@@ -305,7 +305,7 @@ if [ "$product_mode"x == "opengauss"x ]; then
         echo "    You may copy them from 'third_party' repo by executing:"
         echo "    mkdir -p $binarylib_dir/dependency/masstree && cp -fr <third_party>/dependency/masstree/* $binarylib_dir/dependency/masstree"
         echo "    You should substitute <third_party> by real path to third_party repo"
-        exit 1
+#       exit 1
     fi
 fi
 
@@ -730,15 +730,15 @@ function install_gaussdb()
                 GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
             fi
 
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "memcheck"x ]; then
-            ./configure $shared_opt CFLAGS="-O0" --enable-mot --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0" --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiurelease"x ]; then
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiudebug"x ]; then
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         fi
     fi
 
