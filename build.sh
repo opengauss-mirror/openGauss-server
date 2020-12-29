@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         -nopt|--not_optimized)
-            not_optimized='nopt'
+            not_optimized='-nopt'
             shift 1
             ;;
          *)
@@ -64,7 +64,7 @@ ROOT_DIR=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 echo "ROOT_DIR : $ROOT_DIR"
 cd build/script
 chmod a+x build_opengauss.sh
-sh build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} "-${not_optimized}" -pkg server -mc off
+sh build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not_optimized} -pkg server -mc off
 if [ "${wrap_binaries}"X = "YES"X ]
 then
     chmod a+x build_opengauss.sh
