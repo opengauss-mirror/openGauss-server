@@ -4,7 +4,6 @@ declare build_version_mode='release'
 declare build_binarylib_dir='None'
 declare wrap_binaries='NO'
 declare not_optimized=''
-declare distribute='NO'
 #########################################################################
 ##read command line paramenters
 #######################################################################

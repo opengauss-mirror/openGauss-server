@@ -669,7 +669,7 @@ ifeq ($(enable_thread_check), yes)
 endif
 	cp $(with_3rd)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 endif
-	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/huaweijdk8/jdk1.8.0_272/jre/* '$(DESTDIR)$(bindir)/../jre/'
+	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/openjdk8/jdk1.8.222/jre/* '$(DESTDIR)$(bindir)/../jre/'
 
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
