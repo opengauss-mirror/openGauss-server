@@ -64,7 +64,7 @@
 
 /*
  * To control whether a master configured with synchronous commit is
- * allowed to stop waiting for standby WAL sync when All synchronous
+ * allowed to stop waiting for standby WAL sync when there is synchronous
  * standby WAL senders are disconnected.
  */
 volatile bool most_available_sync = false;
@@ -644,9 +644,12 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
     /*
      * Quick exit if we are not managing a sync standby (or not check for check_am_sync is false)
      * or there are not enough synchronous standbys.
-     */
+     * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
+     * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
+    */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
-        list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync) {
+        (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
+        list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
         list_free(sync_standbys);
         return false;
     }
@@ -792,6 +795,14 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     qsort(write_array, len, sizeof(XLogRecPtr), cmp_lsn);
     qsort(flush_array, len, sizeof(XLogRecPtr), cmp_lsn);
     qsort(apply_array, len, sizeof(XLogRecPtr), cmp_lsn);
+
+    /*
+    * rewrite nth if current sync standby num < nth, when most_available_sync is true,
+    * primary only wait the alive sync standbys if list_length(sync_standbys) doesn't satisfy num_sync in quroum.
+    */
+    if (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && list_length(sync_standbys) < nth) {
+        nth = (uint8)list_length(sync_standbys);
+    }
 
     /* Get Nth latest Write, Flush, Apply positions */
     *receivePtr = receive_array[nth - 1];

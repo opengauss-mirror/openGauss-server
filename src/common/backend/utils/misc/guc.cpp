@@ -2879,7 +2879,7 @@ static void InitConfigureNamesBool()
              "most_available_sync",
              PGC_SIGHUP,
              REPLICATION_MASTER,
-             gettext_noop("Enables master to continue as standalone on sync standbys failure."),
+             gettext_noop("Enables master to continue when sync standbys failure."),
              NULL,
          },
             &u_sess->attr.attr_storage.guc_most_available_sync,
@@ -4982,7 +4982,11 @@ static void InitConfigureNamesInt()
 
         {{"replication_type", PGC_POSTMASTER, WAL_SETTINGS, gettext_noop("Sets the dn's HA mode."), NULL},
             &g_instance.attr.attr_storage.replication_type,
+#ifdef ENABLE_MULTIPLE_NODES
             RT_WITH_DUMMY_STANDBY,
+#else
+            RT_WITH_MULTI_STANDBY,
+#endif
             RT_WITH_DUMMY_STANDBY,
             RT_NUM,
             check_replication_type,
@@ -17597,6 +17601,11 @@ static bool check_replication_type(int* newval, void** extra, GucSource source)
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("replication_type is not allowed set 1 "
                            "in Current Version. Set to default (0).")));
+#ifndef ENABLE_MULTIPLE_NODES
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("replication_type is only allowed set to 1, newval=%d.", *newval)));
+#endif
     }
     return true;
 }
