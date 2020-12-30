@@ -320,13 +320,17 @@ ERROR:  must be initial account to examine "alarm_component"
 CONTEXT:  referenced column: current_setting
 set role user_guc_sysadmin password 'Ttest@123';
 select name, setting, sourcefile from pg_settings where name = 'alarm_component';
- name | setting | sourcefile 
-------+---------+------------
-(0 rows)
+--?.*
+--?.*
+ alarm_component | /opt/snas/bin/snas_cm_cmd | @abs_srcdir@/./tmp_check/datanode1/postgresql.conf
+(1 row)
 
 select current_setting('alarm_component');
-ERROR:  must be initial account to examine "alarm_component"
-CONTEXT:  referenced column: current_setting
+--?current_setting.*
+--?.*
+ /opt/snas/bin/snas_cm_cmd
+(1 row)
+
 reset role;
 drop user user_guc_normal;
 drop user user_guc_sysadmin;

@@ -1,0 +1,6 @@
+show alarm_component;
+      alarm_component      
+---------------------------
+ /opt/snas/bin/snas_cm_cmd
+(1 row)
+

@@ -1823,13 +1823,6 @@ static TransactionId RecordTransactionCommit(void)
 
         XLogFlush(t_thrd.xlog_cxt.XactLastRecEnd);
 
-        /*
-         * Wake up all walsenders to send WAL up to the COMMIT record
-         * immediately if replication is enabled
-         */
-        if (g_instance.attr.attr_storage.max_wal_senders > 0)
-            WalSndWakeup();
-
         /* Now we may update the CLOG, if we wrote a COMMIT record above */
         if (markXidCommitted) {
             t_thrd.pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;

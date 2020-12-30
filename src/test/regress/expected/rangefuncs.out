@@ -22,7 +22,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_codegen_print              | off
  enable_compress_spill             | on
  enable_copy_server_files          | off
- enable_data_replicate             | on
+ enable_data_replicate             | off
  enable_debug_vacuum               | off
  enable_delta_store                | off
  enable_double_write               | on

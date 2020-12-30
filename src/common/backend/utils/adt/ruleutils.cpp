@@ -2171,8 +2171,12 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 
     appendStringInfo(&buf, "SET search_path = %s;", quote_identifier(get_namespace_name(tableinfo.spcid)));
 
-    appendStringInfo(&buf, "\nCREATE %s %s %s",
-        (tableinfo.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED" : "", reltypename, relname);
+    appendStringInfo(&buf,
+        "\nCREATE %s%s %s",
+        (tableinfo.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
+            ((tableinfo.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
+        reltypename,
+        relname);
 
     // get attribute info
     actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns);

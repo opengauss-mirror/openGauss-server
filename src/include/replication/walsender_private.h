@@ -145,8 +145,9 @@ typedef struct WalSndCtlData {
     bool sync_standbys_defined;
 
     /*
-     * Whether master is allowed to switched to standalone if no synchronous
-     * Standbys are available. This is copy of GUC variable most_available_sync.
+     * 1. Whether master is allowed to switched to standalone if no synchronous
+     * Standbys are available; 2. master need not to keep waiting failed synchronous
+     * Standbys if most_available_sync is ON.This is copy of GUC variable most_available_sync.
      */
     bool most_available_sync;
 

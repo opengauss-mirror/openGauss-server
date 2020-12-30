@@ -3763,3 +3763,16 @@ select * from hash_right_anti_y where not exists (select hash_right_anti_x.y fro
 
 drop table hash_right_anti_x;
 drop table hash_right_anti_y;
+-- test rownum in outer join
+create table t_a (id int, name varchar(10), code int);
+create table t_b (id int, name varchar(10), code int);
+insert into t_a values (1, 'tom', 3);
+insert into t_b values (1, 'bat', 6);
+select * from t_a a, t_b b where a.id(+) = b.id and rownum = 1;
+ id | name | code | id | name | code 
+----+------+------+----+------+------
+  1 | tom  |    3 |  1 | bat  |    6
+(1 row)
+
+drop table t_a;
+drop table t_b;

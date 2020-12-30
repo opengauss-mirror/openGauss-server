@@ -2879,7 +2879,7 @@ static void InitConfigureNamesBool()
              "most_available_sync",
              PGC_SIGHUP,
              REPLICATION_MASTER,
-             gettext_noop("Enables master to continue as standalone on sync standbys failure."),
+             gettext_noop("Enables master to continue when sync standbys failure."),
              NULL,
          },
             &u_sess->attr.attr_storage.guc_most_available_sync,
@@ -4921,7 +4921,7 @@ static void InitConfigureNamesInt()
                 gettext_noop("Sets the maximum number of simultaneously running WAL sender processes."),
                 NULL},
             &g_instance.attr.attr_storage.max_wal_senders,
-            4,
+            16,
             0,
             MAX_BACKENDS,
             NULL,
@@ -4982,7 +4982,11 @@ static void InitConfigureNamesInt()
 
         {{"replication_type", PGC_POSTMASTER, WAL_SETTINGS, gettext_noop("Sets the dn's HA mode."), NULL},
             &g_instance.attr.attr_storage.replication_type,
+#ifdef ENABLE_MULTIPLE_NODES
             RT_WITH_DUMMY_STANDBY,
+#else
+            RT_WITH_MULTI_STANDBY,
+#endif
             RT_WITH_DUMMY_STANDBY,
             RT_NUM,
             check_replication_type,
@@ -7845,7 +7849,7 @@ static void InitConfigureNamesString()
                  NULL,
                  GUC_SUPERUSER_ONLY},
                 &g_instance.attr.attr_common.Alarm_component,
-                "/opt/huawei/snas/bin/snas_cm_cmd",
+                "/opt/snas/bin/snas_cm_cmd",
                 NULL,
                 NULL,
                 NULL},
@@ -8093,7 +8097,7 @@ static void InitConfigureNamesString()
                  NULL,
                  GUC_LIST_INPUT},
                 &u_sess->attr.attr_storage.SyncRepStandbyNames,
-                "",
+                "*",
                 check_synchronous_standby_names,
                 assign_synchronous_standby_names,
                 NULL},
@@ -14180,7 +14184,7 @@ char* GetConfigOptionByName(const char* name, const char** varname)
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized configuration parameter \"%s\"", name)));
 
-    if ((record->flags & GUC_SUPERUSER_ONLY) && (GetUserId() != BOOTSTRAP_SUPERUSERID))
+    if ((record->flags & GUC_SUPERUSER_ONLY) && !superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial account to examine \"%s\"", name)));
 
@@ -14207,7 +14211,7 @@ void GetConfigOptionByNum(int varnum, const char** values, bool* noshow)
 
     if (noshow != NULL) {
         if ((conf->flags & GUC_NO_SHOW_ALL) ||
-            ((conf->flags & GUC_SUPERUSER_ONLY) && (GetUserId() != BOOTSTRAP_SUPERUSERID)))
+            ((conf->flags & GUC_SUPERUSER_ONLY) && !superuser()))
             *noshow = true;
         else
             *noshow = false;
@@ -17597,6 +17601,11 @@ static bool check_replication_type(int* newval, void** extra, GucSource source)
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("replication_type is not allowed set 1 "
                            "in Current Version. Set to default (0).")));
+#ifndef ENABLE_MULTIPLE_NODES
+    } else {
+        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("replication_type is only allowed set to 1, newval=%d.", *newval)));
+#endif
     }
     return true;
 }
@@ -18197,6 +18206,8 @@ int find_guc_option(
     bool isMatched = false;
     int i = 0;
     size_t paramlen = 0;
+    int targetline = 0;
+    int matchtimes = 0;
 
     if (NULL == optlines || NULL == opt_name) {
         return INVALID_LINES_IDX;
@@ -18210,22 +18221,35 @@ int find_guc_option(
         if (!isOptLineCommented(optlines[i])) {
             isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchtimes++;
+                targetline = i;
             }
         }
     }
 
+    /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
+    if (matchtimes > 1) {
+        ereport(NOTICE, (errmsg("There are %d \"%s\" not commented in \"postgresql.conf\", and only the "
+        "last one in %dth line will be set and used.", 
+        matchtimes, 
+        opt_name, 
+        (targetline + 1))));
+    }
+
     /* The second loop is to deal with the lines commented by '#' */
+    matchtimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
         if (isOptLineCommented(optlines[i])) {
             isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchtimes++;
+                targetline = i;
             }
         }
     }
 
-    return INVALID_LINES_IDX;
+    /* The line of last one will be returned, otherwise it return invaild line */
+    return (matchtimes > 0) ? targetline : INVALID_LINES_IDX;
 }
 /*
  * @@GaussDB@@
