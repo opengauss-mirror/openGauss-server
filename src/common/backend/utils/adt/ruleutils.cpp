@@ -2175,8 +2175,8 @@ static char* pg_get_tabledef_worker(Oid tableoid)
         "\nCREATE %s%s %s",
         (table_info.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
             ((table_info.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
-        rel_type_name,
-        rel_name);
+        reltype_name,
+        relname);
 
     // get attribute info
     actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns);
