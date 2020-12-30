@@ -5108,6 +5108,11 @@ void TryLockAccount(Oid roleID, int extrafails, bool superlock)
     bool lockflag = 0;
     char* rolename = NULL;
 
+    /* We could not insert new xlog if recovery in process */
+    if (RecoveryInProgress()) {
+        return;
+    }
+
     if (!LockAccountParaValid(roleID, extrafails, superlock)) {
         return;
     }

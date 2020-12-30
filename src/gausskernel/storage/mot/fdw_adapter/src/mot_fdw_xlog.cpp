@@ -78,9 +78,7 @@ void MOTRedo(XLogReaderState* record)
 
 uint64_t XLOGLogger::AddToLog(MOT::RedoLogBuffer** redoLogBufferArray, uint32_t size)
 {
-    uint64_t written = MOT::ILogger::AddToLog(redoLogBufferArray, size);
-    XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
-    return written;
+    return MOT::ILogger::AddToLog(redoLogBufferArray, size);
 }
 
 uint64_t XLOGLogger::AddToLog(uint8_t* data, uint32_t size)

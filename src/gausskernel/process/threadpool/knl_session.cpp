@@ -1042,7 +1042,11 @@ static void knl_u_syscache_init(knl_u_syscache_context* syscache_cxt)
 
 static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     pgxc_cxt->NumDataNodes = 0;
+#else
+    pgxc_cxt->NumDataNodes = 1;
+#endif /* ENABLE_MULTIPLE_NODES */
     pgxc_cxt->NumCoords = 0;
     pgxc_cxt->NumStandbyDataNodes = 0;
     pgxc_cxt->datanode_count = 0;

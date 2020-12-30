@@ -1719,7 +1719,7 @@ void write_table_label_and_tablespace_map(pgBackup *backup, PGresult *res,
 
 }
 
-void pg_stop_backup_sent(PGconn *conn, char **stop_backup_query)
+void pg_stop_backup_sent(PGconn *conn, const char **stop_backup_query)
 {
     if (!pg_stop_backup_is_sent) {
         bool sent = false;

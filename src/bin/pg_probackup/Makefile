@@ -32,7 +32,7 @@ top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 EXTRA_CLEAN += logging.h
 
-override CXXFLAGS := -std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DHAVE_LIBZ -DSTREAMPLAN -DPGXC -O0  -g -DENABLE_GSTRACE -fpermissive -Wl,-z,relro,-z,now
+override CXXFLAGS := -std=c++11 -D_GLIBCXX_USE_CXX11_ABI=0 -fsigned-char -DHAVE_LIBZ -DSTREAMPLAN -DPGXC -O0 -g -DENABLE_GSTRACE  -Wl,-z,relro,-z,now
 LDFLAGS += -L$(LZ4_LIB_PATH)
 LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -llz4
 PG_CPPFLAGS = -I$(libpq_srcdir) ${PTHREAD_CFLAGS} -Isrc -I$(top_builddir)/$(subdir) -I$(LZ4_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH)

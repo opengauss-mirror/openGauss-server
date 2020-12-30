@@ -2650,10 +2650,10 @@ $as_echo "$as_me: error: argument required for --with-gs-version option" >&2;}
 else
   product=$(cat build/script/gauss.spec | grep 'PRODUCT' | awk -F "=" '{print $2}')
   version=$(cat build/script/gauss.spec | grep 'VERSION' | awk -F "=" '{print $2}')
-  gitversion=$(git log | grep commit | head -1 | awk '{print $2}' | cut -b 1-8)
-  commits=$(git log | grep "See in merge request" | wc -l)
+  gitversion=$(git log 2>/dev/null | grep commit | head -1 | awk '{print $2}' | cut -b 1-8)
+  commits=$(git log 2>/dev/null | grep "See in merge request" | wc -l)
   debug_str=""
-  mrid=$(git log | grep "See merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
+  mrid=$(git log 2>/dev/null | grep "See merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
   if test "$enable_debug" = yes; then
     debug_str="debug"
   fi

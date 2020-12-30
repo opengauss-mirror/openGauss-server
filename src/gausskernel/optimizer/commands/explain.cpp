@@ -938,11 +938,7 @@ void ExplainOnePlan(
      * and than calling ExecutorStart for ExecInitNode in CN.
      */
     /*  only stream plan can use  u_sess->instr_cxt.global_instr to collect executor info */
-#ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && queryDesc->plannedstmt->is_stream_plan == true &&
-#else
-    if (queryDesc->plannedstmt->is_stream_plan == true &&
-#endif
         check_stream_support() && instrument_option != 0 && u_sess->instr_cxt.global_instr == NULL &&
         queryDesc->plannedstmt->num_nodes != 0) {
         int dop = queryDesc->plannedstmt->query_dop;
@@ -1129,7 +1125,7 @@ void ExplainOnePlan(
 
     /* Check plan was influenced by row level security or not, here need to skip remote dummy node */
     if (range_table_walker(
-            plannedstmt->rtable, (bool (*)())ContainRlsQualInRteWalker, NULL, QTW_EXAMINE_RTES | QTW_IGNORE_DUMMY)) {
+        plannedstmt->rtable, (bool (*)())ContainRlsQualInRteWalker, NULL, QTW_EXAMINE_RTES | QTW_IGNORE_DUMMY)) {
         if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo != NULL 
             && es->planinfo->m_detailInfo != NULL) {
             appendStringInfo(es->planinfo->m_detailInfo->info_str,
@@ -5436,10 +5432,7 @@ static void show_buffers(ExplainState* es, StringInfo infostr, const Instrumenta
                 appendStringInfoSpaces(es->str, es->indent * 2);
             show_buffers_info(infostr, has_shared, has_local, has_temp, usage);
         } else if (is_datanode) {
-            if (get_execute_mode(es, nodeIdx))
-                appendStringInfo(infostr, "(Buffers: 0)\n");
-            else
-                appendStringInfo(infostr, "(Buffers: unknown)\n");
+            appendStringInfo(infostr, get_execute_mode(es, nodeIdx) ? "(Buffers: 0)\n" : "(Buffers: unknown)\n");
         }
 
         /* As above, show only positive counter values. */

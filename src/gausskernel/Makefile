@@ -155,8 +155,8 @@ JARPLJAVA = pljava.jar
 # MOT component
 ##############################################################################
 ifeq ($(enable_mot), yes)
-  LIBS += -latomic -lmot_engine
-  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin
+  LIBS += -latomic -lmot_engine -lmasstree
+  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin -L$(MASSTREE_LIB_PATH)
   CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
 endif
 
@@ -643,6 +643,9 @@ endif
 	cp $(GRPC_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
 	cp $(NUMA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
+endif
+ifeq ($(enable_mot), yes)
+	cp -d $(MASSTREE_LIB_PATH)/libmasstree* '$(DESTDIR)$(libdir)/'
 endif
 ifeq ($(with_3rd), NONE)
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'

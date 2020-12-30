@@ -247,7 +247,7 @@ void GcManager::CleanIndexItems(uint32_t indexId, bool dropIndex)
     }
     m_managerLock.unlock();
     if (counter) {
-        MOT_LOG_INFO("Entity:%s threadId = %d cleaned from index id = %d items = %d\n",
+        MOT_LOG_INFO("Entity:%s threadId = %d cleaned from index id = %u items = %u\n",
             enGcTypes[m_purpose],
             m_tid,
             indexId,

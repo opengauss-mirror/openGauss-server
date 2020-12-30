@@ -110,11 +110,11 @@ else
 fi
 
 SCRIPT_DIR=$(cd $(dirname $SCRIPT_PATH) && pwd)
-
-package_path=$SCRIPT_DIR
+test -d ${SCRIPT_DIR}/../../output || mkdir -p ${SCRIPT_DIR}/../../output
+output_path=$(cd ${SCRIPT_DIR}/../../output && pwd)
 
 #######################################################################
-##version 1.0.1
+##version 1.1.0
 #######################################################################
 function read_srv_version()
 {
@@ -124,8 +124,16 @@ function read_srv_version()
     #auto read the number from kernal globals.cpp, no need to change it here
 }
 
-read_srv_version
+function deploy_pkgs()
+{
+    for pkg in $@; do
+        if [ -f $pkg ]; then
+            mv $pkg $output_path/
+        fi
+    done
+}
 
+read_srv_version
 
 #########################################################################
 ##read command line paramenters
@@ -281,6 +289,7 @@ function install_gaussdb()
        ./separate_debug_information.sh
        cd $SCRIPT_DIR
        mv symbols.tar.gz $kernel_symbol_package_name
+       deploy_pkgs $kernel_symbol_package_name
     fi
 
     #insert the commitid to version.cfg as the upgrade app path specification
@@ -388,7 +397,8 @@ function make_package_srv()
     mkdir -p temp
     mkdir -p ${BUILD_DIR}/temp/etc
     target_file_copy "$copydest" ${BUILD_DIR}/temp
-    mv ${sha256_name} ${kernel_package_name} ${package_path}
+
+    deploy_pkgs ${sha256_name} ${kernel_package_name}
     echo "make server(all) package success!"
 }
 
@@ -420,7 +430,8 @@ function make_package_upgrade_sql()
 
     chmod 600 ${UPGRADE_SQL_TAR}
     chmod 600 ${UPGRADE_SQL_SHA256}
-    mv ${UPGRADE_SQL_TAR} ${UPGRADE_SQL_SHA256} ${package_path}
+
+    deploy_pkgs ${UPGRADE_SQL_TAR} ${UPGRADE_SQL_SHA256}
 
     echo "Successfully packaged upgrade_sql files."
 }
@@ -485,8 +496,9 @@ function make_package_libpq()
     if [ $? -ne 0 ]; then
         die "$package_command ${libpq_package_name} failed"
     fi
-    mv ${libpq_package_name} ${package_path}
-    echo "install $pkgname tools is ${libpq_package_name} of ${package_path} directory " >> "$LOG_FILE" 2>&1
+
+    deploy_pkgs ${libpq_package_name}
+    echo "install $pkgname tools is ${libpq_package_name} of ${output_path} directory " >> "$LOG_FILE" 2>&1
     echo "success!"
 }
 
@@ -541,8 +553,9 @@ function make_package_tools()
     if [ $? -ne 0 ]; then
         die "$package_command ${tools_package_name} failed"
     fi
-    mv ${tools_package_name} ${package_path}
-    echo "install $pkgname tools is ${tools_package_name} of ${package_path} directory " >> "$LOG_FILE" 2>&1
+
+    deploy_pkgs ${tools_package_name}
+    echo "install $pkgname tools is ${tools_package_name} of ${output_path} directory " >> "$LOG_FILE" 2>&1
     echo "success!"
 }
 

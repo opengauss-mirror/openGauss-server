@@ -2473,6 +2473,11 @@ void mark_parent_child_pushdown_flag(Query *parent, Query *child)
     if (IS_STREAM_PLAN && ((parent->can_push && !child->can_push) ||
         (!parent->can_push && child->can_push))) {
         if (check_base_rel_in_fromlist(parent, (Node *)parent->jointree)) {
+#ifndef ENABLE_MULTIPLE_NODES
+            if (u_sess->opt_cxt.is_stream_support) {
+                mark_stream_unsupport();
+            }
+#endif
             set_stream_off();
         } else {
             parent->can_push = false;

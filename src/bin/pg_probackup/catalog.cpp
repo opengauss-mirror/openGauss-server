@@ -1184,8 +1184,8 @@ walk_files_collect_timelines(InstanceConfig *instance)
     save_backupinfo_belong_timelines(instance, timelineinfos);
 
     if (xlog_files_list) {
-        parray_walk(xlog_files_list, pgFileFree);
-        parray_free(xlog_files_list);    
+        parray_walk(xlog_files_list, pfree);
+        parray_free(xlog_files_list);
     }
 
     return timelineinfos;

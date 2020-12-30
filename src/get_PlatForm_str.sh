@@ -20,6 +20,12 @@ kernel=""
 if [ -f "/etc/euleros-release" ]
 then
 	kernel=$(cat /etc/euleros-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/openEuler-release" ]
+then
+	kernel=$(cat /etc/openEuler-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/centos-release" ]
+then
+	kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 else
 	kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi

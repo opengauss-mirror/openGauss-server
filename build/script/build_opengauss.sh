@@ -30,6 +30,7 @@ test -d $ROOT_DIR/contrib/carbondata && mv $ROOT_DIR/contrib/carbondata $ROOT_DI
 cp opengauss.spec gauss.spec
 
 #(3) invoke mpp_package
+chmod a+x mpp_package.sh
 echo "mpp_package.sh $@ -nopkg -pm opengauss"
 ./mpp_package.sh $@ -nopkg -pm opengauss
 if [ $? != "0" ]; then
