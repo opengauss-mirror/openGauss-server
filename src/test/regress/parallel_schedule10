@@ -80,3 +80,5 @@
  test：initdb
  test: not_support_nodegroup
  test: double_support_unit
+ test: gs_guc_value_range
+ test: alter_set_same_parameter

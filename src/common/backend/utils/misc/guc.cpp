@@ -18197,6 +18197,8 @@ int find_guc_option(
     bool isMatched = false;
     int i = 0;
     size_t paramlen = 0;
+    int targetline = 0;
+    int matchtimes = 0;
 
     if (NULL == optlines || NULL == opt_name) {
         return INVALID_LINES_IDX;
@@ -18210,12 +18212,23 @@ int find_guc_option(
         if (!isOptLineCommented(optlines[i])) {
             isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchtimes++;
+                targetline = i;
             }
         }
     }
 
+    /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
+    if (matchtimes > 1) {
+        ereport(NOTICE, (errmsg("There are %d \"%s\" not commented in \"postgresql.conf\", and only the "
+        "last one in %dth line will be set and used.", 
+        matchtimes, 
+        opt_name, 
+        (targetline + 1))));
+    }
+
     /* The second loop is to deal with the lines commented by '#' */
+    matchtimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
         if (isOptLineCommented(optlines[i])) {
             isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
