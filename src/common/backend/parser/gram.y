@@ -545,7 +545,7 @@ static void parameter_check_execute_direct(const char* query);
 
 %type <ival>	Iconst SignedIconst
 %type <str>		Sconst comment_text notify_payload
-%type <str>		RoleId opt_granted_by opt_boolean_or_string ColId_or_Sconst
+%type <str>		RoleId TypeOwner opt_granted_by opt_boolean_or_string ColId_or_Sconst
 %type <list>	var_list
 %type <str>		ColId ColLabel var_name type_function_name param_name
 %type <node>	var_value zone_value
@@ -11969,7 +11969,7 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
-			| ALTER TYPE_P any_name OWNER TO RoleId
+			| ALTER TYPE_P any_name OWNER TO TypeOwner
 				{
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_TYPE;
@@ -12033,6 +12033,11 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
+		;
+
+TypeOwner:	RoleId			{ $$ = $1; }
+			| CURRENT_USER	{ $$ = pstrdup($1); }
+			| SESSION_USER	{ $$ = pstrdup($1); }
 		;
 
 

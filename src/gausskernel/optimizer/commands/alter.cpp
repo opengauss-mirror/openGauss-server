@@ -482,7 +482,18 @@ Oid AlterObjectNamespace(Relation rel, int oidCacheId, int nameCacheId, Oid obji
  */
 void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
 {
-    Oid newowner = get_role_oid(stmt->newowner, false);
+    const char* newOwnerName = stmt->newowner;
+    Oid newowner;
+    if (strcmp(newOwnerName, "current_user") == 0) {
+        /* CURRENT_USER */
+        newowner = GetUserId();
+    } else if (strcmp(newOwnerName, "session_user") == 0) {
+        /* SESSION_USER */
+        newowner = GetSessionUserId();
+    } else {
+        /* Normal User */
+        newowner = get_role_oid(newOwnerName, false);
+    }
 
     switch (stmt->objectType) {
         case OBJECT_AGGREGATE:
