@@ -198,5 +198,11 @@ Size BufferShmemSize(void)
     /* size of checkpoint sort array in bufmgr.c */
     size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(CkptSortItem)));
 
+    /* size of candidate buffers */
+    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(Buffer)));
+
+    /* size of candidate free map */
+    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(bool)));
+
     return size;
 }
