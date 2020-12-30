@@ -82,3 +82,6 @@
  test: double_support_unit
  test: gs_guc_value_range
  test: alter_set_same_parameter
+ test: enum_empty_test
+ test: alarm_component_test
+ test: unify_definition_superuser

@@ -1,0 +1,1 @@
+show alarm_component;

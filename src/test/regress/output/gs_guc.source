@@ -90,6 +90,29 @@ gs_guc set: cstore_buffers=10GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.co
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_beta_opfusion=on"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: enable_beta_opfusion=on: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_beta_nestloop_fusion=on"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: enable_beta_nestloop_fusion=on: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+-----Reload(GUC)
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: cstore_buffers=10GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "intervalstyle=a"
 --?The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c intervalstyle=a set ].
 --?.*
@@ -100,14 +123,12 @@ gs_guc set: intervalstyle=a: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
------Reload(GUC)
-\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "intervalstyle=a"
 --?The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c cstore_buffers=10GB reload ].
 --?.*
 --?.*
 expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-gs_guc reload: cstore_buffers=10GB: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
-server signaled
+gs_guc set: intervalstyle=a: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!

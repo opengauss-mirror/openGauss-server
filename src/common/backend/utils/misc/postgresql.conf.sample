@@ -502,7 +502,7 @@ log_line_prefix = '%m %u %d %h %p %S '	# special values:
 enable_alarm = on
 connection_alarm_rate = 0.9
 alarm_report_interval = 10
-alarm_component = '/opt/huawei/snas/bin/snas_cm_cmd'
+alarm_component = '/opt/snas/bin/snas_cm_cmd'
 
 #------------------------------------------------------------------------------
 # RUNTIME STATISTICS
