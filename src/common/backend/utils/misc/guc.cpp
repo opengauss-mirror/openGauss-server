@@ -18220,12 +18220,14 @@ int find_guc_option(
         if (isOptLineCommented(optlines[i])) {
             isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchtimes++;
+                targetline = i;
             }
         }
     }
 
-    return INVALID_LINES_IDX;
+    /* The line of last one will be returned, otherwise it return invaild line */
+    return (matchtimes > 0) ? targetline : INVALID_LINES_IDX;
 }
 /*
  * @@GaussDB@@
