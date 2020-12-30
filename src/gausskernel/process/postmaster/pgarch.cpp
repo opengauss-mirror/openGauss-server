@@ -430,7 +430,10 @@ static void pgarch_MainLoop(void)
                 last_time = TIME_GET_MILLISEC(last_copy_time);
             }
             gettimeofday(&curtime, NULL);
-            const long time_diff = (long)TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
+            long time_diff = (long)TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
+            if (time_diff < 0) {
+                time_diff = 0;
+            }
             long timeout = wait_interval - time_diff;
             if (timeout < 0 && IsServerModeStandby()) {
                 /* sleep 100ms for check next task */

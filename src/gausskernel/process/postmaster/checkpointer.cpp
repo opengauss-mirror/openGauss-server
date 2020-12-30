@@ -581,6 +581,9 @@ void CheckpointerMain(void)
          */
         now = (pg_time_t)time(NULL);
         elapsed_secs = now - t_thrd.checkpoint_cxt.last_checkpoint_time;
+        if (elapsed_secs < 0) {
+            elapsed_secs = 0;
+        }
 
         if (elapsed_secs >= u_sess->attr.attr_storage.CheckPointTimeout)
             continue; /* no sleep for us ... */
