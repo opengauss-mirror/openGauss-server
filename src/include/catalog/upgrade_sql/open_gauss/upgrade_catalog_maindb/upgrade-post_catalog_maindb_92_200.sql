@@ -546,20 +546,20 @@ DROP FUNCTION IF EXISTS pg_catalog.proc_add_depend(name, name) cascade;
 CREATE OR REPLACE VIEW DBE_PERF.os_runtime AS
   SELECT * FROM pv_os_run_info();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_os_runtime
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_os_runtime
   (OUT node_name name, OUT id integer, OUT name text, OUT value numeric, OUT comments text, OUT cumulative boolean)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.os_runtime%rowtype;
+  row_data dbe_perf.os_runtime%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.os_runtime''';
+      query_str := 'SELECT * FROM dbe_perf.os_runtime';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         id := row_data.id;
@@ -586,19 +586,19 @@ CREATE OR REPLACE VIEW DBE_PERF.os_threads AS
     S.creation_time
     FROM pg_stat_get_thread() AS S;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_os_threads()
-RETURNS setof DBE_PERF.os_threads
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_os_threads()
+RETURNS setof dbe_perf.os_threads
 AS $$
 DECLARE
-  row_data DBE_PERF.os_threads%rowtype;
+  row_data dbe_perf.os_threads%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.os_threads''';
+      query_str := 'SELECT * FROM dbe_perf.os_threads';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -614,20 +614,20 @@ CREATE OR REPLACE VIEW DBE_PERF.global_os_threads AS
 CREATE OR REPLACE VIEW DBE_PERF.instance_time AS
   SELECT * FROM pv_instance_time();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_instance_time
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_instance_time
   (OUT node_name name, OUT stat_id integer, OUT stat_name text, OUT value bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.instance_time%rowtype;
+  row_data dbe_perf.instance_time%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all CN DN node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.instance_time''';
+      query_str := 'SELECT * FROM dbe_perf.instance_time';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         stat_id := row_data.stat_id;
@@ -681,22 +681,22 @@ CREATE OR REPLACE VIEW DBE_PERF.workload_sql_elapse_time AS
       pg_user left join pg_stat_get_sql_count() AS S on pg_user.usename = S.user_name
     GROUP by pg_user.respool;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_workload_sql_count
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_workload_sql_count
   (OUT node_name name, OUT workload name, OUT select_count bigint,
    OUT update_count bigint, OUT insert_count bigint, OUT delete_count bigint,
    OUT ddl_count bigint, OUT dml_count bigint, OUT dcl_count bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.workload_sql_count%rowtype;
+  row_data dbe_perf.workload_sql_count%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.workload_sql_count''';
+      query_str := 'SELECT * FROM dbe_perf.workload_sql_count';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         workload := row_data.workload;
@@ -717,7 +717,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.summary_workload_sql_count AS
   SELECT * FROM DBE_PERF.get_summary_workload_sql_count();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_workload_sql_elapse_time
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_workload_sql_elapse_time
   (OUT node_name name, OUT workload name,
    OUT total_select_elapse bigint, OUT max_select_elapse bigint, OUT min_select_elapse bigint, OUT avg_select_elapse bigint,
    OUT total_update_elapse bigint, OUT max_update_elapse bigint, OUT min_update_elapse bigint, OUT avg_update_elapse bigint,
@@ -726,15 +726,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_workload_sql_elapse_time
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.workload_sql_elapse_time%rowtype;
+  row_data dbe_perf.workload_sql_elapse_time%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.workload_sql_elapse_time''';
+      query_str := 'SELECT * FROM dbe_perf.workload_sql_elapse_time';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         workload := row_data.workload;
@@ -783,7 +783,7 @@ SELECT
 FROM
     pg_user left join get_instr_workload_info(0) AS giwi on pg_user.usesysid = giwi.user_oid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_user_transaction
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_user_transaction
   (OUT node_name name, OUT usename name, OUT commit_counter bigint,
    OUT rollback_counter bigint, OUT resp_min bigint, OUT resp_max bigint,
    OUT resp_avg bigint, OUT resp_total bigint, OUT bg_commit_counter bigint,
@@ -792,15 +792,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_user_transaction
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.user_transaction%rowtype;
+  row_data dbe_perf.user_transaction%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.user_transaction''';
+      query_str := 'SELECT * FROM dbe_perf.user_transaction';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         usename := row_data.usename;
@@ -856,15 +856,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_workload_transaction
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.workload_transaction%rowtype;
+  row_data dbe_perf.workload_transaction%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.workload_transaction''';
+      query_str := 'SELECT * FROM dbe_perf.workload_transaction';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         workload := row_data.workload;
@@ -912,20 +912,20 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_workload_transaction AS
 CREATE OR REPLACE VIEW DBE_PERF.session_stat AS
   SELECT * FROM pv_session_stat();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_stat
   (OUT node_name name, OUT sessid text, OUT statid integer, OUT statname text, OUT statunit text, OUT value bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.session_stat%rowtype;
+  row_data dbe_perf.session_stat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.session_stat''';
+      query_str := 'SELECT * FROM dbe_perf.session_stat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         sessid := row_data.sessid;
@@ -946,20 +946,20 @@ CREATE OR REPLACE VIEW DBE_PERF.global_session_stat AS
 CREATE OR REPLACE VIEW DBE_PERF.session_time AS
   SELECT * FROM pv_session_time();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_time
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_time
   (OUT node_name name, OUT sessid text, OUT stat_id integer, OUT stat_name text, OUT value bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.session_time%rowtype;
+  row_data dbe_perf.session_time%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.session_time''';
+      query_str := 'SELECT * FROM dbe_perf.session_time';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         sessid := row_data.sessid;
@@ -979,20 +979,20 @@ CREATE OR REPLACE VIEW DBE_PERF.global_session_time AS
 CREATE OR REPLACE VIEW DBE_PERF.session_memory AS
   SELECT * FROM pv_session_memory();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_memory
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_memory
   (OUT node_name name, OUT sessid text, OUT init_mem integer, OUT used_mem integer, OUT peak_mem integer)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.session_memory%rowtype;
+  row_data dbe_perf.session_memory%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.session_memory''';
+      query_str := 'SELECT * FROM dbe_perf.session_memory';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         sessid := row_data.sessid;
@@ -1009,24 +1009,118 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_session_memory AS
   SELECT DISTINCT * FROM DBE_PERF.get_global_session_memory();
 
+
+CREATE OR REPLACE FUNCTION pg_catalog.pv_session_memory_detail_tp(OUT sessid TEXT, OUT sesstype TEXT, OUT contextname TEXT, OUT level INT2, OUT parent TEXT, OUT totalsize INT8, OUT freesize INT8, OUT usedsize INT8)
+RETURNS setof record
+AS $$
+DECLARE
+  enable_threadpool bool;
+  row_data record;
+  query_str text;
+BEGIN
+  show enable_thread_pool into enable_threadpool;
+
+  IF enable_threadpool THEN
+    query_str := 'with SM AS
+                   (SELECT
+                      S.sessid AS sessid,
+                      T.thrdtype AS sesstype,
+                      S.contextname AS contextname,
+                      S.level AS level,
+                      S.parent AS parent,
+                      S.totalsize AS totalsize,
+                      S.freesize AS freesize,
+                      S.usedsize AS usedsize
+                    FROM
+                      pv_session_memory_context S
+                      LEFT JOIN
+                     (SELECT DISTINCT thrdtype, tid
+                      FROM pv_thread_memory_context) T
+                      on S.threadid = T.tid
+                   ),
+                   TM AS
+                   (SELECT
+                      S.sessid AS Ssessid,
+                      T.thrdtype AS sesstype,
+                      T.threadid AS Tsessid,
+                      T.contextname AS contextname,
+                      T.level AS level,
+                      T.parent AS parent,
+                      T.totalsize AS totalsize,
+                      T.freesize AS freesize,
+                      T.usedsize AS usedsize
+                    FROM
+                      pv_thread_memory_context T
+                      LEFT JOIN
+                      (SELECT DISTINCT sessid, threadid
+                       FROM pv_session_memory_context) S
+                      ON T.tid = S.threadid
+                   )
+                   SELECT * from SM
+                   UNION ALL
+                   SELECT
+                     Ssessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
+                   FROM TM WHERE Ssessid IS NOT NULL
+                   UNION ALL
+                   SELECT
+                     Tsessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
+                   FROM TM WHERE Ssessid IS NULL;';
+    FOR row_data IN EXECUTE(query_str) LOOP
+      sessid = row_data.sessid;
+      sesstype = row_data.sesstype;
+      contextname = row_data.contextname;
+      level = row_data.level;
+      parent = row_data.parent;
+      totalsize = row_data.totalsize;
+      freesize = row_data.freesize;
+      usedsize = row_data.usedsize;
+      return next;
+    END LOOP;
+  ELSE
+    query_str := 'SELECT
+                    T.threadid AS sessid,
+                    T.thrdtype AS sesstype,
+                    T.contextname AS contextname,
+                    T.level AS level,
+                    T.parent AS parent,
+                    T.totalsize AS totalsize,
+                    T.freesize AS freesize,
+                    T.usedsize AS usedsize
+                  FROM pg_catalog.pv_thread_memory_detail() T;';
+    FOR row_data IN EXECUTE(query_str) LOOP
+      sessid = row_data.sessid;
+      sesstype = row_data.sesstype;
+      contextname = row_data.contextname;
+      level = row_data.level;
+      parent = row_data.parent;
+      totalsize = row_data.totalsize;
+      freesize = row_data.freesize;
+      usedsize = row_data.usedsize;
+      return next;
+    END LOOP;
+  END IF;
+  RETURN;
+END; $$
+LANGUAGE plpgsql NOT FENCED;
+
 CREATE OR REPLACE VIEW DBE_PERF.session_memory_detail AS
   SELECT * FROM pv_session_memory_detail_tp();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_memory_detail
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_memory_detail
   (OUT node_name name, OUT sessid text, OUT sesstype text, OUT contextname text, OUT level smallint,
    OUT parent text, OUT totalsize bigint, OUT freesize bigint, OUT usedsize bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.session_memory_detail%rowtype;
+  row_data dbe_perf.session_memory_detail%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.session_memory_detail''';
+      query_str := 'SELECT * FROM dbe_perf.session_memory_detail';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         sessid := row_data.sessid;
@@ -1106,7 +1200,7 @@ CREATE OR REPLACE VIEW DBE_PERF.session_stat_activity AS
           S.usesysid = U.oid AND
           T.threadid = S.pid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat_activity
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_stat_activity
   (out coorname text, out datid oid, out datname text, out pid bigint,
    out usesysid oid, out usename text, out application_name text, out client_addr inet,
    out client_hostname text, out client_port integer, out backend_start timestamptz,
@@ -1116,16 +1210,16 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat_activity
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.session_stat_activity%rowtype;
+  row_data dbe_perf.session_stat_activity%rowtype;
   coor_name record;
   fet_active text;
   fetch_coor text;
   BEGIN
     --Get all cn node names
-    fetch_coor := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    fetch_coor := 'select * from dbe_perf.node_name';
     FOR coor_name IN EXECUTE(fetch_coor) LOOP
       coorname :=  coor_name.node_name;
-      fet_active := 'EXECUTE DIRECT ON (' || coor_name.node_name || ') ''SELECT * FROM DBE_PERF.session_stat_activity''';
+      fet_active := 'SELECT * FROM dbe_perf.session_stat_activity';
       FOR row_data IN EXECUTE(fet_active) LOOP
         coorname := coorname;
         datid :=row_data.datid;
@@ -1160,19 +1254,19 @@ CREATE OR REPLACE VIEW DBE_PERF.global_session_stat_activity AS
 CREATE OR REPLACE VIEW DBE_PERF.thread_wait_status AS
   SELECT * FROM pg_stat_get_status(NULL);
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_thread_wait_status()
-RETURNS setof DBE_PERF.thread_wait_status
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_thread_wait_status()
+RETURNS setof dbe_perf.thread_wait_status
 AS $$
 DECLARE
-  row_data DBE_PERF.thread_wait_status%rowtype;
+  row_data dbe_perf.thread_wait_status%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn dn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.thread_wait_status''';
+      query_str := 'SELECT * FROM dbe_perf.thread_wait_status';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1346,30 +1440,6 @@ CREATE OR REPLACE VIEW DBE_PERF.wlm_workload_runtime AS
     WHERE P.query_pid = S.threadpid AND
           S.usesysid = U.oid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_wlm_workload_runtime()
-RETURNS setof DBE_PERF.wlm_workload_runtime
-AS $$
-DECLARE
-  row_data DBE_PERF.wlm_workload_runtime%rowtype;
-  row_name record;
-  query_str text;
-  query_str_nodes text;
-  BEGIN
-    --Get all coordinator node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.wlm_workload_runtime''';
-      FOR row_data IN EXECUTE(query_str) LOOP
-        return next row_data;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_wlm_workload_runtime AS
-  SELECT * from DBE_PERF.get_global_wlm_workload_runtime();
-
 CREATE OR REPLACE VIEW DBE_PERF.wlm_workload_history_info AS
   SELECT
     statement,
@@ -1403,56 +1473,8 @@ CREATE OR REPLACE VIEW DBE_PERF.operator_ec_history AS
     ec_libodbc_type
   FROM pg_stat_get_wlm_ec_operator_info(0) where ec_operator > 0;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_history()
-RETURNS setof DBE_PERF.operator_ec_history
-AS $$
-DECLARE
-  row_data DBE_PERF.operator_ec_history%rowtype;
-  row_name record;
-  query_str text;
-  query_str_nodes text;
-  BEGIN
-    --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.operator_ec_history''';
-      FOR row_data IN EXECUTE(query_str) LOOP
-        return next row_data;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE VIEW DBE_PERF.global_operator_ec_history AS
-  SELECT * FROM DBE_PERF.get_global_operator_ec_history();
-
 CREATE OR REPLACE VIEW DBE_PERF.operator_ec_history_table AS
   SELECT * FROM gs_wlm_ec_operator_info;
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_history_table()
-RETURNS setof DBE_PERF.operator_ec_history_table
-AS $$
-DECLARE
-  row_data DBE_PERF.operator_ec_history_table%rowtype;
-  row_name record;
-  query_str text;
-  query_str_nodes text;
-  BEGIN
-    --Get all the CN node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.operator_ec_history_table''';
-      FOR row_data IN EXECUTE(query_str) LOOP
-        return next row_data;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_operator_ec_history_table AS
-    SELECT * FROM DBE_PERF.get_global_operator_ec_history_table();
 
 --real time ec operator-level view in single CN
 CREATE OR REPLACE VIEW DBE_PERF.operator_ec_runtime AS
@@ -1470,47 +1492,23 @@ CREATE OR REPLACE VIEW DBE_PERF.operator_ec_runtime AS
   FROM DBE_PERF.session_stat_activity AS s, pg_stat_get_wlm_realtime_ec_operator_info(NULL) as t
     where s.query_id = t.queryid and t.ec_operator > 0;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_runtime()
-RETURNS setof DBE_PERF.operator_ec_runtime
-AS $$
-DECLARE
-  row_data DBE_PERF.operator_ec_runtime%rowtype;
-  coor_name record;
-  fet_active text;
-  fetch_coor text;
-  BEGIN
-    --Get all the CN node names
-    fetch_coor := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR coor_name IN EXECUTE(fetch_coor) LOOP
-      fet_active := 'EXECUTE DIRECT ON (' || coor_name.node_name || ') ''SELECT * FROM DBE_PERF.operator_ec_runtime''';
-      FOR row_data IN EXECUTE(fet_active) LOOP
-        return next row_data;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_operator_ec_runtime AS
-  SELECT * FROM DBE_PERF.get_global_operator_ec_runtime();
-
 CREATE OR REPLACE VIEW DBE_PERF.operator_history_table AS
   SELECT * FROM gs_wlm_operator_info;
 
 --createing history operator-level view for test in multi-CN from single CN
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_history_table()
-RETURNS setof DBE_PERF.operator_history_table
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_operator_history_table()
+RETURNS setof dbe_perf.operator_history_table
 AS $$
 DECLARE
-  row_data DBE_PERF.operator_history_table%rowtype;
+  row_data dbe_perf.operator_history_table%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the CN node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.operator_history_table ''';
+      query_str := 'SELECT * FROM dbe_perf.operator_history_table';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1526,19 +1524,19 @@ CREATE OR REPLACE VIEW DBE_PERF.global_operator_history_table AS
 CREATE OR REPLACE VIEW DBE_PERF.operator_history AS
   SELECT * FROM pg_stat_get_wlm_operator_info(0);
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_history()
-RETURNS setof DBE_PERF.operator_history
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_operator_history()
+RETURNS setof dbe_perf.operator_history
 AS $$
 DECLARE
-  row_data DBE_PERF.operator_history%rowtype;
+  row_data dbe_perf.operator_history%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.operator_history''';
+      query_str := 'SELECT * FROM dbe_perf.operator_history';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1556,18 +1554,18 @@ CREATE OR REPLACE VIEW DBE_PERF.operator_runtime AS
   FROM DBE_PERF.session_stat_activity AS s, pg_stat_get_wlm_realtime_operator_info(NULL) as t
     WHERE s.query_id = t.queryid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_runtime()
-RETURNS setof DBE_PERF.operator_runtime
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_operator_runtime()
+RETURNS setof dbe_perf.operator_runtime
 AS $$
 DECLARE
-  row_data DBE_PERF.operator_runtime%rowtype;
+  row_data dbe_perf.operator_runtime%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.operator_runtime''';
+      query_str := 'SELECT * FROM dbe_perf.operator_runtime';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1653,19 +1651,19 @@ SELECT
 FROM pg_stat_get_wlm_session_info(0) S;
 
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_history()
-RETURNS setof DBE_PERF.statement_complex_history
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_complex_history()
+RETURNS setof dbe_perf.statement_complex_history
 AS $$
 DECLARE
-  row_data DBE_PERF.statement_complex_history%rowtype;
+  row_data dbe_perf.statement_complex_history%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement_complex_history''';
+        query_str := 'SELECT * FROM dbe_perf.statement_complex_history';
         FOR row_data IN EXECUTE(query_str) LOOP
             return next row_data;
         END LOOP;
@@ -1680,19 +1678,19 @@ CREATE OR REPLACE VIEW DBE_PERF.global_statement_complex_history AS
 CREATE OR REPLACE VIEW DBE_PERF.statement_complex_history_table AS
   SELECT * FROM gs_wlm_session_info;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_history_table()
-RETURNS setof DBE_PERF.statement_complex_history_table
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_complex_history_table()
+RETURNS setof dbe_perf.statement_complex_history_table
 AS $$
 DECLARE
-  row_data DBE_PERF.statement_complex_history_table%rowtype;
+  row_data dbe_perf.statement_complex_history_table%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement_complex_history_table''';
+      query_str := 'SELECT * FROM dbe_perf.statement_complex_history_table';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1761,18 +1759,18 @@ CREATE OR REPLACE VIEW DBE_PERF.statement_complex_runtime AS
   FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
     WHERE S.pid = T.threadid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_runtime()
-RETURNS setof DBE_PERF.statement_complex_runtime
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_complex_runtime()
+RETURNS setof dbe_perf.statement_complex_runtime
 AS $$
 DECLARE
-  row_data DBE_PERF.statement_complex_runtime%rowtype;
+  row_data dbe_perf.statement_complex_runtime%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.statement_complex_runtime''';
+      query_str := 'SELECT * FROM dbe_perf.statement_complex_runtime';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -1838,19 +1836,19 @@ CREATE OR REPLACE VIEW DBE_PERF.statement_wlmstat_complex_runtime AS
 CREATE OR REPLACE VIEW DBE_PERF.memory_node_detail AS
   SELECT * FROM pv_total_memory_detail();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_memory_node_detail()
-RETURNS setof DBE_PERF.memory_node_detail
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_memory_node_detail()
+RETURNS setof dbe_perf.memory_node_detail
 AS $$
 DECLARE
   row_name record;
-  row_data DBE_PERF.memory_node_detail%rowtype;
+  row_data dbe_perf.memory_node_detail%rowtype;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.memory_node_detail''';
+        query_str := 'SELECT * FROM dbe_perf.memory_node_detail';
         FOR row_data IN EXECUTE(query_str) LOOP
             RETURN NEXT row_data;
         END LOOP;
@@ -1868,21 +1866,21 @@ CREATE OR REPLACE VIEW DBE_PERF.memory_node_ng_detail AS
 CREATE OR REPLACE VIEW DBE_PERF.shared_memory_detail AS
   SELECT * FROM pg_shared_memory_detail();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_shared_memory_detail
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_shared_memory_detail
   (OUT node_name name, OUT contextname text, OUT level smallint, OUT parent text,
    OUT totalsize bigint, OUT freesize bigint, OUT usedsize bigint)
 RETURNS setof record
 AS $$
 DECLARE
   row_name record;
-  row_data DBE_PERF.shared_memory_detail%rowtype;
+  row_data dbe_perf.shared_memory_detail%rowtype;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.shared_memory_detail''';
+        query_str := 'SELECT * FROM dbe_perf.shared_memory_detail';
         FOR row_data IN EXECUTE(query_str) LOOP
             node_name := row_name.node_name;
             contextname := row_data.contextname;
@@ -1904,29 +1902,6 @@ CREATE OR REPLACE VIEW DBE_PERF.global_shared_memory_detail AS
 /* comm */
 CREATE OR REPLACE VIEW DBE_PERF.comm_delay AS
   SELECT DISTINCT * FROM pg_comm_delay();
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_comm_delay()
-RETURNS setof DBE_PERF.comm_delay
-AS $$
-DECLARE
-  row_name record;
-  row_data DBE_PERF.comm_delay%rowtype;
-  query_str text;
-  query_str_nodes text;
-  BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''D''';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.comm_delay''';
-      FOR row_data IN EXECUTE(query_str) LOOP
-        RETURN NEXT row_data;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_comm_delay AS
-  SELECT DISTINCT * FROM DBE_PERF.get_global_comm_delay();
 
 CREATE OR REPLACE VIEW DBE_PERF.comm_recv_stream AS
   SELECT
@@ -2071,9 +2046,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_all_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.statio_all_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2126,9 +2101,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -2139,7 +2114,7 @@ DECLARE
         T.idx_blks_hit AS idx_blks_hit
       FROM DBE_PERF.statio_all_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2181,7 +2156,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_all_sequences AS
        LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
     WHERE C.relkind = 'S';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_all_sequences
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_all_sequences
   (OUT node_name name, OUT relid oid, OUT schemaname name,
    OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
 RETURNS setof record
@@ -2193,9 +2168,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_all_sequences''';
+      query_str := 'SELECT * FROM dbe_perf.statio_all_sequences';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2244,7 +2219,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_all_tables AS
     WHERE C.relkind IN ('r', 't')
   GROUP BY C.oid, N.nspname, C.relname, T.oid, X.oid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_all_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_all_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
    OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
    OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
@@ -2257,9 +2232,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_all_tables''';
+      query_str := 'SELECT * FROM dbe_perf.statio_all_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2283,7 +2258,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_statio_all_tables AS
   SELECT * FROM DBE_PERF.get_global_statio_all_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_all_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statio_all_tables
   (OUT schemaname name, OUT relname name, OUT toastrelschemaname name, OUT toastrelname name, OUT heap_blks_read bigint,
    OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
    OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
@@ -2296,9 +2271,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
         SELECT
             C.relname AS relname,
             C.schemaname AS schemaname,
@@ -2312,9 +2287,9 @@ DECLARE
             C.toast_blks_hit AS toast_blks_hit,
             C.tidx_blks_read AS tidx_blks_read,
             C.tidx_blks_hit AS tidx_blks_hit
-        FROM DBE_PERF.statio_all_tables C
+        FROM dbe_perf.statio_all_tables C
             LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-            LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
+            LEFT JOIN pg_namespace N ON O.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2371,7 +2346,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_sys_indexes AS
     WHERE schemaname IN ('pg_catalog', 'information_schema', 'snapshot') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_sys_indexes
   (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name,
    OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
 RETURNS setof record
@@ -2383,9 +2358,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_sys_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.statio_sys_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2405,7 +2380,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_statio_sys_indexes AS
   SELECT * FROM DBE_PERF.get_global_statio_sys_indexes();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_sys_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statio_sys_indexes
   (OUT schemaname name, OUT toastrelschemaname name, OUT toastrelname name,
    OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
 RETURNS setof record
@@ -2417,9 +2392,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -2428,9 +2403,9 @@ DECLARE
         T.indexrelname AS indexrelname,
         T.idx_blks_read AS idx_blks_read,
         T.idx_blks_hit AS idx_blks_hit
-      FROM DBE_PERF.statio_sys_indexes T
+      FROM dbe_perf.statio_sys_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2465,7 +2440,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_sys_sequences AS
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_sequences
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_sys_sequences
   (OUT node_name name, OUT relid oid, OUT schemaname name,
    OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
 RETURNS setof record
@@ -2477,9 +2452,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_sys_sequences''';
+      query_str := 'SELECT * FROM dbe_perf.statio_sys_sequences';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2508,7 +2483,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_sys_tables AS
     WHERE schemaname IN ('pg_catalog', 'information_schema', 'snapshot') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_sys_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
    OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
    OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
@@ -2521,9 +2496,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_sys_tables''';
+      query_str := 'SELECT * FROM dbe_perf.statio_sys_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2547,7 +2522,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_statio_sys_tables AS
   SELECT * FROM DBE_PERF.get_global_statio_sys_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statio_sys_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT heap_blks_read bigint, OUT heap_blks_hit bigint,
@@ -2563,9 +2538,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
           C.schemaname AS schemaname,
           C.relname AS relname,
@@ -2579,9 +2554,9 @@ DECLARE
           C.toast_blks_hit AS toast_blks_hit,
           C.tidx_blks_read AS tidx_blks_read,
           C.tidx_blks_hit AS tidx_blks_hit
-      FROM DBE_PERF.statio_sys_tables C
+      FROM dbe_perf.statio_sys_tables C
           LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-          LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
+          LEFT JOIN pg_namespace N ON O.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2623,7 +2598,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_user_indexes AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_user_indexes
   (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name,
    OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
 RETURNS setof record
@@ -2635,9 +2610,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_user_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.statio_user_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2657,7 +2632,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_statio_user_indexes AS
   SELECT *  FROM DBE_PERF.get_global_statio_user_indexes();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_user_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statio_user_indexes
   (OUT schemaname name, OUT toastrelschemaname name, OUT toastrelname name,
    OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
 RETURNS setof record
@@ -2669,9 +2644,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -2680,9 +2655,9 @@ DECLARE
         T.indexrelname AS indexrelname,
         T.idx_blks_read AS idx_blks_read,
         T.idx_blks_hit AS idx_blks_hit
-      FROM DBE_PERF.statio_user_indexes T
+      FROM dbe_perf.statio_user_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2718,7 +2693,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_user_sequences AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_sequences
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_user_sequences
   (OUT node_name name, OUT relid oid, OUT schemaname name,
    OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
 RETURNS setof record
@@ -2730,9 +2705,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_user_sequences''';
+      query_str := 'SELECT * FROM dbe_perf.statio_user_sequences';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2761,7 +2736,7 @@ CREATE OR REPLACE VIEW DBE_PERF.statio_user_tables AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'snapshot') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_user_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
    OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
    OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
@@ -2774,9 +2749,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statio_user_tables''';
+      query_str := 'SELECT * FROM dbe_perf.statio_user_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -2800,7 +2775,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_statio_user_tables AS
   SELECT * FROM DBE_PERF.get_global_statio_user_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statio_user_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT heap_blks_read bigint, OUT heap_blks_hit bigint,
@@ -2816,9 +2791,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         C.schemaname AS schemaname,
         C.relname AS relname,
@@ -2832,9 +2807,9 @@ DECLARE
         C.toast_blks_hit AS toast_blks_hit,
         C.tidx_blks_read AS tidx_blks_read,
         C.tidx_blks_hit AS tidx_blks_hit
-      FROM DBE_PERF.statio_user_tables C
+      FROM dbe_perf.statio_user_tables C
         LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-        LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON O.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -2869,7 +2844,7 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_statio_user_tables AS
          ON Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname
   GROUP BY (1, 2);
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_stat_db_cu
+CREATE OR REPLACE FUNCTION dbe_perf.get_stat_db_cu
   (OUT node_name1 text, OUT db_name text,
    OUT mem_hit bigint, OUT hdd_sync_read bigint,
    OUT hdd_asyn_read bigint)
@@ -2881,13 +2856,13 @@ DECLARE
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT  D.datname AS datname,
+      query_str := 'SELECT  D.datname AS datname,
       pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
       pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
       pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read
-      FROM pg_database D;''';
+      FROM pg_database D;';
         FOR each_node_out IN EXECUTE(query_str) LOOP
           node_name1 := row_name.node_name;
           db_name := each_node_out.datname;
@@ -2935,110 +2910,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_all_tables AS
       WHERE C.relkind IN ('r', 't')
     GROUP BY C.oid, N.nspname, C.relname;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_dn_stat_all_tables
-  (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name,
-   OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-   OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-   OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-   OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-   OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    BEGIN
-        --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''D''';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_all_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_name.node_name;
-                relid := row_data.relid;
-                schemaname := row_data.schemaname;
-                relname := row_data.relname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                n_live_tup := row_data.n_live_tup;
-                n_dead_tup := row_data.n_dead_tup;
-                last_vacuum := row_data.last_vacuum;
-                last_autovacuum := row_data.last_autovacuum;
-                last_analyze := row_data.last_analyze;
-                last_autoanalyze := row_data.last_autoanalyze;
-                vacuum_count := row_data.vacuum_count;
-                autovacuum_count := row_data.autovacuum_count;
-                analyze_count := row_data.analyze_count;
-                autoanalyze_count := row_data.autoanalyze_count;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_cn_stat_all_tables
-  (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name,
-   OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-   OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-   OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-   OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-   OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    BEGIN
-        --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
-                SELECT * FROM DBE_PERF.stat_all_tables WHERE schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_name.node_name;
-                relid := row_data.relid;
-                schemaname := row_data.schemaname;
-                relname := row_data.relname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                n_live_tup := row_data.n_live_tup;
-                n_dead_tup := row_data.n_dead_tup;
-                last_vacuum := row_data.last_vacuum;
-                last_autovacuum := row_data.last_autovacuum;
-                last_analyze := row_data.last_analyze;
-                last_autoanalyze := row_data.last_autoanalyze;
-                vacuum_count := row_data.vacuum_count;
-                autovacuum_count := row_data.autovacuum_count;
-                analyze_count := row_data.analyze_count;
-                autoanalyze_count := row_data.autoanalyze_count;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_stat_all_tables AS
-  SELECT * FROM DBE_PERF.get_global_cn_stat_all_tables()
-      UNION ALL SELECT * FROM DBE_PERF.get_global_dn_stat_all_tables();
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_dn_stat_all_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_all_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
@@ -3055,9 +2927,9 @@ DECLARE
     query_str_nodes text;
     BEGIN
         --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''D''';
+        query_str_nodes := 'select * from dbe_perf.node_name';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+            query_str := '
                 SELECT
                     T.schemaname AS schemaname,
                     T.relname AS relname,
@@ -3081,9 +2953,9 @@ DECLARE
                     T.autovacuum_count AS autovacuum_count,
                     T.analyze_count AS analyze_count,
                     T.autoanalyze_count AS autoanalyze_count
-                FROM DBE_PERF.stat_all_tables T
+                FROM dbe_perf.stat_all_tables T
                     LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-                    LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+                    LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
             FOR row_data IN EXECUTE(query_str) LOOP
                 schemaname := row_data.schemaname;
                 IF row_data.toastrelname IS NULL THEN
@@ -3117,104 +2989,6 @@ DECLARE
         return;
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_cn_stat_all_tables
-  (OUT schemaname name, OUT relname name,
-   OUT toastrelschemaname name, OUT toastrelname name,
-   OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-   OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-   OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-   OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-   OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    BEGIN
-        --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
-                SELECT
-                    T.schemaname AS schemaname,
-                    T.relname AS relname,
-                    C.relname AS toastrelname,
-                    N.nspname AS toastrelschemaname,
-                    T.seq_scan AS seq_scan,
-                    T.seq_tup_read AS seq_tup_read,
-                    T.idx_scan AS idx_scan,
-                    T.idx_tup_fetch AS idx_tup_fetch,
-                    T.n_tup_ins AS n_tup_ins,
-                    T.n_tup_upd AS n_tup_upd,
-                    T.n_tup_del AS n_tup_del,
-                    T.n_tup_hot_upd AS n_tup_hot_upd,
-                    T.n_live_tup AS n_live_tup,
-                    T.n_dead_tup AS n_dead_tup,
-                    T.last_vacuum AS last_vacuum,
-                    T.last_autovacuum AS last_autovacuum,
-                    T.last_analyze AS last_analyze,
-                    T.last_autoanalyze AS last_autoanalyze,
-                    T.vacuum_count AS vacuum_count,
-                    T.autovacuum_count AS autovacuum_count,
-                    T.analyze_count AS analyze_count,
-                    T.autoanalyze_count AS autoanalyze_count
-                FROM DBE_PERF.stat_all_tables T
-                    LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-                    LEFT JOIN pg_namespace N ON C.relnamespace = N.oid
-                WHERE T.schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                schemaname := row_data.schemaname;
-                IF row_data.toastrelname IS NULL THEN
-                    relname := row_data.relname;
-                ELSE
-                    relname := NULL;
-                END IF;
-                toastrelschemaname := row_data.toastrelschemaname;
-                toastrelname := row_data.toastrelname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                n_live_tup := row_data.n_live_tup;
-                n_dead_tup := row_data.n_dead_tup;
-                last_vacuum := row_data.last_vacuum;
-                last_autovacuum := row_data.last_autovacuum;
-                last_analyze := row_data.last_analyze;
-                last_autoanalyze := row_data.last_autoanalyze;
-                vacuum_count := row_data.vacuum_count;
-                autovacuum_count := row_data.autovacuum_count;
-                analyze_count := row_data.analyze_count;
-                autoanalyze_count := row_data.autoanalyze_count;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.summary_stat_all_tables AS
-  SELECT Ti.schemaname, COALESCE(Ti.relname, Tn.toastname, NULL) as relname,
-         SUM(Ti.seq_scan) seq_scan, SUM(Ti.seq_tup_read) seq_tup_read,
-         SUM(Ti.idx_scan) idx_scan, SUM(Ti.idx_tup_fetch) idx_tup_fetch,
-         SUM(Ti.n_tup_ins) n_tup_ins, SUM(Ti.n_tup_upd) n_tup_upd,
-         SUM(Ti.n_tup_del) n_tup_del, SUM(Ti.n_tup_hot_upd) n_tup_hot_upd,
-         SUM(Ti.n_live_tup) n_live_tup, SUM(Ti.n_dead_tup) n_dead_tup,
-         MAX(Ti.last_vacuum) last_vacuum, MAX(Ti.last_autovacuum) last_autovacuum,
-         MAX(Ti.last_analyze) last_analyze, MAX(Ti.last_autoanalyze) last_autoanalyze,
-         SUM(Ti.vacuum_count) vacuum_count, SUM(Ti.autovacuum_count) autovacuum_count,
-         SUM(Ti.analyze_count) analyze_count, SUM(Ti.autoanalyze_count) autoanalyze_count
-    FROM (SELECT * FROM DBE_PERF.get_summary_cn_stat_all_tables()
-         UNION ALL SELECT * FROM DBE_PERF.get_summary_dn_stat_all_tables()) AS Ti
-    LEFT JOIN DBE_PERF.get_local_toast_relation() Tn
-         ON Tn.shemaname = Ti.toastrelschemaname AND Tn.relname = Ti.toastrelname
-    GROUP BY (1, 2);
 
 CREATE OR REPLACE VIEW DBE_PERF.stat_all_indexes AS
   SELECT
@@ -3232,7 +3006,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_all_indexes AS
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
       WHERE C.relkind IN ('r', 't');
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_all_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_all_indexes
   (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
    OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
 RETURNS setof record
@@ -3244,9 +3018,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_all_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.stat_all_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -3267,7 +3041,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_all_indexes AS
   SELECT * FROM DBE_PERF.get_global_stat_all_indexes();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_all_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_all_indexes
   (OUT schemaname name, OUT relname name, OUT indexrelname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
@@ -3280,9 +3054,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -3292,9 +3066,9 @@ DECLARE
         T.idx_scan AS idx_scan,
         T.idx_tup_read AS idx_tup_read,
         T.idx_tup_fetch AS idx_tup_fetch
-      FROM DBE_PERF.stat_all_indexes T
+      FROM dbe_perf.stat_all_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -3330,7 +3104,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_sys_tables AS
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_sys_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
    OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
    OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
@@ -3346,9 +3120,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_sys_tables''';
+      query_str := 'SELECT * FROM dbe_perf.stat_sys_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -3382,7 +3156,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_sys_tables AS
   SELECT * FROM DBE_PERF.get_global_stat_sys_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_sys_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint,
@@ -3400,9 +3174,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.schemaname AS schemaname,
         T.relname AS relname,
@@ -3426,9 +3200,9 @@ DECLARE
         T.autovacuum_count AS autovacuum_count,
         T.analyze_count AS analyze_count,
         T.autoanalyze_count AS autoanalyze_count
-      FROM DBE_PERF.stat_sys_tables T
+      FROM dbe_perf.stat_sys_tables T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -3483,7 +3257,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_sys_indexes AS
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_sys_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_sys_indexes
   (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
    OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
 RETURNS setof record
@@ -3495,9 +3269,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_sys_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.stat_sys_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -3518,7 +3292,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_sys_indexes AS
   SELECT * FROM DBE_PERF.get_global_stat_sys_indexes();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_sys_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_sys_indexes
   (OUT schemaname name, OUT relname name, OUT indexrelname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
@@ -3531,9 +3305,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -3543,9 +3317,9 @@ DECLARE
         T.idx_scan AS idx_scan,
         T.idx_tup_read AS idx_tup_read,
         T.idx_tup_fetch AS idx_tup_fetch
-      FROM DBE_PERF.stat_sys_indexes T
+      FROM dbe_perf.stat_sys_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -3581,7 +3355,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_user_tables AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_user_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
    OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
    OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
@@ -3597,9 +3371,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''D'')';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_user_tables''';
+      query_str := 'SELECT * FROM dbe_perf.stat_user_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -3633,7 +3407,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_user_tables AS
   SELECT * FROM DBE_PERF.get_global_stat_user_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_user_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint,
@@ -3651,9 +3425,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''D'')';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.schemaname AS schemaname,
         T.relname AS relname,
@@ -3677,9 +3451,9 @@ DECLARE
         T.autovacuum_count AS autovacuum_count,
         T.analyze_count AS analyze_count,
         T.autoanalyze_count AS autoanalyze_count
-      FROM DBE_PERF.stat_user_tables T
+      FROM dbe_perf.stat_user_tables T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -3734,7 +3508,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_user_indexes AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_user_indexes
   (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
    OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
 RETURNS setof record
@@ -3746,9 +3520,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_user_indexes''';
+      query_str := 'SELECT * FROM dbe_perf.stat_user_indexes';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -3769,7 +3543,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_user_indexes AS
   SELECT * FROM DBE_PERF.get_global_stat_user_indexes();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_user_indexes
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_user_indexes
   (OUT schemaname name, OUT relname name, OUT indexrelname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
@@ -3782,9 +3556,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -3794,9 +3568,9 @@ DECLARE
         T.idx_scan AS idx_scan,
         T.idx_tup_read AS idx_tup_read,
         T.idx_tup_fetch AS idx_tup_fetch
-      FROM DBE_PERF.stat_user_indexes T
+      FROM dbe_perf.stat_user_indexes T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -3851,7 +3625,7 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_database AS
     pg_stat_get_db_stat_reset_time(D.oid) AS stats_reset
   FROM pg_database D;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_database
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_database
   (OUT node_name name, OUT datid oid, OUT datname name, OUT numbackends integer, OUT xact_commit bigint,
    OUT xact_rollback bigint, OUT blks_read bigint, OUT blks_hit bigint, OUT tup_returned bigint, OUT tup_fetched bigint,
    OUT tup_inserted bigint, OUT tup_updated bigint, OUT tup_deleted bigint, OUT conflicts bigint, OUT temp_files bigint,
@@ -3860,15 +3634,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_database
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_database%rowtype;
+  row_data dbe_perf.stat_database%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_database''';
+      query_str := 'SELECT * FROM dbe_perf.stat_database';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         datid := row_data.datid;
@@ -3929,21 +3703,21 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_database_conflicts AS
     pg_stat_get_db_conflict_startup_deadlock(D.oid) AS confl_deadlock
   FROM pg_database D;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_database_conflicts
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_database_conflicts
   (OUT node_name name, OUT datid oid, OUT datname name, OUT confl_tablespace bigint,
    OUT confl_lock bigint, OUT confl_snapshot bigint, OUT confl_bufferpin bigint, OUT confl_deadlock bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_database_conflicts%rowtype;
+  row_data dbe_perf.stat_database_conflicts%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_database_conflicts''';
+      query_str := 'SELECT * FROM dbe_perf.stat_database_conflicts';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         datid := row_data.datid;
@@ -3959,6 +3733,7 @@ DECLARE
     return;
   END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
+
 
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_database_conflicts AS
   SELECT * FROM DBE_PERF.get_global_stat_database_conflicts();
@@ -3993,22 +3768,22 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_xact_all_tables AS
     WHERE C.relkind IN ('r', 't')
   GROUP BY C.oid, N.nspname, C.relname;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_all_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_xact_all_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
    OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
    OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_xact_all_tables%rowtype;
+  row_data dbe_perf.stat_xact_all_tables%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''D''';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_xact_all_tables''';
+        query_str := 'SELECT * FROM dbe_perf.stat_xact_all_tables';
         FOR row_data IN EXECUTE(query_str) LOOP
             node_name := row_name.node_name;
             relid := row_data.relid;
@@ -4025,9 +3800,9 @@ DECLARE
             return next;
         END LOOP;
     END LOOP;
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type = ''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_xact_all_tables where schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
+        query_str := 'SELECT * FROM dbe_perf.stat_xact_all_tables where schemaname = ''pg_catalog'' or schemaname =''pg_toast'' ';
         FOR row_data IN EXECUTE(query_str) LOOP
             node_name := row_name.node_name;
             relid := row_data.relid;
@@ -4051,7 +3826,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_xact_all_tables AS
   SELECT * FROM DBE_PERF.get_global_stat_xact_all_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_all_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_xact_all_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint,
@@ -4066,9 +3841,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''D''';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+        query_str := '
         SELECT
             T.schemaname AS schemaname,
             T.relname AS relname,
@@ -4082,9 +3857,9 @@ DECLARE
             T.n_tup_upd AS n_tup_upd,
             T.n_tup_del AS n_tup_del,
             T.n_tup_hot_upd AS n_tup_hot_upd
-        FROM DBE_PERF.stat_xact_all_tables T
+        FROM dbe_perf.stat_xact_all_tables T
             LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-            LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+            LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
         FOR row_data IN EXECUTE(query_str) LOOP
             schemaname := row_data.schemaname;
             IF row_data.toastrelname IS NULL THEN
@@ -4105,47 +3880,7 @@ DECLARE
             return next;
         END LOOP;
     END LOOP;
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type = ''C'' AND nodeis_active = true';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
-        SELECT
-            T.relname AS relname,
-            T.schemaname AS schemaname,
-            C.relname AS toastrelname,
-            N.nspname AS toastrelschemaname,
-            T.seq_scan AS seq_scan,
-            T.seq_tup_read AS seq_tup_read,
-            T.idx_scan AS idx_scan,
-            T.idx_tup_fetch AS idx_tup_fetch,
-            T.n_tup_ins AS n_tup_ins,
-            T.n_tup_upd AS n_tup_upd,
-            T.n_tup_del AS n_tup_del,
-            T.n_tup_hot_upd AS n_tup_hot_upd
-        FROM DBE_PERF.stat_xact_all_tables T
-        LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid
-        WHERE T.schemaname = ''''pg_catalog'''' OR T.schemaname =''''pg_toast'''' ''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            schemaname := row_data.schemaname;
-            IF row_data.toastrelname IS NULL THEN
-                relname := row_data.relname;
-            ELSE
-                relname := NULL;
-            END IF;
-            toastrelschemaname := row_data.toastrelschemaname;
-            toastrelname := row_data.toastrelname;
-            seq_scan := row_data.seq_scan;
-            seq_tup_read := row_data.seq_tup_read;
-            idx_scan := row_data.idx_scan;
-            idx_tup_fetch := row_data.idx_tup_fetch;
-            n_tup_ins := row_data.n_tup_ins;
-            n_tup_upd := row_data.n_tup_upd;
-            n_tup_del := row_data.n_tup_del;
-            n_tup_hot_upd := row_data.n_tup_hot_upd;
-            return next;
-        END LOOP;
-    END LOOP;
-    return;
+        return;
   END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
@@ -4163,22 +3898,22 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_xact_sys_tables AS
     WHERE schemaname IN ('pg_catalog', 'information_schema') OR
           schemaname ~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_xact_sys_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
    OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
    OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_xact_sys_tables%rowtype;
+  row_data dbe_perf.stat_xact_sys_tables%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_xact_sys_tables''';
+      query_str := 'SELECT * FROM dbe_perf.stat_xact_sys_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -4202,7 +3937,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_xact_sys_tables AS
   SELECT * FROM DBE_PERF.get_global_stat_xact_sys_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_sys_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_xact_sys_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint,
@@ -4217,9 +3952,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -4233,9 +3968,9 @@ DECLARE
         T.n_tup_upd AS n_tup_upd,
         T.n_tup_del AS n_tup_del,
         T.n_tup_hot_upd AS n_tup_hot_upd
-      FROM DBE_PERF.stat_xact_sys_tables T
+      FROM dbe_perf.stat_xact_sys_tables T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -4274,22 +4009,22 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_xact_user_tables AS
     WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND
           schemaname !~ '^pg_toast';
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_xact_user_tables
   (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
    OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
    OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_xact_user_tables%rowtype;
+  row_data dbe_perf.stat_xact_user_tables%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''D'')';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_xact_user_tables''';
+      query_str := 'SELECT * FROM dbe_perf.stat_xact_user_tables';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         relid := row_data.relid;
@@ -4313,7 +4048,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_stat_xact_user_tables AS
   SELECT * FROM DBE_PERF.get_global_stat_xact_user_tables();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_user_tables
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_stat_xact_user_tables
   (OUT schemaname name, OUT relname name,
    OUT toastrelschemaname name, OUT toastrelname name,
    OUT seq_scan bigint, OUT seq_tup_read bigint,
@@ -4328,9 +4063,9 @@ DECLARE
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''D'')';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''
+      query_str := '
       SELECT
         T.relname AS relname,
         T.schemaname AS schemaname,
@@ -4344,9 +4079,9 @@ DECLARE
         T.n_tup_upd AS n_tup_upd,
         T.n_tup_del AS n_tup_del,
         T.n_tup_hot_upd AS n_tup_hot_upd
-      FROM DBE_PERF.stat_xact_user_tables T
+      FROM dbe_perf.stat_xact_user_tables T
         LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
+        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid';
       FOR row_data IN EXECUTE(query_str) LOOP
         schemaname := row_data.schemaname;
         IF row_data.toastrelname IS NULL THEN
@@ -4392,21 +4127,21 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_user_functions AS
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
           AND pg_stat_get_function_calls(P.oid) IS NOT NULL;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_functions
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_user_functions
   (OUT node_name name, OUT funcid oid, OUT schemaname name, OUT funcname name, OUT calls bigint,
    OUT total_time double precision, OUT self_time double precision)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_user_functions%rowtype;
+  row_data dbe_perf.stat_user_functions%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_user_functions''';
+      query_str := 'SELECT * FROM dbe_perf.stat_user_functions';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         funcid := row_data.funcid;
@@ -4443,21 +4178,21 @@ CREATE OR REPLACE VIEW DBE_PERF.stat_xact_user_functions AS
     WHERE P.prolang != 12  -- fast check to eliminate built-in functions
           AND pg_stat_get_xact_function_calls(P.oid) IS NOT NULL;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_user_functions
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_xact_user_functions
   (OUT node_name name, OUT funcid oid, OUT schemaname name, OUT funcname name, OUT calls bigint,
    OUT total_time double precision, OUT self_time double precision)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.stat_xact_user_functions%rowtype;
+  row_data dbe_perf.stat_xact_user_functions%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_xact_user_functions''';
+      query_str := 'SELECT * FROM dbe_perf.stat_xact_user_functions';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         funcid := row_data.funcid;
@@ -4485,7 +4220,7 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_stat_xact_user_functions AS
 CREATE OR REPLACE VIEW DBE_PERF.stat_bad_block AS
   SELECT DISTINCT * from pg_stat_bad_block();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_bad_block
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_stat_bad_block
   (OUT node_name TEXT, OUT databaseid INT4, OUT tablespaceid INT4, OUT relfilenode INT4, OUT forknum INT4,
    OUT error_count INT4, OUT first_time timestamp with time zone, OUT last_time timestamp with time zone)
 RETURNS setof record
@@ -4496,9 +4231,9 @@ DECLARE
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''D''';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.stat_bad_block''';
+      query_str := 'SELECT * FROM dbe_perf.stat_bad_block';
       FOR each_node_out IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         databaseid := each_node_out.databaseid;
@@ -4529,21 +4264,21 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_stat_bad_block AS
 CREATE OR REPLACE VIEW DBE_PERF.file_redo_iostat AS
   SELECT * FROM pg_stat_get_redo_stat();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_file_redo_iostat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_file_redo_iostat
   (OUT node_name name, OUT phywrts bigint, OUT phyblkwrt bigint, OUT writetim bigint,
    OUT avgiotim bigint, OUT lstiotim bigint, OUT miniotim bigint, OUT maxiowtm bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.file_redo_iostat%rowtype;
+  row_data dbe_perf.file_redo_iostat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.file_redo_iostat''';
+      query_str := 'SELECT * FROM dbe_perf.file_redo_iostat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         phywrts := row_data.phywrts;
@@ -4577,21 +4312,21 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_file_redo_iostat AS
 CREATE OR REPLACE VIEW DBE_PERF.local_rel_iostat AS
   SELECT * FROM get_local_rel_iostat();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_rel_iostat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_rel_iostat
   (OUT node_name name, OUT phyrds bigint,
   OUT phywrts bigint, OUT phyblkrd bigint, OUT phyblkwrt bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.local_rel_iostat%rowtype;
+  row_data dbe_perf.local_rel_iostat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.local_rel_iostat''';
+      query_str := 'SELECT * FROM dbe_perf.local_rel_iostat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         phyrds := row_data.phyrds;
@@ -4618,22 +4353,22 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_rel_iostat AS
 CREATE OR REPLACE VIEW DBE_PERF.file_iostat AS
   SELECT * FROM pg_stat_get_file_stat();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_file_iostat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_file_iostat
   (OUT node_name name, OUT filenum oid, OUT dbid oid, OUT spcid oid, OUT phyrds bigint,
    OUT phywrts bigint, OUT phyblkrd bigint, OUT phyblkwrt bigint, OUT readtim bigint,
    OUT writetim bigint, OUT avgiotim bigint, OUT lstiotim bigint, OUT miniotim bigint, OUT maxiowtm bigint)
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.file_iostat%rowtype;
+  row_data dbe_perf.file_iostat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.file_iostat''';
+      query_str := 'SELECT * FROM dbe_perf.file_iostat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         filenum := row_data.filenum;
@@ -4674,7 +4409,7 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_file_iostat AS
 CREATE OR REPLACE VIEW DBE_PERF.locks AS
   SELECT * FROM pg_lock_status() AS L;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_locks
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_locks
   (OUT node_name name,
    OUT locktype text,
    OUT database oid,
@@ -4694,15 +4429,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_locks
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.locks%rowtype;
+  row_data dbe_perf.locks%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.locks''';
+      query_str := 'SELECT * FROM dbe_perf.locks';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         locktype := row_data.locktype;
@@ -4711,7 +4446,7 @@ DECLARE
         page := row_data.page;
         tuple := row_data.tuple;
         virtualxid := row_data.virtualxid;
-        transactionid := row_data.classid;
+        transactionid := row_data.transactionid;
         objid := row_data.objid;
         objsubid := row_data.objsubid;
         virtualtransaction := row_data.virtualtransaction;
@@ -4745,7 +4480,7 @@ CREATE OR REPLACE VIEW DBE_PERF.replication_slots AS
     FROM pg_get_replication_slots() AS L
          LEFT JOIN pg_database D ON (L.datoid = D.oid);
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_slots
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_replication_slots
   (OUT node_name name,
    OUT slot_name text,
    OUT plugin text,
@@ -4760,15 +4495,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_slots
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.replication_slots%rowtype;
+  row_data dbe_perf.replication_slots%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''D''';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.replication_slots''';
+      query_str := 'SELECT * FROM dbe_perf.replication_slots';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         slot_name := row_data.slot_name;
@@ -4805,7 +4540,7 @@ CREATE OR REPLACE VIEW DBE_PERF.bgwriter_stat AS
     pg_stat_get_buf_alloc() AS buffers_alloc,
     pg_stat_get_bgwriter_stat_reset_time() AS stats_reset;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_bgwriter_stat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_bgwriter_stat
   (OUT node_name name,
    OUT checkpoints_timed bigint,
    OUT checkpoints_req bigint,
@@ -4821,15 +4556,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_bgwriter_stat
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.bgwriter_stat%rowtype;
+  row_data dbe_perf.bgwriter_stat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.bgwriter_stat''';
+      query_str := 'SELECT * FROM dbe_perf.bgwriter_stat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         checkpoints_timed := row_data.checkpoints_timed;
@@ -4875,7 +4610,7 @@ CREATE OR REPLACE VIEW DBE_PERF.replication_stat AS
     WHERE S.usesysid = U.oid AND
           S.pid = W.sender_pid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_stat
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_replication_stat
   (OUT node_name name,
    OUT pid bigint,
    OUT usesysid oid,
@@ -4895,15 +4630,15 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_stat
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.replication_stat%rowtype;
+  row_data dbe_perf.replication_stat%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.replication_stat''';
+      query_str := 'SELECT * FROM dbe_perf.replication_stat';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         pid := row_data.pid;
@@ -4929,82 +4664,23 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_replication_stat AS
   SELECT * FROM DBE_PERF.get_global_replication_stat();
 
-CREATE OR REPLACE VIEW DBE_PERF.pooler_status AS
-    SELECT
-        S.database_name AS database,
-        S.user_name AS user_name,
-        S.tid AS tid,
-        S.node_oid AS node_oid,
-        D.node_name AS node_name,
-        S.in_use AS in_use,
-        D.node_port AS node_port,
-        S.fdsock AS fdsock,
-        S.remote_pid AS remote_pid,
-        S.session_params AS session_params
-    FROM pgxc_node D, pg_stat_get_pooler_status() AS S
-        WHERE D.oid = S.node_oid;
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_pooler_status
-  (OUT source_node_name name,
-  OUT database text,
-  OUT user_name text,
-  OUT tid bigint,
-  OUT node_oid bigint,
-  OUT node_name name,
-  OUT in_use boolean,
-  OUT fdsock bigint,
-  OUT remote_pid bigint,
-  OUT session_params text)
-RETURNS setof record
-AS $$
-DECLARE
-  row_data DBE_PERF.pooler_status%rowtype;
-  row_name record;
-  query_str text;
-  query_str_nodes text;
-  BEGIN
-    --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.pooler_status''';
-      FOR row_data IN EXECUTE(query_str) LOOP
-        source_node_name := row_name.node_name;
-        database := row_data.database;
-        user_name := row_data.user_name;
-        tid := row_data.tid;
-        node_oid := row_data.node_oid;
-        node_name := row_data.node_name;
-        in_use := row_data.in_use;
-        fdsock := row_data.fdsock;
-        remote_pid := row_data.remote_pid;
-        session_params := row_data.session_params;
-        return next;
-      END LOOP;
-    END LOOP;
-    return;
-  END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE VIEW DBE_PERF.global_pooler_status AS
-  SELECT * FROM DBE_PERF.get_global_pooler_status();
-
 /* transaction */
 CREATE OR REPLACE VIEW DBE_PERF.transactions_running_xacts AS
   SELECT * FROM pg_get_running_xacts();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_transactions_running_xacts()
-RETURNS setof DBE_PERF.transactions_running_xacts
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_transactions_running_xacts()
+RETURNS setof dbe_perf.transactions_running_xacts
 AS $$
 DECLARE
-  row_data DBE_PERF.transactions_running_xacts%rowtype;
+  row_data dbe_perf.transactions_running_xacts%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn dn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.transactions_running_xacts''';
+      query_str := 'SELECT * FROM dbe_perf.transactions_running_xacts';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5016,19 +4692,19 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_transactions_running_xacts AS
   SELECT DISTINCT * from DBE_PERF.get_global_transactions_running_xacts();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_transactions_running_xacts()
-RETURNS setof DBE_PERF.transactions_running_xacts
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_transactions_running_xacts()
+RETURNS setof dbe_perf.transactions_running_xacts
 AS $$
 DECLARE
-  row_data DBE_PERF.transactions_running_xacts%rowtype;
+  row_data dbe_perf.transactions_running_xacts%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.transactions_running_xacts''';
+      query_str := 'SELECT * FROM dbe_perf.transactions_running_xacts';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5047,19 +4723,19 @@ CREATE OR REPLACE VIEW DBE_PERF.transactions_prepared_xacts AS
          LEFT JOIN pg_authid U ON P.ownerid = U.oid
          LEFT JOIN pg_database D ON P.dbid = D.oid;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_transactions_prepared_xacts()
-RETURNS setof DBE_PERF.transactions_prepared_xacts
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_transactions_prepared_xacts()
+RETURNS setof dbe_perf.transactions_prepared_xacts
 AS $$
 DECLARE
-  row_data DBE_PERF.transactions_prepared_xacts%rowtype;
+  row_data dbe_perf.transactions_prepared_xacts%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn dn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.transactions_prepared_xacts''';
+      query_str := 'SELECT * FROM dbe_perf.transactions_prepared_xacts';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5071,19 +4747,19 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_transactions_prepared_xacts AS
   SELECT DISTINCT * FROM DBE_PERF.get_global_transactions_prepared_xacts();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_transactions_prepared_xacts()
-RETURNS setof DBE_PERF.transactions_prepared_xacts
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_transactions_prepared_xacts()
+RETURNS setof dbe_perf.transactions_prepared_xacts
 AS $$
 DECLARE
-  row_data DBE_PERF.transactions_prepared_xacts%rowtype;
+  row_data dbe_perf.transactions_prepared_xacts%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all cn node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type=''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name|| ') ''SELECT * FROM DBE_PERF.transactions_prepared_xacts''';
+      query_str := 'SELECT * FROM dbe_perf.transactions_prepared_xacts';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5099,19 +4775,19 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_transactions_prepared_xacts AS
 CREATE OR REPLACE VIEW DBE_PERF.statement AS
   SELECT * FROM get_instr_unique_sql();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statement()
-RETURNS setof DBE_PERF.statement
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statement()
+RETURNS setof dbe_perf.statement
 AS $$
 DECLARE
-  row_data DBE_PERF.statement%rowtype;
+  row_data dbe_perf.statement%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement''';
+      query_str := 'SELECT * FROM dbe_perf.statement';
         FOR row_data IN EXECUTE(query_str) LOOP
           return next row_data;
        END LOOP;
@@ -5153,19 +4829,19 @@ CREATE OR REPLACE VIEW DBE_PERF.statement_count AS
     min_delete_elapse
     FROM pg_stat_get_sql_count();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_count()
-RETURNS setof DBE_PERF.statement_count
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_statement_count()
+RETURNS setof dbe_perf.statement_count
 AS $$
 DECLARE
-  row_data DBE_PERF.statement_count%rowtype;
+  row_data dbe_perf.statement_count%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement_count''';
+      query_str := 'SELECT * FROM dbe_perf.statement_count';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5202,7 +4878,7 @@ CREATE OR REPLACE VIEW DBE_PERF.summary_statement_count AS
 CREATE OR REPLACE VIEW DBE_PERF.config_settings AS
   SELECT * FROM pg_show_all_settings();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_config_settings
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_config_settings
   (out node_name text,
    out name text,
    out setting text,
@@ -5223,14 +4899,14 @@ CREATE OR REPLACE FUNCTION DBE_PERF.get_global_config_settings
 RETURNS setof record
 AS $$
 DECLARE
-  row_data DBE_PERF.config_settings%rowtype;
+  row_data dbe_perf.config_settings%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.config_settings''';
+      query_str := 'SELECT * FROM dbe_perf.config_settings';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         name := row_data.name;
@@ -5263,19 +4939,19 @@ CREATE OR REPLACE VIEW DBE_PERF.global_config_settings AS
 CREATE OR REPLACE VIEW DBE_PERF.wait_events AS
   SELECT * FROM get_instr_wait_event(NULL);
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_wait_events()
-RETURNS setof DBE_PERF.wait_events
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_wait_events()
+RETURNS setof dbe_perf.wait_events
 AS $$
 DECLARE
-  row_data DBE_PERF.wait_events%rowtype;
+  row_data dbe_perf.wait_events%rowtype;
   row_name record;
   query_str text;
   query_str_nodes text;
   BEGIN
     --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.wait_events''';
+      query_str := 'SELECT * FROM dbe_perf.wait_events';
       FOR row_data IN EXECUTE(query_str) LOOP
         return next row_data;
       END LOOP;
@@ -5287,7 +4963,7 @@ LANGUAGE 'plpgsql' NOT FENCED;
 CREATE OR REPLACE VIEW DBE_PERF.global_wait_events AS
   SELECT * FROM DBE_PERF.get_global_wait_events();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_statement_responsetime_percentile(OUT p80 bigint, OUT p95 bigint)
+CREATE OR REPLACE FUNCTION dbe_perf.get_statement_responsetime_percentile(OUT p80 bigint, OUT p95 bigint)
 RETURNS SETOF RECORD
 AS $$
 DECLARE
@@ -5296,9 +4972,9 @@ DECLARE
   QUERY_STR TEXT;
   QUERY_STR_NODES TEXT;
   BEGIN
-    QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'') and nodeis_central = true and nodeis_active = true';
+    QUERY_STR_NODES := 'select * from dbe_perf.node_name';
     FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-      QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM get_instr_rt_percentile(0)''';
+      QUERY_STR := 'SELECT * FROM get_instr_rt_percentile(0)';
       FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
         p80 = ROW_DATA."P80";
         p95 = ROW_DATA."P95";
@@ -5316,18 +4992,18 @@ CREATE OR REPLACE VIEW DBE_PERF.statement_responsetime_percentile AS
 CREATE OR REPLACE VIEW DBE_PERF.user_login AS
   SELECT * FROM get_instr_user_login();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_user_login()
-RETURNS SETOF DBE_PERF.user_login
+CREATE OR REPLACE FUNCTION dbe_perf.get_summary_user_login()
+RETURNS SETOF dbe_perf.user_login
 AS $$
 DECLARE
-  ROW_DATA DBE_PERF.user_login%ROWTYPE;
+  ROW_DATA dbe_perf.user_login%ROWTYPE;
   ROW_NAME RECORD;
   QUERY_STR TEXT;
   QUERY_STR_NODES TEXT;
   BEGIN
-    QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE=''C'' AND nodeis_active = true';
+    QUERY_STR_NODES := 'select * from dbe_perf.node_name';
     FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-      QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.user_login''';
+      QUERY_STR := 'SELECT * FROM dbe_perf.user_login';
       FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
         RETURN NEXT ROW_DATA;
       END LOOP;
@@ -5348,7 +5024,7 @@ CREATE OR REPLACE VIEW DBE_PERF.class_vital_info AS
     FROM pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
       WHERE C.relkind IN ('r', 't', 'i');
 
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_record_reset_time(OUT node_name text, OUT reset_time timestamp with time zone)
+CREATE OR REPLACE FUNCTION dbe_perf.get_global_record_reset_time(OUT node_name text, OUT reset_time timestamp with time zone)
 RETURNS setof record
 AS $$
 DECLARE
@@ -5357,9 +5033,9 @@ DECLARE
   query_str text;
   query_str_nodes text;
   BEGIN
-    query_str_nodes := 'SELECT node_name FROM pgxc_node where node_type IN (''C'', ''D'') AND nodeis_active = true';
+    query_str_nodes := 'select * from dbe_perf.node_name';
     FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select * from get_node_stat_reset_time()''';
+      query_str := 'select * from get_node_stat_reset_time()';
       FOR row_data IN EXECUTE(query_str) LOOP
         node_name := row_name.node_name;
         reset_time := row_data.get_node_stat_reset_time;
@@ -5370,42 +5046,24 @@ DECLARE
   END; $$
 LANGUAGE 'plpgsql';
 
-CREATE OR REPLACE VIEW DBE_PERF.global_ckpt_status AS
-        SELECT node_name,ckpt_redo_point,ckpt_clog_flush_num,ckpt_csnlog_flush_num,ckpt_multixact_flush_num,ckpt_predicate_flush_num,ckpt_twophase_flush_num
-        FROM pg_catalog.remote_ckpt_stat()
-        UNION ALL
+CREATE OR REPLACE  VIEW dbe_perf.global_ckpt_status AS
         SELECT node_name,ckpt_redo_point,ckpt_clog_flush_num,ckpt_csnlog_flush_num,ckpt_multixact_flush_num,ckpt_predicate_flush_num,ckpt_twophase_flush_num
         FROM pg_catalog.local_ckpt_stat();
 
-CREATE OR REPLACE VIEW DBE_PERF.global_double_write_status AS
-    SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
-           total_writes, low_threshold_writes, high_threshold_writes,
-           total_pages, low_threshold_pages, high_threshold_pages
-    FROM pg_catalog.remote_double_write_stat()
-    UNION ALL
+CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
     SELECT node_name, curr_dwn, curr_start_page, file_trunc_num, file_reset_num,
            total_writes, low_threshold_writes, high_threshold_writes,
            total_pages, low_threshold_pages, high_threshold_pages
     FROM pg_catalog.local_double_write_stat();
 
-CREATE OR REPLACE VIEW DBE_PERF.global_pagewriter_status AS
-        SELECT node_name,pgwr_actual_flush_total_num,pgwr_last_flush_num,remain_dirty_page_num,queue_head_page_rec_lsn,queue_rec_lsn,current_xlog_insert_lsn,ckpt_redo_point        FROM pg_catalog.remote_pagewriter_stat()
-        UNION ALL
+CREATE OR REPLACE  VIEW dbe_perf.global_pagewriter_status AS
         SELECT node_name,pgwr_actual_flush_total_num,pgwr_last_flush_num,remain_dirty_page_num,queue_head_page_rec_lsn,queue_rec_lsn,current_xlog_insert_lsn,ckpt_redo_point
         FROM pg_catalog.local_pagewriter_stat();
 
 CREATE OR REPLACE VIEW DBE_PERF.global_record_reset_time AS
   SELECT * FROM DBE_PERF.get_global_record_reset_time();
 
-CREATE OR REPLACE VIEW DBE_PERF.global_redo_status AS
-    SELECT node_name, redo_start_ptr, redo_start_time, redo_done_time, curr_time,
-           min_recovery_point, read_ptr, last_replayed_read_ptr, recovery_done_ptr,
-           read_xlog_io_counter, read_xlog_io_total_dur, read_data_io_counter, read_data_io_total_dur,
-           write_data_io_counter, write_data_io_total_dur, process_pending_counter, process_pending_total_dur,
-           apply_counter, apply_total_dur,
-           speed, local_max_ptr, primary_flush_ptr, worker_info
-    FROM pg_catalog.remote_redo_stat()
-    UNION ALL
+CREATE OR REPLACE VIEW dbe_perf.global_redo_status AS
     SELECT node_name, redo_start_ptr, redo_start_time, redo_done_time, curr_time,
            min_recovery_point, read_ptr, last_replayed_read_ptr, recovery_done_ptr,
            read_xlog_io_counter, read_xlog_io_total_dur, read_data_io_counter, read_data_io_total_dur,
@@ -5414,35 +5072,29 @@ CREATE OR REPLACE VIEW DBE_PERF.global_redo_status AS
            speed, local_max_ptr, primary_flush_ptr, worker_info
     FROM pg_catalog.local_redo_stat();
 
-CREATE OR REPLACE VIEW DBE_PERF.global_rto_status AS
-SELECT node_name, rto_info
- FROM pg_catalog.remote_rto_stat()
- UNION ALL
+CREATE OR REPLACE VIEW dbe_perf.global_rto_status AS
 SELECT node_name, rto_info
 FROM pg_catalog.local_rto_stat();
 
-CREATE OR REPLACE VIEW DBE_PERF.global_recovery_status AS
-SELECT node_name, standby_node_name, source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, current_sleep_time
- FROM pg_catalog.remote_recovery_status()
- UNION ALL
+CREATE OR REPLACE VIEW dbe_perf.global_recovery_status AS
 SELECT node_name, standby_node_name, source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, current_sleep_time
 FROM pg_catalog.local_recovery_status();
 
 CREATE OR REPLACE VIEW DBE_PERF.local_threadpool_status AS
   SELECT * FROM threadpool_status();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.global_threadpool_status()
-RETURNS SETOF DBE_PERF.local_threadpool_status
+CREATE OR REPLACE FUNCTION dbe_perf.global_threadpool_status()
+RETURNS SETOF dbe_perf.local_threadpool_status
 AS $$
 DECLARE
-  ROW_DATA DBE_PERF.local_threadpool_status%ROWTYPE;
+  ROW_DATA dbe_perf.local_threadpool_status%ROWTYPE;
   ROW_NAME RECORD;
   QUERY_STR TEXT;
   QUERY_STR_NODES TEXT;
 BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') AND nodeis_active=true';
+  QUERY_STR_NODES := 'select * from dbe_perf.node_name';
   FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_threadpool_status''';
+    QUERY_STR := 'SELECT * FROM dbe_perf.local_threadpool_status';
     FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
       RETURN NEXT ROW_DATA;
     END LOOP;
@@ -5457,76 +5109,14 @@ CREATE OR REPLACE VIEW DBE_PERF.global_threadpool_status AS
 CREATE OR REPLACE VIEW DBE_PERF.local_plancache_status AS
   SELECT * FROM plancache_status();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_status()
-RETURNS SETOF DBE_PERF.local_plancache_status
-AS $$
-DECLARE
-  ROW_DATA DBE_PERF.local_plancache_status%ROWTYPE;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_plancache_status''';
-    FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-      RETURN NEXT ROW_DATA;
-    END LOOP;
-  END LOOP;
-  RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE VIEW DBE_PERF.global_plancache_status AS
-  SELECT * FROM DBE_PERF.global_plancache_status();
+CREATE VIEW DBE_PERF.global_plancache_status AS
+  SELECT * FROM pg_catalog.plancache_status();
 
 CREATE OR REPLACE VIEW DBE_PERF.local_prepare_statement_status AS
   SELECT * FROM prepare_statement_status();
 
-CREATE OR REPLACE FUNCTION DBE_PERF.global_prepare_statement_status()
-RETURNS SETOF DBE_PERF.local_prepare_statement_status
-AS $$
-DECLARE
-  ROW_DATA DBE_PERF.local_prepare_statement_status%ROWTYPE;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_prepare_statement_status''';
-    FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-      RETURN NEXT ROW_DATA;
-    END LOOP;
-  END LOOP;
-  RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE VIEW DBE_PERF.global_prepare_statement_status AS
-  SELECT * FROM DBE_PERF.global_prepare_statement_status();
-
 CREATE OR REPLACE VIEW DBE_PERF.local_plancache_clean AS
   SELECT * FROM plancache_clean();
-
-CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_clean()
-RETURNS BOOLEAN
-AS $$
-DECLARE
-  ROW_DATA record;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''D'') and nodeis_active=true';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-        QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * from DBE_PERF.local_plancache_clean''';
-        FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-     END LOOP;
-  END LOOP;
-  RETURN TRUE;
-END; $$
-LANGUAGE 'plpgsql';
 
 CREATE OR REPLACE VIEW DBE_PERF.gs_slow_query_info AS
 SELECT
@@ -5592,11 +5182,11 @@ SELECT
 		S.data_io_time
 FROM pg_stat_get_wlm_session_info(0) S where S.is_slow_query = 1;
 
-CREATE OR REPLACE FUNCTION DBE_PERF.global_slow_query_history
-RETURNS setof DBE_PERF.gs_slow_query_history
+CREATE OR REPLACE FUNCTION dbe_perf.global_slow_query_history
+RETURNS setof dbe_perf.gs_slow_query_history
 AS $$
 DECLARE
-		row_data DBE_PERF.gs_slow_query_history%rowtype;
+		row_data dbe_perf.gs_slow_query_history%rowtype;
 		row_name record;
 		query_str text;
 		query_str_nodes text;
@@ -5604,7 +5194,7 @@ DECLARE
 				--Get all the node names
 				query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
 				FOR row_name IN EXECUTE(query_str_nodes) LOOP
-						query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.gs_slow_query_history''';
+						query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM dbe_perf.gs_slow_query_history''';
 						FOR row_data IN EXECUTE(query_str) LOOP
 								return next row_data;
 						END LOOP;
@@ -5670,298 +5260,9 @@ SELECT * FROM DBE_PERF.global_slow_query_info();
 
 CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
   SELECT * FROM pg_catalog.get_local_active_session();
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_active_session
-  (OUT node_name text,
-   OUT sampleid bigint,
-   OUT sample_time timestamp without time zone,
-   OUT need_flush_sample boolean,
-   OUT databaseid oid,
-   OUT thread_id bigint,
-   OUT sessionid bigint,
-   OUT start_time timestamp without time zone,
-   OUT event text,
-   OUT lwtid integer,
-   OUT psessionid bigint,
-   OUT tlevel integer,
-   OUT smpid integer,
-   OUT userid oid,
-   OUT application_name text,
-   OUT client_addr inet,
-   OUT client_hostname text,
-   OUT client_port integer,
-   OUT query_id bigint,
-   OUT unique_query_id bigint,
-   OUT user_id oid,
-   OUT cn_id integer,
-   OUT unique_query text)
-RETURNS SETOF record
-AS $$
-DECLARE
-  ROW_DATA DBE_PERF.local_active_session%ROWTYPE;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'')';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_active_session''';
-    FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          node_name := ROW_NAME.NODE_NAME;
-          sampleid := ROW_DATA.sampleid;
-          sample_time := ROW_DATA.sample_time;
-          need_flush_sample := ROW_DATA.need_flush_sample;
-          databaseid := ROW_DATA.databaseid;
-          thread_id := ROW_DATA.thread_id;
-          sessionid := ROW_DATA.sessionid;
-          start_time := ROW_DATA.start_time;
-          event := ROW_DATA.event;
-          lwtid := ROW_DATA.lwtid;
-          psessionid := ROW_DATA.psessionid;
-          tlevel := ROW_DATA.tlevel;
-          smpid := ROW_DATA.smpid;
-          userid := ROW_DATA.userid;
-          application_name := ROW_DATA.application_name;
-          client_addr := ROW_DATA.client_addr;
-          client_hostname := ROW_DATA.client_hostname;
-          client_port := ROW_DATA.client_port;
-          query_id := ROW_DATA.query_id;
-          unique_query_id := ROW_DATA.unique_query_id;
-          user_id := ROW_DATA.user_id;
-          cn_id := ROW_DATA.cn_id;
-          unique_query := ROW_DATA.unique_query;
-      RETURN NEXT;
-    END LOOP;
-  END LOOP;
-  RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE VIEW DBE_PERF.global_active_session AS
-  SELECT * FROM DBE_PERF.get_global_active_session();
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_pg_asp
-  (OUT node_name text,
-   OUT sampleid bigint,
-   OUT sample_time timestamp without time zone,
-   OUT need_flush_sample boolean,
-   OUT databaseid oid,
-   OUT thread_id bigint,
-   OUT sessionid bigint,
-   OUT start_time timestamp without time zone,
-   OUT event text,
-   OUT lwtid integer,
-   OUT psessionid bigint,
-   OUT tlevel integer,
-   OUT smpid integer,
-   OUT userid oid,
-   OUT application_name text,
-   OUT client_addr inet,
-   OUT client_hostname text,
-   OUT client_port integer,
-   OUT query_id bigint,
-   OUT unique_query_id bigint,
-   OUT user_id oid,
-   OUT cn_id integer,
-   OUT unique_query text)
-RETURNS SETOF record
-AS $$
-DECLARE
-  ROW_DATA pg_catalog.pg_asp%ROWTYPE;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'')';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM pg_asp''';
-    FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          node_name := ROW_NAME.NODE_NAME;
-          sampleid := ROW_DATA.sampleid;
-          sample_time := ROW_DATA.sample_time;
-          need_flush_sample := ROW_DATA.need_flush_sample;
-          databaseid := ROW_DATA.databaseid;
-          thread_id := ROW_DATA.thread_id;
-          sessionid := ROW_DATA.sessionid;
-          start_time := ROW_DATA.start_time;
-          event := ROW_DATA.event;
-          lwtid := ROW_DATA.lwtid;
-          psessionid := ROW_DATA.psessionid;
-          tlevel := ROW_DATA.tlevel;
-          smpid := ROW_DATA.smpid;
-          userid := ROW_DATA.userid;
-          application_name := ROW_DATA.application_name;
-          client_addr := ROW_DATA.client_addr;
-          client_hostname := ROW_DATA.client_hostname;
-          client_port := ROW_DATA.client_port;
-          query_id := ROW_DATA.query_id;
-          unique_query_id := ROW_DATA.unique_query_id;
-          user_id := ROW_DATA.user_id;
-          cn_id := ROW_DATA.cn_id;
-          unique_query := ROW_DATA.unique_query;
-      RETURN NEXT;
-    END LOOP;
-  END LOOP;
-  RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE VIEW DBE_PERF.global_pg_asp AS
-  SELECT * FROM DBE_PERF.get_global_pg_asp();
 
 CREATE OR REPLACE VIEW DBE_PERF.wait_event_info AS
   SELECT * FROM get_wait_event_info();
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_datanode_active_session
-(  in datanode text,
-   OUT node_name text,
-   OUT sampleid bigint,
-   OUT sample_time timestamp without time zone,
-   OUT need_flush_sample boolean,
-   OUT databaseid oid,
-   OUT thread_id bigint,
-   OUT sessionid bigint,
-   OUT start_time timestamp without time zone,
-   OUT event text,
-   OUT lwtid integer,
-   OUT psessionid bigint,
-   OUT tlevel integer,
-   OUT smpid integer,
-   OUT userid oid,
-   OUT application_name text,
-   OUT client_addr inet,
-   OUT client_hostname text,
-   OUT client_port integer,
-   OUT query_id bigint,
-   OUT unique_query_id bigint,
-   OUT user_id oid,
-   OUT cn_id integer,
-   OUT unique_query text)
-RETURNS SETOF record
-AS $$
-DECLARE
-  row_data DBE_PERF.local_active_session%rowtype;
-  cn_name record;
-  query_text record;
-  QUERY_STR text;
-  query_cn text;
-  query_str_cn_name text;
-BEGIN
-	--Get all the node names
-	QUERY_STR := 'EXECUTE DIRECT ON (' || $1 || ') ''SELECT * FROM DBE_PERF.local_active_session''';
-	FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-		sampleid := ROW_DATA.sampleid;
-		sample_time := ROW_DATA.sample_time;
-		need_flush_sample := ROW_DATA.need_flush_sample;
-		databaseid := ROW_DATA.databaseid;
-		thread_id := ROW_DATA.thread_id;
-		sessionid := ROW_DATA.sessionid;
-		start_time := ROW_DATA.start_time;
-		event := ROW_DATA.event;
-		lwtid := ROW_DATA.lwtid;
-		psessionid := ROW_DATA.psessionid;
-		tlevel := ROW_DATA.tlevel;
-		smpid := ROW_DATA.smpid;
-		userid := ROW_DATA.userid;
-		application_name := ROW_DATA.application_name;
-		client_addr := ROW_DATA.client_addr;
-		client_hostname := ROW_DATA.client_hostname;
-		client_port := ROW_DATA.client_port;
-		query_id := ROW_DATA.query_id;
-		unique_query_id := ROW_DATA.unique_query_id;
-		user_id := ROW_DATA.user_id;
-		cn_id := ROW_DATA.cn_id;
-		IF ROW_DATA.cn_id IS NULL THEN
-			  unique_query := ROW_DATA.unique_query;
-		ELSE
-			query_str_cn_name := 'SELECT node_name FROM pgxc_node WHERE node_id='||ROW_DATA.cn_id||' AND nodeis_active = true';
-			FOR cn_name IN EXECUTE(query_str_cn_name) LOOP
-				query_cn := 'EXECUTE DIRECT ON (' || cn_name.node_name || ') ''SELECT unique_query FROM DBE_PERF.local_active_session where unique_query_id = '|| ROW_DATA.unique_query_id||' limit 1''';
-				FOR query_text IN EXECUTE(query_cn) LOOP
-					  unique_query := query_text.unique_query;
-				END LOOP;
-			END LOOP;
-		END IF;
-		RETURN NEXT;
-	END LOOP;
-	RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE FUNCTION DBE_PERF.get_datanode_active_session_hist
-(  in datanode text,
-   OUT node_name text,
-   OUT sampleid bigint,
-   OUT sample_time timestamp without time zone,
-   OUT need_flush_sample boolean,
-   OUT databaseid oid,
-   OUT thread_id bigint,
-   OUT sessionid bigint,
-   OUT start_time timestamp without time zone,
-   OUT event text,
-   OUT lwtid integer,
-   OUT psessionid bigint,
-   OUT tlevel integer,
-   OUT smpid integer,
-   OUT userid oid,
-   OUT application_name text,
-   OUT client_addr inet,
-   OUT client_hostname text,
-   OUT client_port integer,
-   OUT query_id bigint,
-   OUT unique_query_id bigint,
-   OUT user_id oid,
-   OUT cn_id integer,
-   OUT unique_query text)
-RETURNS SETOF record
-AS $$
-DECLARE
-	ROW_DATA pg_catalog.pg_asp%ROWTYPE;
-	cn_name record;
-	query_text record;
-	QUERY_STR text;
-	query_cn text;
-	query_str_cn_name text;
-BEGIN
-	--Get all the node names
-	QUERY_STR := 'EXECUTE DIRECT ON (' || $1 || ') ''SELECT * FROM pg_catalog.pg_asp''';
-	FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-		sampleid := ROW_DATA.sampleid;
-		sample_time := ROW_DATA.sample_time;
-		need_flush_sample := ROW_DATA.need_flush_sample;
-		databaseid := ROW_DATA.databaseid;
-		thread_id := ROW_DATA.thread_id;
-		sessionid := ROW_DATA.sessionid;
-		start_time := ROW_DATA.start_time;
-		event := ROW_DATA.event;
-		lwtid := ROW_DATA.lwtid;
-		psessionid := ROW_DATA.psessionid;
-		tlevel := ROW_DATA.tlevel;
-		smpid := ROW_DATA.smpid;
-		userid := ROW_DATA.userid;
-		application_name := ROW_DATA.application_name;
-		client_addr := ROW_DATA.client_addr;
-		client_hostname := ROW_DATA.client_hostname;
-		client_port := ROW_DATA.client_port;
-		query_id := ROW_DATA.query_id;
-		unique_query_id := ROW_DATA.unique_query_id;
-		user_id := ROW_DATA.user_id;
-		cn_id := ROW_DATA.cn_id;
-		IF ROW_DATA.cn_id IS NULL THEN
-			  unique_query := ROW_DATA.unique_query;
-		ELSE
-			query_str_cn_name := 'SELECT node_name FROM pgxc_node WHERE node_id='||ROW_DATA.cn_id||' AND nodeis_active = true';
-			FOR cn_name IN EXECUTE(query_str_cn_name) LOOP
-				query_cn := 'EXECUTE DIRECT ON (' || cn_name.node_name || ') ''SELECT unique_query FROM pg_catalog.pg_asp where unique_query_id = '|| ROW_DATA.unique_query_id||' limit 1''';
-				FOR query_text IN EXECUTE(query_cn) LOOP
-					  unique_query := query_text.unique_query;
-				END LOOP;
-			END LOOP;
-		END IF;
-		RETURN NEXT;
-	END LOOP;
-	RETURN;
-END; $$
-LANGUAGE 'plpgsql';
 
 grant select on all tables in schema DBE_PERF to public;
 
@@ -5973,49 +5274,6 @@ CREATE EXTENSION security_plugin;
 
 DROP FUNCTION IF EXISTS pg_catalog.gs_stat_activity_timeout() cascade;
 DROP FUNCTION IF EXISTS pg_catalog.global_stat_activity_timeout() cascade;
-
-DO $DO$
-DECLARE
-  ans boolean;
-BEGIN
-  select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-  if ans = true then
-    SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4520;
-    CREATE OR REPLACE FUNCTION dbe_perf.gs_stat_activity_timeout(IN timeout_threshold int4, OUT datid oid, OUT pid INT8, OUT sessionid INT8, OUT usesysid oid, OUT application_name text, OUT query text, OUT xact_start timestamptz, OUT query_start timestamptz, OUT query_id INT8)
-    RETURNS SETOF RECORD LANGUAGE INTERNAL as 'gs_stat_activity_timeout';
-
-    SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 0;
-    CREATE OR REPLACE FUNCTION dbe_perf.global_stat_activity_timeout(in execute_time int4, out nodename text, out datid oid, out pid int8, out sessionid int8, out usesysid oid, out application_name text, out query text, out xact_start timestamptz, out query_start timestamptz, out query_id int8)
-    RETURNS setof record
-    AS $$
-    DECLARE
-        query_str text;
-        node_data record;
-        row_data record;
-    BEGIN
-        --Get the node names of all CNs
-        query_str := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-        FOR node_data IN EXECUTE(query_str) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || node_data.node_name || ') ''SELECT * FROM dbe_perf.gs_stat_activity_timeout(' || execute_time || ')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                nodename := node_data.node_name;
-                datid := row_data.datid;
-                pid := row_data.pid;
-                sessionid := row_data.sessionid;
-                usesysid := row_data.usesysid;
-                application_name := row_data.application_name;
-                query := row_data.query;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                query_id := row_data.query_id;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-    LANGUAGE 'plpgsql' NOT FENCED;
-  end if;
-END$DO$;
 
 DROP FUNCTION IF EXISTS remove_create_partition_policy(name, name);
 DROP FUNCTION IF EXISTS remove_drop_partition_policy(name, name);
@@ -6287,40 +5545,6 @@ END; $$
 LANGUAGE plpgsql NOT FENCED;
 
 --get audit log from all CNs
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_query_audit(IN starttime TIMESTAMPTZ, IN endtime TIMESTAMPTZ, OUT "time" TIMESTAMPTZ, OUT "type" text, OUT "result" text, OUT userid text, OUT username text, OUT database text, OUT client_conninfo text, OUT "object_name" text, OUT detail_info text, OUT node_name text, OUT thread_id text, OUT local_port text, OUT remote_port text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_name record;
-    row_data record;
-    query_str text;
-    query_str_nodes text;
-    BEGIN
-        --Get the node names of all CNs
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_query_audit(''''' || starttime || ''''',''''' || endtime || ''''')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                "time"   := row_data."time";
-                "type"   := row_data."type";
-                "result" := row_data."result";
-                userid := row_data.userid;
-                username := row_data.username;
-                database := row_data.database;
-                client_conninfo := row_data.client_conninfo;
-                "object_name"   := row_data."object_name";
-                detail_info := row_data.detail_info;
-                node_name   := row_data.node_name;
-                thread_id   := row_data.thread_id;
-                local_port  := row_data.local_port;
-                remote_port := row_data.remote_port;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 DO $DO$
 DECLARE
   ans boolean;
@@ -6334,37 +5558,6 @@ BEGIN
     SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4520;
     CREATE OR REPLACE FUNCTION dbe_perf.gs_stat_activity_timeout(IN timeout_threshold int4, OUT database name, OUT pid INT8, OUT sessionid INT8, OUT usesysid oid, OUT application_name text, OUT query text, OUT xact_start timestamptz, OUT query_start timestamptz, OUT query_id INT8)
     RETURNS SETOF RECORD LANGUAGE INTERNAL as 'gs_stat_activity_timeout';
-
-    SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 0;
-    CREATE OR REPLACE FUNCTION dbe_perf.global_stat_activity_timeout(in execute_time int4, out nodename text, out database name, out pid int8, out sessionid int8, out usesysid oid, out application_name text, out query text, out xact_start timestamptz, out query_start timestamptz, out query_id int8)
-    RETURNS setof record
-    AS $$
-    DECLARE
-        query_str text;
-        node_data record;
-        row_data record;
-    BEGIN
-        --Get the node names of all CNs
-        query_str := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-        FOR node_data IN EXECUTE(query_str) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || node_data.node_name || ') ''SELECT * FROM dbe_perf.gs_stat_activity_timeout(' || execute_time || ')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                nodename := node_data.node_name;
-                database := row_data.database;
-                pid := row_data.pid;
-                sessionid := row_data.sessionid;
-                usesysid := row_data.usesysid;
-                application_name := row_data.application_name;
-                query := row_data.query;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                query_id := row_data.query_id;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-    LANGUAGE 'plpgsql' NOT FENCED;
   end if;
 END$DO$;
 
@@ -6380,8 +5573,6 @@ CREATE OR REPLACE FUNCTION pkg_service.job_submit(
 IMMUTABLE NOT SHIPPABLE
 as 'job_submit';
 
-    DROP VIEW IF EXISTS DBE_PERF.global_prepare_statement_status CASCADE;
-    DROP FUNCTION IF EXISTS DBE_PERF.global_prepare_statement_status() CASCADE;
     DROP VIEW IF EXISTS DBE_PERF.local_prepare_statement_status CASCADE;
     DROP FUNCTION IF EXISTS pg_catalog.prepare_statement_status() CASCADE;
     set local inplace_upgrade_next_system_object_oids = IUO_PROC,3959;
@@ -6389,28 +5580,6 @@ as 'job_submit';
 
     CREATE VIEW DBE_PERF.local_prepare_statement_status AS
         SELECT * FROM prepare_statement_status();
-    CREATE OR REPLACE FUNCTION DBE_PERF.global_prepare_statement_status()
-    RETURNS SETOF DBE_PERF.local_prepare_statement_status
-    AS $$
-    DECLARE
-      ROW_DATA DBE_PERF.local_prepare_statement_status%ROWTYPE;
-      ROW_NAME RECORD;
-      QUERY_STR TEXT;
-      QUERY_STR_NODES TEXT;
-    BEGIN
-      QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-      FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-        QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_prepare_statement_status''';
-        FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          RETURN NEXT ROW_DATA;
-        END LOOP;
-      END LOOP;
-      RETURN;
-    END; $$
-    LANGUAGE 'plpgsql';
-
-    CREATE VIEW DBE_PERF.global_prepare_statement_status AS
-      SELECT * FROM DBE_PERF.global_prepare_statement_status();
 
     DECLARE
     	    user_name text;
@@ -6421,181 +5590,10 @@ as 'job_submit';
 	query_str := 'GRANT ALL ON TABLE DBE_PERF.local_prepare_statement_status TO ' || quote_ident(user_name) || ';';
 	EXECUTE IMMEDIATE query_str;
 
-	query_str := 'GRANT ALL ON TABLE DBE_PERF.global_prepare_statement_status TO ' || quote_ident(user_name) || ';';
-	EXECUTE IMMEDIATE query_str;
-
     END;
     /
 
     GRANT SELECT ON TABLE DBE_PERF.local_prepare_statement_status TO PUBLIC;
-    GRANT SELECT ON TABLE DBE_PERF.global_prepare_statement_status TO PUBLIC;
-
-DO $DO$
-DECLARE
-ans boolean;
-BEGIN
-  select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-  if ans = true then
-    DROP FUNCTION IF EXISTS DBE_PERF.get_global_pg_asp
-     (in start_ts timestamp without time zone,
-      in end_ts timestamp without time zone,
-      OUT node_name text,
-      OUT sampleid bigint,
-      OUT sample_time timestamp without time zone,
-      OUT need_flush_sample boolean,
-      OUT databaseid oid,
-      OUT thread_id bigint,
-      OUT sessionid bigint,
-      OUT start_time timestamp without time zone,
-      OUT event text,
-      OUT lwtid integer,
-      OUT psessionid bigint,
-      OUT tlevel integer,
-      OUT smpid integer,
-      OUT userid oid,
-      OUT application_name text,
-      OUT client_addr inet,
-      OUT client_hostname text,
-      OUT client_port integer,
-      OUT query_id bigint,
-      OUT unique_query_id bigint,
-      OUT user_id oid,
-      OUT cn_id integer,
-      OUT unique_query text) cascade;
-    DROP FUNCTION IF EXISTS DBE_PERF.get_datanode_active_session_hist
-     (in datanode text,
-      OUT node_name text,
-      OUT sampleid bigint,
-      OUT sample_time timestamp without time zone,
-      OUT need_flush_sample boolean,
-      OUT databaseid oid,
-      OUT thread_id bigint,
-      OUT sessionid bigint,
-      OUT start_time timestamp without time zone,
-      OUT event text,
-      OUT lwtid integer,
-      OUT psessionid bigint,
-      OUT tlevel integer,
-      OUT smpid integer,
-      OUT userid oid,
-      OUT application_name text,
-      OUT client_addr inet,
-      OUT client_hostname text,
-      OUT client_port integer,
-      OUT query_id bigint,
-      OUT unique_query_id bigint,
-      OUT user_id oid,
-      OUT cn_id integer,
-      OUT unique_query text) cascade;
-    DROP FUNCTION IF EXISTS DBE_PERF.get_datanode_active_session_hist
-     (in datanode text,
-      in start_ts timestamp without time zone,
-      in end_ts timestamp without time zone,
-      OUT node_name text,
-      OUT sampleid bigint,
-      OUT sample_time timestamp without time zone,
-      OUT need_flush_sample boolean,
-      OUT databaseid oid,
-      OUT thread_id bigint,
-      OUT sessionid bigint,
-      OUT start_time timestamp without time zone,
-      OUT event text,
-      OUT lwtid integer,
-      OUT psessionid bigint,
-      OUT tlevel integer,
-      OUT smpid integer,
-      OUT userid oid,
-      OUT application_name text,
-      OUT client_addr inet,
-      OUT client_hostname text,
-      OUT client_port integer,
-      OUT query_id bigint,
-      OUT unique_query_id bigint,
-      OUT user_id oid,
-      OUT cn_id integer,
-      OUT unique_query text) cascade;
-    CREATE OR REPLACE FUNCTION DBE_PERF.get_datanode_active_session_hist
-      (in datanode text,
-       in start_ts timestamp without time zone,
-       in end_ts timestamp without time zone,
-       OUT node_name text,
-       OUT sampleid bigint,
-       OUT sample_time timestamp without time zone,
-       OUT need_flush_sample boolean,
-       OUT databaseid oid,
-       OUT thread_id bigint,
-       OUT sessionid bigint,
-       OUT start_time timestamp without time zone,
-       OUT event text,
-       OUT lwtid integer,
-       OUT psessionid bigint,
-       OUT tlevel integer,
-       OUT smpid integer,
-       OUT userid oid,
-       OUT application_name text,
-       OUT client_addr inet,
-       OUT client_hostname text,
-       OUT client_port integer,
-       OUT query_id bigint,
-       OUT unique_query_id bigint,
-       OUT user_id oid,
-       OUT cn_id integer,
-       OUT unique_query text)
-    RETURNS SETOF record
-    AS $$
-    DECLARE
-        ROW_DATA pg_catalog.gs_asp%ROWTYPE;
-        cn_name record;
-        query_text record;
-        QUERY_STR text;
-        query_cn text;
-        query_str_cn_name text;
-        node_str text;
-    BEGIN
-        --Get all the node names
-        node_str := 'SELECT * FROM pg_catalog.gs_asp where sample_time > '''''||$2||''''' and sample_time < '''''||$3||'''';
-        QUERY_STR := 'EXECUTE DIRECT ON (' || $1 || ') '''|| node_str ||''''';';
-        FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          node_name := datanode;
-          sampleid := ROW_DATA.sampleid;
-          sample_time := ROW_DATA.sample_time;
-          need_flush_sample := ROW_DATA.need_flush_sample;
-          databaseid := ROW_DATA.databaseid;
-          thread_id := ROW_DATA.thread_id;
-          sessionid := ROW_DATA.sessionid;
-          start_time := ROW_DATA.start_time;
-          event := ROW_DATA.event;
-          lwtid := ROW_DATA.lwtid;
-          psessionid := ROW_DATA.psessionid;
-          tlevel := ROW_DATA.tlevel;
-          smpid := ROW_DATA.smpid;
-          userid := ROW_DATA.userid;
-          application_name := ROW_DATA.application_name;
-          client_addr := ROW_DATA.client_addr;
-          client_hostname := ROW_DATA.client_hostname;
-          client_port := ROW_DATA.client_port;
-          query_id := ROW_DATA.query_id;
-          unique_query_id := ROW_DATA.unique_query_id;
-          user_id := ROW_DATA.user_id;
-          cn_id := ROW_DATA.cn_id;
-          IF ROW_DATA.cn_id IS NULL THEN
-            unique_query := ROW_DATA.unique_query;
-          ELSE
-            query_str_cn_name := 'SELECT node_name FROM pgxc_node WHERE node_id='||ROW_DATA.cn_id||' AND nodeis_active = true';
-            FOR cn_name IN EXECUTE(query_str_cn_name) LOOP
-                    query_cn := 'EXECUTE DIRECT ON (' || cn_name.node_name || ') ''SELECT unique_query FROM pg_catalog.gs_asp where unique_query_id = '|| ROW_DATA.unique_query_id||' limit 1''';
-                    FOR query_text IN EXECUTE(query_cn) LOOP
-                              unique_query := query_text.unique_query;
-                    END LOOP;
-            END LOOP;
-          END IF;
-          RETURN NEXT;
-        END LOOP;
-        RETURN;
-    END; $$
-    LANGUAGE 'plpgsql';
-   end if;
-END$DO$;
 
 drop function if exists pg_catalog.login_audit_messages(boolean);
 drop function if exists pg_catalog.login_audit_messages_pid(boolean);
@@ -7171,113 +6169,6 @@ CREATE OR REPLACE VIEW pg_catalog.DV_SESSIONS AS
         LEFT JOIN pg_authid ad ON(sa.usesysid = ad.oid)
         WHERE sa.application_name <> 'JobScheduler';
 
-CREATE OR REPLACE FUNCTION pg_catalog.pg_nodes_memmon(OUT InnerNName text, OUT InnerUsedMem int8, OUT InnerTopCtxt int8, OUT NName text, OUT UsedMem text, OUT SharedBufferCache text,  OUT TopContext text)
-RETURNS setof record
-AS $$
-DECLARE
-  enable_threadpool bool;
-  row_data record;
-  row_data1 record;
-  row_name record;
-  query_str text;
-  query_str1 text;
-  shared_bcache text;
-  query_str_nodes text;
-  itr integer;
-  BEGIN
-    --Get all the node names
-    query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
-
-    FOR row_name IN EXECUTE(query_str_nodes) LOOP
-      query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select ''''N_name'''' as nname1, sum(usedsize) as usedmem1 from pv_session_memory_detail where 1=1 ''';
-      query_str1 := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select contextname as contextname1, sum(usedsize) as usedsize1 from pv_session_memory_detail group by contextname order by usedsize1 desc limit 3 ''';
-
-      FOR row_data IN EXECUTE(query_str) LOOP
-        row_data.nname1 := CASE
-          WHEN pg_catalog.LENGTH(row_name.node_name)<20
-          THEN row_name.node_name || right('                    ',20-pg_catalog.length(row_name.node_name))
-          ELSE pg_catalog.SUBSTR(row_name.node_name,1,20)
-          END;
-
-        InnerNName := row_data.nname1;
-        NName := row_data.nname1;
-        InnerUsedMem := row_data.usedmem1;
-        UsedMem := pg_size_pretty(row_data.usedmem1);
-
-        EXECUTE 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT pg_size_pretty(count(*) * 8192) || ''''(Utilization: '''' || pg_size_pretty((SELECT setting FROM pg_settings WHERE name =''''shared_buffers'''') * 8192) || ''''/'''' || round(count(*)/(SELECT setting FROM pg_settings WHERE name =''''shared_buffers''''),2)*100 || ''''%)'''' FROM pg_buffercache_pages() WHERE relfilenode IS NOT NULL '''
-        INTO shared_bcache;
-
-        SharedBufferCache := shared_bcache;
-
-        itr := 1;
-        FOR row_data1 IN EXECUTE(query_str1) LOOP
-          --We should have 3 return rows
-          TopContext := row_data1.contextname1 || '(' || pg_size_pretty(row_data1.usedsize1) || ')';
-          InnerTopCtxt := row_data1.usedsize1;
-          IF itr = 1 THEN
-            RETURN next;
-          ELSE
-            NName := '';
-            UsedMem := '';
-            SharedBufferCache := '';
-            RETURN next;
-          END IF;
-          itr := itr + 1;
-        END LOOP;
-      END LOOP;
-    END LOOP;
-    RETURN;
-  END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.distributed_count(IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    total_num bigint;
-    flag boolean;
-    special text := '[;|-]';
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN _table_name, IN special;
-        IF flag = true THEN
-            raise WARNING 'illegal character entered for function';
-            RETURN;
-        END IF;
-        EXECUTE 'SELECT count(1) FROM ' || _table_name
-            INTO total_num;
-
-                --Get the node names
-                query_str_nodes := 'SELECT node_name FROM pgxc_node, pgxc_class where node_type IN (''C'', ''D'') AND is_oid_in_group_members(oid, nodeoids) AND
-                        pcrelid=''' || _table_name || '''::regclass::oid';
-
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select ''''DN_name'''' as dnname1, count(1) as count1 from ' || $1 || '''';
-
-            FOR row_data IN EXECUTE(query_str) LOOP
-                row_data.dnname1 := CASE
-                    WHEN pg_catalog.LENGTH(row_name.node_name)<20
-                    THEN row_name.node_name || right('                    ',20-pg_catalog.length(row_name.node_name))
-                    ELSE pg_catalog.SUBSTR(row_name.node_name,1,20)
-                    END;
-                DNName := row_data.dnname1;
-                Num := row_data.count1;
-                IF total_num = 0 THEN
-                Ratio := 0.000 ||'%';
-                ELSE
-                Ratio := ROUND(row_data.count1/total_num*100,3) || '%';
-                END IF;
-                RETURN next;
-            END LOOP;
-        END LOOP;
-
-        RETURN;
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
 CREATE OR REPLACE FUNCTION pg_catalog.login_audit_messages(in flag boolean) returns table (username text, database text, logintime timestamp with time zone, mytype text, result text, client_conninfo text) AUTHID DEFINER
 AS $$
 DECLARE
@@ -7447,30 +6338,6 @@ LANGUAGE plpgsql NOT FENCED;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_thread_wait_status AS
     SELECT * FROM pg_catalog.pg_stat_get_status(NULL);
-
-create or replace function pg_catalog.pgxc_cgroup_map_ng_conf(IN ngname text)
-returns bool
-AS $$
-declare
-    host_info record;
-    query_str text;
-    query_string text;
-    flag boolean;
-    special text := '[^A-z0-9_]';
-begin
-    EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN ngname, IN special;
-    IF flag = true THEN
-        return false;
-    ELSE
-        query_str = 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
-        for host_info in execute(query_str) loop
-                query_string := 'execute direct on (' || host_info.node_name || ') ''SELECT * from pg_catalog.gs_cgroup_map_ng_conf(''''' || ngname || ''''')''';
-                execute query_string;
-        end loop;
-    END IF;
-    return true;
-end;
-$$language plpgsql NOT FENCED;
 
 create or replace function pg_catalog.table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
@@ -7669,33 +6536,6 @@ DECLARE
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_delta_info(IN rel TEXT, OUT node_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
-RETURNS setof record
-AS $$
-DECLARE
-    query_str_nodes text;
-    query_str text;
-    query_part_str text;
-    rel_info record;
-    row_name record;
-    row_data record;
-    BEGIN
-        EXECUTE ('select c.relname,n.nspname from pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace) where C.oid = (select '''|| rel ||'''::regclass::oid)') into rel_info;
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''D''';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_catalog.pg_get_delta_info('''''||rel_info.relname||''''','''''||rel_info.nspname||''''')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_name.node_name;
-                live_tuple := row_data.live_tuple;
-                data_size := row_data.data_size;
-                blockNum := row_data.blockNum;
-                part_name := row_data.part_name;
-                return next;
-            END LOOP;
-        END LOOP;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 CREATE OR REPLACE FUNCTION pg_catalog.get_delta_info(IN rel TEXT, OUT part_name TEXT, OUT total_live_tuple INT8, OUT total_data_size INT8, OUT max_blockNum INT8)
 RETURNS setof record
 AS $$
@@ -7712,60 +6552,6 @@ DECLARE
             return next;
         END LOOP;
     END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_query_audit(IN starttime TIMESTAMPTZ, IN endtime TIMESTAMPTZ, OUT "time" TIMESTAMPTZ, OUT "type" text, OUT "result" text, OUT userid text, OUT username text, OUT database text, OUT client_conninfo text, OUT "object_name" text, OUT detail_info text, OUT node_name text, OUT thread_id text, OUT local_port text, OUT remote_port text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_name record;
-    row_data record;
-    query_str text;
-    query_str_nodes text;
-    BEGIN
-        --Get the node names of all CNs
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_catalog.pg_query_audit(''''' || starttime || ''''',''''' || endtime || ''''')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                "time"   := row_data."time";
-                "type"   := row_data."type";
-                "result" := row_data."result";
-                userid := row_data.userid;
-                username := row_data.username;
-                database := row_data.database;
-                client_conninfo := row_data.client_conninfo;
-                "object_name"   := row_data."object_name";
-                detail_info := row_data.detail_info;
-                node_name   := row_data.node_name;
-                thread_id   := row_data.thread_id;
-                local_port  := row_data.local_port;
-                remote_port := row_data.remote_port;
-                return next;
-            END LOOP;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.is_oid_in_group_members(IN node_oid Oid, IN group_members oidvector_extend)
-RETURNS BOOLEAN AS $$
-DECLARE
-query_str text;
-match_count int;
-node_list text;
-BEGIN
-    match_count := 0;
-    select pg_catalog.array_to_string($2, ',') into node_list;
-
-    query_str := 'SELECT count(1) FROM pgxc_node n WHERE n.oid = ' || node_oid  || ' AND n.node_name IN (SELECT n1.node_name FROM pgxc_node n1 WHERE n1.oid in (' || node_list || '))';
-    EXECUTE query_str into match_count;
-
-    IF match_count = 1 THEN
-        RETURN true;
-    END IF;
-    RETURN false;
-END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.lock_cluster_ddl()
@@ -7872,54 +6658,6 @@ DECLARE
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pg_catalog.distributed_count(IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    total_num bigint;
-    flag boolean;
-    special text := '[;|-]';
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN $1, IN special;
-        IF flag = true THEN
-            raise WARNING 'illegal character entered for function';
-            RETURN;
-        END IF;
-        EXECUTE 'SELECT count(1) FROM ' || $1
-            INTO total_num;
-
-		--Get the node names
-		query_str_nodes := 'SELECT node_name FROM pgxc_node, pgxc_class where node_type IN (''C'', ''D'') AND is_oid_in_group_members(oid, nodeoids) AND
-			pcrelid=''' || $1 || '''::regclass::oid';
-
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select ''''DN_name'''' as dnname1, count(1) as count1 from ' || $1 || '''';
-
-            FOR row_data IN EXECUTE(query_str) LOOP
-                row_data.dnname1 := CASE
-                    WHEN LENGTH(row_name.node_name)<20
-                    THEN row_name.node_name || right('                    ',20-length(row_name.node_name))
-                    ELSE SUBSTR(row_name.node_name,1,20)
-                    END;
-                DNName := row_data.dnname1;
-                Num := row_data.count1;
-                IF total_num = 0 THEN
-                Ratio := 0.000 ||'%';
-                ELSE
-                Ratio := ROUND(row_data.count1/total_num*100,3) || '%';
-                END IF;
-                RETURN next;
-            END LOOP;
-        END LOOP;
-
-        RETURN;
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
 CREATE OR REPLACE FUNCTION pg_catalog.get_delta_info(IN rel TEXT, OUT part_name TEXT, OUT total_live_tuple INT8, OUT total_data_size INT8, OUT max_blockNum INT8)
 RETURNS setof record
 AS $$
@@ -7937,31 +6675,6 @@ DECLARE
         END LOOP;
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.get_shard_oids_byname(IN node_name varchar)
-RETURNS Oid[] AS $$
-declare
-    node_oid Oid;
-    nodes Oid[];
-    nodenames_query text;
-    total_num bigint;
-    flag boolean;
-    special text := '[;|-]';
-BEGIN
-    EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN $1, IN special;
-
-    IF flag = true THEN
-        raise WARNING 'illegal character entered for function';
-        return '{0}';
-    ELSE
-        nodenames_query := 'SELECT oid FROM pgxc_node WHERE node_name = $1 ORDER BY oid';
-        FOR node_oid IN EXECUTE nodenames_query USING node_name LOOP
-            nodes := array_append(nodes, node_oid);
-        END LOOP;
-        RETURN nodes;
-    END IF;
-END; $$
-LANGUAGE plpgsql NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.get_large_table_name(relfile_node text, threshold_size_gb int8)
 RETURNS text
@@ -8031,99 +6744,6 @@ DECLARE
         end loop;
     END;
 $$LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pv_session_memory_detail_tp(OUT sessid TEXT, OUT sesstype TEXT, OUT contextname TEXT, OUT level INT2, OUT parent TEXT, OUT totalsize INT8, OUT freesize INT8, OUT usedsize INT8)
-RETURNS setof record
-AS $$
-DECLARE
-  enable_threadpool bool;
-  row_data record;
-  query_str text;
-BEGIN
-  show enable_thread_pool into enable_threadpool;
-
-  IF enable_threadpool THEN
-    query_str := 'with SM AS
-                   (SELECT
-                      S.sessid AS sessid,
-                      T.thrdtype AS sesstype,
-                      S.contextname AS contextname,
-                      S.level AS level,
-                      S.parent AS parent,
-                      S.totalsize AS totalsize,
-                      S.freesize AS freesize,
-                      S.usedsize AS usedsize
-                    FROM
-                      pv_session_memory_context S
-                      LEFT JOIN
-                     (SELECT DISTINCT thrdtype, tid
-                      FROM pv_thread_memory_context) T
-                      on S.threadid = T.tid
-                   ),
-                   TM AS
-                   (SELECT
-                      S.sessid AS Ssessid,
-                      T.thrdtype AS sesstype,
-                      T.threadid AS Tsessid,
-                      T.contextname AS contextname,
-                      T.level AS level,
-                      T.parent AS parent,
-                      T.totalsize AS totalsize,
-                      T.freesize AS freesize,
-                      T.usedsize AS usedsize
-                    FROM
-                      pv_thread_memory_context T
-                      LEFT JOIN
-                      (SELECT DISTINCT sessid, threadid
-                       FROM pv_session_memory_context) S
-                      ON T.tid = S.threadid
-                   )
-                   SELECT * from SM
-                   UNION ALL
-                   SELECT
-                     Ssessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
-                   FROM TM WHERE Ssessid IS NOT NULL
-                   UNION ALL
-                   SELECT
-                     Tsessid AS sessid, sesstype, contextname, level, parent, totalsize, freesize, usedsize
-                   FROM TM WHERE Ssessid IS NULL;';
-    FOR row_data IN EXECUTE(query_str) LOOP
-      sessid = row_data.sessid;
-      sesstype = row_data.sesstype;
-      contextname = row_data.contextname;
-      level = row_data.level;
-      parent = row_data.parent;
-      totalsize = row_data.totalsize;
-      freesize = row_data.freesize;
-      usedsize = row_data.usedsize;
-      return next;
-    END LOOP;
-  ELSE
-    query_str := 'SELECT
-                    T.threadid AS sessid,
-                    T.thrdtype AS sesstype,
-                    T.contextname AS contextname,
-                    T.level AS level,
-                    T.parent AS parent,
-                    T.totalsize AS totalsize,
-                    T.freesize AS freesize,
-                    T.usedsize AS usedsize
-                  FROM pg_catalog.pv_thread_memory_detail() T;';
-    FOR row_data IN EXECUTE(query_str) LOOP
-      sessid = row_data.sessid;
-      sesstype = row_data.sesstype;
-      contextname = row_data.contextname;
-      level = row_data.level;
-      parent = row_data.parent;
-      totalsize = row_data.totalsize;
-      freesize = row_data.freesize;
-      usedsize = row_data.usedsize;
-      return next;
-    END LOOP;
-  END IF;
-  RETURN;
-END; $$
-LANGUAGE plpgsql NOT FENCED;
 
 CREATE OR REPLACE VIEW pg_catalog.gs_session_memory_statistics AS
 SELECT
@@ -8209,12 +6829,6 @@ SELECT
 FROM pg_stat_activity_ng AS S, pg_catalog.pg_stat_get_wlm_realtime_session_info(NULL) AS T
 WHERE S.sessionid = T.threadid;
 
-set local inplace_upgrade_next_system_object_oids = IUO_PROC, 2099;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_terminate_session
- (IN threadid BIGINT,
-  IN sessionid BIGINT)
-RETURNS bool LANGUAGE INTERNAL NOT FENCED as 'pg_terminate_session';
-
 CREATE OR REPLACE FUNCTION pg_catalog.pg_get_delta_info(IN rel TEXT, IN schema_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
 RETURNS setof record
 AS $$
@@ -8255,33 +6869,6 @@ DECLARE
                 return next;
             END LOOP;
         END IF;
-        END LOOP;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_delta_info(IN rel TEXT, OUT node_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
-RETURNS setof record
-AS $$
-DECLARE
-    query_str_nodes text;
-    query_str text;
-    query_part_str text;
-    rel_info record;
-    row_name record;
-    row_data record;
-    BEGIN
-        EXECUTE format('select c.relname,n.nspname from pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace) where C.oid = (select %L::regclass::oid)', rel) into rel_info;
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''D''';
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_catalog.pg_get_delta_info('''''||rel_info.relname||''''','''''||rel_info.nspname||''''')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_name.node_name;
-                live_tuple := row_data.live_tuple;
-                data_size := row_data.data_size;
-                blockNum := row_data.blockNum;
-                part_name := row_data.part_name;
-                return next;
-            END LOOP;
         END LOOP;
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
@@ -8433,153 +7020,6 @@ BEGIN
     GRANT SELECT ON TABLE dbe_perf.wlm_user_resource_config TO PUBLIC;
   end if;
 END $DO$;
-
-CREATE or REPLACE FUNCTION pg_catalog.gs_get_table_distribution( IN table_name TEXT, IN schema_name TEXT)
-RETURNS TEXT
-AS
-$$
-DECLARE
-nodename  text;
-query_str text;
-row_data record;
-row_data1 record;
-nodelist  text;
-flag boolean;
-special text := '[ ;|-]';
-BEGIN
-    EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN table_name, IN special;
-    IF flag = true THEN
-        raise WARNING 'Illegal character entered for function';
-        return nodelist;
-    END IF;
-
-    EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN schema_name, IN special;
-    IF flag = true THEN
-        raise WARNING 'Illegal character entered for function';
-        return nodelist;
-    END IF;
-
-    query_str := 'SELECT oid,node_name FROM pgxc_node WHERE node_type=''D'' order by node_name';
-
-    FOR row_data IN EXECUTE(query_str) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_data.node_name || ') ''SELECT count(*) AS num  FROM pg_class c LEFT JOIN pg_namespace n  ON c.relnamespace = n.oid WHERE relname='''''||table_name||''''' AND n.nspname='''''||schema_name||''''' ''';
-        FOR row_data1 IN EXECUTE(query_str) LOOP
-            IF row_data1.num = 1 THEN
-                nodelist := nodelist || ' '|| row_data.oid;
-            END IF;
-        END LOOP;
-   END LOOP;
-
-   RETURN nodelist;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_current_instance_info(text, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-    row_data gs_wlm_instance_history%rowtype;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    query_str_temp text;
-    node_name text;
-    flag boolean;
-    special text := '[ ;|-]';
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT pg_catalog.regexp_like(:1,:2);' INTO flag USING IN $1, IN special;
-        IF flag = true THEN
-            RAISE WARNING 'Illegal character entered for function';
-            return;
-        END IF;
-
-        IF $2 is null THEN
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info()';
-        ELSE
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info() limit '||$2;
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='''||$1||'''';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-                query_str := 'EXECUTE DIRECT ON ('||node_name||') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_history_instance_info(text, TIMESTAMP, TIMESTAMP, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-    row_data gs_wlm_instance_history%rowtype;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    query_str_temp text;
-    node_name text;
-    flag boolean;
-    special text := '[ ;|-]';
-    BEGIN
-        EXECUTE IMMEDIATE 'SELECT pg_catalog.regexp_like(:1,:2);' INTO flag USING IN $1, IN special;
-        IF flag = true THEN
-            RAISE WARNING 'Illegal character entered for function';
-            return;
-        END IF;
-
-        IF $4 is null THEN
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'''''||$2||''''' and timestamp <'''''||$3||''''' ';
-        ELSE
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'''''||$2||''''' and timestamp <'''''||$3||''''' limit '||$4;
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='''||$1||'''';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-                query_str := 'EXECUTE DIRECT ON ('||node_name||') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
 
 DROP VIEW IF EXISTS pg_catalog.pg_stat_replication;
   CREATE VIEW pg_catalog.pg_stat_replication AS
@@ -9138,19 +7578,19 @@ BEGIN
     CREATE VIEW DBE_PERF.statement AS
       SELECT * FROM get_instr_unique_sql();
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statement()
-    RETURNS setof DBE_PERF.statement
+    CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statement()
+    RETURNS setof dbe_perf.statement
     AS $$
     DECLARE
-      row_data DBE_PERF.statement%rowtype;
+      row_data dbe_perf.statement%rowtype;
       row_name record;
       query_str text;
       query_str_nodes text;
       BEGIN
         --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
+        query_str_nodes := 'select * from dbe_perf.node_name';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
-          query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement''';
+          query_str := 'SELECT * FROM dbe_perf.statement';
             FOR row_data IN EXECUTE(query_str) LOOP
               return next row_data;
            END LOOP;
@@ -9195,62 +7635,6 @@ DROP FUNCTION IF EXISTS pg_catalog.pg_stat_get_pooler_status(OUT database_name t
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3955;
 CREATE FUNCTION pg_catalog.pg_stat_get_pooler_status(OUT database_name text, OUT user_name text, OUT tid int8, OUT pgoptions text, OUT node_oid int8, OUT in_use boolean, OUT session_params text, OUT fdsock int8, OUT remote_pid int8, OUT used_count int8) RETURNS SETOF record LANGUAGE INTERNAL STABLE ROWS 100 as 'pg_stat_get_pooler_status';
 
-DROP VIEW IF EXISTS pg_catalog.pg_pooler_status;
-CREATE VIEW pg_catalog.pg_pooler_status AS
-    SELECT
-            S.database_name AS database,
-            S.user_name AS user_name,
-            S.tid AS tid,
-            S.node_oid AS node_oid,
-            D.node_name AS node_name,
-            S.in_use AS in_use,
-            D.node_port AS node_port,
-            S.fdsock AS fdsock,
-            S.remote_pid AS remote_pid,
-            S.session_params AS session_params,
-            S.used_count AS used_count
-    FROM pgxc_node D, pg_stat_get_pooler_status() AS S
-    WHERE D.oid = S.node_oid;
-
-GRANT SELECT ON pg_catalog.pg_pooler_status TO public;
-
-
-DO $DO$
-DECLARE
-ans boolean;
-BEGIN
-    select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-    if ans = true then
-        DROP VIEW IF EXISTS DBE_PERF.pooler_status;
-        CREATE VIEW DBE_PERF.pooler_status AS
-            SELECT
-                S.database_name AS database,
-                S.user_name AS user_name,
-                S.tid AS tid,
-                S.node_oid AS node_oid,
-                D.node_name AS node_name,
-                S.in_use AS in_use,
-                D.node_port AS node_port,
-                S.fdsock AS fdsock,
-                S.remote_pid AS remote_pid,
-                S.session_params AS session_params,
-                S.used_count AS used_count
-            FROM pgxc_node D, pg_stat_get_pooler_status() AS S
-                WHERE D.oid = S.node_oid;
-
-        DECLARE
-            user_name text;
-            query_str text;
-        BEGIN
-            SELECT SESSION_USER INTO user_name;
-
-            query_str := 'GRANT ALL ON TABLE DBE_PERF.pooler_status TO ' || quote_ident(user_name) || ';';
-            EXECUTE IMMEDIATE query_str;
-        END;
-        GRANT SELECT ON TABLE DBE_PERF.pooler_status TO PUBLIC;
-    end if;
-END$DO$;
-
 DO $$
 DECLARE
 ans boolean;
@@ -9258,10 +7642,7 @@ BEGIN
     select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
     if ans = true then
         DROP FUNCTION IF EXISTS DBE_PERF.get_global_gs_asp() CASCADE;
-        DROP FUNCTION IF EXISTS DBE_PERF.get_datanode_active_session() CASCADE;
-        DROP FUNCTION IF EXISTS DBE_PERF.get_datanode_active_session_hist() CASCADE;
         DROP VIEW IF EXISTS DBE_PERF.global_active_session CASCADE;
-        DROP FUNCTION IF EXISTS DBE_PERF.get_global_active_session() CASCADE;
         DROP VIEW IF EXISTS DBE_PERF.local_active_session CASCADE;
         DROP VIEW IF EXISTS DBE_PERF.global_thread_wait_status CASCADE;
         DROP FUNCTION IF EXISTS DBE_PERF.get_global_thread_wait_status() CASCADE;
@@ -9398,19 +7779,19 @@ BEGIN
       CREATE OR REPLACE VIEW DBE_PERF.thread_wait_status AS
         SELECT * FROM pg_catalog.pg_stat_get_status(NULL);
 
-      CREATE OR REPLACE FUNCTION DBE_PERF.get_global_thread_wait_status()
-      RETURNS setof DBE_PERF.thread_wait_status
+      CREATE OR REPLACE FUNCTION dbe_perf.get_global_thread_wait_status()
+      RETURNS setof dbe_perf.thread_wait_status
       AS $$
       DECLARE
-        row_data DBE_PERF.thread_wait_status%rowtype;
+        row_data dbe_perf.thread_wait_status%rowtype;
         row_name record;
         query_str text;
         query_str_nodes text;
         BEGIN
           --Get all cn dn node names
-          query_str_nodes := 'SELECT node_name FROM pg_catalog.pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+          query_str_nodes := 'select * from dbe_perf.node_name';
           FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.thread_wait_status''';
+            query_str := 'SELECT * FROM dbe_perf.thread_wait_status';
             FOR row_data IN EXECUTE(query_str) LOOP
               return next row_data;
             END LOOP;
@@ -9434,343 +7815,6 @@ BEGIN
         SELECT sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid, tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id, user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status FROM tt
         WHERE level = (SELECT MAX(level) FROM tt t1 WHERE t1.sessionid = tt.sessionid);
 
-      CREATE OR REPLACE FUNCTION DBE_PERF.get_global_active_session
-        (OUT node_name text,
-         OUT sampleid bigint,
-         OUT sample_time timestamp without time zone,
-         OUT need_flush_sample boolean,
-         OUT databaseid oid,
-         OUT thread_id bigint,
-         OUT sessionid bigint,
-         OUT start_time timestamp without time zone,
-         OUT event text,
-         OUT lwtid integer,
-         OUT psessionid bigint,
-         OUT tlevel integer,
-         OUT smpid integer,
-         OUT userid oid,
-         OUT application_name text,
-         OUT client_addr inet,
-         OUT client_hostname text,
-         OUT client_port integer,
-         OUT query_id bigint,
-         OUT unique_query_id bigint,
-         OUT user_id oid,
-         OUT cn_id integer,
-         OUT unique_query text,
-         OUT locktag text,
-         OUT lockmode text,
-         OUT block_sessionid bigint,
-         OUT final_block_sessionid bigint,
-         OUT wait_status text)
-      RETURNS SETOF record
-      AS $$
-      DECLARE
-        ROW_DATA DBE_PERF.local_active_session%ROWTYPE;
-        ROW_NAME RECORD;
-        QUERY_STR TEXT;
-        QUERY_STR_NODES TEXT;
-      BEGIN
-        QUERY_STR_NODES := 'SELECT NODE_NAME FROM pg_catalog.PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'')';
-        FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-          QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_active_session''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-                node_name := ROW_NAME.NODE_NAME;
-                sampleid := ROW_DATA.sampleid;
-                sample_time := ROW_DATA.sample_time;
-                need_flush_sample := ROW_DATA.need_flush_sample;
-                databaseid := ROW_DATA.databaseid;
-                thread_id := ROW_DATA.thread_id;
-                sessionid := ROW_DATA.sessionid;
-                start_time := ROW_DATA.start_time;
-                event := ROW_DATA.event;
-                lwtid := ROW_DATA.lwtid;
-                psessionid := ROW_DATA.psessionid;
-                tlevel := ROW_DATA.tlevel;
-                smpid := ROW_DATA.smpid;
-                userid := ROW_DATA.userid;
-                application_name := ROW_DATA.application_name;
-                client_addr := ROW_DATA.client_addr;
-                client_hostname := ROW_DATA.client_hostname;
-                client_port := ROW_DATA.client_port;
-                query_id := ROW_DATA.query_id;
-                unique_query_id := ROW_DATA.unique_query_id;
-                user_id := ROW_DATA.user_id;
-                cn_id := ROW_DATA.cn_id;
-                unique_query := ROW_DATA.unique_query;
-                locktag := ROW_DATA.locktag;
-                lockmode := ROW_DATA.lockmode;
-                block_sessionid := ROW_DATA.block_sessionid;
-                final_block_sessionid := ROW_DATA.final_block_sessionid;
-                wait_status := ROW_DATA.wait_status;
-            RETURN NEXT;
-          END LOOP;
-        END LOOP;
-        RETURN;
-      END; $$
-      LANGUAGE 'plpgsql';
-
-      CREATE OR REPLACE VIEW DBE_PERF.global_active_session AS
-        SELECT * FROM DBE_PERF.get_global_active_session();
-
-      CREATE OR REPLACE FUNCTION DBE_PERF.get_datanode_active_session_hist
-      (  IN datanode text,
-         IN start_ts timestamp without time zone,
-         IN end_ts timestamp without time zone,
-         OUT node_name text,
-         OUT sampleid bigint,
-         OUT sample_time timestamp without time zone,
-         OUT need_flush_sample boolean,
-         OUT databaseid oid,
-         OUT thread_id bigint,
-         OUT sessionid bigint,
-         OUT start_time timestamp without time zone,
-         OUT event text,
-         OUT lwtid integer,
-         OUT psessionid bigint,
-         OUT tlevel integer,
-         OUT smpid integer,
-         OUT userid oid,
-         OUT application_name text,
-         OUT client_addr inet,
-         OUT client_hostname text,
-         OUT client_port integer,
-         OUT query_id bigint,
-         OUT unique_query_id bigint,
-         OUT user_id oid,
-         OUT cn_id integer,
-         OUT unique_query text,
-         OUT locktag text,
-         OUT lockmode text,
-         OUT block_sessionid bigint,
-         OUT wait_status text)
-      RETURNS SETOF record
-      AS $$
-      DECLARE
-          ROW_DATA pg_catalog.gs_asp%ROWTYPE;
-          cn_name record;
-          query_text record;
-          QUERY_STR text;
-          query_cn text;
-          query_str_cn_name text;
-          node_str text;
-      BEGIN
-              if (select working_version_num() < 92217) then
-                  raise exception 'function get_datanode_active_session_hist should not be call during upgrade.';
-              end if;
-              node_str := 'SELECT * FROM pg_catalog.gs_asp where sample_time > '''''||$2||''''' and sample_time < '''''||$3||'''';
-              QUERY_STR := 'EXECUTE DIRECT ON (' || $1 || ') '''|| node_str ||''''';';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-              node_name := datanode;
-              sampleid := ROW_DATA.sampleid;
-              sample_time := ROW_DATA.sample_time;
-              need_flush_sample := ROW_DATA.need_flush_sample;
-              databaseid := ROW_DATA.databaseid;
-              thread_id := ROW_DATA.thread_id;
-              sessionid := ROW_DATA.sessionid;
-              start_time := ROW_DATA.start_time;
-              event := ROW_DATA.event;
-              lwtid := ROW_DATA.lwtid;
-              psessionid := ROW_DATA.psessionid;
-              tlevel := ROW_DATA.tlevel;
-              smpid := ROW_DATA.smpid;
-              userid := ROW_DATA.userid;
-              application_name := ROW_DATA.application_name;
-              client_addr := ROW_DATA.client_addr;
-              client_hostname := ROW_DATA.client_hostname;
-              client_port := ROW_DATA.client_port;
-              query_id := ROW_DATA.query_id;
-              unique_query_id := ROW_DATA.unique_query_id;
-              user_id := ROW_DATA.user_id;
-              cn_id := ROW_DATA.cn_id;
-              IF ROW_DATA.cn_id IS NULL THEN
-                    unique_query := ROW_DATA.unique_query;
-              ELSE
-                  query_str_cn_name := 'SELECT node_name FROM pg_catalog.pgxc_node WHERE node_id='||ROW_DATA.cn_id||' AND nodeis_active = true';
-                  FOR cn_name IN EXECUTE(query_str_cn_name) LOOP
-                      query_cn := 'EXECUTE DIRECT ON (' || cn_name.node_name || ') ''SELECT unique_query FROM pg_catalog.gs_asp where unique_query_id = '|| ROW_DATA.unique_query_id||' limit 1''';
-                      FOR query_text IN EXECUTE(query_cn) LOOP
-                            unique_query := query_text.unique_query;
-                      END LOOP;
-                  END LOOP;
-              END IF;
-              locktag := ROW_DATA.locktag;
-              lockmode := ROW_DATA.lockmode;
-              block_sessionid := ROW_DATA.block_sessionid;
-              wait_status := ROW_DATA.wait_status;
-              RETURN NEXT;
-          END LOOP;
-          RETURN;
-      END; $$
-      LANGUAGE 'plpgsql';
-
-      CREATE OR REPLACE FUNCTION DBE_PERF.get_datanode_active_session
-      (  in datanode text,
-         OUT node_name text,
-         OUT sampleid bigint,
-         OUT sample_time timestamp without time zone,
-         OUT need_flush_sample boolean,
-         OUT databaseid oid,
-         OUT thread_id bigint,
-         OUT sessionid bigint,
-         OUT start_time timestamp without time zone,
-         OUT event text,
-         OUT lwtid integer,
-         OUT psessionid bigint,
-         OUT tlevel integer,
-         OUT smpid integer,
-         OUT userid oid,
-         OUT application_name text,
-         OUT client_addr inet,
-         OUT client_hostname text,
-         OUT client_port integer,
-         OUT query_id bigint,
-         OUT unique_query_id bigint,
-         OUT user_id oid,
-         OUT cn_id integer,
-         OUT unique_query text,
-         OUT locktag text,
-         OUT lockmode text,
-         OUT block_sessionid bigint,
-         OUT final_block_sessionid bigint,
-         OUT wait_status text)
-      RETURNS SETOF record
-      AS $$
-      DECLARE
-        row_data DBE_PERF.local_active_session%rowtype;
-        cn_name record;
-        query_text record;
-        QUERY_STR text;
-        query_cn text;
-        query_str_cn_name text;
-      BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON (' || $1 || ') ''SELECT * FROM DBE_PERF.local_active_session''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-                      node_name := datanode;
-              sampleid := ROW_DATA.sampleid;
-              sample_time := ROW_DATA.sample_time;
-              need_flush_sample := ROW_DATA.need_flush_sample;
-              databaseid := ROW_DATA.databaseid;
-              thread_id := ROW_DATA.thread_id;
-              sessionid := ROW_DATA.sessionid;
-              start_time := ROW_DATA.start_time;
-              event := ROW_DATA.event;
-              lwtid := ROW_DATA.lwtid;
-              psessionid := ROW_DATA.psessionid;
-              tlevel := ROW_DATA.tlevel;
-              smpid := ROW_DATA.smpid;
-              userid := ROW_DATA.userid;
-              application_name := ROW_DATA.application_name;
-              client_addr := ROW_DATA.client_addr;
-              client_hostname := ROW_DATA.client_hostname;
-              client_port := ROW_DATA.client_port;
-              query_id := ROW_DATA.query_id;
-              unique_query_id := ROW_DATA.unique_query_id;
-              user_id := ROW_DATA.user_id;
-              cn_id := ROW_DATA.cn_id;
-              IF ROW_DATA.cn_id IS NULL THEN
-                    unique_query := ROW_DATA.unique_query;
-              ELSE
-                  query_str_cn_name := 'SELECT node_name FROM pg_catalog.pgxc_node WHERE node_id='||ROW_DATA.cn_id||' AND nodeis_active = true';
-                  FOR cn_name IN EXECUTE(query_str_cn_name) LOOP
-                      query_cn := 'EXECUTE DIRECT ON (' || cn_name.node_name || ') ''SELECT unique_query FROM DBE_PERF.local_active_session where unique_query_id = '|| ROW_DATA.unique_query_id||' limit 1''';
-                      FOR query_text IN EXECUTE(query_cn) LOOP
-                            unique_query := query_text.unique_query;
-                      END LOOP;
-                  END LOOP;
-              END IF;
-              locktag := ROW_DATA.locktag;
-              lockmode := ROW_DATA.lockmode;
-              block_sessionid := ROW_DATA.block_sessionid;
-              final_block_sessionid := ROW_DATA.final_block_sessionid;
-              wait_status := ROW_DATA.wait_status;
-              RETURN NEXT;
-          END LOOP;
-          RETURN;
-      END; $$
-      LANGUAGE 'plpgsql';
-
-      CREATE OR REPLACE FUNCTION DBE_PERF.get_global_gs_asp
-        (IN start_ts timestamp without time zone,
-         IN end_ts timestamp without time zone,
-         OUT node_name text,
-         OUT sampleid bigint,
-         OUT sample_time timestamp without time zone,
-         OUT need_flush_sample boolean,
-         OUT databaseid oid,
-         OUT thread_id bigint,
-         OUT sessionid bigint,
-         OUT start_time timestamp without time zone,
-         OUT event text,
-         OUT lwtid integer,
-         OUT psessionid bigint,
-         OUT tlevel integer,
-         OUT smpid integer,
-         OUT userid oid,
-         OUT application_name text,
-         OUT client_addr inet,
-         OUT client_hostname text,
-         OUT client_port integer,
-         OUT query_id bigint,
-         OUT unique_query_id bigint,
-         OUT user_id oid,
-         OUT cn_id integer,
-         OUT unique_query text,
-         OUT locktag text,
-         OUT lockmode text,
-         OUT block_sessionid bigint,
-         OUT wait_status text)
-      RETURNS SETOF record
-      AS $$
-      DECLARE
-        ROW_DATA pg_catalog.gs_asp%ROWTYPE;
-        ROW_NAME RECORD;
-        QUERY_STR TEXT;
-        QUERY_STR_NODES TEXT;
-        node_str TEXT;
-      BEGIN
-        if (select working_version_num() < 92217) then
-            raise exception 'function get_global_gs_asp should not be call during upgrade.';
-        end if;
-        QUERY_STR_NODES := 'SELECT NODE_NAME FROM pg_catalog.PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'')';
-        node_str := 'SELECT * FROM pg_catalog.gs_asp where sample_time > '''''||$1||''''' and sample_time < '''''||$2||'''';
-        FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-          QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') '''|| node_str ||''''';';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-                node_name := ROW_NAME.NODE_NAME;
-                sampleid := ROW_DATA.sampleid;
-                sample_time := ROW_DATA.sample_time;
-                need_flush_sample := ROW_DATA.need_flush_sample;
-                databaseid := ROW_DATA.databaseid;
-                thread_id := ROW_DATA.thread_id;
-                sessionid := ROW_DATA.sessionid;
-                start_time := ROW_DATA.start_time;
-                event := ROW_DATA.event;
-                lwtid := ROW_DATA.lwtid;
-                psessionid := ROW_DATA.psessionid;
-                tlevel := ROW_DATA.tlevel;
-                smpid := ROW_DATA.smpid;
-                userid := ROW_DATA.userid;
-                application_name := ROW_DATA.application_name;
-                client_addr := ROW_DATA.client_addr;
-                client_hostname := ROW_DATA.client_hostname;
-                client_port := ROW_DATA.client_port;
-                query_id := ROW_DATA.query_id;
-                unique_query_id := ROW_DATA.unique_query_id;
-                user_id := ROW_DATA.user_id;
-                cn_id := ROW_DATA.cn_id;
-                unique_query := ROW_DATA.unique_query;
-                locktag := ROW_DATA.locktag;
-                lockmode := ROW_DATA.lockmode;
-                block_sessionid := ROW_DATA.block_sessionid;
-                wait_status := ROW_DATA.wait_status;
-            RETURN NEXT;
-          END LOOP;
-        END LOOP;
-        RETURN;
-      END; $$
-      LANGUAGE 'plpgsql';
-
       SELECT SESSION_USER INTO user_name;
       global_query_str := 'GRANT ALL ON TABLE DBE_PERF.locks TO ' || quote_ident(user_name) || ';';
       EXECUTE IMMEDIATE global_query_str;
@@ -9780,14 +7824,11 @@ BEGIN
       EXECUTE IMMEDIATE global_query_str;
       global_query_str := 'GRANT ALL ON TABLE DBE_PERF.local_active_session TO ' || quote_ident(user_name) || ';';
       EXECUTE IMMEDIATE global_query_str;
-      global_query_str := 'GRANT ALL ON TABLE DBE_PERF.global_active_session TO ' || quote_ident(user_name) || ';';
-      EXECUTE IMMEDIATE global_query_str;
 
       GRANT SELECT ON DBE_PERF.locks TO public;
       GRANT SELECT ON DBE_PERF.global_thread_wait_status TO public;
       GRANT SELECT ON DBE_PERF.thread_wait_status TO public;
       GRANT SELECT ON DBE_PERF.local_active_session TO public;
-      GRANT SELECT ON DBE_PERF.global_active_session TO public;
 
     end if;
 END $DO$;
@@ -10290,245 +8331,6 @@ CREATE OR REPLACE VIEW pg_catalog.gs_wlm_workload_records AS
     WHERE P.query_pid = S.threadpid AND
           S.usesysid = U.oid;
 
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_current_instance_info(text, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-    row_data gs_wlm_instance_history%rowtype;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    query_str_temp text;
-    node_name text;
-    BEGIN
-
-        IF $2 is null THEN
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info()';
-        ELSE
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info() limit '||$2;
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name in select pg_catalog.regexp_split_to_table(quote_literal($1),',') LOOP
-                query_str := 'EXECUTE DIRECT ON ('||node_name||') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_history_instance_info(text, TIMESTAMP, TIMESTAMP, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-       row_data gs_wlm_instance_history%rowtype;
-       row_name record;
-       query_str text;
-       query_str_nodes text;
-    query_str_temp text;
-    node_name text;
-    BEGIN
-
-        IF $4 is null THEN
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3);
-        ELSE
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3)||' limit '||quote_literal($4);
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name in select pg_catalog.regexp_split_to_table(quote_literal($1),',') LOOP
-                query_str := 'EXECUTE DIRECT ON ('||node_name||') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.distributed_count(IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    total_num bigint;
-    flag boolean;
-    BEGIN
-
-		query_str_nodes := 'SELECT count(1) FROM "' || $1 || '";';
-        EXECUTE query_str_nodes INTO total_num;
-
-		--Get the node names
-		query_str_nodes := 'SELECT node_name FROM pgxc_node, pgxc_class where node_type IN (''C'', ''D'') AND is_oid_in_group_members(oid, nodeoids) AND
-                        pcrelid=' || quote_literal('"'||$1||'"') || '::regclass::oid';
-
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select ''''DN_name'''' as dnname1, count(1) as count1 from "' || $1 || '"''';
-
-            FOR row_data IN EXECUTE(query_str) LOOP
-                row_data.dnname1 := CASE
-                    WHEN pg_catalog.LENGTH(row_name.node_name)<20
-                    THEN row_name.node_name || right('                    ',20-pg_catalog.length(row_name.node_name))
-                    ELSE pg_catalog.SUBSTR(row_name.node_name,1,20)
-                    END;
-                DNName := row_data.dnname1;
-                Num := row_data.count1;
-                IF total_num = 0 THEN
-                Ratio := 0.000 ||'%';
-                ELSE
-                Ratio := ROUND(row_data.count1/total_num*100,3) || '%';
-                END IF;
-                RETURN next;
-            END LOOP;
-        END LOOP;
-
-        RETURN;
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.distributed_count(IN _schema_name text, IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    total_num bigint;
-    flag boolean;
-    BEGIN
-
-		query_str_nodes := 'SELECT count(1) FROM "' || $1 || '"."' || $2 || '";';
-        EXECUTE query_str_nodes INTO total_num;
-
-		--Get the node names
-		query_str_nodes := 'SELECT node_name FROM pgxc_node, pgxc_class where node_type IN (''C'', ''D'') AND is_oid_in_group_members(oid, nodeoids) AND
-                        pcrelid=' || quote_literal('"'||$1||'"."' || $2 || '"') || '::regclass::oid';
-
-        FOR row_name IN EXECUTE(query_str_nodes) LOOP
-            query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal('select ''DN_name'' as dnname1, count(1) as count1 from "' || $1 || '"."' || $2 || '"');
-
-            FOR row_data IN EXECUTE(query_str) LOOP
-                row_data.dnname1 := CASE
-                    WHEN pg_catalog.LENGTH(row_name.node_name)<20
-                    THEN row_name.node_name || right('                    ',20-pg_catalog.length(row_name.node_name))
-                    ELSE pg_catalog.SUBSTR(row_name.node_name,1,20)
-                    END;
-                DNName := row_data.dnname1;
-                Num := row_data.count1;
-                IF total_num = 0 THEN
-                Ratio := 0.000 ||'%';
-                ELSE
-                Ratio := ROUND(row_data.count1/total_num*100,3) || '%';
-                END IF;
-                RETURN next;
-            END LOOP;
-        END LOOP;
-
-        RETURN;
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.table_skewness(text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-    BEGIN
-	    RETURN QUERY EXECUTE 'SELECT * FROM pg_catalog.distributed_count(' || quote_literal($1) || ') ORDER BY num DESC, dnname';
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.table_skewness_with_schema(IN _schema_name text,text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-    BEGIN
-	    RETURN QUERY EXECUTE 'SELECT * FROM pg_catalog.distributed_count(' || quote_literal($1) || ',' || quote_literal($2) || ') ORDER BY num DESC, dnname';
-    END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.gs_get_table_distribution( IN table_name TEXT, IN schema_name TEXT)
-RETURNS TEXT
-AS
-$$
-DECLARE
-nodename  text;
-query_str text;
-row_data record;
-row_data1 record;
-nodelist  text;
-BEGIN
-
-    query_str := 'SELECT oid,node_name FROM pgxc_node WHERE node_type=''D'' order by node_name';
-
-    FOR row_data IN EXECUTE(query_str) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || row_data.node_name || ') ' || quote_literal('SELECT count(*) AS num FROM pg_class c LEFT JOIN pg_namespace n ON c.relnamespace = n.oid WHERE relname='||quote_literal(table_name)||' AND n.nspname='||quote_literal(schema_name));
-        FOR row_data1 IN EXECUTE(query_str) LOOP
-            IF row_data1.num = 1 THEN
-                nodelist := nodelist || ' '|| row_data.oid;
-            END IF;
-        END LOOP;
-   END LOOP;
-
-   RETURN nodelist;
-END;
-$$
-LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION pg_catalog.get_shard_oids_byname(IN node_name varchar)
-RETURNS Oid[] AS $$
-declare
-    node_oid Oid;
-    nodes Oid[];
-    nodenames_query text;
-    total_num bigint;
-BEGIN
-	nodenames_query := 'SELECT oid FROM pgxc_node WHERE node_name = '||quote_literal($1)||' ORDER BY oid';
-	FOR node_oid IN EXECUTE nodenames_query USING node_name LOOP
-		nodes := array_append(nodes, node_oid);
-	END LOOP;
-	RETURN nodes;
-
-END; $$
-LANGUAGE plpgsql NOT FENCED;
-
 DROP FUNCTION IF EXISTS pg_catalog.pg_cbm_rotate_file(in rotate_lsn text);
 SET LOCAL inplace_upgrade_next_system_object_oids=IUO_PROC, 4660;
 CREATE FUNCTION pg_catalog.pg_cbm_rotate_file
@@ -10608,214 +8410,6 @@ SELECT
     T.write_speed
 FROM pg_user AS S, pg_catalog.pg_total_user_resource_info_oid AS T
 WHERE S.usesysid = T.userid;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_current_instance_info(text, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-    row_data gs_wlm_instance_history%rowtype;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    query_str_temp text;
-    node_name_new text;
-    node_count int;
-    BEGIN
-
-        IF $2 is null THEN
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info()';
-        ELSE
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info() limit '||$2;
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name_new in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-                select count(*) from pgxc_node where node_name=quote_literal(node_name_new) into node_count;
-                IF node_count <> 0 THEN
-                    query_str := 'EXECUTE DIRECT ON ('||node_name_new||') ''' || query_str_temp ||''';';
-                    FOR row_data IN EXECUTE(query_str) LOOP
-                        return next row_data;
-                    END LOOP;
-                END IF;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_history_instance_info(text, TIMESTAMP, TIMESTAMP, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-       row_data gs_wlm_instance_history%rowtype;
-       row_name record;
-       query_str text;
-       query_str_nodes text;
-    query_str_temp text;
-    node_name_new text;
-    node_count int;
-    BEGIN
-
-        IF $4 is null THEN
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3);
-        ELSE
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3)||' limit '||quote_literal($4);
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name_new in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-                select count(*) from pgxc_node where node_name=quote_literal(node_name_new) into node_count;
-                IF node_count <> 0 THEN
-                    query_str := 'EXECUTE DIRECT ON ('||node_name_new||') ' || quote_literal(query_str_temp) ||';';
-                    FOR row_data IN EXECUTE(query_str) LOOP
-                        return next row_data;
-                    END LOOP;
-                END IF;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_current_instance_info(text, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-    row_data gs_wlm_instance_history%rowtype;
-    row_name record;
-    query_str text;
-    query_str_nodes text;
-    query_str_temp text;
-    node_name_new text;
-    node_count int;
-    node_str text;
-    query_text text;
-    BEGIN
-
-        IF $2 is null THEN
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info()';
-        ELSE
-            query_str_temp := 'SELECT * FROM pg_stat_get_wlm_instance_info() limit '||$2;
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_temp ||''';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name_new in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-				node_str := quote_literal(trim(node_name_new));
-				query_text := 'select count(*) from pgxc_node where node_name = ' || node_str;
-                EXECUTE(query_text) into node_count;
-                IF node_count <> 0 THEN
-                    query_str := 'EXECUTE DIRECT ON ('||node_name_new||') ''' || query_str_temp ||''';';
-                    FOR row_data IN EXECUTE(query_str) LOOP
-                        return next row_data;
-                    END LOOP;
-                END IF;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_history_instance_info(text, TIMESTAMP, TIMESTAMP, int default null)
-RETURNS setof gs_wlm_instance_history
-AS $$
-DECLARE
-       row_data gs_wlm_instance_history%rowtype;
-       row_name record;
-       query_str text;
-       query_str_nodes text;
-    query_str_temp text;
-    node_name_new text;
-    node_count int;
-    node_str text;
-    query_text text;
-    BEGIN
-
-        IF $4 is null THEN
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3);
-        ELSE
-            query_str_temp := 'SELECT * FROM gs_wlm_instance_history where timestamp >'||quote_literal($2)||' and timestamp <'||quote_literal($3)||' limit '||quote_literal($4);
-        END IF;
-
-        IF $1 IN ('C','D') THEN
-            query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type='||quote_literal($1);
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSIF $1 ='ALL' THEN
-            query_str_nodes := 'SELECT distinct node_name FROM pgxc_node';
-            FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ' || quote_literal(query_str_temp) ||';';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    return next row_data;
-                END LOOP;
-            END LOOP;
-        ELSE
-            FOR node_name_new in select pg_catalog.regexp_split_to_table('' || $1 || '',',') LOOP
-                node_str := quote_literal(trim(node_name_new));
-                query_text := 'select count(*) from pgxc_node where node_name = ' || node_str;
-                EXECUTE(query_text) into node_count;
-                IF node_count <> 0 THEN
-                    query_str := 'EXECUTE DIRECT ON ('||node_name_new||') ' || quote_literal(query_str_temp) ||';';
-                    FOR row_data IN EXECUTE(query_str) LOOP
-                        return next row_data;
-                    END LOOP;
-                END IF;
-            END LOOP;
-        END IF;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
 
 DO $DO$
 DECLARE
@@ -11230,7 +8824,7 @@ CREATE OR REPLACE VIEW pg_catalog.pg_indexes AS
          JOIN pg_class I ON (I.oid = X.indexrelid)
          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
          LEFT JOIN pg_tablespace T ON (T.oid = I.reltablespace)
-    WHERE C.relkind = 'r' AND I.relkind IN ('i','I');
+    WHERE C.relkind IN ('r','m') AND I.relkind IN ('i','I');
 
 DROP TABLE IF EXISTS snapshot.snap_global_operator_runtime;
 DROP TABLE IF EXISTS snapshot.snap_global_operator_history;
@@ -11411,177 +9005,6 @@ END$$;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 0;
 
-CREATE OR REPLACE FUNCTION pg_catalog.get_local_cont_query_stats()
-RETURNS TABLE (
-    cq oid,
-    w_in_rows int8,
-    w_in_bytes int8,
-    w_out_rows int8,
-    w_out_bytes int8,
-    w_pendings int8,
-    w_errors int8,
-    r_in_rows int8,
-    r_in_bytes int8,
-    r_out_rows int8,
-    r_out_bytes int8,
-    r_errors int8,
-    c_in_rows int8,
-    c_in_bytes int8,
-    c_out_rows int8,
-    c_out_bytes int8,
-    c_pendings int8,
-    c_errors int8
-)
-AS $$
-DECLARE
-    query_cq_ids text;
-    cq_ids record;
-    query_stats text;
-    stats record;
-BEGIN
-    query_cq_ids := 'SELECT id FROM streaming_cont_query';
-    FOR cq_ids IN EXECUTE(query_cq_ids) LOOP
-        query_stats := 'SELECT * FROM pg_catalog.get_local_cont_query_stat(' || cq_ids.id || ')';
-        FOR stats IN EXECUTE(query_stats) LOOP
-            cq = stats.cq;
-            w_in_rows = stats.w_in_rows;
-            w_in_bytes = stats.w_in_bytes;
-            w_out_rows = stats.w_out_rows;
-            w_out_bytes = stats.w_out_bytes;
-            w_pendings = stats.w_pendings;
-            w_errors = stats.w_errors;
-            r_in_rows = stats.r_in_rows;
-            r_in_bytes = stats.r_in_bytes;
-            r_out_rows = stats.r_out_rows;
-            r_out_bytes = stats.r_out_bytes;
-            r_errors = stats.r_errors;
-            c_in_rows = stats.c_in_rows;
-            c_in_bytes = stats.c_in_bytes;
-            c_out_rows = stats.c_out_rows;
-            c_out_bytes = stats.c_out_bytes;
-            c_pendings = stats.c_pendings;
-            c_errors = stats.c_errors;
-            return NEXT;
-        END LOOP;
-    END LOOP;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.get_cont_query_stats()
-RETURNS TABLE (
-    node name,
-    cq oid,
-    w_in_rows int8,
-    w_in_bytes int8,
-    w_out_rows int8,
-    w_out_bytes int8,
-    w_pendings int8,
-    w_errors int8,
-    r_in_rows int8,
-    r_in_bytes int8,
-    r_out_rows int8,
-    r_out_bytes int8,
-    r_errors int8,
-    c_in_rows int8,
-    c_in_bytes int8,
-    c_out_rows int8,
-    c_out_bytes int8,
-    c_pendings int8,
-    c_errors int8
-)
-AS $$
-DECLARE
-    query_nodes text;
-    nodes record;
-    query_stats text;
-    stats record;
-BEGIN
-    query_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
-    FOR nodes IN EXECUTE(query_nodes) LOOP
-        query_stats := 'EXECUTE DIRECT ON (' || nodes.node_name || ') ''SELECT * FROM  pg_catalog.get_local_cont_query_stats()''';
-        FOR stats IN EXECUTE(query_stats) LOOP
-            node = nodes.node_name;
-            cq = stats.cq;
-            w_in_rows = stats.w_in_rows;
-            w_in_bytes = stats.w_in_bytes;
-            w_out_rows = stats.w_out_rows;
-            w_out_bytes = stats.w_out_bytes;
-            w_pendings = stats.w_pendings;
-            w_errors = stats.w_errors;
-            r_in_rows = stats.r_in_rows;
-            r_in_bytes = stats.r_in_bytes;
-            r_out_rows = stats.r_out_rows;
-            r_out_bytes = stats.r_out_bytes;
-            r_errors = stats.r_errors;
-            c_in_rows = stats.c_in_rows;
-            c_in_bytes = stats.c_in_bytes;
-            c_out_rows = stats.c_out_rows;
-            c_out_bytes = stats.c_out_bytes;
-            c_pendings = stats.c_pendings;
-            c_errors = stats.c_errors;
-            return NEXT;
-        END LOOP;
-    END LOOP;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-DO $$
-DECLARE
-ans boolean;
-BEGIN
-    select case when count(*)=1 then true else false end as ans from (select * from pg_extension where extname = 'streaming' limit 1) into ans;
-    if ans = true then
-        CREATE OR REPLACE VIEW pg_catalog.cont_query_stats
-        AS
-            SELECT cq,
-                SUM(w_in_rows) AS w_in_rows,
-                SUM(w_in_bytes) AS w_in_bytes,
-                SUM(w_out_rows) AS w_out_rows,
-                SUM(w_out_bytes) AS w_out_bytes,
-                SUM(w_pendings) AS w_pendings,
-                SUM(w_errors) AS w_errors,
-                SUM(r_in_rows) AS r_in_rows,
-                SUM(r_in_bytes) AS r_in_bytes,
-                SUM(r_out_rows) AS r_out_rows,
-                SUM(r_out_bytes) AS r_out_bytes,
-                SUM(r_errors) AS r_errors,
-                SUM(c_in_rows) AS c_in_rows,
-                SUM(c_in_bytes) AS c_in_bytes,
-                SUM(c_out_rows) AS c_out_rows,
-                SUM(c_out_bytes) AS c_out_bytes,
-                SUM(c_pendings) AS c_pendings,
-                SUM(c_errors) AS c_errors
-            FROM pg_catalog.get_cont_query_stats()
-            GROUP BY cq;
-
-        CREATE OR REPLACE VIEW pg_catalog.stream_stats
-        AS
-            SELECT s.streamrelid AS "stream",
-                SUM(w_in_rows) AS w_in_rows,
-                SUM(w_in_bytes) AS w_in_bytes,
-                SUM(w_out_rows) AS w_out_rows,
-                SUM(w_out_bytes) AS w_out_bytes,
-                SUM(w_pendings) AS w_pendings,
-                SUM(w_errors) AS w_errors,
-                SUM(r_in_rows) AS r_in_rows,
-                SUM(r_in_bytes) AS r_in_bytes,
-                SUM(r_out_rows) AS r_out_rows,
-                SUM(r_out_bytes) AS r_out_bytes,
-                SUM(r_errors) AS r_errors,
-                SUM(c_in_rows) AS c_in_rows,
-                SUM(c_in_bytes) AS c_in_bytes,
-                SUM(c_out_rows) AS c_out_rows,
-                SUM(c_out_bytes) AS c_out_bytes,
-                SUM(c_pendings) AS c_pendings,
-                SUM(c_errors) AS c_errors
-            FROM pg_catalog.cont_query_stats c, pg_catalog.streaming_cont_query s
-            WHERE s.id = c.cq
-            GROUP BY "stream";
-    end if;
-END$$;
-
 DO $$
 DECLARE
 ans boolean;
@@ -11603,72 +9026,6 @@ BEGIN
         LANGUAGE ''plpgsql'' NOT FENCED';
     end if;
 END$$;
-
-CREATE OR REPLACE FUNCTION pg_catalog.reset_local_cont_query_stats(cq_id oid)
-RETURNS bool
-AS $$
-DECLARE
-    query_cq_ids text;
-    cq_ids record;
-    query_stats text;
-BEGIN
-    query_cq_ids := 'SELECT id FROM streaming_cont_query WHERE streamrelid = (SELECT streamrelid FROM streaming_cont_query WHERE id = ' || cq_id || ')';
-    FOR cq_ids IN EXECUTE(query_cq_ids) LOOP
-        query_stats := 'SELECT pg_catalog.reset_local_cont_query_stat(' || cq_ids.id || ')';
-        EXECUTE(query_stats);
-    END LOOP;
-    return true;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.reset_cont_query_stats(stream_id oid)
-RETURNS bool
-AS $$
-DECLARE
-    query_cq_ids text;
-    cq_ids record;
-    query_nodes text;
-    nodes record;
-    query_stats text;
-BEGIN
-    query_cq_ids := 'SELECT id FROM streaming_cont_query WHERE streamrelid = ' || stream_id || 'LIMIT 1';
-    FOR cq_ids IN EXECUTE(query_cq_ids) LOOP
-        query_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
-        FOR nodes IN EXECUTE(query_nodes) LOOP
-            query_stats := 'EXECUTE DIRECT ON (' || nodes.node_name || ') ''SELECT * FROM  pg_catalog.reset_local_cont_query_stats(' || cq_ids.id || ')''';
-            EXECUTE(query_stats);
-        END LOOP;
-    END LOOP;
-    return true;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.reset_cont_query_stats()
-RETURNS bool
-AS $$
-DECLARE
-    query_streams text;
-    streams record;
-    query_cq_ids text;
-    cq_ids record;
-    query_nodes text;
-    nodes record;
-    query_stats text;
-BEGIN
-    query_streams := 'SELECT DISTINCT streamrelid FROM streaming_cont_query';
-    FOR streams IN EXECUTE(query_streams) LOOP
-        query_cq_ids := 'SELECT id FROM streaming_cont_query WHERE streamrelid = ' || streams.streamrelid || 'LIMIT 1';
-        FOR cq_ids IN EXECUTE(query_cq_ids) LOOP
-            query_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
-            FOR nodes IN EXECUTE(query_nodes) LOOP
-                query_stats := 'EXECUTE DIRECT ON (' || nodes.node_name || ') ''SELECT * FROM  pg_catalog.reset_local_cont_query_stats(' || cq_ids.id || ')''';
-                EXECUTE(query_stats);
-            END LOOP;
-        END LOOP;
-    END LOOP;
-    return true;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
 
 CREATE OR REPLACE FUNCTION pg_catalog.check_cont_query_schema_changed(cq_id oid)
 RETURNS bool
@@ -11832,84 +9189,20 @@ BEGIN
     DROP VIEW IF EXISTS DBE_PERF.local_plancache_status CASCADE;
     DROP VIEW IF EXISTS DBE_PERF.global_plancache_status CASCADE;
     DROP VIEW IF EXISTS DBE_PERF.local_prepare_statement_status CASCADE;
-    DROP FUNCTION IF EXISTS  DBE_PERF.global_prepare_statement_status() CASCADE;
-    DROP VIEW IF EXISTS DBE_PERF.global_prepare_statement_status CASCADE;
     DROP FUNCTION IF EXISTS DBE_PERF.global_plancache_clean() CASCADE;
     DROP VIEW IF EXISTS DBE_PERF.local_plancache_clean CASCADE;
 
     CREATE VIEW DBE_PERF.local_plancache_status AS
       SELECT * FROM pg_catalog.plancache_status();
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_status()
-    RETURNS SETOF DBE_PERF.local_plancache_status
-    AS $$
-    DECLARE
-      ROW_DATA DBE_PERF.local_plancache_status%ROWTYPE;
-      ROW_NAME RECORD;
-      QUERY_STR TEXT;
-      QUERY_STR_NODES TEXT;
-    BEGIN
-      QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-      FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-        QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_plancache_status''';
-        FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          RETURN NEXT ROW_DATA;
-        END LOOP;
-      END LOOP;
-      RETURN;
-    END; $$
-    LANGUAGE 'plpgsql';
-
-    CREATE VIEW DBE_PERF.global_plancache_status AS
-      SELECT * FROM DBE_PERF.global_plancache_status();
-
     CREATE VIEW DBE_PERF.local_prepare_statement_status AS
       SELECT * FROM pg_catalog.prepare_statement_status();
-
-    CREATE OR REPLACE FUNCTION DBE_PERF.global_prepare_statement_status()
-    RETURNS SETOF DBE_PERF.local_prepare_statement_status
-    AS $$
-    DECLARE
-      ROW_DATA DBE_PERF.local_prepare_statement_status%ROWTYPE;
-      ROW_NAME RECORD;
-      QUERY_STR TEXT;
-      QUERY_STR_NODES TEXT;
-    BEGIN
-      QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-      FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-        QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * FROM DBE_PERF.local_prepare_statement_status''';
-        FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          RETURN NEXT ROW_DATA;
-        END LOOP;
-      END LOOP;
-      RETURN;
-    END; $$
-    LANGUAGE 'plpgsql';
-
-    CREATE VIEW DBE_PERF.global_prepare_statement_status AS
-      SELECT * FROM DBE_PERF.global_prepare_statement_status();
 
     CREATE VIEW DBE_PERF.local_plancache_clean AS
       SELECT * FROM pg_catalog.plancache_clean();
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_clean()
-    RETURNS BOOLEAN
-    AS $$
-    DECLARE
-      ROW_DATA record;
-      ROW_NAME RECORD;
-      QUERY_STR TEXT;
-      QUERY_STR_NODES TEXT;
-    BEGIN
-      QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'') and nodeis_active=true';
-      FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-            QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') ''SELECT * from DBE_PERF.local_plancache_clean''';
-            FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-         END LOOP;
-      END LOOP;
-      RETURN TRUE;
-    END; $$
-    LANGUAGE 'plpgsql';
+    CREATE VIEW DBE_PERF.global_plancache_clean AS
+      SELECT * FROM pg_catalog.plancache_clean();
 
   end if;
 END$DO$;
@@ -12042,75 +9335,75 @@ BEGIN
   select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
   if ans = true then
   CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
-    (in start_timestamp timestamp with time zone,
-    in end_timestamp timestamp with time zone,
-    OUT node_name name,
-    OUT db_name name,
-    OUT schema_name name,
-    OUT origin_node integer,
-    OUT user_name name,
-    OUT application_name text,
-    OUT client_addr text,
-    OUT client_port integer,
-    OUT unique_query_id bigint,
-    OUT debug_query_id bigint,
-    OUT query text,
-    OUT start_time timestamp with time zone,
-    OUT finish_time timestamp with time zone,
-    OUT slow_sql_threshold bigint,
-    OUT transaction_id bigint,
-    OUT thread_id bigint,
-    OUT session_id bigint,
-    OUT n_soft_parse bigint,
-    OUT n_hard_parse bigint,
-    OUT query_plan text,
-    OUT n_returned_rows bigint,
-    OUT n_tuples_fetched bigint,
-    OUT n_tuples_returned bigint,
-    OUT n_tuples_inserted bigint,
-    OUT n_tuples_updated bigint,
-    OUT n_tuples_deleted bigint,
-    OUT n_blocks_fetched bigint,
-    OUT n_blocks_hit bigint,
-    OUT db_time bigint,
-    OUT cpu_time bigint,
-    OUT execution_time bigint,
-    OUT parse_time bigint,
-    OUT plan_time bigint,
-    OUT rewrite_time bigint,
-    OUT pl_execution_time bigint,
-    OUT pl_compilation_time bigint,
-    OUT data_io_time bigint,
-    OUT net_send_info text,
-    OUT net_recv_info text,
-    OUT net_stream_send_info text,
-    OUT net_stream_recv_info text,
-    OUT lock_count bigint,
-    OUT lock_time bigint,
-    OUT lock_wait_count bigint,
-    OUT lock_wait_time bigint,
-    OUT lock_max_count bigint,
-    OUT lwlock_count bigint,
-    OUT lwlock_wait_count bigint,
-    OUT lwlock_time bigint,
-    OUT lwlock_wait_time bigint,
-    OUT details text)
-  RETURNS setof record
-  AS $$
-  DECLARE
-    row_data pg_catalog.statement_history%rowtype;
-    query_str text;
-    -- node name
-    node_names name[];
-    each_node_name name;
-    BEGIN
-      -- Get all node names(CN + master DN)
-      node_names := ARRAY(SELECT pgxc_node.node_name FROM pgxc_node WHERE (node_type = 'C' or node_type = 'D') AND nodeis_active = true);
-      FOREACH each_node_name IN ARRAY node_names
-      LOOP
-          query_str := 'EXECUTE DIRECT ON (' || each_node_name || ') ''SELECT * FROM DBE_PERF.statement_history where start_time >= ''''' ||$1|| ''''' and start_time <= ''''' || $2 || '''''''';
-          FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := each_node_name;
+      (in start_timestamp timestamp with time zone,
+       in end_timestamp timestamp with time zone,
+       OUT node_name name,
+       OUT db_name name,
+       OUT schema_name name,
+       OUT origin_node integer,
+       OUT user_name name,
+       OUT application_name text,
+       OUT client_addr text,
+       OUT client_port integer,
+       OUT unique_query_id bigint,
+       OUT debug_query_id bigint,
+       OUT query text,
+       OUT start_time timestamp with time zone,
+       OUT finish_time timestamp with time zone,
+       OUT slow_sql_threshold bigint,
+       OUT transaction_id bigint,
+       OUT thread_id bigint,
+       OUT session_id bigint,
+       OUT n_soft_parse bigint,
+       OUT n_hard_parse bigint,
+       OUT query_plan text,
+       OUT n_returned_rows bigint,
+       OUT n_tuples_fetched bigint,
+       OUT n_tuples_returned bigint,
+       OUT n_tuples_inserted bigint,
+       OUT n_tuples_updated bigint,
+       OUT n_tuples_deleted bigint,
+       OUT n_blocks_fetched bigint,
+       OUT n_blocks_hit bigint,
+       OUT db_time bigint,
+       OUT cpu_time bigint,
+       OUT execution_time bigint,
+       OUT parse_time bigint,
+       OUT plan_time bigint,
+       OUT rewrite_time bigint,
+       OUT pl_execution_time bigint,
+       OUT pl_compilation_time bigint,
+       OUT data_io_time bigint,
+       OUT net_send_info text,
+       OUT net_recv_info text,
+       OUT net_stream_send_info text,
+       OUT net_stream_recv_info text,
+       OUT lock_count bigint,
+       OUT lock_time bigint,
+       OUT lock_wait_count bigint,
+       OUT lock_wait_time bigint,
+       OUT lock_max_count bigint,
+       OUT lwlock_count bigint,
+       OUT lwlock_wait_count bigint,
+       OUT lwlock_time bigint,
+       OUT lwlock_wait_time bigint,
+       OUT details bytea,
+       OUT is_slow_sql bool)
+     RETURNS setof record
+     AS $$
+     DECLARE
+      row_data pg_catalog.statement_history%rowtype;
+      row_name record;
+      query_str text;
+      -- node name
+      query_str_nodes text;
+      BEGIN
+        -- Get all node names(CN + master DN)
+       query_str_nodes := 'select * from dbe_perf.node_name';
+       FOR row_name IN EXECUTE(query_str_nodes) LOOP
+          query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || '''';
+            FOR row_data IN EXECUTE(query_str) LOOP
+              node_name := row_name.node_name;
               db_name := row_data.db_name;
               schema_name := row_data.schema_name;
               origin_node := row_data.origin_node;
@@ -12161,84 +9454,84 @@ BEGIN
               lwlock_time := row_data.lwlock_time;
               lwlock_wait_time := row_data.lwlock_wait_time;
               details := row_data.details;
+              is_slow_sql := row_data.is_slow_sql;
               return next;
-          END LOOP;
-      END LOOP;
-      return;
-    END; $$
-  LANGUAGE 'plpgsql' NOT FENCED;
+           END LOOP;
+        END LOOP;
+        return;
+      END; $$
+    LANGUAGE 'plpgsql' NOT FENCED;
 
   CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
-    (in start_timestamp timestamp with time zone,
-    in end_timestamp timestamp with time zone,
-    OUT node_name name,
-    OUT db_name name,
-    OUT schema_name name,
-    OUT origin_node integer,
-    OUT user_name name,
-    OUT application_name text,
-    OUT client_addr text,
-    OUT client_port integer,
-    OUT unique_query_id bigint,
-    OUT debug_query_id bigint,
-    OUT query text,
-    OUT start_time timestamp with time zone,
-    OUT finish_time timestamp with time zone,
-    OUT slow_sql_threshold bigint,
-    OUT transaction_id bigint,
-    OUT thread_id bigint,
-    OUT session_id bigint,
-    OUT n_soft_parse bigint,
-    OUT n_hard_parse bigint,
-    OUT query_plan text,
-    OUT n_returned_rows bigint,
-    OUT n_tuples_fetched bigint,
-    OUT n_tuples_returned bigint,
-    OUT n_tuples_inserted bigint,
-    OUT n_tuples_updated bigint,
-    OUT n_tuples_deleted bigint,
-    OUT n_blocks_fetched bigint,
-    OUT n_blocks_hit bigint,
-    OUT db_time bigint,
-    OUT cpu_time bigint,
-    OUT execution_time bigint,
-    OUT parse_time bigint,
-    OUT plan_time bigint,
-    OUT rewrite_time bigint,
-    OUT pl_execution_time bigint,
-    OUT pl_compilation_time bigint,
-    OUT data_io_time bigint,
-    OUT net_send_info text,
-    OUT net_recv_info text,
-    OUT net_stream_send_info text,
-    OUT net_stream_recv_info text,
-    OUT lock_count bigint,
-    OUT lock_time bigint,
-    OUT lock_wait_count bigint,
-    OUT lock_wait_time bigint,
-    OUT lock_max_count bigint,
-    OUT lwlock_count bigint,
-    OUT lwlock_wait_count bigint,
-    OUT lwlock_time bigint,
-    OUT lwlock_wait_time bigint,
-    OUT details text)
-  RETURNS setof record
-  AS $$
-  DECLARE
-    row_data pg_catalog.statement_history%rowtype;
-    row_name record;
-    query_str text;
-    -- node name
-    node_names name[];
-    each_node_name name;
-    BEGIN
-      -- Get all node names(CN + master DN)
-      node_names := ARRAY(SELECT pgxc_node.node_name FROM pgxc_node WHERE (node_type = 'C' or node_type = 'D') AND nodeis_active = true);
-      FOREACH each_node_name IN ARRAY node_names
-      LOOP
-          query_str := 'EXECUTE DIRECT ON (' || each_node_name || ') ''SELECT * FROM DBE_PERF.statement_history where start_time >= ''''' ||$1|| ''''' and start_time <= ''''' || $2 || ''''' and (extract(epoch from (finish_time - start_time))  * 1000000) >= slow_sql_threshold ''';
-          FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := each_node_name;
+  (in start_timestamp timestamp with time zone,
+   in end_timestamp timestamp with time zone,
+   OUT node_name name,
+   OUT db_name name,
+   OUT schema_name name,
+   OUT origin_node integer,
+   OUT user_name name,
+   OUT application_name text,
+   OUT client_addr text,
+   OUT client_port integer,
+   OUT unique_query_id bigint,
+   OUT debug_query_id bigint,
+   OUT query text,
+   OUT start_time timestamp with time zone,
+   OUT finish_time timestamp with time zone,
+   OUT slow_sql_threshold bigint,
+   OUT transaction_id bigint,
+   OUT thread_id bigint,
+   OUT session_id bigint,
+   OUT n_soft_parse bigint,
+   OUT n_hard_parse bigint,
+   OUT query_plan text,
+   OUT n_returned_rows bigint,
+   OUT n_tuples_fetched bigint,
+   OUT n_tuples_returned bigint,
+   OUT n_tuples_inserted bigint,
+   OUT n_tuples_updated bigint,
+   OUT n_tuples_deleted bigint,
+   OUT n_blocks_fetched bigint,
+   OUT n_blocks_hit bigint,
+   OUT db_time bigint,
+   OUT cpu_time bigint,
+   OUT execution_time bigint,
+   OUT parse_time bigint,
+   OUT plan_time bigint,
+   OUT rewrite_time bigint,
+   OUT pl_execution_time bigint,
+   OUT pl_compilation_time bigint,
+   OUT data_io_time bigint,
+   OUT net_send_info text,
+   OUT net_recv_info text,
+   OUT net_stream_send_info text,
+   OUT net_stream_recv_info text,
+   OUT lock_count bigint,
+   OUT lock_time bigint,
+   OUT lock_wait_count bigint,
+   OUT lock_wait_time bigint,
+   OUT lock_max_count bigint,
+   OUT lwlock_count bigint,
+   OUT lwlock_wait_count bigint,
+   OUT lwlock_time bigint,
+   OUT lwlock_wait_time bigint,
+   OUT details bytea,
+   OUT is_slow_sql bool)
+ RETURNS setof record
+ AS $$
+ DECLARE
+  row_data pg_catalog.statement_history%rowtype;
+  row_name record;
+  query_str text;
+  -- node name
+  query_str_nodes text;
+  BEGIN
+        -- Get all node names(CN + master DN)
+       query_str_nodes := 'select * from dbe_perf.node_name';
+       FOR row_name IN EXECUTE(query_str_nodes) LOOP
+            query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || ''' and is_slow_sql = true ';
+            FOR row_data IN EXECUTE(query_str) LOOP
+              node_name := row_name.node_name;
               db_name := row_data.db_name;
               schema_name := row_data.schema_name;
               origin_node := row_data.origin_node;
@@ -12289,12 +9582,13 @@ BEGIN
               lwlock_time := row_data.lwlock_time;
               lwlock_wait_time := row_data.lwlock_wait_time;
               details := row_data.details;
+              is_slow_sql := row_data.is_slow_sql;
               return next;
-          END LOOP;
-      END LOOP;
-      return;
-    END; $$
-  LANGUAGE 'plpgsql' NOT FENCED;
+           END LOOP;
+        END LOOP;
+        return;
+      END; $$
+    LANGUAGE 'plpgsql' NOT FENCED;
   end if;
 END$DO$;
 
@@ -12405,19 +9699,19 @@ BEGIN
     CREATE VIEW DBE_PERF.statement AS
       SELECT * FROM get_instr_unique_sql();
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statement()
-    RETURNS setof DBE_PERF.statement
+    CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statement()
+    RETURNS setof dbe_perf.statement
     AS $$
     DECLARE
-      row_data DBE_PERF.statement%rowtype;
+      row_data dbe_perf.statement%rowtype;
       row_name record;
       query_str text;
       query_str_nodes text;
       BEGIN
         --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
+        query_str_nodes := 'select * from dbe_perf.node_name';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
-          query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement''';
+          query_str := 'SELECT * FROM dbe_perf.statement';
             FOR row_data IN EXECUTE(query_str) LOOP
               return next row_data;
            END LOOP;
@@ -12500,19 +9794,19 @@ BEGIN
     CREATE VIEW DBE_PERF.wait_events AS
       SELECT * FROM get_instr_wait_event(NULL);
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.get_global_wait_events()
-    RETURNS setof DBE_PERF.wait_events
+    CREATE OR REPLACE FUNCTION dbe_perf.get_global_wait_events()
+    RETURNS setof dbe_perf.wait_events
     AS $$
     DECLARE
-      row_data DBE_PERF.wait_events%rowtype;
+      row_data dbe_perf.wait_events%rowtype;
       row_name record;
       query_str text;
       query_str_nodes text;
       BEGIN
         --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type IN (''C'', ''D'') AND nodeis_active = true';
+        query_str_nodes := 'select * from dbe_perf.node_name';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
-          query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.wait_events''';
+          query_str := 'SELECT * FROM dbe_perf.wait_events';
           FOR row_data IN EXECUTE(query_str) LOOP
             return next row_data;
           END LOOP;
@@ -12723,19 +10017,19 @@ BEGIN
     CREATE VIEW DBE_PERF.statement AS
       SELECT * FROM get_instr_unique_sql();
 
-    CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statement()
-    RETURNS setof DBE_PERF.statement
+    CREATE OR REPLACE FUNCTION dbe_perf.get_summary_statement()
+    RETURNS setof dbe_perf.statement
     AS $$
     DECLARE
-      row_data DBE_PERF.statement%rowtype;
+      row_data dbe_perf.statement%rowtype;
       row_name record;
       query_str text;
       query_str_nodes text;
       BEGIN
         --Get all the node names
-        query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type = ''C'' AND nodeis_active = true';
+        query_str_nodes := 'select * from dbe_perf.node_name';
         FOR row_name IN EXECUTE(query_str_nodes) LOOP
-          query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM DBE_PERF.statement''';
+          query_str := 'SELECT * FROM dbe_perf.statement';
             FOR row_data IN EXECUTE(query_str) LOOP
               return next row_data;
            END LOOP;
@@ -13057,3062 +10351,6 @@ GRANT SELECT ON information_schema.role_table_grants TO PUBLIC;
 
 RESET search_path;
 
-DO $DO$
-DECLARE
-    ans boolean;
-    user_name text;
-    global_query_str text;
-BEGIN
-    select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-    if ans = true then
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_os_runtime
-          (OUT node_name name, OUT id integer, OUT name text, OUT value numeric, OUT comments text, OUT cumulative boolean)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.os_runtime''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              id := row_data.id;
-              name := row_data.name;
-              value := row_data.value;
-              comments := row_data.comments;
-              cumulative := row_data.cumulative;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_os_threads()
-        RETURNS setof DBE_PERF.os_threads
-        AS $$
-        DECLARE
-          row_data DBE_PERF.os_threads%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.os_threads''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_instance_time
-          (OUT node_name name, OUT stat_id integer, OUT stat_name text, OUT value bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all CN DN node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.instance_time''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              stat_id := row_data.stat_id;
-              stat_name := row_data.stat_name;
-              value := row_data.value;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_workload_sql_count
-          (OUT node_name name, OUT workload name, OUT select_count bigint,
-           OUT update_count bigint, OUT insert_count bigint, OUT delete_count bigint,
-           OUT ddl_count bigint, OUT dml_count bigint, OUT dcl_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.workload_sql_count''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              workload := row_data.workload;
-              select_count := row_data.select_count;
-              update_count := row_data.update_count;
-              insert_count := row_data.insert_count;
-              delete_count := row_data.delete_count;
-              ddl_count := row_data.ddl_count;
-              dml_count := row_data.dml_count;
-              dcl_count := row_data.dcl_count;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_workload_sql_elapse_time
-          (OUT node_name name, OUT workload name,
-           OUT total_select_elapse bigint, OUT max_select_elapse bigint, OUT min_select_elapse bigint, OUT avg_select_elapse bigint,
-           OUT total_update_elapse bigint, OUT max_update_elapse bigint, OUT min_update_elapse bigint, OUT avg_update_elapse bigint,
-           OUT total_insert_elapse bigint, OUT max_insert_elapse bigint, OUT min_insert_elapse bigint, OUT avg_insert_elapse bigint,
-           OUT total_delete_elapse bigint, OUT max_delete_elapse bigint, OUT min_delete_elapse bigint, OUT avg_delete_elapse bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.workload_sql_elapse_time''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              workload := row_data.workload;
-              total_select_elapse := row_data.total_select_elapse;
-              max_select_elapse := row_data.max_select_elapse;
-              min_select_elapse := row_data.min_select_elapse;
-              avg_select_elapse := row_data.avg_select_elapse;
-              total_update_elapse := row_data.total_update_elapse;
-              max_update_elapse := row_data.max_update_elapse;
-              min_update_elapse := row_data.min_update_elapse;
-              avg_update_elapse := row_data.avg_update_elapse;
-              total_insert_elapse := row_data.total_insert_elapse;
-              max_insert_elapse := row_data.max_insert_elapse;
-              min_insert_elapse := row_data.min_insert_elapse;
-              avg_insert_elapse := row_data.avg_insert_elapse;
-              total_delete_elapse := row_data.total_delete_elapse;
-              max_delete_elapse := row_data.max_delete_elapse;
-              min_delete_elapse := row_data.min_delete_elapse;
-              avg_delete_elapse := row_data.avg_delete_elapse;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_user_transaction
-          (OUT node_name name, OUT usename name, OUT commit_counter bigint,
-           OUT rollback_counter bigint, OUT resp_min bigint, OUT resp_max bigint,
-           OUT resp_avg bigint, OUT resp_total bigint, OUT bg_commit_counter bigint,
-           OUT bg_rollback_counter bigint, OUT bg_resp_min bigint, OUT bg_resp_max bigint,
-           OUT bg_resp_avg bigint, OUT bg_resp_total bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.user_transaction''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              usename := row_data.usename;
-              commit_counter := row_data.commit_counter;
-              rollback_counter := row_data.rollback_counter;
-              resp_min := row_data.resp_min;
-              resp_max := row_data.resp_max;
-              resp_avg := row_data.resp_avg;
-              resp_total := row_data.resp_total;
-              bg_commit_counter := row_data.bg_commit_counter;
-              bg_rollback_counter := row_data.bg_rollback_counter;
-              bg_resp_min := row_data.bg_resp_min;
-              bg_resp_max := row_data.bg_resp_max;
-              bg_resp_avg := row_data.bg_resp_avg;
-              bg_resp_total := row_data.bg_resp_total;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_workload_transaction
-          (OUT node_name name, OUT workload name, OUT commit_counter bigint,
-           OUT rollback_counter bigint, OUT resp_min bigint, OUT resp_max bigint,
-           OUT resp_avg bigint, OUT resp_total bigint, OUT bg_commit_counter bigint,
-           OUT bg_rollback_counter bigint, OUT bg_resp_min bigint, OUT bg_resp_max bigint,
-           OUT bg_resp_avg bigint, OUT bg_resp_total bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.workload_transaction''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              workload := row_data.workload;
-              commit_counter := row_data.commit_counter;
-              rollback_counter := row_data.rollback_counter;
-              resp_min := row_data.resp_min;
-              resp_max := row_data.resp_max;
-              resp_avg := row_data.resp_avg;
-              resp_total := row_data.resp_total;
-              bg_commit_counter := row_data.bg_commit_counter;
-              bg_rollback_counter := row_data.bg_rollback_counter;
-              bg_resp_min := row_data.bg_resp_min;
-              bg_resp_max := row_data.bg_resp_max;
-              bg_resp_avg := row_data.bg_resp_avg;
-              bg_resp_total := row_data.bg_resp_total;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat
-          (OUT node_name name, OUT sessid text, OUT statid integer, OUT statname text, OUT statunit text, OUT value bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.session_stat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              sessid := row_data.sessid;
-              statid := row_data.statid;
-              statname := row_data.statname;
-              statunit := row_data.statunit;
-              value := row_data.value;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_time
-          (OUT node_name name, OUT sessid text, OUT stat_id integer, OUT stat_name text, OUT value bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.session_time''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              sessid := row_data.sessid;
-              stat_id := row_data.stat_id;
-              stat_name := row_data.stat_name;
-              value := row_data.value;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_memory
-          (OUT node_name name, OUT sessid text, OUT init_mem integer, OUT used_mem integer, OUT peak_mem integer)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.session_memory''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              sessid := row_data.sessid;
-              init_mem := row_data.init_mem;
-              used_mem := row_data.used_mem;
-              peak_mem := row_data.peak_mem;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_memory_detail
-          (OUT node_name name, OUT sessid text, OUT sesstype text, OUT contextname text, OUT level smallint,
-           OUT parent text, OUT totalsize bigint, OUT freesize bigint, OUT usedsize bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.session_memory_detail''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              sessid := row_data.sessid;
-              sesstype := row_data.sesstype;
-              contextname := row_data.contextname;
-              level := row_data.level;
-              parent := row_data.parent;
-              totalsize := row_data.totalsize;
-              freesize := row_data.freesize;
-              usedsize := row_data.usedsize;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_thread_wait_status()
-        RETURNS setof DBE_PERF.thread_wait_status
-        AS $$
-        DECLARE
-          row_data DBE_PERF.thread_wait_status%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn dn node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.thread_wait_status''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_wlm_workload_runtime()
-        RETURNS setof DBE_PERF.wlm_workload_runtime
-        AS $$
-        DECLARE
-          row_data DBE_PERF.wlm_workload_runtime%rowtype;
-          query_str text;
-          BEGIN
-            --Get all coordinator node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.wlm_workload_runtime''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_history()
-        RETURNS setof DBE_PERF.operator_ec_history
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_ec_history%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_ec_history''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_history_table()
-        RETURNS setof DBE_PERF.operator_ec_history_table
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_ec_history_table%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the CN node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_ec_history_table''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_history_table()
-        RETURNS setof DBE_PERF.operator_history_table
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_history_table%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the CN node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_history_table ''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_history()
-        RETURNS setof DBE_PERF.operator_history
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_history%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_history''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_runtime()
-        RETURNS setof DBE_PERF.operator_runtime
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_runtime%rowtype;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_runtime''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_history()
-        RETURNS setof DBE_PERF.statement_complex_history
-        AS $$
-        DECLARE
-          row_data DBE_PERF.statement_complex_history%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.statement_complex_history''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_history_table()
-        RETURNS setof DBE_PERF.statement_complex_history_table
-        AS $$
-        DECLARE
-          row_data DBE_PERF.statement_complex_history_table%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.statement_complex_history_table''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_complex_runtime()
-        RETURNS setof DBE_PERF.statement_complex_runtime
-        AS $$
-        DECLARE
-          row_data DBE_PERF.statement_complex_runtime%rowtype;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.statement_complex_runtime''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_memory_node_detail()
-        RETURNS setof DBE_PERF.memory_node_detail
-        AS $$
-        DECLARE
-          row_data DBE_PERF.memory_node_detail%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.memory_node_detail''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                RETURN NEXT row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_shared_memory_detail
-          (OUT node_name name, OUT contextname text, OUT level smallint, OUT parent text,
-           OUT totalsize bigint, OUT freesize bigint, OUT usedsize bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.shared_memory_detail''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_data.node_name;
-                contextname := row_data.contextname;
-                level := row_data.level;
-                parent := row_data.parent;
-                totalsize := row_data.totalsize;
-                freesize := row_data.freesize;
-                usedsize := row_data.usedsize;
-                RETURN NEXT;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_comm_delay()
-        RETURNS setof DBE_PERF.comm_delay
-        AS $$
-        DECLARE
-          row_data DBE_PERF.comm_delay%rowtype;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT * FROM DBE_PERF.comm_delay''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              RETURN NEXT row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_all_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_all_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_all_indexes
-          (OUT schemaname name, OUT toastrelschemaname name, OUT toastrelname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_blks_read AS idx_blks_read,
-              T.idx_blks_hit AS idx_blks_hit
-            FROM DBE_PERF.statio_all_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_all_sequences
-          (OUT node_name name, OUT relid oid, OUT schemaname name,
-           OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_all_sequences''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              blks_read := row_data.blks_read;
-              blks_hit := row_data.blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_all_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
-           OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
-           OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_all_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_all_tables
-          (OUT schemaname name, OUT relname name, OUT toastrelschemaname name, OUT toastrelname name, OUT heap_blks_read bigint,
-           OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
-           OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-              SELECT
-                  C.relname AS relname,
-                  C.schemaname AS schemaname,
-                  O.relname AS toastrelname,
-                  N.nspname AS toastrelschemaname,
-                  C.heap_blks_read AS heap_blks_read,
-                  C.heap_blks_hit AS heap_blks_hit,
-                  C.idx_blks_read AS idx_blks_read,
-                  C.idx_blks_hit AS idx_blks_hit,
-                  C.toast_blks_read AS toast_blks_read,
-                  C.toast_blks_hit AS toast_blks_hit,
-                  C.tidx_blks_read AS tidx_blks_read,
-                  C.tidx_blks_hit AS tidx_blks_hit
-              FROM DBE_PERF.statio_all_tables C
-                  LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-                  LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_sys_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_sys_indexes
-          (OUT schemaname name, OUT toastrelschemaname name, OUT toastrelname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_blks_read AS idx_blks_read,
-              T.idx_blks_hit AS idx_blks_hit
-            FROM DBE_PERF.statio_sys_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_sequences
-          (OUT node_name name, OUT relid oid, OUT schemaname name,
-           OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_sys_sequences''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              blks_read := row_data.blks_read;
-              blks_hit := row_data.blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_sys_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
-           OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
-           OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_sys_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_sys_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT heap_blks_read bigint, OUT heap_blks_hit bigint,
-           OUT idx_blks_read bigint, OUT idx_blks_hit bigint,
-           OUT toast_blks_read bigint, OUT toast_blks_hit bigint,
-           OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-                C.schemaname AS schemaname,
-                C.relname AS relname,
-                O.relname AS toastrelname,
-                N.nspname AS toastrelschemaname,
-                C.heap_blks_read AS heap_blks_read,
-                C.heap_blks_hit AS heap_blks_hit,
-                C.idx_blks_read AS idx_blks_read,
-                C.idx_blks_hit AS idx_blks_hit,
-                C.toast_blks_read AS toast_blks_read,
-                C.toast_blks_hit AS toast_blks_hit,
-                C.tidx_blks_read AS tidx_blks_read,
-                C.tidx_blks_hit AS tidx_blks_hit
-            FROM DBE_PERF.statio_sys_tables C
-                LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-                LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_user_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_user_indexes
-          (OUT schemaname name, OUT toastrelschemaname name, OUT toastrelname name,
-           OUT relname name, OUT indexrelname name, OUT idx_blks_read numeric, OUT idx_blks_hit numeric)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_blks_read AS idx_blks_read,
-              T.idx_blks_hit AS idx_blks_hit
-            FROM DBE_PERF.statio_user_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_sequences
-          (OUT node_name name, OUT relid oid, OUT schemaname name,
-           OUT relname name, OUT blks_read bigint, OUT blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_user_sequences''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              blks_read := row_data.blks_read;
-              blks_hit := row_data.blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statio_user_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT heap_blks_read bigint,
-           OUT heap_blks_hit bigint, OUT idx_blks_read bigint, OUT idx_blks_hit bigint, OUT toast_blks_read bigint,
-           OUT toast_blks_hit bigint, OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.statio_user_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statio_user_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT heap_blks_read bigint, OUT heap_blks_hit bigint,
-           OUT idx_blks_read bigint, OUT idx_blks_hit bigint,
-           OUT toast_blks_read bigint, OUT toast_blks_hit bigint,
-           OUT tidx_blks_read bigint, OUT tidx_blks_hit bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              C.schemaname AS schemaname,
-              C.relname AS relname,
-              O.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              C.heap_blks_read AS heap_blks_read,
-              C.heap_blks_hit AS heap_blks_hit,
-              C.idx_blks_read AS idx_blks_read,
-              C.idx_blks_hit AS idx_blks_hit,
-              C.toast_blks_read AS toast_blks_read,
-              C.toast_blks_hit AS toast_blks_hit,
-              C.tidx_blks_read AS tidx_blks_read,
-              C.tidx_blks_hit AS tidx_blks_hit
-            FROM DBE_PERF.statio_user_tables C
-              LEFT JOIN pg_class O ON C.relid = O.reltoastrelid
-              LEFT JOIN pg_namespace N ON O.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              heap_blks_read := row_data.heap_blks_read;
-              heap_blks_hit := row_data.heap_blks_hit;
-              idx_blks_read := row_data.idx_blks_read;
-              idx_blks_hit := row_data.idx_blks_hit;
-              toast_blks_read := row_data.toast_blks_read;
-              toast_blks_hit := row_data.toast_blks_hit;
-              tidx_blks_read := row_data.tidx_blks_read;
-              tidx_blks_hit := row_data.tidx_blks_hit;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_dn_stat_all_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-           OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            row_data record;
-            query_str text;
-            BEGIN
-                --Get all the node names
-                query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_all_tables''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    node_name := row_data.node_name;
-                    relid := row_data.relid;
-                    schemaname := row_data.schemaname;
-                    relname := row_data.relname;
-                    seq_scan := row_data.seq_scan;
-                    seq_tup_read := row_data.seq_tup_read;
-                    idx_scan := row_data.idx_scan;
-                    idx_tup_fetch := row_data.idx_tup_fetch;
-                    n_tup_ins := row_data.n_tup_ins;
-                    n_tup_upd := row_data.n_tup_upd;
-                    n_tup_del := row_data.n_tup_del;
-                    n_tup_hot_upd := row_data.n_tup_hot_upd;
-                    n_live_tup := row_data.n_live_tup;
-                    n_dead_tup := row_data.n_dead_tup;
-                    last_vacuum := row_data.last_vacuum;
-                    last_autovacuum := row_data.last_autovacuum;
-                    last_analyze := row_data.last_analyze;
-                    last_autoanalyze := row_data.last_autoanalyze;
-                    vacuum_count := row_data.vacuum_count;
-                    autovacuum_count := row_data.autovacuum_count;
-                    analyze_count := row_data.analyze_count;
-                    autoanalyze_count := row_data.autoanalyze_count;
-                    return next;
-                END LOOP;
-                return;
-            END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_dn_stat_all_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-           OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            row_data record;
-            query_str text;
-            BEGIN
-                --Get all the node names
-                query_str := 'EXECUTE DIRECT ON DATANODES ''
-                    SELECT
-                        T.schemaname AS schemaname,
-                        T.relname AS relname,
-                        C.relname AS toastrelname,
-                        N.nspname AS toastrelschemaname,
-                        T.seq_scan AS seq_scan,
-                        T.seq_tup_read AS seq_tup_read,
-                        T.idx_scan AS idx_scan,
-                        T.idx_tup_fetch AS idx_tup_fetch,
-                        T.n_tup_ins AS n_tup_ins,
-                        T.n_tup_upd AS n_tup_upd,
-                        T.n_tup_del AS n_tup_del,
-                        T.n_tup_hot_upd AS n_tup_hot_upd,
-                        T.n_live_tup AS n_live_tup,
-                        T.n_dead_tup AS n_dead_tup,
-                        T.last_vacuum AS last_vacuum,
-                        T.last_autovacuum AS last_autovacuum,
-                        T.last_analyze AS last_analyze,
-                        T.last_autoanalyze AS last_autoanalyze,
-                        T.vacuum_count AS vacuum_count,
-                        T.autovacuum_count AS autovacuum_count,
-                        T.analyze_count AS analyze_count,
-                        T.autoanalyze_count AS autoanalyze_count
-                    FROM DBE_PERF.stat_all_tables T
-                        LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-                        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    schemaname := row_data.schemaname;
-                    IF row_data.toastrelname IS NULL THEN
-                        relname := row_data.relname;
-                    ELSE
-                        relname := NULL;
-                    END IF;
-                    toastrelschemaname := row_data.toastrelschemaname;
-                    toastrelname := row_data.toastrelname;
-                    seq_scan := row_data.seq_scan;
-                    seq_tup_read := row_data.seq_tup_read;
-                    idx_scan := row_data.idx_scan;
-                    idx_tup_fetch := row_data.idx_tup_fetch;
-                    n_tup_ins := row_data.n_tup_ins;
-                    n_tup_upd := row_data.n_tup_upd;
-                    n_tup_del := row_data.n_tup_del;
-                    n_tup_hot_upd := row_data.n_tup_hot_upd;
-                    n_live_tup := row_data.n_live_tup;
-                    n_dead_tup := row_data.n_dead_tup;
-                    last_vacuum := row_data.last_vacuum;
-                    last_autovacuum := row_data.last_autovacuum;
-                    last_analyze := row_data.last_analyze;
-                    last_autoanalyze := row_data.last_autoanalyze;
-                    vacuum_count := row_data.vacuum_count;
-                    autovacuum_count := row_data.autovacuum_count;
-                    analyze_count := row_data.analyze_count;
-                    autoanalyze_count := row_data.autoanalyze_count;
-                    return next;
-                END LOOP;
-                return;
-            END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_cn_stat_all_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-           OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            row_data record;
-            query_str text;
-            BEGIN
-                --Get all the node names
-                query_str := 'EXECUTE DIRECT ON COORDINATORS ''
-                    SELECT
-                        T.schemaname AS schemaname,
-                        T.relname AS relname,
-                        C.relname AS toastrelname,
-                        N.nspname AS toastrelschemaname,
-                        T.seq_scan AS seq_scan,
-                        T.seq_tup_read AS seq_tup_read,
-                        T.idx_scan AS idx_scan,
-                        T.idx_tup_fetch AS idx_tup_fetch,
-                        T.n_tup_ins AS n_tup_ins,
-                        T.n_tup_upd AS n_tup_upd,
-                        T.n_tup_del AS n_tup_del,
-                        T.n_tup_hot_upd AS n_tup_hot_upd,
-                        T.n_live_tup AS n_live_tup,
-                        T.n_dead_tup AS n_dead_tup,
-                        T.last_vacuum AS last_vacuum,
-                        T.last_autovacuum AS last_autovacuum,
-                        T.last_analyze AS last_analyze,
-                        T.last_autoanalyze AS last_autoanalyze,
-                        T.vacuum_count AS vacuum_count,
-                        T.autovacuum_count AS autovacuum_count,
-                        T.analyze_count AS analyze_count,
-                        T.autoanalyze_count AS autoanalyze_count
-                    FROM DBE_PERF.stat_all_tables T
-                        LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-                        LEFT JOIN pg_namespace N ON C.relnamespace = N.oid
-                    WHERE T.schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    schemaname := row_data.schemaname;
-                    IF row_data.toastrelname IS NULL THEN
-                        relname := row_data.relname;
-                    ELSE
-                        relname := NULL;
-                    END IF;
-                    toastrelschemaname := row_data.toastrelschemaname;
-                    toastrelname := row_data.toastrelname;
-                    seq_scan := row_data.seq_scan;
-                    seq_tup_read := row_data.seq_tup_read;
-                    idx_scan := row_data.idx_scan;
-                    idx_tup_fetch := row_data.idx_tup_fetch;
-                    n_tup_ins := row_data.n_tup_ins;
-                    n_tup_upd := row_data.n_tup_upd;
-                    n_tup_del := row_data.n_tup_del;
-                    n_tup_hot_upd := row_data.n_tup_hot_upd;
-                    n_live_tup := row_data.n_live_tup;
-                    n_dead_tup := row_data.n_dead_tup;
-                    last_vacuum := row_data.last_vacuum;
-                    last_autovacuum := row_data.last_autovacuum;
-                    last_analyze := row_data.last_analyze;
-                    last_autoanalyze := row_data.last_autoanalyze;
-                    vacuum_count := row_data.vacuum_count;
-                    autovacuum_count := row_data.autovacuum_count;
-                    analyze_count := row_data.analyze_count;
-                    autoanalyze_count := row_data.autoanalyze_count;
-                    return next;
-                END LOOP;
-                return;
-            END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_all_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
-           OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_all_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_all_indexes
-          (OUT schemaname name, OUT relname name, OUT indexrelname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_read AS idx_tup_read,
-              T.idx_tup_fetch AS idx_tup_fetch
-            FROM DBE_PERF.stat_all_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_sys_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
-           OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_sys_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              n_live_tup := row_data.n_live_tup;
-              n_dead_tup := row_data.n_dead_tup;
-              last_vacuum := row_data.last_vacuum;
-              last_autovacuum := row_data.last_autovacuum;
-              last_analyze := row_data.last_analyze;
-              last_autoanalyze := row_data.last_autoanalyze;
-              vacuum_count := row_data.vacuum_count;
-              autovacuum_count := row_data.autovacuum_count;
-              analyze_count := row_data.analyze_count;
-              autoanalyze_count := row_data.autoanalyze_count;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_sys_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint,
-           OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.schemaname AS schemaname,
-              T.relname AS relname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.seq_scan AS seq_scan,
-              T.seq_tup_read AS seq_tup_read,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_fetch AS idx_tup_fetch,
-              T.n_tup_ins AS n_tup_ins,
-              T.n_tup_upd AS n_tup_upd,
-              T.n_tup_del AS n_tup_del,
-              T.n_tup_hot_upd AS n_tup_hot_upd,
-              T.n_live_tup AS n_live_tup,
-              T.n_dead_tup AS n_dead_tup,
-              T.last_vacuum AS last_vacuum,
-              T.last_autovacuum AS last_autovacuum,
-              T.last_analyze AS last_analyze,
-              T.last_autoanalyze AS last_autoanalyze,
-              T.vacuum_count AS vacuum_count,
-              T.autovacuum_count AS autovacuum_count,
-              T.analyze_count AS analyze_count,
-              T.autoanalyze_count AS autoanalyze_count
-            FROM DBE_PERF.stat_sys_tables T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              n_live_tup := row_data.n_live_tup;
-              n_dead_tup := row_data.n_dead_tup;
-              last_vacuum := row_data.last_vacuum;
-              last_autovacuum := row_data.last_autovacuum;
-              last_analyze := row_data.last_analyze;
-              last_autoanalyze := row_data.last_autoanalyze;
-              vacuum_count := row_data.vacuum_count;
-              autovacuum_count := row_data.autovacuum_count;
-              analyze_count := row_data.analyze_count;
-              autoanalyze_count := row_data.autoanalyze_count;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_sys_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
-           OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_sys_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_sys_indexes
-          (OUT schemaname name, OUT relname name, OUT indexrelname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_read AS idx_tup_read,
-              T.idx_tup_fetch AS idx_tup_fetch
-            FROM DBE_PERF.stat_sys_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
-           OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_user_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              n_live_tup := row_data.n_live_tup;
-              n_dead_tup := row_data.n_dead_tup;
-              last_vacuum := row_data.last_vacuum;
-              last_autovacuum := row_data.last_autovacuum;
-              last_analyze := row_data.last_analyze;
-              last_autoanalyze := row_data.last_autoanalyze;
-              vacuum_count := row_data.vacuum_count;
-              autovacuum_count := row_data.autovacuum_count;
-              analyze_count := row_data.analyze_count;
-              autoanalyze_count := row_data.autoanalyze_count;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_user_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint,
-           OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''
-            SELECT
-              T.schemaname AS schemaname,
-              T.relname AS relname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.seq_scan AS seq_scan,
-              T.seq_tup_read AS seq_tup_read,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_fetch AS idx_tup_fetch,
-              T.n_tup_ins AS n_tup_ins,
-              T.n_tup_upd AS n_tup_upd,
-              T.n_tup_del AS n_tup_del,
-              T.n_tup_hot_upd AS n_tup_hot_upd,
-              T.n_live_tup AS n_live_tup,
-              T.n_dead_tup AS n_dead_tup,
-              T.last_vacuum AS last_vacuum,
-              T.last_autovacuum AS last_autovacuum,
-              T.last_analyze AS last_analyze,
-              T.last_autoanalyze AS last_autoanalyze,
-              T.vacuum_count AS vacuum_count,
-              T.autovacuum_count AS autovacuum_count,
-              T.analyze_count AS analyze_count,
-              T.autoanalyze_count AS autoanalyze_count
-            FROM DBE_PERF.stat_user_tables T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              n_live_tup := row_data.n_live_tup;
-              n_dead_tup := row_data.n_dead_tup;
-              last_vacuum := row_data.last_vacuum;
-              last_autovacuum := row_data.last_autovacuum;
-              last_analyze := row_data.last_analyze;
-              last_autoanalyze := row_data.last_autoanalyze;
-              vacuum_count := row_data.vacuum_count;
-              autovacuum_count := row_data.autovacuum_count;
-              analyze_count := row_data.analyze_count;
-              autoanalyze_count := row_data.autoanalyze_count;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_indexes
-          (OUT node_name name, OUT relid oid, OUT indexrelid oid, OUT schemaname name, OUT relname name,
-           OUT indexrelname name, OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_user_indexes''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              indexrelid := row_data.indexrelid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              indexrelname := row_data.indexrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_user_indexes
-          (OUT schemaname name, OUT relname name, OUT indexrelname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT idx_scan bigint, OUT idx_tup_read bigint, OUT idx_tup_fetch bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.indexrelname AS indexrelname,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_read AS idx_tup_read,
-              T.idx_tup_fetch AS idx_tup_fetch
-            FROM DBE_PERF.stat_user_indexes T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-                  indexrelname := row_data.indexrelname;
-              ELSE
-                  relname := NULL;
-                  indexrelname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              idx_scan := row_data.idx_scan;
-              idx_tup_read := row_data.idx_tup_read;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_database
-          (OUT node_name name, OUT datid oid, OUT datname name, OUT numbackends integer, OUT xact_commit bigint,
-           OUT xact_rollback bigint, OUT blks_read bigint, OUT blks_hit bigint, OUT tup_returned bigint, OUT tup_fetched bigint,
-           OUT tup_inserted bigint, OUT tup_updated bigint, OUT tup_deleted bigint, OUT conflicts bigint, OUT temp_files bigint,
-           OUT temp_bytes bigint, OUT deadlocks bigint, OUT blk_read_time double precision, OUT blk_write_time double precision,
-           OUT stats_reset timestamp with time zone)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_database''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              datid := row_data.datid;
-              datname := row_data.datname;
-              numbackends := row_data.numbackends;
-              xact_commit := row_data.xact_commit;
-              xact_rollback := row_data.xact_rollback;
-              blks_read := row_data.blks_read;
-              blks_hit := row_data.blks_hit;
-              tup_returned := row_data.tup_returned;
-              tup_fetched := row_data.tup_fetched;
-              tup_inserted := row_data.tup_inserted;
-              tup_updated := row_data.tup_updated;
-              tup_deleted := row_data.tup_deleted;
-              conflicts := row_data.conflicts;
-              temp_files := row_data.temp_files;
-              temp_bytes := row_data.temp_bytes;
-              deadlocks := row_data.deadlocks;
-              blk_read_time := row_data.blk_read_time;
-              blk_write_time := row_data.blk_write_time;
-              stats_reset := row_data.stats_reset;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_database_conflicts
-          (OUT node_name name, OUT datid oid, OUT datname name, OUT confl_tablespace bigint,
-           OUT confl_lock bigint, OUT confl_snapshot bigint, OUT confl_bufferpin bigint, OUT confl_deadlock bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_database_conflicts''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              datid := row_data.datid;
-              datname := row_data.datname;
-              confl_tablespace := row_data.confl_tablespace;
-              confl_lock := row_data.confl_lock;
-              confl_snapshot := row_data.confl_snapshot;
-              confl_bufferpin := row_data.confl_bufferpin;
-              confl_deadlock := row_data.confl_deadlock;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_sys_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
-           OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_xact_sys_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_sys_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint,
-           OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.seq_scan AS seq_scan,
-              T.seq_tup_read AS seq_tup_read,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_fetch AS idx_tup_fetch,
-              T.n_tup_ins AS n_tup_ins,
-              T.n_tup_upd AS n_tup_upd,
-              T.n_tup_del AS n_tup_del,
-              T.n_tup_hot_upd AS n_tup_hot_upd
-            FROM DBE_PERF.stat_xact_sys_tables T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_user_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
-           OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_xact_user_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              relid := row_data.relid;
-              schemaname := row_data.schemaname;
-              relname := row_data.relname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_user_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint,
-           OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''
-            SELECT
-              T.relname AS relname,
-              T.schemaname AS schemaname,
-              C.relname AS toastrelname,
-              N.nspname AS toastrelschemaname,
-              T.seq_scan AS seq_scan,
-              T.seq_tup_read AS seq_tup_read,
-              T.idx_scan AS idx_scan,
-              T.idx_tup_fetch AS idx_tup_fetch,
-              T.n_tup_ins AS n_tup_ins,
-              T.n_tup_upd AS n_tup_upd,
-              T.n_tup_del AS n_tup_del,
-              T.n_tup_hot_upd AS n_tup_hot_upd
-            FROM DBE_PERF.stat_xact_user_tables T
-              LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-              LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              schemaname := row_data.schemaname;
-              IF row_data.toastrelname IS NULL THEN
-                  relname := row_data.relname;
-              ELSE
-                  relname := NULL;
-              END IF;
-              toastrelschemaname := row_data.toastrelschemaname;
-              toastrelname := row_data.toastrelname;
-              seq_scan := row_data.seq_scan;
-              seq_tup_read := row_data.seq_tup_read;
-              idx_scan := row_data.idx_scan;
-              idx_tup_fetch := row_data.idx_tup_fetch;
-              n_tup_ins := row_data.n_tup_ins;
-              n_tup_upd := row_data.n_tup_upd;
-              n_tup_del := row_data.n_tup_del;
-              n_tup_hot_upd := row_data.n_tup_hot_upd;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_user_functions
-          (OUT node_name name, OUT funcid oid, OUT schemaname name, OUT funcname name, OUT calls bigint,
-           OUT total_time double precision, OUT self_time double precision)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_user_functions''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              funcid := row_data.funcid;
-              schemaname := row_data.schemaname;
-              funcname := row_data.funcname;
-              calls := row_data.calls;
-              total_time := row_data.total_time;
-              self_time := row_data.self_time;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_user_functions
-          (OUT node_name name, OUT funcid oid, OUT schemaname name, OUT funcname name, OUT calls bigint,
-           OUT total_time double precision, OUT self_time double precision)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_xact_user_functions''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              funcid := row_data.funcid;
-              schemaname := row_data.schemaname;
-              funcname := row_data.funcname;
-              calls := row_data.calls;
-              total_time := row_data.total_time;
-              self_time := row_data.self_time;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_bad_block
-          (OUT node_name TEXT, OUT databaseid INT4, OUT tablespaceid INT4, OUT relfilenode INT4, OUT forknum INT4,
-           OUT error_count INT4, OUT first_time timestamp with time zone, OUT last_time timestamp with time zone)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          each_node_out record;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.stat_bad_block''';
-            FOR each_node_out IN EXECUTE(query_str) LOOP
-              node_name := each_node_out.node_name;
-              databaseid := each_node_out.databaseid;
-              tablespaceid := each_node_out.tablespaceid;
-              relfilenode := each_node_out.relfilenode;
-              forknum := each_node_out.forknum;
-              error_count := each_node_out.error_count;
-              first_time := each_node_out.first_time;
-              last_time := each_node_out.last_time;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_file_redo_iostat
-          (OUT node_name name, OUT phywrts bigint, OUT phyblkwrt bigint, OUT writetim bigint,
-           OUT avgiotim bigint, OUT lstiotim bigint, OUT miniotim bigint, OUT maxiowtm bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.file_redo_iostat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              phywrts := row_data.phywrts;
-              phyblkwrt := row_data.phyblkwrt;
-              writetim := row_data.writetim;
-              avgiotim := row_data.avgiotim;
-              lstiotim := row_data.lstiotim;
-              miniotim := row_data.miniotim;
-              maxiowtm := row_data.maxiowtm;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_rel_iostat
-          (OUT node_name name, OUT phyrds bigint,
-          OUT phywrts bigint, OUT phyblkrd bigint, OUT phyblkwrt bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.local_rel_iostat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              phyrds := row_data.phyrds;
-              phywrts := row_data.phywrts;
-              phyblkrd := row_data.phyblkrd;
-              phyblkwrt := row_data.phyblkwrt;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_file_iostat
-          (OUT node_name name, OUT filenum oid, OUT dbid oid, OUT spcid oid, OUT phyrds bigint,
-           OUT phywrts bigint, OUT phyblkrd bigint, OUT phyblkwrt bigint, OUT readtim bigint,
-           OUT writetim bigint, OUT avgiotim bigint, OUT lstiotim bigint, OUT miniotim bigint, OUT maxiowtm bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.file_iostat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              filenum := row_data.filenum;
-              dbid := row_data.dbid;
-              spcid := row_data.spcid;
-              phyrds := row_data.phyrds;
-              phywrts := row_data.phywrts;
-              phyblkrd := row_data.phyblkrd;
-              phyblkwrt := row_data.phyblkwrt;
-              readtim := row_data.readtim;
-              writetim := row_data.writetim;
-              avgiotim := row_data.avgiotim;
-              lstiotim := row_data.lstiotim;
-              miniotim := row_data.miniotim;
-              maxiowtm := row_data.maxiowtm;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_locks
-          (OUT node_name name,
-           OUT locktype text,
-           OUT database oid,
-           OUT relation oid,
-           OUT page integer,
-           OUT tuple smallint,
-           OUT virtualxid text,
-           OUT transactionid xid,
-           OUT classid oid,
-           OUT objid oid,
-           OUT objsubid smallint,
-           OUT virtualtransaction text,
-           OUT pid bigint,
-           OUT mode text,
-           OUT granted boolean,
-           OUT fastpath boolean)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.locks''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              locktype := row_data.locktype;
-              database := row_data.database;
-              relation := row_data.relation;
-              page := row_data.page;
-              tuple := row_data.tuple;
-              virtualxid := row_data.virtualxid;
-              transactionid := row_data.classid;
-              objid := row_data.objid;
-              objsubid := row_data.objsubid;
-              virtualtransaction := row_data.virtualtransaction;
-              pid := row_data.pid;
-              mode := row_data.mode;
-              granted := row_data.granted;
-              fastpath := row_data.fastpath;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_slots
-          (OUT node_name name,
-           OUT slot_name text,
-           OUT plugin text,
-           OUT slot_type text,
-           OUT datoid oid,
-           OUT database name,
-           OUT active boolean,
-           OUT x_min xid,
-           OUT catalog_xmin xid,
-           OUT restart_lsn text,
-           OUT dummy_standby boolean)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.replication_slots''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              slot_name := row_data.slot_name;
-              plugin := row_data.plugin;
-              slot_type := row_data.slot_type;
-              datoid := row_data.datoid;
-              database := row_data.database;
-              active := row_data.active;
-              x_min := row_data.xmin;
-              catalog_xmin := row_data.catalog_xmin;
-              restart_lsn := row_data.restart_lsn;
-              dummy_standby := row_data.dummy_standby;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_bgwriter_stat
-          (OUT node_name name,
-           OUT checkpoints_timed bigint,
-           OUT checkpoints_req bigint,
-           OUT checkpoint_write_time double precision,
-           OUT checkpoint_sync_time double precision,
-           OUT buffers_checkpoint bigint,
-           OUT buffers_clean bigint,
-           OUT maxwritten_clean bigint,
-           OUT buffers_backend bigint,
-           OUT buffers_backend_fsync bigint,
-           OUT buffers_alloc bigint,
-           OUT stats_reset timestamp with time zone)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.bgwriter_stat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              checkpoints_timed := row_data.checkpoints_timed;
-              checkpoints_req := row_data.checkpoints_req;
-              checkpoint_write_time := row_data.checkpoint_write_time;
-              checkpoint_sync_time := row_data.checkpoint_sync_time;
-              buffers_checkpoint := row_data.buffers_checkpoint;
-              buffers_clean := row_data.buffers_clean;
-              maxwritten_clean := row_data.maxwritten_clean;
-              buffers_backend := row_data.buffers_backend;
-              buffers_backend_fsync := row_data.buffers_backend_fsync;
-              buffers_alloc := row_data.buffers_alloc;
-              stats_reset := row_data.stats_reset;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_replication_stat
-          (OUT node_name name,
-           OUT pid bigint,
-           OUT usesysid oid,
-           OUT usename name,
-           OUT application_name text,
-           OUT client_addr inet,
-           OUT client_hostname text,
-           OUT client_port integer,
-           OUT backend_start timestamp with time zone,
-           OUT state text,
-           OUT sender_sent_location text,
-           OUT receiver_write_location text,
-           OUT receiver_flush_location text,
-           OUT receiver_replay_location text,
-           OUT sync_priority integer,
-           OUT sync_state text)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.replication_stat''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              pid := row_data.pid;
-              usesysid := row_data.usesysid;
-              usename := row_data.usename;
-              client_addr := row_data.client_addr;
-              client_hostname := row_data.client_hostname;
-              client_port := row_data.client_port;
-              state := row_data.state;
-              sender_sent_location := row_data.sender_sent_location;
-              receiver_write_location := row_data.receiver_write_location;
-              receiver_flush_location := row_data.receiver_flush_location;
-              receiver_replay_location := row_data.receiver_replay_location;
-              sync_priority := row_data.sync_priority;
-              sync_state := row_data.sync_state;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_pooler_status
-          (OUT source_node_name name,
-          OUT database text,
-          OUT user_name text,
-          OUT tid bigint,
-          OUT node_oid bigint,
-          OUT node_name name,
-          OUT in_use boolean,
-          OUT fdsock bigint,
-          OUT remote_pid bigint,
-          OUT session_params text)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.pooler_status''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              source_node_name := row_data.node_name;
-              database := row_data.database;
-              user_name := row_data.user_name;
-              tid := row_data.tid;
-              node_oid := row_data.node_oid;
-              node_name := row_data.node_name;
-              in_use := row_data.in_use;
-              fdsock := row_data.fdsock;
-              remote_pid := row_data.remote_pid;
-              session_params := row_data.session_params;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_transactions_running_xacts()
-        RETURNS setof DBE_PERF.transactions_running_xacts
-        AS $$
-        DECLARE
-          row_data DBE_PERF.transactions_running_xacts%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn dn node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.transactions_running_xacts''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_transactions_running_xacts()
-        RETURNS setof DBE_PERF.transactions_running_xacts
-        AS $$
-        DECLARE
-          row_data DBE_PERF.transactions_running_xacts%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.transactions_running_xacts''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_transactions_prepared_xacts()
-        RETURNS setof DBE_PERF.transactions_prepared_xacts
-        AS $$
-        DECLARE
-          row_data DBE_PERF.transactions_prepared_xacts%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn dn node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.transactions_prepared_xacts''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_transactions_prepared_xacts()
-        RETURNS setof DBE_PERF.transactions_prepared_xacts
-        AS $$
-        DECLARE
-          row_data DBE_PERF.transactions_prepared_xacts%rowtype;
-          query_str text;
-          BEGIN
-            --Get all cn node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.transactions_prepared_xacts''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_statement()
-        RETURNS setof DBE_PERF.statement
-        AS $$
-        DECLARE
-          row_data DBE_PERF.statement%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.statement''';
-              FOR row_data IN EXECUTE(query_str) LOOP
-                return next row_data;
-             END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_statement_count()
-        RETURNS setof DBE_PERF.statement_count
-        AS $$
-        DECLARE
-          row_data DBE_PERF.statement_count%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.statement_count''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_config_settings
-          (out node_name text,
-           out name text,
-           out setting text,
-           out unit text,
-           out category text,
-           out short_desc text,
-           out extra_desc text,
-           out context text,
-           out vartype text,
-           out source text,
-           out min_val text,
-           out max_val text,
-           out enumvals text[],
-           out boot_val text,
-           out reset_val text,
-           out sourcefile text,
-           out sourceline integer)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.config_settings''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              name := row_data.name;
-              setting := row_data.setting;
-              unit := row_data.unit;
-              category := row_data.category;
-              short_desc := row_data.short_desc;
-              extra_desc := row_data.extra_desc;
-              context := row_data.context;
-              vartype := row_data.vartype;
-              source := row_data.source;
-              min_val := row_data.min_val;
-              max_val := row_data.max_val;
-              enumvals := row_data.enumvals;
-              boot_val := row_data.boot_val;
-              reset_val := row_data.reset_val;
-              sourcefile := row_data.sourcefile;
-              sourceline := row_data.sourceline;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_wait_events()
-        RETURNS setof DBE_PERF.wait_events
-        AS $$
-        DECLARE
-          row_data DBE_PERF.wait_events%rowtype;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.wait_events''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              return next row_data;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_user_login()
-        RETURNS SETOF DBE_PERF.user_login
-        AS $$
-        DECLARE
-          ROW_DATA DBE_PERF.user_login%ROWTYPE;
-          QUERY_STR TEXT;
-          BEGIN
-            QUERY_STR := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.user_login''';
-            FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-              RETURN NEXT ROW_DATA;
-            END LOOP;
-            RETURN;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_record_reset_time(OUT node_name text, OUT reset_time timestamp with time zone)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM get_node_stat_reset_time()''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-              node_name := row_data.node_name;
-              reset_time := row_data.get_node_stat_reset_time;
-              return next;
-            END LOOP;
-            RETURN;
-          END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_threadpool_status()
-        RETURNS SETOF DBE_PERF.local_threadpool_status
-        AS $$
-        DECLARE
-          ROW_DATA DBE_PERF.local_threadpool_status%ROWTYPE;
-          QUERY_STR TEXT;
-        BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.local_threadpool_status''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-            RETURN NEXT ROW_DATA;
-          END LOOP;
-          RETURN;
-        END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_status()
-        RETURNS SETOF DBE_PERF.local_plancache_status
-        AS $$
-        DECLARE
-          ROW_DATA DBE_PERF.local_plancache_status%ROWTYPE;
-          QUERY_STR TEXT;
-        BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.local_plancache_status''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-            RETURN NEXT ROW_DATA;
-          END LOOP;
-          RETURN;
-        END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_prepare_statement_status()
-        RETURNS SETOF DBE_PERF.local_prepare_statement_status
-        AS $$
-        DECLARE
-          ROW_DATA DBE_PERF.local_prepare_statement_status%ROWTYPE;
-          QUERY_STR TEXT;
-        BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON ALL ''SELECT * FROM DBE_PERF.local_prepare_statement_status''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-            RETURN NEXT ROW_DATA;
-          END LOOP;
-          RETURN;
-        END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_slow_query_info()
-        RETURNS setof DBE_PERF.gs_slow_query_info
-        AS $$
-        DECLARE
-        		row_data DBE_PERF.gs_slow_query_info%rowtype;
-        		query_str text;
-        		BEGIN
-        				--Get all the node names
-        				query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.gs_slow_query_info''';
-        				FOR row_data IN EXECUTE(query_str) LOOP
-        						return next row_data;
-        				END LOOP;
-        				return;
-        		END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_slow_query_info_bytime(text, TIMESTAMP, TIMESTAMP, int)
-        RETURNS setof DBE_PERF.gs_slow_query_info
-        AS $$
-        DECLARE
-        		row_data DBE_PERF.gs_slow_query_info%rowtype;
-        		query_str text;
-        		query_str_cn text;
-        		BEGIN
-        				IF $1 IN ('start_time', 'finish_time') THEN
-        				ELSE
-        					 raise WARNING 'Illegal character entered for function, colname must be start_time or finish_time';
-        					return;
-        				END IF;
-        				--Get all the node names
-        				query_str_cn := 'SELECT * FROM DBE_PERF.gs_slow_query_info where '||$1||'>'''''||$2||''''' and '||$1||'<'''''||$3||''''' limit '||$4;
-        				query_str := 'EXECUTE DIRECT ON COORDINATORS ''' || query_str_cn||''';';
-        				FOR row_data IN EXECUTE(query_str) LOOP
-        						return next row_data;
-        				END LOOP;
-        				return;
-        		END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        DROP FUNCTION IF EXISTS DBE_PERF.get_global_active_session() CASCADE;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_active_session
-          (OUT node_name text,
-           OUT sampleid bigint,
-           OUT sample_time timestamp without time zone,
-           OUT need_flush_sample boolean,
-           OUT databaseid oid,
-           OUT thread_id bigint,
-           OUT sessionid bigint,
-           OUT start_time timestamp without time zone,
-           OUT event text,
-           OUT lwtid integer,
-           OUT psessionid bigint,
-           OUT tlevel integer,
-           OUT smpid integer,
-           OUT userid oid,
-           OUT application_name text,
-           OUT client_addr inet,
-           OUT client_hostname text,
-           OUT client_port integer,
-           OUT query_id bigint,
-           OUT unique_query_id bigint,
-           OUT user_id oid,
-           OUT cn_id integer,
-           OUT unique_query text,
-           OUT locktag text,
-           OUT lockmode text,
-           OUT block_sessionid bigint,
-           OUT final_block_sessionid bigint,
-           OUT wait_status text)
-        RETURNS SETOF record
-        AS $$
-        DECLARE
-          ROW_DATA record;
-          QUERY_STR TEXT;
-        BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM DBE_PERF.local_active_session''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-                node_name := ROW_DATA.node_name;
-                sampleid := ROW_DATA.sampleid;
-                sample_time := ROW_DATA.sample_time;
-                need_flush_sample := ROW_DATA.need_flush_sample;
-                databaseid := ROW_DATA.databaseid;
-                thread_id := ROW_DATA.thread_id;
-                sessionid := ROW_DATA.sessionid;
-                start_time := ROW_DATA.start_time;
-                event := ROW_DATA.event;
-                lwtid := ROW_DATA.lwtid;
-                psessionid := ROW_DATA.psessionid;
-                tlevel := ROW_DATA.tlevel;
-                smpid := ROW_DATA.smpid;
-                userid := ROW_DATA.userid;
-                application_name := ROW_DATA.application_name;
-                client_addr := ROW_DATA.client_addr;
-                client_hostname := ROW_DATA.client_hostname;
-                client_port := ROW_DATA.client_port;
-                query_id := ROW_DATA.query_id;
-                unique_query_id := ROW_DATA.unique_query_id;
-                user_id := ROW_DATA.user_id;
-                cn_id := ROW_DATA.cn_id;
-                unique_query := ROW_DATA.unique_query;
-                locktag := ROW_DATA.locktag;
-                lockmode := ROW_DATA.lockmode;
-                block_sessionid := ROW_DATA.block_sessionid;
-                final_block_sessionid := ROW_DATA.final_block_sessionid;
-          wait_status := ROW_DATA.wait_status;
-            RETURN NEXT;
-          END LOOP;
-          RETURN;
-        END; $$
-        LANGUAGE 'plpgsql';
-
-
-        CREATE OR REPLACE VIEW DBE_PERF.global_active_session AS
-          SELECT * FROM DBE_PERF.get_global_active_session();
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_stat_xact_all_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name, OUT seq_scan bigint,
-           OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          row_name record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name,* FROM DBE_PERF.stat_xact_all_tables''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_data.node_name;
-                relid := row_data.relid;
-                schemaname := row_data.schemaname;
-                relname := row_data.relname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                return next;
-            END LOOP;
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name,* FROM DBE_PERF.stat_xact_all_tables where schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                node_name := row_data.node_name;
-                relid := row_data.relid;
-                schemaname := row_data.schemaname;
-                relname := row_data.relname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_summary_stat_xact_all_tables
-          (OUT schemaname name, OUT relname name,
-           OUT toastrelschemaname name, OUT toastrelname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint,
-           OUT idx_scan bigint, OUT idx_tup_fetch bigint, OUT n_tup_ins bigint,
-           OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          query_str text;
-          BEGIN
-            --Get all the node names
-            query_str := 'EXECUTE DIRECT ON DATANODES ''
-            SELECT
-                T.schemaname AS schemaname,
-                T.relname AS relname,
-                N.nspname AS toastrelschemaname,
-                C.relname AS toastrelname,
-                T.seq_scan AS seq_scan,
-                T.seq_tup_read AS seq_tup_read,
-                T.idx_scan AS idx_scan,
-                T.idx_tup_fetch AS idx_tup_fetch,
-                T.n_tup_ins AS n_tup_ins,
-                T.n_tup_upd AS n_tup_upd,
-                T.n_tup_del AS n_tup_del,
-                T.n_tup_hot_upd AS n_tup_hot_upd
-            FROM DBE_PERF.stat_xact_all_tables T
-                LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-                LEFT JOIN pg_namespace N ON C.relnamespace = N.oid''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                schemaname := row_data.schemaname;
-                IF row_data.toastrelname IS NULL THEN
-                    relname := row_data.relname;
-                ELSE
-                    relname := NULL;
-                END IF;
-                toastrelschemaname := row_data.toastrelschemaname;
-                toastrelname := row_data.toastrelname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                return next;
-            END LOOP;
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''
-            SELECT
-                T.relname AS relname,
-                T.schemaname AS schemaname,
-                C.relname AS toastrelname,
-                N.nspname AS toastrelschemaname,
-                T.seq_scan AS seq_scan,
-                T.seq_tup_read AS seq_tup_read,
-                T.idx_scan AS idx_scan,
-                T.idx_tup_fetch AS idx_tup_fetch,
-                T.n_tup_ins AS n_tup_ins,
-                T.n_tup_upd AS n_tup_upd,
-                T.n_tup_del AS n_tup_del,
-                T.n_tup_hot_upd AS n_tup_hot_upd
-            FROM DBE_PERF.stat_xact_all_tables T
-            LEFT JOIN pg_class C ON T.relid = C.reltoastrelid
-            LEFT JOIN pg_namespace N ON C.relnamespace = N.oid
-            WHERE T.schemaname = ''''pg_catalog'''' OR T.schemaname =''''pg_toast'''' ''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                schemaname := row_data.schemaname;
-                IF row_data.toastrelname IS NULL THEN
-                    relname := row_data.relname;
-                ELSE
-                    relname := NULL;
-                END IF;
-                toastrelschemaname := row_data.toastrelschemaname;
-                toastrelname := row_data.toastrelname;
-                seq_scan := row_data.seq_scan;
-                seq_tup_read := row_data.seq_tup_read;
-                idx_scan := row_data.idx_scan;
-                idx_tup_fetch := row_data.idx_tup_fetch;
-                n_tup_ins := row_data.n_tup_ins;
-                n_tup_upd := row_data.n_tup_upd;
-                n_tup_del := row_data.n_tup_del;
-                n_tup_hot_upd := row_data.n_tup_hot_upd;
-                return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat_activity
-          (out coorname text, out datid oid, out datname text, out pid bigint,
-           out usesysid oid, out usename text, out application_name text, out client_addr inet,
-           out client_hostname text, out client_port integer, out backend_start timestamptz,
-           out xact_start timestamptz, out query_start timestamptz, out state_change timestamptz,
-           out waiting boolean, out enqueue text, out state text, out resource_pool name,
-           out query_id bigint, out query text)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          fet_active text;
-          BEGIN
-              fet_active := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name, * FROM DBE_PERF.session_stat_activity''';
-              FOR row_data IN EXECUTE(fet_active) LOOP
-                coorname := row_data.node_name;
-                datid :=row_data.datid;
-                datname := row_data.datname;
-                pid := row_data.pid;
-                usesysid :=row_data.usesysid;
-                usename := row_data.usename;
-                application_name := row_data.application_name;
-                client_addr := row_data.client_addr;
-                client_hostname :=row_data.client_hostname;
-                client_port :=row_data.client_port;
-                backend_start := row_data.backend_start;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                state_change := row_data.state_change;
-                waiting := row_data.waiting;
-                enqueue := row_data.enqueue;
-                state := row_data.state;
-                resource_pool :=row_data.resource_pool;
-                query_id :=row_data.query_id;
-                query := row_data.query;
-                return next;
-              END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_cn_stat_all_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-           OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            row_data record;
-            query_str text;
-            BEGIN
-                --Get all the node names
-                query_str := 'EXECUTE DIRECT ON COORDINATORS ''
-                    SELECT pgxc_node_str() as node_name, * FROM DBE_PERF.stat_all_tables WHERE schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    node_name := row_data.node_name;
-                    relid := row_data.relid;
-                    schemaname := row_data.schemaname;
-                    relname := row_data.relname;
-                    seq_scan := row_data.seq_scan;
-                    seq_tup_read := row_data.seq_tup_read;
-                    idx_scan := row_data.idx_scan;
-                    idx_tup_fetch := row_data.idx_tup_fetch;
-                    n_tup_ins := row_data.n_tup_ins;
-                    n_tup_upd := row_data.n_tup_upd;
-                    n_tup_del := row_data.n_tup_del;
-                    n_tup_hot_upd := row_data.n_tup_hot_upd;
-                    n_live_tup := row_data.n_live_tup;
-                    n_dead_tup := row_data.n_dead_tup;
-                    last_vacuum := row_data.last_vacuum;
-                    last_autovacuum := row_data.last_autovacuum;
-                    last_analyze := row_data.last_analyze;
-                    last_autoanalyze := row_data.last_autoanalyze;
-                    vacuum_count := row_data.vacuum_count;
-                    autovacuum_count := row_data.autovacuum_count;
-                    analyze_count := row_data.analyze_count;
-                    autoanalyze_count := row_data.autoanalyze_count;
-                    return next;
-                END LOOP;
-                return;
-            END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_stat_db_cu
-          (OUT node_name1 text, OUT db_name text,
-           OUT mem_hit bigint, OUT hdd_sync_read bigint,
-           OUT hdd_asyn_read bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          each_node_out record;
-          query_str text;
-          BEGIN
-            query_str := 'EXECUTE DIRECT ON  ALL ''SELECT  D.datname AS datname,
-            pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
-            pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
-            pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read,
-            pgxc_node_str() as node_name
-            FROM pg_database D;''';
-            FOR each_node_out IN EXECUTE(query_str) LOOP
-              node_name1 := each_node_out.node_name;
-              db_name := each_node_out.datname;
-              mem_hit := each_node_out.mem_hit;
-              hdd_sync_read := each_node_out.hdd_sync_read;
-              hdd_asyn_read := each_node_out.hdd_asyn_read;
-              return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_cn_stat_all_tables
-          (OUT node_name name, OUT relid oid, OUT schemaname name, OUT relname name,
-           OUT seq_scan bigint, OUT seq_tup_read bigint, OUT idx_scan bigint, OUT idx_tup_fetch bigint,
-           OUT n_tup_ins bigint, OUT n_tup_upd bigint, OUT n_tup_del bigint, OUT n_tup_hot_upd bigint, OUT n_live_tup bigint,
-           OUT n_dead_tup bigint, OUT last_vacuum timestamp with time zone, OUT last_autovacuum timestamp with time zone,
-           OUT last_analyze timestamp with time zone, OUT last_autoanalyze timestamp with time zone, OUT vacuum_count bigint,
-           OUT autovacuum_count bigint, OUT analyze_count bigint, OUT autoanalyze_count bigint)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            row_data record;
-            query_str text;
-            BEGIN
-                --Get all the node names
-                query_str := 'EXECUTE DIRECT ON COORDINATORS ''
-                    SELECT pgxc_node_str() as node_name, * FROM DBE_PERF.stat_all_tables WHERE schemaname = ''''pg_catalog'''' or schemaname =''''pg_toast'''' ''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    node_name := row_data.node_name;
-                    relid := row_data.relid;
-                    schemaname := row_data.schemaname;
-                    relname := row_data.relname;
-                    seq_scan := row_data.seq_scan;
-                    seq_tup_read := row_data.seq_tup_read;
-                    idx_scan := row_data.idx_scan;
-                    idx_tup_fetch := row_data.idx_tup_fetch;
-                    n_tup_ins := row_data.n_tup_ins;
-                    n_tup_upd := row_data.n_tup_upd;
-                    n_tup_del := row_data.n_tup_del;
-                    n_tup_hot_upd := row_data.n_tup_hot_upd;
-                    n_live_tup := row_data.n_live_tup;
-                    n_dead_tup := row_data.n_dead_tup;
-                    last_vacuum := row_data.last_vacuum;
-                    last_autovacuum := row_data.last_autovacuum;
-                    last_analyze := row_data.last_analyze;
-                    last_autoanalyze := row_data.last_autoanalyze;
-                    vacuum_count := row_data.vacuum_count;
-                    autovacuum_count := row_data.autovacuum_count;
-                    analyze_count := row_data.analyze_count;
-                    autoanalyze_count := row_data.autoanalyze_count;
-                    return next;
-                END LOOP;
-                return;
-            END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION dbe_perf.global_stat_activity_timeout(in execute_time int4, out nodename text, out database name, out pid int8, out sessionid int8, out usesysid oid, out application_name text, out query text, out xact_start timestamptz, out query_start timestamptz, out query_id int8)
-        RETURNS setof record
-        AS $$
-        DECLARE
-            query_str text;
-            row_data record;
-        BEGIN
-            --Get the node names of all CNs
-            query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM dbe_perf.gs_stat_activity_timeout(' || execute_time || ')''';
-            FOR row_data IN EXECUTE(query_str) LOOP
-                nodename := row_data.node_name;
-                database := row_data.database;
-                pid := row_data.pid;
-                sessionid := row_data.sessionid;
-                usesysid := row_data.usesysid;
-                application_name := row_data.application_name;
-                query := row_data.query;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                query_id := row_data.query_id;
-                return next;
-            END LOOP;
-            return;
-        END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_session_stat_activity
-          (out coorname text, out datid oid, out datname text, out pid bigint,
-           out usesysid oid, out usename text, out application_name text, out client_addr inet,
-           out client_hostname text, out client_port integer, out backend_start timestamptz,
-           out xact_start timestamptz, out query_start timestamptz, out state_change timestamptz,
-           out waiting boolean, out enqueue text, out state text, out resource_pool name,
-           out query_id bigint, out query text)
-        RETURNS setof record
-        AS $$
-        DECLARE
-          row_data record;
-          fet_active text;
-          BEGIN
-            --Get all cn node names
-              fet_active := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name , * FROM DBE_PERF.session_stat_activity''';
-              FOR row_data IN EXECUTE(fet_active) LOOP
-                coorname := row_data.node_name;
-                datid :=row_data.datid;
-                datname := row_data.datname;
-                pid := row_data.pid;
-                usesysid :=row_data.usesysid;
-                usename := row_data.usename;
-                application_name := row_data.application_name;
-                client_addr := row_data.client_addr;
-                client_hostname :=row_data.client_hostname;
-                client_port :=row_data.client_port;
-                backend_start := row_data.backend_start;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                state_change := row_data.state_change;
-                waiting := row_data.waiting;
-                enqueue := row_data.enqueue;
-                state := row_data.state;
-                resource_pool :=row_data.resource_pool;
-                query_id :=row_data.query_id;
-                query := row_data.query;
-                return next;
-            END LOOP;
-            return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.get_global_operator_ec_runtime()
-        RETURNS setof DBE_PERF.operator_ec_runtime
-        AS $$
-        DECLARE
-          row_data DBE_PERF.operator_ec_runtime%rowtype;
-          fet_active text;
-          BEGIN
-            --Get all the CN node names
-              fet_active := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.operator_ec_runtime''';
-              FOR row_data IN EXECUTE(fet_active) LOOP
-                return next row_data;
-              END LOOP;
-              return;
-          END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_plancache_clean()
-        RETURNS BOOLEAN
-        AS $$
-        DECLARE
-          ROW_DATA record;
-          QUERY_STR TEXT;
-        BEGIN
-          QUERY_STR := 'EXECUTE DIRECT ON ALL ''SELECT * from DBE_PERF.local_plancache_clean''';
-          FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          END LOOP;
-          RETURN TRUE;
-        END; $$
-        LANGUAGE 'plpgsql';
-
-        CREATE OR REPLACE FUNCTION DBE_PERF.global_slow_query_history
-        RETURNS setof DBE_PERF.gs_slow_query_history
-        AS $$
-        DECLARE
-        		row_data DBE_PERF.gs_slow_query_history%rowtype;
-        		query_str text;
-        		BEGIN
-        				--Get all the node names
-        				query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM DBE_PERF.gs_slow_query_history''';
-        				FOR row_data IN EXECUTE(query_str) LOOP
-        						return next row_data;
-        				END LOOP;
-        				return;
-        		END; $$
-        LANGUAGE 'plpgsql' NOT FENCED;
-
-        SELECT SESSION_USER INTO user_name;
-        global_query_str := 'GRANT ALL ON TABLE DBE_PERF.global_active_session TO ' || quote_ident(user_name) || ';';
-        EXECUTE IMMEDIATE global_query_str;
-        GRANT SELECT ON DBE_PERF.global_active_session TO public;
-    end if;
-END $DO$;
 CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_session_statistics()
 RETURNS setof record
 AS $$
@@ -16282,79 +10520,6 @@ DECLARE
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
- CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_get_wal_senders_status(OUT nodename text, OUT source_ip text, OUT source_port integer,OUT dest_ip text, OUT dest_port integer,OUT sender_pid int, OUT local_role text,  OUT peer_role text,  OUT peer_state text,
-                                 OUT state text,
-                                 OUT sender_sent_location text, OUT sender_write_location text, OUT sender_flush_location text, OUT sender_replay_location text,
-                                 OUT receiver_received_location text, OUT receiver_write_location text, OUT receiver_flush_location text, OUT receiver_replay_location text)
-
- RETURNS setof record
- AS $$
- DECLARE
-     row_data record;
-     query_str text;
-     source_addr text;
-     dest_addr text;
-     BEGIN
-         query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM pg_stat_get_wal_senders()''';
-         FOR row_data IN EXECUTE(query_str) LOOP
-             nodename = row_data.node_name;
-             source_addr = substring(row_data.channel from 0 for position('-->' in row_data.channel));
-             dest_addr = substring(row_data.channel from position('-->' in row_data.channel) + 3);
-             source_ip = substring(source_addr from 0 for position(':' in source_addr));
-             source_port = cast(substring(source_addr from position(':' in source_addr) + 1) as integer);
-             dest_ip = substring(dest_addr from 0 for position(':' in dest_addr));
-             dest_port = cast(substring(dest_addr from position(':' in dest_addr) + 1) as integer);
-             sender_pid = row_data.sender_pid;
-             local_role = row_data.local_role;
-             peer_role = row_data.peer_role;
-             peer_state = row_data.peer_state;
-             state = row_data.state;
-             sender_sent_location = row_data.sender_sent_location;
-             sender_write_location = row_data.sender_write_location;
-             sender_flush_location = row_data.sender_flush_location;
-             sender_replay_location = row_data.sender_replay_location;
-             receiver_received_location = row_data.receiver_received_location;
-             receiver_write_location = row_data.receiver_write_location;
-             receiver_flush_location = row_data.receiver_flush_location;
-             receiver_replay_location = row_data.receiver_replay_location;
-             return next;
-         END LOOP;
-         return;
-     END; $$
- LANGUAGE 'plpgsql';
-
-CREATE OR REPLACE FUNCTION pg_catalog.gs_get_stat_session_cu(OUT node_name1 text, OUT mem_hit int, OUT hdd_sync_read int, OUT hdd_asyn_read int)
-RETURNS setof record
-AS $$
-DECLARE
-    each_node_out record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name ,* FROM pg_stat_session_cu()''';
-        FOR each_node_out IN EXECUTE(query_str) LOOP
-            node_name1 := each_node_out.node_name;
-            mem_hit := each_node_out.mem_hit;
-            hdd_sync_read := each_node_out.hdd_sync_read;
-            hdd_asyn_read := each_node_out.hdd_asyn_read;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.gs_stat_reset()
-RETURNS void
-AS $$
-DECLARE
-    each_node_out record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT * FROM pg_stat_reset()''';
-        EXECUTE(query_str);
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 CREATE OR REPLACE FUNCTION pg_catalog.pgxc_comm_delay()
 RETURNS setof pg_comm_delay
 AS $$
@@ -16464,74 +10629,8 @@ DECLARE
     END; $$
 LANGUAGE 'plpgsql' NOT FENCED;
 
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_bad_block(OUT nodename TEXT, OUT databaseid INT4, OUT tablespaceid INT4, OUT relfilenode INT4, OUT forknum INT4, OUT error_count INT4, OUT first_time timestamp with time zone, OUT last_time timestamp with time zone)
-RETURNS setof record
-AS $$
-DECLARE
-    each_node_out record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name ,* FROM pg_stat_bad_block()''';
-        FOR each_node_out IN EXECUTE(query_str) LOOP
-            nodename := each_node_out.node_name;
-            databaseid := each_node_out.databaseid;
-            tablespaceid := each_node_out.tablespaceid;
-            relfilenode := each_node_out.relfilenode;
-            forknum := each_node_out.forknum;
-            error_count := each_node_out.error_count;
-            first_time := each_node_out.first_time;
-            last_time := each_node_out.last_time;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_bad_block_clear()
-RETURNS void
-AS $$
-DECLARE
-    each_node_out record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT * FROM pg_stat_bad_block_clear()''';
-        EXECUTE(query_str);
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 DROP FUNCTION IF EXISTS  pg_catalog.pgxc_query_audit(IN starttime TIMESTAMPTZ, IN endtime TIMESTAMPTZ, OUT "time" TIMESTAMPTZ, OUT "type" text, OUT "result" text, OUT userid text, OUT username text, OUT database text, OUT client_conninfo text, OUT "object_name" text, OUT detail_info text, OUT node_name text, OUT thread_id text, OUT local_port text, OUT remote_port text)
  CASCADE;
-
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_query_audit(IN starttime TIMESTAMPTZ, IN endtime TIMESTAMPTZ, OUT "time" TIMESTAMPTZ, OUT "type" text, OUT "result" text, OUT userid text, OUT username text, OUT database text, OUT client_conninfo text, OUT "object_name" text, OUT detail_info text, OUT node_name text, OUT thread_id text, OUT local_port text, OUT remote_port text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    query_str text;
-    BEGIN
-        --Get the node names of all CNs
-        query_str := 'EXECUTE DIRECT ON COORDINATORS ''SELECT * FROM pg_catalog.pg_query_audit(''''' || starttime || ''''',''''' || endtime || ''''')''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            "time"   := row_data."time";
-            "type"   := row_data."type";
-            "result" := row_data."result";
-            userid := row_data.userid;
-            username := row_data.username;
-            database := row_data.database;
-            client_conninfo := row_data.client_conninfo;
-            "object_name"   := row_data."object_name";
-            detail_info := row_data.detail_info;
-            node_name   := row_data.node_name;
-            thread_id   := row_data.thread_id;
-            local_port  := row_data.local_port;
-            remote_port := row_data.remote_port;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
 
 DROP FUNCTION IF EXISTS pg_catalog.pgxc_stat_all_tables()
  CASCADE;
@@ -16564,174 +10663,6 @@ CREATE VIEW pg_catalog.pgxc_get_stat_all_tables AS
          AS NUMERIC(5,2)) dirty_page_rate FROM pgxc_stat_all_tables() GROUP BY (relname,schemaname)) s
         WHERE p.relname = s.relname AND p.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname) AND p.relname NOT LIKE '%pg_cudesc%' ORDER BY dirty_page_rate DESC;
 
-CREATE OR REPLACE FUNCTION pg_catalog.gs_get_stat_db_cu(OUT node_name1 text, OUT db_name text, OUT mem_hit bigint, OUT hdd_sync_read bigint, OUT hdd_asyn_read bigint)
-RETURNS setof record
-AS $$
-DECLARE
-    each_node_out record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT  D.datname AS datname,
-        pg_stat_get_db_cu_mem_hit(D.oid) AS mem_hit,
-        pg_stat_get_db_cu_hdd_sync(D.oid) AS hdd_sync_read,
-        pg_stat_get_db_cu_hdd_asyn(D.oid) AS hdd_asyn_read,
-        pgxc_node_str() as node_name
-        FROM pg_database D;''';
-        FOR each_node_out IN EXECUTE(query_str) LOOP
-            node_name1 := each_node_out.node_name;
-            db_name := each_node_out.datname;
-            mem_hit := each_node_out.mem_hit;
-            hdd_sync_read := each_node_out.hdd_sync_read;
-            hdd_asyn_read := each_node_out.hdd_asyn_read;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_delta_info(IN rel TEXT, OUT node_name TEXT, OUT part_name TEXT, OUT live_tuple INT8, OUT data_size INT8, OUT blockNum INT8)
-RETURNS setof record
-AS $$
-DECLARE
-    query_str text;
-    rel_info record;
-    row_data record;
-    BEGIN
-        EXECUTE format('select c.relname,n.nspname from pg_class C LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace) where C.oid = (select %L::regclass::oid)', rel) into rel_info;
-        query_str := 'EXECUTE DIRECT ON DATANODES ''SELECT pgxc_node_str() as node_name , * from pg_catalog.pg_get_delta_info('''''||rel_info.relname||''''','''''||rel_info.nspname||''''')''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            node_name := row_data.node_name;
-            live_tuple := row_data.live_tuple;
-            data_size := row_data.data_size;
-            blockNum := row_data.blockNum;
-            part_name := row_data.part_name;
-            return next;
-        END LOOP;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_activity_with_conninfo
-(
-out coorname text,
-out datid oid,
-out datname text,
-out pid bigint,
-out sessionid bigint,
-out usesysid oid,
-out usename text,
-out application_name text,
-out client_addr inet,
-out client_hostname text,
-out client_port integer,
-out backend_start timestamptz,
-out xact_start timestamptz,
-out query_start timestamptz,
-out state_change timestamptz,
-out waiting boolean,
-out enqueue text,
-out state text,
-out resource_pool name,
-out query_id bigint,
-out query text,
-out connection_info text
-)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    fet_active text;
-    BEGIN
-        --Get all the node names
-        fet_active := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM pg_stat_activity ''';
-        FOR row_data IN EXECUTE(fet_active) LOOP
-            coorname := row_data.node_name;
-            datid :=row_data.datid;
-            datname := row_data.datname;
-            pid := row_data.pid;
-            sessionid := row_data.sessionid;
-            usesysid :=row_data.usesysid;
-            usename := row_data.usename;
-            application_name := row_data.application_name;
-            client_addr := row_data.client_addr;
-            client_hostname :=row_data.client_hostname;
-            client_port :=row_data.client_port;
-            backend_start := row_data.backend_start;
-            xact_start := row_data.xact_start;
-            query_start := row_data.query_start;
-            state_change := row_data.state_change;
-            waiting := row_data.waiting;
-            enqueue := row_data.enqueue;
-            state := row_data.state;
-            resource_pool :=row_data.resource_pool;
-            query_id :=row_data.query_id;
-            query := row_data.query;
-            connection_info := row_data.connection_info;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_activity
-(
-out coorname text,
-out datid oid,
-out datname text,
-out pid bigint,
-out sessionid bigint,
-out usesysid oid,
-out usename text,
-out application_name text,
-out client_addr inet,
-out client_hostname text,
-out client_port integer,
-out backend_start timestamptz,
-out xact_start timestamptz,
-out query_start timestamptz,
-out state_change timestamptz,
-out waiting boolean,
-out enqueue text,
-out state text,
-out resource_pool name,
-out query_id bigint,
-out query text
-)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    fet_active text;
-    BEGIN
-        --Get all the node names
-        fet_active := 'EXECUTE DIRECT ON COORDINATORS ''SELECT pgxc_node_str() as node_name ,* FROM pg_stat_activity ''';
-        FOR row_data IN EXECUTE(fet_active) LOOP
-                coorname := row_data.node_name;
-                datid :=row_data.datid;
-                datname := row_data.datname;
-                pid := row_data.pid;
-                sessionid := row_data.sessionid;
-                usesysid :=row_data.usesysid;
-                usename := row_data.usename;
-                application_name := row_data.application_name;
-                client_addr := row_data.client_addr;
-                client_hostname :=row_data.client_hostname;
-                client_port :=row_data.client_port;
-                backend_start := row_data.backend_start;
-                xact_start := row_data.xact_start;
-                query_start := row_data.query_start;
-                state_change := row_data.state_change;
-                waiting := row_data.waiting;
-                enqueue := row_data.enqueue;
-                state := row_data.state;
-                resource_pool :=row_data.resource_pool;
-                query_id :=row_data.query_id;
-                query := row_data.query;
-                return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 create or replace function pg_catalog.pgxc_cgroup_map_ng_conf(IN ngname text)
 returns bool
 AS $$
@@ -16749,101 +10680,6 @@ begin
     return true;
 end;
 $$language plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_xacts_iscommitted(IN xid int8, OUT nodename text, OUT iscommitted bool)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_is_committed('|| xid ||'::text::xid) as bcommitted , pgxc_node_str() as node_name''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            nodename = row_data.node_name;
-            iscommitted = row_data.bcommitted;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_senders_catchup_time(OUT nodename text, OUT lwpid int, OUT local_role text,  OUT peer_role text,
-                                                        OUT state text, OUT sender text,
-                                                        OUT catchup_start TimestampTz,  OUT catchup_end TimestampTz)
-
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name,* FROM pg_get_senders_catchup_time where state = ''''Catchup'''' ''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            nodename = row_data.node_name;
-            lwpid = row_data.lwpid;
-            local_role = row_data.local_role;
-            peer_role = row_data.peer_role;
-            state = row_data.state;
-            sender = row_data."type";
-            catchup_start = row_data.catchup_start;
-            catchup_end = row_data.catchup_end;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_parse_clog(OUT xid int8, OUT nodename text, OUT status text)
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    query_str text;
-    BEGIN
-        --Get all the node names
-        query_str := 'EXECUTE DIRECT ON ALL''SELECT pgxc_node_str() as node_name, * FROM pg_parse_clog() ''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            xid = row_data.xid;
-            nodename = row_data.node_name;
-            status = row_data.status;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_stat_get_wal_senders(OUT nodename text, OUT sender_pid int, OUT local_role text,  OUT peer_role text,  OUT peer_state text,
-                                OUT state text,
-                                OUT sender_sent_location text, OUT sender_write_location text, OUT sender_flush_location text, OUT sender_replay_location text,
-                                OUT receiver_received_location text, OUT receiver_write_location text, OUT receiver_flush_location text, OUT receiver_replay_location text)
-
-RETURNS setof record
-AS $$
-DECLARE
-    row_data record;
-    query_str text;
-    BEGIN
-        query_str := 'EXECUTE DIRECT ON ALL ''SELECT pgxc_node_str() as node_name, * FROM pg_stat_get_wal_senders() where sender_flush_location != receiver_replay_location  ''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            nodename = row_data.node_name;
-            sender_pid = row_data.sender_pid;
-            local_role = row_data.local_role;
-            peer_role = row_data.peer_role;
-            peer_state = row_data.peer_state;
-            state = row_data.state;
-            sender_sent_location = row_data.sender_sent_location;
-            sender_write_location = row_data.sender_write_location;
-            sender_flush_location = row_data.sender_flush_location;
-            sender_replay_location = row_data.sender_replay_location;
-            receiver_received_location = row_data.receiver_received_location;
-            receiver_write_location = row_data.receiver_write_location;
-            receiver_flush_location = row_data.receiver_flush_location;
-            receiver_replay_location = row_data.receiver_replay_location;
-            return next;
-        END LOOP;
-        return;
-    END; $$
-LANGUAGE 'plpgsql';
 
 CREATE OR REPLACE FUNCTION pg_catalog.reload_active_coordinator()
 RETURNS boolean
@@ -17149,76 +10985,75 @@ BEGIN
         CREATE VIEW DBE_PERF.statement_history AS
             select * from pg_catalog.statement_history;
         CREATE OR REPLACE FUNCTION DBE_PERF.get_global_full_sql_by_timestamp
-          (in start_timestamp timestamp with time zone,
-           in end_timestamp timestamp with time zone,
-           OUT node_name name,
-           OUT db_name name,
-           OUT schema_name name,
-           OUT origin_node integer,
-           OUT user_name name,
-           OUT application_name text,
-           OUT client_addr text,
-           OUT client_port integer,
-           OUT unique_query_id bigint,
-           OUT debug_query_id bigint,
-           OUT query text,
-           OUT start_time timestamp with time zone,
-           OUT finish_time timestamp with time zone,
-           OUT slow_sql_threshold bigint,
-           OUT transaction_id bigint,
-           OUT thread_id bigint,
-           OUT session_id bigint,
-           OUT n_soft_parse bigint,
-           OUT n_hard_parse bigint,
-           OUT query_plan text,
-           OUT n_returned_rows bigint,
-           OUT n_tuples_fetched bigint,
-           OUT n_tuples_returned bigint,
-           OUT n_tuples_inserted bigint,
-           OUT n_tuples_updated bigint,
-           OUT n_tuples_deleted bigint,
-           OUT n_blocks_fetched bigint,
-           OUT n_blocks_hit bigint,
-           OUT db_time bigint,
-           OUT cpu_time bigint,
-           OUT execution_time bigint,
-           OUT parse_time bigint,
-           OUT plan_time bigint,
-           OUT rewrite_time bigint,
-           OUT pl_execution_time bigint,
-           OUT pl_compilation_time bigint,
-           OUT data_io_time bigint,
-           OUT net_send_info text,
-           OUT net_recv_info text,
-           OUT net_stream_send_info text,
-           OUT net_stream_recv_info text,
-           OUT lock_count bigint,
-           OUT lock_time bigint,
-           OUT lock_wait_count bigint,
-           OUT lock_wait_time bigint,
-           OUT lock_max_count bigint,
-           OUT lwlock_count bigint,
-           OUT lwlock_wait_count bigint,
-           OUT lwlock_time bigint,
-           OUT lwlock_wait_time bigint,
-           OUT details bytea,
-           OUT is_slow_sql bool)
-         RETURNS setof record
-         AS $$
-         DECLARE
-          row_data pg_catalog.statement_history%rowtype;
-          query_str text;
-          -- node name
-          node_names name[];
-          each_node_name name;
-          BEGIN
-            -- Get all node names(CN + master DN)
-            node_names := ARRAY(SELECT pgxc_node.node_name FROM pgxc_node WHERE (node_type = 'C' or node_type = 'D') AND nodeis_active = true);
-            FOREACH each_node_name IN ARRAY node_names
-            LOOP
-                query_str := 'EXECUTE DIRECT ON (' || each_node_name || ') ''SELECT * FROM DBE_PERF.statement_history where start_time >= ''''' ||$1|| ''''' and start_time <= ''''' || $2 || '''''''';
-                FOR row_data IN EXECUTE(query_str) LOOP
-                    node_name := each_node_name;
+        (in start_timestamp timestamp with time zone,
+         in end_timestamp timestamp with time zone,
+         OUT node_name name,
+         OUT db_name name,
+         OUT schema_name name,
+         OUT origin_node integer,
+         OUT user_name name,
+         OUT application_name text,
+         OUT client_addr text,
+         OUT client_port integer,
+         OUT unique_query_id bigint,
+         OUT debug_query_id bigint,
+         OUT query text,
+         OUT start_time timestamp with time zone,
+         OUT finish_time timestamp with time zone,
+         OUT slow_sql_threshold bigint,
+         OUT transaction_id bigint,
+         OUT thread_id bigint,
+         OUT session_id bigint,
+         OUT n_soft_parse bigint,
+         OUT n_hard_parse bigint,
+         OUT query_plan text,
+         OUT n_returned_rows bigint,
+         OUT n_tuples_fetched bigint,
+         OUT n_tuples_returned bigint,
+         OUT n_tuples_inserted bigint,
+         OUT n_tuples_updated bigint,
+         OUT n_tuples_deleted bigint,
+         OUT n_blocks_fetched bigint,
+         OUT n_blocks_hit bigint,
+         OUT db_time bigint,
+         OUT cpu_time bigint,
+         OUT execution_time bigint,
+         OUT parse_time bigint,
+         OUT plan_time bigint,
+         OUT rewrite_time bigint,
+         OUT pl_execution_time bigint,
+         OUT pl_compilation_time bigint,
+         OUT data_io_time bigint,
+         OUT net_send_info text,
+         OUT net_recv_info text,
+         OUT net_stream_send_info text,
+         OUT net_stream_recv_info text,
+         OUT lock_count bigint,
+         OUT lock_time bigint,
+         OUT lock_wait_count bigint,
+         OUT lock_wait_time bigint,
+         OUT lock_max_count bigint,
+         OUT lwlock_count bigint,
+         OUT lwlock_wait_count bigint,
+         OUT lwlock_time bigint,
+         OUT lwlock_wait_time bigint,
+         OUT details bytea,
+         OUT is_slow_sql bool)
+       RETURNS setof record
+       AS $$
+       DECLARE
+        row_data pg_catalog.statement_history%rowtype;
+        row_name record;
+        query_str text;
+        -- node name
+        query_str_nodes text;
+        BEGIN
+              -- Get all node names(CN + master DN)
+             query_str_nodes := 'select * from dbe_perf.node_name';
+             FOR row_name IN EXECUTE(query_str_nodes) LOOP
+                query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || '''';
+                  FOR row_data IN EXECUTE(query_str) LOOP
+                    node_name := row_name.node_name;
                     db_name := row_data.db_name;
                     schema_name := row_data.schema_name;
                     origin_node := row_data.origin_node;
@@ -17278,77 +11113,75 @@ BEGIN
         LANGUAGE 'plpgsql' NOT FENCED;
 
         CREATE OR REPLACE FUNCTION DBE_PERF.get_global_slow_sql_by_timestamp
-          (in start_timestamp timestamp with time zone,
-           in end_timestamp timestamp with time zone,
-           OUT node_name name,
-           OUT db_name name,
-           OUT schema_name name,
-           OUT origin_node integer,
-           OUT user_name name,
-           OUT application_name text,
-           OUT client_addr text,
-           OUT client_port integer,
-           OUT unique_query_id bigint,
-           OUT debug_query_id bigint,
-           OUT query text,
-           OUT start_time timestamp with time zone,
-           OUT finish_time timestamp with time zone,
-           OUT slow_sql_threshold bigint,
-           OUT transaction_id bigint,
-           OUT thread_id bigint,
-           OUT session_id bigint,
-           OUT n_soft_parse bigint,
-           OUT n_hard_parse bigint,
-           OUT query_plan text,
-           OUT n_returned_rows bigint,
-           OUT n_tuples_fetched bigint,
-           OUT n_tuples_returned bigint,
-           OUT n_tuples_inserted bigint,
-           OUT n_tuples_updated bigint,
-           OUT n_tuples_deleted bigint,
-           OUT n_blocks_fetched bigint,
-           OUT n_blocks_hit bigint,
-           OUT db_time bigint,
-           OUT cpu_time bigint,
-           OUT execution_time bigint,
-           OUT parse_time bigint,
-           OUT plan_time bigint,
-           OUT rewrite_time bigint,
-           OUT pl_execution_time bigint,
-           OUT pl_compilation_time bigint,
-           OUT data_io_time bigint,
-           OUT net_send_info text,
-           OUT net_recv_info text,
-           OUT net_stream_send_info text,
-           OUT net_stream_recv_info text,
-           OUT lock_count bigint,
-           OUT lock_time bigint,
-           OUT lock_wait_count bigint,
-           OUT lock_wait_time bigint,
-           OUT lock_max_count bigint,
-           OUT lwlock_count bigint,
-           OUT lwlock_wait_count bigint,
-           OUT lwlock_time bigint,
-           OUT lwlock_wait_time bigint,
-           OUT details bytea,
-           OUT is_slow_sql bool)
-         RETURNS setof record
-         AS $$
-         DECLARE
+        (in start_timestamp timestamp with time zone,
+         in end_timestamp timestamp with time zone,
+         OUT node_name name,
+         OUT db_name name,
+         OUT schema_name name,
+         OUT origin_node integer,
+         OUT user_name name,
+         OUT application_name text,
+         OUT client_addr text,
+         OUT client_port integer,
+         OUT unique_query_id bigint,
+         OUT debug_query_id bigint,
+         OUT query text,
+         OUT start_time timestamp with time zone,
+         OUT finish_time timestamp with time zone,
+         OUT slow_sql_threshold bigint,
+         OUT transaction_id bigint,
+         OUT thread_id bigint,
+         OUT session_id bigint,
+         OUT n_soft_parse bigint,
+         OUT n_hard_parse bigint,
+         OUT query_plan text,
+         OUT n_returned_rows bigint,
+         OUT n_tuples_fetched bigint,
+         OUT n_tuples_returned bigint,
+         OUT n_tuples_inserted bigint,
+         OUT n_tuples_updated bigint,
+         OUT n_tuples_deleted bigint,
+         OUT n_blocks_fetched bigint,
+         OUT n_blocks_hit bigint,
+         OUT db_time bigint,
+         OUT cpu_time bigint,
+         OUT execution_time bigint,
+         OUT parse_time bigint,
+         OUT plan_time bigint,
+         OUT rewrite_time bigint,
+         OUT pl_execution_time bigint,
+         OUT pl_compilation_time bigint,
+         OUT data_io_time bigint,
+         OUT net_send_info text,
+         OUT net_recv_info text,
+         OUT net_stream_send_info text,
+         OUT net_stream_recv_info text,
+         OUT lock_count bigint,
+         OUT lock_time bigint,
+         OUT lock_wait_count bigint,
+         OUT lock_wait_time bigint,
+         OUT lock_max_count bigint,
+         OUT lwlock_count bigint,
+         OUT lwlock_wait_count bigint,
+         OUT lwlock_time bigint,
+         OUT lwlock_wait_time bigint,
+         OUT details bytea,
+         OUT is_slow_sql bool)
+       RETURNS setof record
+       AS $$
+       DECLARE
           row_data pg_catalog.statement_history%rowtype;
           row_name record;
           query_str text;
           -- node name
-          node_names name[];
-          each_node_name name;
+          query_str_nodes text;
           BEGIN
             -- Get all node names(CN + master DN)
-            node_names := ARRAY(SELECT pgxc_node.node_name FROM pgxc_node WHERE (node_type = 'C' or node_type = 'D') AND nodeis_active = true);
-            FOREACH each_node_name IN ARRAY node_names
-            LOOP
-                query_str := 'EXECUTE DIRECT ON (' || each_node_name || ') ''SELECT * FROM DBE_PERF.statement_history where start_time >= ''''' ||$1|| ''''' and start_time <= ''''' || $2 || ''''' and is_slow_sql = true ''';
+           query_str_nodes := 'select * from dbe_perf.node_name';
+           FOR row_name IN EXECUTE(query_str_nodes) LOOP
+                query_str := 'SELECT * FROM DBE_PERF.statement_history where start_time >= ''' ||$1|| ''' and start_time <= ''' || $2 || ''' and is_slow_sql = true ';
                 FOR row_data IN EXECUTE(query_str) LOOP
-                    node_name := each_node_name;
+                    node_name := row_name.node_name;
                     db_name := row_data.db_name;
                     schema_name := row_data.schema_name;
                     origin_node := row_data.origin_node;
@@ -17504,3 +11337,143 @@ BEGIN
     END IF;
 END;
 /
+
+CREATE OR REPLACE VIEW pg_catalog.pg_seclabels AS
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	CASE WHEN rel.relkind = 'r' THEN 'table'::text
+		 WHEN rel.relkind = 'v' THEN 'view'::text
+		 WHEN rel.relkind = 'm' THEN 'materialized view'::text
+		 WHEN rel.relkind = 'S' THEN 'sequence'::text
+		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
+	rel.relnamespace AS objnamespace,
+	CASE WHEN pg_table_is_visible(rel.oid)
+	     THEN quote_ident(rel.relname)
+	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(rel.relname)
+	     END AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_class rel ON l.classoid = rel.tableoid AND l.objoid = rel.oid
+	JOIN pg_namespace nsp ON rel.relnamespace = nsp.oid
+WHERE
+	l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	'column'::text AS objtype,
+	rel.relnamespace AS objnamespace,
+	CASE WHEN pg_table_is_visible(rel.oid)
+	     THEN quote_ident(rel.relname)
+	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(rel.relname)
+	     END || '.' || att.attname AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_class rel ON l.classoid = rel.tableoid AND l.objoid = rel.oid
+	JOIN pg_attribute att
+	     ON rel.oid = att.attrelid AND l.objsubid = att.attnum
+	JOIN pg_namespace nsp ON rel.relnamespace = nsp.oid
+WHERE
+	l.objsubid != 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	CASE WHEN pro.proisagg = true THEN 'aggregate'::text
+	     WHEN pro.proisagg = false THEN 'function'::text
+	END AS objtype,
+	pro.pronamespace AS objnamespace,
+	CASE WHEN pg_function_is_visible(pro.oid)
+	     THEN quote_ident(pro.proname)
+	     ELSE quote_ident(nsp.nspname) || '.' || quote_ident(pro.proname)
+	END || '(' || pg_catalog.pg_get_function_arguments(pro.oid) || ')' AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_proc pro ON l.classoid = pro.tableoid AND l.objoid = pro.oid
+	JOIN pg_namespace nsp ON pro.pronamespace = nsp.oid
+WHERE
+	l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	CASE WHEN typ.typtype = 'd' THEN 'domain'::text
+	ELSE 'type'::text END AS objtype,
+	typ.typnamespace AS objnamespace,
+	CASE WHEN pg_type_is_visible(typ.oid)
+	THEN quote_ident(typ.typname)
+	ELSE quote_ident(nsp.nspname) || '.' || quote_ident(typ.typname)
+	END AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_type typ ON l.classoid = typ.tableoid AND l.objoid = typ.oid
+	JOIN pg_namespace nsp ON typ.typnamespace = nsp.oid
+WHERE
+	l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	'large object'::text AS objtype,
+	NULL::oid AS objnamespace,
+	l.objoid::text AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_largeobject_metadata lom ON l.objoid = lom.oid
+WHERE
+	l.classoid = 'pg_catalog.pg_largeobject'::regclass AND l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	'language'::text AS objtype,
+	NULL::oid AS objnamespace,
+	quote_ident(lan.lanname) AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_language lan ON l.classoid = lan.tableoid AND l.objoid = lan.oid
+WHERE
+	l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, l.objsubid,
+	'schema'::text AS objtype,
+	nsp.oid AS objnamespace,
+	quote_ident(nsp.nspname) AS objname,
+	l.provider, l.label
+FROM
+	pg_seclabel l
+	JOIN pg_namespace nsp ON l.classoid = nsp.tableoid AND l.objoid = nsp.oid
+WHERE
+	l.objsubid = 0
+UNION ALL
+SELECT
+	l.objoid, l.classoid, 0::int4 AS objsubid,
+	'database'::text AS objtype,
+	NULL::oid AS objnamespace,
+	quote_ident(dat.datname) AS objname,
+	l.provider, l.label
+FROM
+	pg_shseclabel l
+	JOIN pg_database dat ON l.classoid = dat.tableoid AND l.objoid = dat.oid
+UNION ALL
+SELECT
+	l.objoid, l.classoid, 0::int4 AS objsubid,
+	'tablespace'::text AS objtype,
+	NULL::oid AS objnamespace,
+	quote_ident(spc.spcname) AS objname,
+	l.provider, l.label
+FROM
+	pg_shseclabel l
+	JOIN pg_tablespace spc ON l.classoid = spc.tableoid AND l.objoid = spc.oid
+UNION ALL
+SELECT
+	l.objoid, l.classoid, 0::int4 AS objsubid,
+	'role'::text AS objtype,
+	NULL::oid AS objnamespace,
+	quote_ident(rol.rolname) AS objname,
+	l.provider, l.label
+FROM
+	pg_shseclabel l
+	JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;

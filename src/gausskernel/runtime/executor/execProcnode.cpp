@@ -536,8 +536,8 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
         }
 #else
         if (u_sess->instr_cxt.global_instr != NULL && u_sess->instr_cxt.thread_instr && node->plan_node_id > 0 &&
-            u_sess->instr_cxt.global_instr->get_planIdOffsetArray()[node->plan_node_id - 1] ==
-            u_sess->instr_cxt.thread_instr->getSegmentId() - 1) {
+            (!StreamTopConsumerAmI() ||
+            u_sess->instr_cxt.global_instr->get_planIdOffsetArray()[node->plan_node_id - 1] == 0)) {
             result->instrument = u_sess->instr_cxt.thread_instr->allocInstrSlot(
                 node->plan_node_id, node->parent_node_id, result->plan, estate);
         } else {

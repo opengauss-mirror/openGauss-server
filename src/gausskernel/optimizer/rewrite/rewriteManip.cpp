@@ -20,6 +20,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
+#include "optimizer/stream_check.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
@@ -1082,6 +1083,11 @@ Node* replace_rte_variables_mutator(Node* node, replace_rte_variables_context* c
             expression_tree_mutator(node, (Node* (*)(Node*, void*)) replace_rte_variables_mutator, (void*)context);
 
         if (contain_subplans(newnode)) {
+#ifndef ENABLE_MULTIPLE_NODES
+            if (u_sess->opt_cxt.is_stream_support) {
+                mark_stream_unsupport();
+            }
+#endif
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg(

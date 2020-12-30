@@ -534,7 +534,7 @@ static Expression* ProcessOpExpr(
 {
     Expression* result = nullptr;
     const int op_args_num = 3;
-    MOT_LOG_DEBUG("%*s --> Processing OP %d expression", depth, "", (int)op_expr->opfuncid);
+    MOT_LOG_DEBUG("%*s --> Processing OP %u expression", depth, "", op_expr->opfuncid);
     if (depth > MOT_JIT_MAX_EXPR_DEPTH) {
         MOT_LOG_TRACE("Cannot process expression: Expression exceeds depth limit %d", (int)MOT_JIT_MAX_EXPR_DEPTH);
         return nullptr;
@@ -567,11 +567,11 @@ static Expression* ProcessOpExpr(
         APPLY_OPERATORS()
 
         default:
-            MOT_LOG_TRACE("Unsupported operator function type: %d", op_expr->opfuncid);
+            MOT_LOG_TRACE("Unsupported operator function type: %u", op_expr->opfuncid);
             break;
     }
 
-    MOT_LOG_DEBUG("%*s <-- Processing OP %d expression result: %p", depth, "", (int)op_expr->opfuncid, result);
+    MOT_LOG_DEBUG("%*s <-- Processing OP %u expression result: %p", depth, "", op_expr->opfuncid, result);
     return result;
 }
 

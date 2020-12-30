@@ -32,7 +32,6 @@ CFLAGS ?=
 
 subdir=src/gausskernel/storage/mot/core/src
 top_builddir ?= ../../../../../../
-MASSTREE_MEGRED_SOURCES_DIR=$(MASSTREE_HOME)/code
 
 ifeq ($(UNDERPG),yes)
 include $(top_builddir)/src/Makefile.global
@@ -48,7 +47,7 @@ SRC_TARGET_DIRS = \
 		memory \
 		storage \
 		system \
-		$(MASSTREE_MEGRED_SOURCES_DIR) \
+		$(MASSTREE_HOME)/include \
 		utils
 
 SRC_DIRS = $(shell find $(SRC_TARGET_DIRS) -type d 2> /dev/null) # 2> /dev/null To remove error printout when calling clean
@@ -108,6 +107,7 @@ CFLAGS += -faligned-new
 # turn on some warnings
 CFLAGS += -Wwrite-strings -Wcast-align -Wreturn-type
 CFLAGS += -Wpointer-arith -Wlogical-op -Waddress -Wsizeof-pointer-memaccess -Winit-self
+CFLAGS += -L$(MASSTREE_HOME)/lib -lmasstree
 
 # Enable this warning for gcc version 6.0 or higher
 #CFLAGS += -Wduplicated-cond

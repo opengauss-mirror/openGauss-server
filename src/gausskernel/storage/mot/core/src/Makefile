@@ -29,66 +29,9 @@ top_builddir ?= ../../../../../../
 
 include $(top_builddir)/src/Makefile.global
 
-MASSTREE_DIR=$(MASSTREE_HOME)
-MASSTREE_PACKAGE=masstree-beta-0.9.0
-MOT_MASSTREE_PATCH=masstree-beta-0.9.0_patch
-MASSTREE_MEGRED_SOURCES_DIR=$(MASSTREE_DIR)/code
-
-
 mot_target:
-	@$(call create_masstree_sources)
 	@make -f Makefile.local
 
 clean:
-	@rm -rf $(MASSTREE_MEGRED_SOURCES_DIR)
 	@make -f Makefile.local clean
-
-MASSTREE_RELEVANT_SOURCES = \
-		btree_leaflink.hh \
-		circular_int.hh \
-		compiler.cc \
-		compiler.hh \
-		hashcode.hh \
-		kpermuter.hh \
-		ksearch.hh   \
-		masstree_get.hh \
-		masstree.hh \
-		masstree_insert.hh \
-		masstree_key.hh \
-		masstree_remove.hh \
-		masstree_scan.hh \
-		masstree_split.hh \
-		masstree_struct.hh \
-		masstree_tcursor.hh \
-		memdebug.cc \
-		memdebug.hh \
-		mtcounters.hh \
-		kvthread.cc \
-		kvthread.hh \
-		nodeversion.hh \
-		small_vector.hh \
-		straccum.cc \
-		straccum.hh \
-		str.hh \
-		stringbag.hh \
-		string_base.hh \
-		string.cc \
-		string.hh \
-		string_slice.hh \
-		timestamp.hh
-
-define create_masstree_sources
-   rm -rf $(MASSTREE_DIR)/tmp; \
-   rm -rf $(MASSTREE_MEGRED_SOURCES_DIR); \
-   mkdir $(MASSTREE_DIR)/tmp; \
-   mkdir $(MASSTREE_MEGRED_SOURCES_DIR); \
-   tar xfzv $(MASSTREE_DIR)/$(MASSTREE_PACKAGE).tar.gz -C $(MASSTREE_DIR)/tmp &> /dev/null; \
-   for src_file in $(MASSTREE_RELEVANT_SOURCES); \
-   do \
-	cp $(MASSTREE_DIR)/tmp/$(MASSTREE_PACKAGE)/$$src_file $(MASSTREE_MEGRED_SOURCES_DIR); \
-   done
-   rename ".cc" ".cpp" $(MASSTREE_MEGRED_SOURCES_DIR)/*.cc; \
-   rm -rf $(MASSTREE_DIR)/tmp; \
-   patch -d $(MASSTREE_MEGRED_SOURCES_DIR) < $(MASSTREE_DIR)/$(MOT_MASSTREE_PATCH).patch &> /dev/null;
-endef
 

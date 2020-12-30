@@ -155,8 +155,8 @@ JARPLJAVA = pljava.jar
 # MOT component
 ##############################################################################
 ifeq ($(enable_mot), yes)
-  LIBS += -latomic -lmot_engine
-  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin
+  LIBS += -latomic -lmot_engine -lmasstree
+  LDFLAGS += -L$(top_builddir)/src/gausskernel/storage/mot/core/bin -L$(MASSTREE_LIB_PATH)
   CXXFLAGS += -I$(JEMALLOC_INCLUDE_PATH)
 endif
 
@@ -644,6 +644,9 @@ endif
 ifneq (, $(findstring __USE_NUMA, $(CFLAGS)))
 	cp $(NUMA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 endif
+ifeq ($(enable_mot), yes)
+	cp -d $(MASSTREE_LIB_PATH)/libmasstree* '$(DESTDIR)$(libdir)/'
+endif
 ifeq ($(with_3rd), NONE)
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
@@ -669,7 +672,7 @@ ifeq ($(enable_thread_check), yes)
 endif
 	cp $(with_3rd)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 endif
-	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/openjdk8/jdk1.8.222/jre/* '$(DESTDIR)$(bindir)/../jre/'
+	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/openjdk8/jdk1.8.0_222/jre/* '$(DESTDIR)$(bindir)/../jre/'
 
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'

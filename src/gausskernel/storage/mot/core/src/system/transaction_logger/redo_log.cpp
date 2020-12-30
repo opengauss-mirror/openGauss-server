@@ -369,8 +369,9 @@ RC RedoLog::SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap)
 RC RedoLog::SerializeTransactionDMLs()
 {
     RC status = RC_OK;
-    for (uint32_t index = 0; index < m_txn->m_accessMgr->m_rowCnt; index++) {
-        Access* access = m_txn->m_accessMgr->GetAccessPtr(index);
+    TxnOrderedSet_t& orderedSet = m_txn->m_accessMgr->GetOrderedRowSet();
+    for (const auto& raPair : orderedSet) {
+        Access* access = raPair.second;
         if (access != nullptr) {
             switch (access->m_type) {
                 case INS:

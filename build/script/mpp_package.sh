@@ -300,13 +300,6 @@ fi
 
 if [ "$product_mode"x == "opengauss"x ]; then
     release_file_list=$(echo ${release_file_list}_single | sed -e 's/mpp_release/opengauss_release/')
-    if [ ! -f $binarylib_dir/dependency/masstree/masstree-beta-0.9.0.tar.gz ]; then
-        echo "ERROR: there is no necessary files in $binarylib_dir/dependency/masstree/"
-        echo "    You may copy them from 'third_party' repo by executing:"
-        echo "    mkdir -p $binarylib_dir/dependency/masstree && cp -fr <third_party>/dependency/masstree/* $binarylib_dir/dependency/masstree"
-        echo "    You should substitute <third_party> by real path to third_party repo"
-#       exit 1
-    fi
 fi
 
 read_mpp_version

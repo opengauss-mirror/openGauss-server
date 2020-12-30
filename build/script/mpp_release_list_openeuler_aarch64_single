@@ -82,8 +82,6 @@
 ./share/postgresql/extension/gc_fdw.control
 ./share/postgresql/extension/log_fdw--1.0.sql
 ./share/postgresql/extension/log_fdw.control
-./share/postgresql/extension/mot_fdw--1.0.sql
-./share/postgresql/extension/mot_fdw.control
 ./share/postgresql/extension/dimsearch--1.0.sql
 ./share/postgresql/extension/dimsearch.control
 ./share/postgresql/extension/packages--1.0.sql
@@ -779,9 +777,6 @@
 ./lib/libcom_err_gauss.so
 ./lib/libcom_err_gauss.so.3
 ./lib/libcom_err_gauss.so.3.0
-./lib/libatomic.so
-./lib/libatomic.so.1
-./lib/libatomic.so.1.2.0
 ./lib/libgpr.so
 ./lib/libgpr.so.9
 ./lib/libgpr.so.9.0.0

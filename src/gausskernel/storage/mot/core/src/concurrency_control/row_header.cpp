@@ -110,13 +110,7 @@ void RowHeader::WriteChangesToRow(const Access* access, uint64_t csn)
 #ifdef MOT_DEBUG
     if (access->m_params.IsPrimarySentinel()) {
         uint64_t v = m_csnWord;
-        if (MOTEngine::GetInstance()->IsRecovering()) {
-            if (!(csn == GetCSN() && (v & LOCK_BIT))) {
-                MOT_LOG_ERROR(
-                    "csn=%ld, v & LOCK_BIT=%ld, v & (~LOCK_BIT)=%ld\n", csn, (v & LOCK_BIT), (v & (~LOCK_BIT)));
-                MOT_ASSERT(false);
-            }
-        } else {
+        if (!MOTEngine::GetInstance()->IsRecovering()) {
             if (!(csn > GetCSN() && (v & LOCK_BIT))) {
                 MOT_LOG_ERROR(
                     "csn=%ld, v & LOCK_BIT=%ld, v & (~LOCK_BIT)=%ld\n", csn, (v & LOCK_BIT), (v & (~LOCK_BIT)));

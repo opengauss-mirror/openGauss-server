@@ -552,7 +552,7 @@ uint32_t CheckpointRecovery::HaveTasks()
 
 bool CheckpointRecovery::IsMemoryLimitReached(uint32_t numThreads, uint32_t neededBytes)
 {
-    uint64_t memoryRequiredBytes = numThreads * neededBytes;
+    uint64_t memoryRequiredBytes = (uint64_t)numThreads * neededBytes;
     if (MOTEngine::GetInstance()->GetCurrentMemoryConsumptionBytes() + memoryRequiredBytes >=
         MOTEngine::GetInstance()->GetHardMemoryLimitBytes()) {
         MOT_LOG_WARN("CheckpointRecovery::IsMemoryLimitReached: memory limit reached "

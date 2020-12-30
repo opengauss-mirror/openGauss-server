@@ -1032,7 +1032,7 @@ static TableExprClass clasifyTableExprArgs(Query* query, MOT::Table* table, MOT:
 static TableExprClass classifyTableOpExpr(Query* query, MOT::Table* table, MOT::Index* index, OpExpr* op_expr)
 {
     if (!IsFuncIdSupported(op_expr->opfuncid)) {
-        MOT_LOG_TRACE("classifyTableOpExpr(): Unsupported function id %d", (int)op_expr->opfuncid);
+        MOT_LOG_TRACE("classifyTableOpExpr(): Unsupported function id %u", op_expr->opfuncid);
         return TableExprError;
     }
 

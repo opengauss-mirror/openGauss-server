@@ -97,71 +97,6 @@ RETURNS BOOL LANGUAGE INTERNAL strict volatile as 'pgxc_unlock_for_transfer';
 DROP FUNCTION IF EXISTS pg_catalog.table_skewness(text, OUT DNName text, OUT Num text, OUT Ratio text);
 DROP FUNCTION IF EXISTS pg_catalog.distributed_count(IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text);
 
-CREATE OR REPLACE FUNCTION pg_catalog.distributed_count(IN _table_name text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-DECLARE
-	row_data record;
-	row_name record;
-	query_str text;
-	query_str_nodes text;
-	total_num bigint;
-	flag boolean;
-	special text := '[;|-]';
-	BEGIN
-		EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN _table_name, IN special;
-		IF flag = true THEN
-			raise WARNING 'illegal character entered for function';
-			RETURN;
-		END IF;
-		EXECUTE 'SELECT count(1) FROM ' || _table_name
-			INTO total_num;
-
-		--Get the node names
-		query_str_nodes := 'SELECT node_name FROM pgxc_node, pgxc_class where node_type IN (''C'', ''D'') AND  is_oid_in_group_members(oid, nodeoids) AND
-			pcrelid=''' || _table_name || '''::regclass::oid';
-
-		FOR row_name IN EXECUTE(query_str_nodes) LOOP
-			query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''select ''''DN_name'''' as dnname1, count(1) as count1 from ' || $1 || '''';
-
-			FOR row_data IN EXECUTE(query_str) LOOP
-				row_data.dnname1 := CASE
-					WHEN LENGTH(row_name.node_name)<20
-					THEN row_name.node_name || right('                    ',20-length(row_name.node_name))
-					ELSE SUBSTR(row_name.node_name,1,20)
-					END;
-				DNName := row_data.dnname1;
-				Num := row_data.count1;
-				IF total_num = 0 THEN
-				Ratio := 0.000 ||'%';
-				ELSE
-				Ratio := ROUND(row_data.count1/total_num*100,3) || '%';
-				END IF;
-				RETURN next;
-			END LOOP;
-		END LOOP;
-
-		RETURN;
-	END; $$
-LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION pg_catalog.table_skewness(text, OUT DNName text, OUT Num text, OUT Ratio text)
-RETURNS setof record
-AS $$
-declare
-flag boolean;
-special text := '[;|-]';
-	BEGIN
-		EXECUTE IMMEDIATE 'SELECT regexp_like(:1,:2);' INTO flag USING IN $1, IN special;
-		IF flag = true THEN
-			raise WARNING 'illegal character entered for function';
-			return NEXT;
-		ELSE
-			RETURN QUERY EXECUTE 'SELECT * FROM distributed_count(''' || $1 || ''') ORDER BY num DESC, dnname';
-		END IF;
-	END; $$
-LANGUAGE plpgsql NOT FENCED;
-
 -- upgrade 3956
 DROP FUNCTION IF EXISTS pg_catalog.threadpool_status;
 
@@ -543,36 +478,6 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 4520;
 CREATE FUNCTION pg_catalog.gs_stat_activity_timeout(IN timeout_threshold int4, OUT datid oid, OUT pid INT8, OUT sessionid INT8, OUT usesysid oid, OUT application_name text, OUT query text, OUT xact_start timestamptz, OUT query_start timestamptz, OUT query_id INT8)
 RETURNS SETOF RECORD LANGUAGE INTERNAL as 'pg_stat_get_activity_timeout';
 
-CREATE OR REPLACE FUNCTION pg_catalog.global_stat_activity_timeout(in execute_time int4, out nodename text, out datid oid, out pid int8, out sessionid int8, out usesysid oid, out application_name text, out query text, out xact_start timestamptz, out query_start timestamptz, out query_id int8)
-RETURNS setof record
-AS $$
-DECLARE
-    query_str text;
-    node_data record;
-    row_data record;
-BEGIN
-    --Get the node names of all CNs
-    query_str := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-    FOR node_data IN EXECUTE(query_str) LOOP
-        query_str := 'EXECUTE DIRECT ON (' || node_data.node_name || ') ''SELECT * FROM gs_stat_activity_timeout(' || execute_time || ')''';
-        FOR row_data IN EXECUTE(query_str) LOOP
-            nodename := node_data.node_name;
-            datid := row_data.datid;
-            pid := row_data.pid;
-            sessionid := row_data.sessionid;
-            usesysid := row_data.usesysid;
-            application_name := row_data.application_name;
-            query := row_data.query;
-            xact_start := row_data.xact_start;
-            query_start := row_data.query_start;
-            query_id := row_data.query_id;
-            return next;
-        END LOOP;
-    END LOOP;
-    return;
-END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 DROP VIEW IF EXISTS pg_catalog.pgxc_wlm_session_history CASCADE;
 DROP FUNCTION IF EXISTS pg_catalog.pgxc_get_wlm_session_history() CASCADE;
 DROP VIEW IF EXISTS pg_catalog.gs_wlm_session_history CASCADE;
@@ -917,122 +822,6 @@ SELECT
         S.top_cpu_dn
 FROM pg_catalog.gs_wlm_session_info_all S;
 
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_session_history()
-RETURNS setof record
-AS $$
-DECLARE
-        row_data record;
-        row_name record;
-        query_str text;
-        query_str_nodes text;
-        BEGIN
-                --Get all the node names
-                query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-                FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_catalog.gs_wlm_session_history''';
-                        FOR row_data IN EXECUTE(query_str) LOOP
-                                return next row_data;
-                        END LOOP;
-                END LOOP;
-                return;
-        END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-CREATE VIEW pg_catalog.pgxc_wlm_session_history AS
-SELECT * FROM pg_catalog.pgxc_get_wlm_session_history() AS
-(
-datid  Oid,
-dbname text,
-schemaname text,
-nodename text,
-username text,
-application_name text,
-client_addr inet,
-client_hostname text,
-client_port int,
-query_band text,
-block_time bigint,
-start_time timestamp with time zone,
-finish_time timestamp with time zone,
-duration bigint,
-estimate_total_time bigint,
-status text,
-abort_info text,
-resource_pool text,
-control_group text,
-estimate_memory int,
-min_peak_memory int,
-max_peak_memory int,
-average_peak_memory int,
-memory_skew_percent int,
-spill_info text,
-min_spill_size int,
-max_spill_size int,
-average_spill_size int,
-spill_skew_percent int,
-min_dn_time bigint,
-max_dn_time bigint,
-average_dn_time bigint,
-dntime_skew_percent int,
-min_cpu_time bigint,
-max_cpu_time bigint,
-total_cpu_time bigint,
-cpu_skew_percent int,
-min_peak_iops int,
-max_peak_iops int,
-average_peak_iops int,
-iops_skew_percent int,
-warning text,
-queryid bigint,
-query text,
-query_plan text,
-node_group text,
-cpu_top1_node_name text,
-cpu_top2_node_name text,
-cpu_top3_node_name text,
-cpu_top4_node_name text,
-cpu_top5_node_name text,
-mem_top1_node_name text,
-mem_top2_node_name text,
-mem_top3_node_name text,
-mem_top4_node_name text,
-mem_top5_node_name text,
-cpu_top1_value bigint,
-cpu_top2_value bigint,
-cpu_top3_value bigint,
-cpu_top4_value bigint,
-cpu_top5_value bigint,
-mem_top1_value bigint,
-mem_top2_value bigint,
-mem_top3_value bigint,
-mem_top4_value bigint,
-mem_top5_value bigint,
-top_mem_dn text,
-top_cpu_dn text
-);
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_session_info()
-RETURNS setof record
-AS $$
-DECLARE
-        row_data record;
-        row_name record;
-        query_str text;
-        query_str_nodes text;
-        BEGIN
-                --Get all the node names
-                query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-                FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''SELECT * FROM pg_catalog.gs_wlm_session_info''';
-                        FOR row_data IN EXECUTE(query_str) LOOP
-                                return next row_data;
-                        END LOOP;
-                END LOOP;
-                return;
-        END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
-
 CREATE OR REPLACE FUNCTION pg_catalog.create_wlm_session_info(IN flag int)
 RETURNS int
 AS $$
@@ -1054,115 +843,10 @@ DECLARE
 	END; $$
 LANGUAGE plpgsql NOT FENCED;
 
-CREATE VIEW pg_catalog.pgxc_wlm_session_info AS
-SELECT * FROM pg_catalog.pgxc_get_wlm_session_info() AS
-(
-	datid	     		Oid,
-	dbname	     		text,
-	schemaname    		text,
-	nodename    		text,
-	username    		text,
-	application_name	text,
-	client_addr    		inet,
-	client_hostname 	text,
-	client_port 		int,
-	query_band    		text,
-	block_time    		bigint,
-	start_time   		timestamp with time zone,
-	finish_time   		timestamp with time zone,
-	duration      		bigint,
-	estimate_total_time	bigint,
-	status      		text,
-	abort_info  		text,
-	resource_pool 		text,
-	control_group 		text,
-	estimate_memory		int,
-	min_peak_memory		int,
-	max_peak_memory		int,
-	average_peak_memory	int,
-	memory_skew_percent	int,
-	spill_info  		text,
-	min_spill_size		int,
-	max_spill_size		int,
-	average_spill_size	int,
-	spill_skew_percent	int,
-	min_dn_time	    	bigint,
-	max_dn_time	    	bigint,
-	average_dn_time		bigint,
-	dntime_skew_percent	int,
-	min_cpu_time		bigint,
-	max_cpu_time		bigint,
-	total_cpu_time  	bigint,
-	cpu_skew_percent	int,
-	min_peak_iops		int,
-	max_peak_iops		int,
-	average_peak_iops	int,
-	iops_skew_percent	int,
-	warning	    		text,
-	queryid      		bigint,
-	query       		text,
-	query_plan	    	text,
-	node_group		text,
-	cpu_top1_node_name	text,
-	cpu_top2_node_name	text,
-	cpu_top3_node_name	text,
-	cpu_top4_node_name	text,
-	cpu_top5_node_name	text,
-	mem_top1_node_name	text,
-	mem_top2_node_name	text,
-	mem_top3_node_name	text,
-	mem_top4_node_name	text,
-	mem_top5_node_name	text,
-	cpu_top1_value		bigint,
-	cpu_top2_value		bigint,
-	cpu_top3_value		bigint,
-	cpu_top4_value		bigint,
-	cpu_top5_value		bigint,
-	mem_top1_value		bigint,
-	mem_top2_value		bigint,
-	mem_top3_value		bigint,
-	mem_top4_value		bigint,
-	mem_top5_value		bigint,
-	top_mem_dn		text,
-	top_cpu_dn		text
-);
-
-CREATE OR REPLACE FUNCTION pg_catalog.pgxc_get_wlm_session_info_bytime(text, TIMESTAMP, TIMESTAMP, int)
-RETURNS setof pg_catalog.gs_wlm_session_info
-AS $$
-DECLARE
-        row_data gs_wlm_session_info%rowtype;
-        row_name record;
-        query_str text;
-        query_str_nodes text;
-        query_str_cn text;
-        BEGIN
-        		IF $1 IN ('start_time', 'finish_time') THEN
-
-	        	ELSE
-	        		 raise WARNING 'Illegal character entered for function, colname must be start_time or finish_time';
-	        		return;
-	        	END IF;
-
-                --Get all the node names
-                query_str_nodes := 'SELECT node_name FROM pgxc_node WHERE node_type=''C'' AND nodeis_active = true';
-                query_str_cn := 'SELECT * FROM pg_catalog.gs_wlm_session_info where '||$1||'>'''''||$2||''''' and '||$1||'<'''''||$3||''''' limit '||$4;
-                FOR row_name IN EXECUTE(query_str_nodes) LOOP
-                        query_str := 'EXECUTE DIRECT ON (' || row_name.node_name || ') ''' || query_str_cn||''';';
-                        FOR row_data IN EXECUTE(query_str) LOOP
-                                return next row_data;
-                        END LOOP;
-                END LOOP;
-                return;
-        END; $$
-LANGUAGE 'plpgsql' NOT FENCED;
-
 GRANT SELECT ON TABLE pg_catalog.gs_wlm_session_query_info_all TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_wlm_session_history TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_wlm_session_info TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_wlm_session_info_all TO PUBLIC;
-GRANT SELECT ON TABLE pg_catalog.pgxc_wlm_session_history TO PUBLIC;
-GRANT SELECT ON TABLE pg_catalog.pgxc_wlm_session_info TO PUBLIC;
 
 DROP INDEX IF EXISTS pg_catalog.pg_asp_oid_index;
 DROP TYPE IF EXISTS pg_catalog.pg_asp;
@@ -1397,23 +1081,9 @@ GRANT SELECT ON TABLE pg_catalog.gs_auditing_access TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_auditing_privilege TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.gs_auditing TO PUBLIC;
 
-DROP FUNCTION IF EXISTS dbms_job.isubmit_on_nodes(bigint, name, name, text, timestamp without time zone, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.submit_on_nodes(name, name, text, timestamp without time zone, text, OUT integer) cascade;
 DROP FUNCTION IF EXISTS pg_catalog.capture_view_to_json(text, integer) cascade;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5717;
-CREATE FUNCTION dbms_job.submit_on_nodes(node_name name, database name, what text, next_date timestamp without time zone, job_interval text, OUT job integer)
- RETURNS integer
- LANGUAGE internal
- NOT FENCED NOT SHIPPABLE
-AS 'submit_job_on_nodes';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5718;
-CREATE FUNCTION dbms_job.isubmit_on_nodes(job bigint, node_name name, database name, what text, next_date timestamp without time zone, job_interval text)
- RETURNS integer
- LANGUAGE internal
- NOT FENCED NOT SHIPPABLE
-AS 'isubmit_job_on_nodes';
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 5719;
 CREATE FUNCTION pg_catalog.capture_view_to_json(view_name text, is_all_db integer)
@@ -1559,15 +1229,6 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0,
 GRANT SELECT ON TABLE pg_catalog.streaming_stream TO PUBLIC;
 GRANT SELECT ON TABLE pg_catalog.streaming_cont_query TO PUBLIC;
 
-DROP FUNCTION IF EXISTS dbms_job.isubmit_on_nodes_internal(bigint, name, name, text, timestamp without time zone, text) cascade;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6007;
-CREATE FUNCTION dbms_job.isubmit_on_nodes_internal(job bigint, node_name name, database name, what text, next_date timestamp without time zone, job_interval text)
- RETURNS integer
- LANGUAGE internal
- NOT FENCED NOT SHIPPABLE
-AS 'isubmit_job_on_nodes_internal';
-
 CREATE OR REPLACE FUNCTION  pg_catalog.proc_add_depend(
                   IN        relationname         name,
                   IN        dbname               name
@@ -1706,17 +1367,6 @@ DROP VIEW IF EXISTS pg_catalog.user_views CASCADE;
 drop view if exists pg_catalog.v$session CASCADE;
 drop view if exists pg_catalog.V$SESSION_LONGOPS CASCADE;
 
-DROP FUNCTION IF EXISTS dbms_job.remove(bigint) cascade;
-DROP FUNCTION IF EXISTS dbms_job.change(bigint, text, timestamp, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.what(bigint, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.next_date(bigint, timestamp) cascade;
-DROP FUNCTION IF EXISTS dbms_job.interval(bigint, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.broken(bigint, boolean, timestamp) cascade;
-DROP FUNCTION IF EXISTS dbms_job.isubmit(bigint, text, timestamp, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.submit(text, timestamp, text, out integer) cascade;
-DROP FUNCTION IF EXISTS dbms_job.isubmit_on_nodes(bigint, name, name, text, timestamp without time zone, text) cascade;
-DROP FUNCTION IF EXISTS dbms_job.submit_on_nodes(name, name, text, timestamp without time zone, text, OUT integer) cascade;
-DROP FUNCTION IF EXISTS dbms_job.isubmit_on_nodes_internal(bigint, name, name, text, timestamp without time zone, text) cascade;
 DROP SCHEMA IF EXISTS dbms_job cascade;
 
 CREATE OR REPLACE VIEW pg_catalog.gs_wlm_user_session_info AS
@@ -2107,84 +1757,6 @@ CREATE UNIQUE INDEX gs_asp_sample_time_index ON pg_catalog.gs_asp USING BTREE(sa
 
 GRANT SELECT ON pg_catalog.gs_asp TO PUBLIC;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
-
-DO $DO$
-DECLARE
-ans boolean;
-BEGIN
-  select case when count(*)=1 then true else false end as ans from (select nspname from pg_namespace where nspname='dbe_perf' limit 1) into ans;
-  if ans = true then
-CREATE OR REPLACE FUNCTION DBE_PERF.get_global_gs_asp
-  (in start_ts timestamp without time zone,
-   in end_ts timestamp without time zone,
-   OUT node_name text,
-   OUT sampleid bigint,
-   OUT sample_time timestamp without time zone,
-   OUT need_flush_sample boolean,
-   OUT databaseid oid,
-   OUT thread_id bigint,
-   OUT sessionid bigint,
-   OUT start_time timestamp without time zone,
-   OUT event text,
-   OUT lwtid integer,
-   OUT psessionid bigint,
-   OUT tlevel integer,
-   OUT smpid integer,
-   OUT userid oid,
-   OUT application_name text,
-   OUT client_addr inet,
-   OUT client_hostname text,
-   OUT client_port integer,
-   OUT query_id bigint,
-   OUT unique_query_id bigint,
-   OUT user_id oid,
-   OUT cn_id integer,
-   OUT unique_query text)
-RETURNS SETOF record
-AS $$
-DECLARE
-  ROW_DATA pg_catalog.gs_asp%ROWTYPE;
-  ROW_NAME RECORD;
-  QUERY_STR TEXT;
-  QUERY_STR_NODES TEXT;
-  node_str TEXT;
-BEGIN
-  QUERY_STR_NODES := 'SELECT NODE_NAME FROM PGXC_NODE WHERE NODE_TYPE IN (''C'', ''D'')';
-  node_str := 'SELECT * FROM pg_catalog.gs_asp where sample_time > '''''||$1||''''' and sample_time < '''''||$2||'''';
-  FOR ROW_NAME IN EXECUTE(QUERY_STR_NODES) LOOP
-    QUERY_STR := 'EXECUTE DIRECT ON (' || ROW_NAME.NODE_NAME || ') '''|| node_str ||''''';';
-    FOR ROW_DATA IN EXECUTE(QUERY_STR) LOOP
-          node_name := ROW_NAME.NODE_NAME;
-          sampleid := ROW_DATA.sampleid;
-          sample_time := ROW_DATA.sample_time;
-          need_flush_sample := ROW_DATA.need_flush_sample;
-          databaseid := ROW_DATA.databaseid;
-          thread_id := ROW_DATA.thread_id;
-          sessionid := ROW_DATA.sessionid;
-          start_time := ROW_DATA.start_time;
-          event := ROW_DATA.event;
-          lwtid := ROW_DATA.lwtid;
-          psessionid := ROW_DATA.psessionid;
-          tlevel := ROW_DATA.tlevel;
-          smpid := ROW_DATA.smpid;
-          userid := ROW_DATA.userid;
-          application_name := ROW_DATA.application_name;
-          client_addr := ROW_DATA.client_addr;
-          client_hostname := ROW_DATA.client_hostname;
-          client_port := ROW_DATA.client_port;
-          query_id := ROW_DATA.query_id;
-          unique_query_id := ROW_DATA.unique_query_id;
-          user_id := ROW_DATA.user_id;
-          cn_id := ROW_DATA.cn_id;
-          unique_query := ROW_DATA.unique_query;
-      RETURN NEXT;
-    END LOOP;
-  END LOOP;
-  RETURN;
-END; $$
-LANGUAGE 'plpgsql';
-   end if;
-END$DO$;
 
 -- use relfilenode to get schemane.tablename if the table is larger than threshold_size_gb
 CREATE OR REPLACE FUNCTION pg_catalog.get_large_table_name(relfile_node text, threshold_size_gb int8)
@@ -2816,23 +2388,6 @@ DECLARE
         end loop;
     END;
 $$LANGUAGE plpgsql NOT FENCED;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC,3466;
-CREATE FUNCTION pg_catalog.check_engine_status(IN text, IN text) RETURNS text LANGUAGE INTERNAL STABLE STRICT as 'check_engine_status';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC,3467;
-CREATE FUNCTION pg_catalog.encode_plan_node(IN text, IN text, IN text, IN text, IN int8, IN text, IN text) RETURNS text LANGUAGE INTERNAL STABLE as 'encode_plan_node';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC,3481;
-CREATE FUNCTION pg_catalog.model_train_opt(IN text, IN text, OUT startup_time_accuracy FLOAT8, OUT total_time_accuracy FLOAT8, OUT rows_accuracy FLOAT8, OUT peak_memory_accuracy FLOAT8) RETURNS SETOF RECORD LANGUAGE INTERNAL STABLE ROWS 1 STRICT as 'model_train_opt';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC,5033;
-CREATE FUNCTION pg_catalog.gs_stat_get_wlm_plan_operator_info(IN OID, OUT datname text, OUT queryid int8, OUT plan_node_id int4, OUT startup_time int8, OUT total_time int8, OUT actual_rows int8, OUT max_peak_memory int4, OUT query_dop int4, OUT parent_node_id int4, OUT left_child_id int4, OUT right_child_id int4, OUT operation text, OUT orientation text, OUT strategy text, OUT options text, OUT condition text, OUT projection text) RETURNS SETOF RECORD LANGUAGE INTERNAL STABLE ROWS 100 STRICT as 'gs_stat_get_wlm_plan_operator_info';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC,3468;
-CREATE FUNCTION pg_catalog.track_model_train_opt(IN text, IN text) RETURNS text LANGUAGE INTERNAL STABLE STRICT as 'track_model_train_opt';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3442;
 DROP FUNCTION IF EXISTS pg_catalog.pg_control_checkpoint() CASCADE;

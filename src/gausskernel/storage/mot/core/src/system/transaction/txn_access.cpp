@@ -175,24 +175,16 @@ void TxnAccess::ClearSet()
 {
     m_lastAcc = nullptr;
     MOT_ASSERT(m_rowCnt == m_rowsSet->size());
+    m_rowsSet->clear();
     if (unlikely(m_accessSetSize > DEFAULT_ACCESS_SIZE)) {
         ShrinkAccessSet();
-    }
-    m_rowsSet->clear();
-    m_allocatedAc = 0;
-
-    unsigned int i;
-    for (i = 0; i < m_accessSetSize; i++) {
-        Access* ac = GetAccessPtr(i);
-        if (ac != nullptr) {
-            DestroyAccess(ac);
-        } else {
-            break;
+    } else {
+        for (unsigned int i = 0; i < m_rowCnt; i++) {
+            DestroyAccess(m_accessesSetBuff[i]);
         }
+        m_rowCnt = 0;
     }
-    m_allocatedAc = i;
     m_insertManager->ClearSet();
-    m_rowCnt = 0;
 }
 
 void TxnAccess::DestroyAccess(Access* access)
@@ -241,15 +233,9 @@ void TxnAccess::ShrinkAccessSet()
     errno_t erc;
     uint64_t new_array_size = DEFAULT_ACCESS_SIZE;
     // Clear access set
-    for (unsigned int i = DEFAULT_ACCESS_SIZE; i < m_accessSetSize; i++) {
-        Access* ac = GetAccessPtr(i);
-        if (ac != nullptr) {
-            DestroyAccess(ac);
-            delete ac;
-            ResetAccessPtr(i);
-        } else {
-            break;
-        }
+    for (unsigned int i = 0; i < m_allocatedAc; i++) {
+        DestroyAccess(m_accessesSetBuff[i]);
+        delete m_accessesSetBuff[i];
     }
 
     if (new_array_size < m_accessSetSize) {
@@ -269,11 +255,11 @@ void TxnAccess::ShrinkAccessSet()
 
     erc = memset_s(ptr, alloc_size, 0, sizeof(Access*) * new_array_size);
     securec_check(erc, "\0", "\0");
-    erc = memcpy_s(ptr, alloc_size, m_accessesSetBuff, sizeof(Access*) * DEFAULT_ACCESS_SIZE);
-    securec_check(erc, "\0", "\0");
     MemSessionFree(m_accessesSetBuff);
     SetAccessesSet(reinterpret_cast<Access**>(ptr));
     m_accessSetSize = new_array_size;
+    m_allocatedAc = 0;
+    m_rowCnt = 0;
 }
 
 Access* TxnAccess::GetNewRowAccess(const Row* row, AccessType type, RC& rc)

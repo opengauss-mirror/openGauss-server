@@ -574,8 +574,9 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     foreach (lc, baserel->baserestrictinfo) {
         RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
 
-        if (!IsMOTExpr(baserel, planstate, &marr, ri->clause, NULL, true))
+        if (!IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, true)) {
             planstate->m_localConds = lappend(planstate->m_localConds, ri->clause);
+        }
     }
 
     // get best index
@@ -675,8 +676,8 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
         foreach (lc, bestClause) {
             RestrictInfo* ri = (RestrictInfo*)lfirst(lc);
 
-            IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, false);
-            // in case we use index params DO NOT add it to envelope filter
+            // In case we use index params DO NOT add it to envelope filter.
+            (void)IsMOTExpr(baserel, planstate, &marr, ri->clause, nullptr, false);
         }
 
         best = MOTAdaptor::GetBestMatchIndex(planstate, &marr, list_length(bestClause), false);
@@ -1383,7 +1384,7 @@ static TupleTableSlot* MOTExecForeignInsert(
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
 
-    if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached()) {
+    if (MOTAdaptor::m_engine->IsSoftMemoryLimitReached() && fdwState != nullptr) {
         CleanQueryStatesOnError(fdwState->m_currTxn);
     }
 
