@@ -481,7 +481,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    export CODE_BASE=________     # Path of the openGauss-server file
    export BINARYLIBS=________    # Path of the binarylibs file
    export GAUSSHOME=$CODE_BASE/dest/
-   export GCC_PATH=$BINARYLIBS/buildtools/***/gcc8.2/
+   export GCC_PATH=$BINARYLIBS/buildtools/***/gcc=7.3/
    export CC=$GCC_PATH/gcc/bin/gcc
    export CXX=$GCC_PATH/gcc/bin/g++
    export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
@@ -496,7 +496,7 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    export CODE_BASE=`pwd`
    export BINARYLIBS=`pwd`/../binarylibs
    export GAUSSHOME=$CODE_BASE/dest/
-   export GCC_PATH=$BINARYLIBS/buildtools/centos7.6_x86_64/gcc8.2/
+   export GCC_PATH=$BINARYLIBS/buildtools/centos7.6_x86_64/gcc7.3/
    export CC=$GCC_PATH/gcc/bin/gcc
    export CXX=$GCC_PATH/gcc/bin/g++
    export LD_LIBRARY_PATH=$GAUSSHOME/lib:$GCC_PATH/gcc/lib64:$GCC_PATH/isl/lib:$GCC_PATH/mpc/lib/:$GCC_PATH/mpfr/lib/:$GCC_PATH/gmp/lib/:$LD_LIBRARY_PATH
@@ -508,19 +508,19 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    **debug**版本：
 
    ```
-   ./configure --gcc-version=8.2.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib
    ```
 
    **release**版本：
 
    ```
-   ./configure --gcc-version=8.2.0 CC=g++ CFLAGS="-O2 -g3" --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-thread-safety --without-readline --without-zlib
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS="-O2 -g3" --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-thread-safety --without-readline --without-zlib
    ```
 
    **memcheck**版本：
 
    ```
-   ./configure --gcc-version=8.2.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check
    ```
 
    > **注意** 
