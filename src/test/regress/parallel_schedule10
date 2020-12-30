@@ -1,4 +1,4 @@
-# ----------
+﻿# ----------
  # The first group of parallel tests
  # ----------
  test: boolean char name varchar text int2 int4 int8 oid float4 float8 bit numeric numeric_2 txid uuid money
@@ -85,3 +85,4 @@
  test: enum_empty_test
  test: alarm_component_test
  test: unify_definition_superuser
+ test: global_temporary_table_get_table_def

@@ -1,0 +1,20 @@
+CREATE GLOBAL TEMPORARY TABLE gtt1 (
+  ID INTEGER NOT NULL,
+  NAME CHAR(16) NOT NULL,
+  ADDRESS VARCHAR(50),
+  POSTCODE CHAR(6)
+)
+ON COMMIT PRESERVE ROWS;
+select * from pg_get_tabledef('gtt1');
+                           pg_get_tabledef                            
+----------------------------------------------------------------------
+ SET search_path = public;                                           +
+ CREATE GLOBAL TEMPORARY TABLE gtt1 (                                +
+         id integer NOT NULL,                                        +
+         name character(16) NOT NULL,                                +
+         address character varying(50),                              +
+         postcode character(6)                                       +
+ )                                                                   +
+ WITH (orientation=row, compression=no, on_commit_delete_rows=false);
+(1 row)
+
