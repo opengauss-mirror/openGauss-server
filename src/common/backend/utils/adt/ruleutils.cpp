@@ -2173,9 +2173,9 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 
     appendStringInfo(&buf,
         "\nCREATE %s%s %s",
-        (table_info.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
-            ((table_info.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
-        reltype_name,
+        (tableinfo.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
+            ((tableinfo.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
+        reltypename,
         relname);
 
     // get attribute info
