@@ -12881,9 +12881,9 @@ const char* GetConfigOption(const char* name, bool missing_ok, bool restrict_sup
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized configuration parameter \"%s\"", name)));
     }
 
-    if (restrict_superuser && (record->flags & GUC_SUPERUSER_ONLY) && (GetUserId() != BOOTSTRAP_SUPERUSERID))
+    if (restrict_superuser && (record->flags & GUC_SUPERUSER_ONLY) && !superuser())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial account to examine \"%s\"", name)));
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to examine \"%s\"", name)));
 
     switch (record->vartype) {
         case PGC_BOOL:
@@ -12935,9 +12935,9 @@ const char* GetConfigOptionResetString(const char* name)
     if (record == NULL)
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unrecognized configuration parameter \"%s\"", name)));
-    if ((record->flags & GUC_SUPERUSER_ONLY) && (GetUserId() != BOOTSTRAP_SUPERUSERID))
+    if ((record->flags & GUC_SUPERUSER_ONLY) && !superuser())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial account to examine \"%s\"", name)));
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to examine \"%s\"", name)));
 
     switch (record->vartype) {
         case PGC_BOOL:
@@ -14115,7 +14115,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
  */
 static void ShowAllGUCConfig(DestReceiver* dest)
 {
-    bool am_superuser = (GetUserId() == BOOTSTRAP_SUPERUSERID);
+    bool am_superuser = superuser();
     int i;
     TupOutputState* tstate = NULL;
     TupleDesc tupdesc;
