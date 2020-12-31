@@ -48,6 +48,7 @@ open($OF, ">$tmpfname") || die "Could not open file $tmpfname\n";
 while (my $indata = <$F>)
 {
 	$indata =~ s/(char \*yy_c_buf_p = \(char \*\) 0;)/THR_LOCAL $1/;
+	$indata =~ s/(char \*yy_c_buf_p = NULL;)/THR_LOCAL $1/;
 	$indata =~ s/(char \*yy_last_accepting_cpos;)/THR_LOCAL $1/;
 	$indata =~ s/(char \*yytext;)/THR_LOCAL $1/;
 	$indata =~ s/(char \*base_yytext;)/THR_LOCAL $1/;
@@ -75,12 +76,14 @@ while (my $indata = <$F>)
 	$indata =~ s/(YYLTYPE plpgsql_yylloc;)/THR_LOCAL $1/;
 	$indata =~ s/(YYSTYPE yylval;)/THR_LOCAL $1/;
 	$indata =~ s/(static )(int yy_n_chars;)/$1THR_LOCAL $2/;
+	$indata =~ s/(static )(yy_size_t yy_n_chars;)/$1THR_LOCAL $2/;
 	$indata =~ s/(extern )(FILE \*replication_yyin, \*replication_yyout;)/$1THR_LOCAL $2/;
 	$indata =~ s/(extern )(int replication_yy_flex_debug;)/$1THR_LOCAL $2/;
 	$indata =~ s/(int replication_yyleng;)/THR_LOCAL $1/;
 	$indata =~ s/(static )(size_t yy_buffer_stack_top = 0;)/$1THR_LOCAL $2/;
 	$indata =~ s/(static )(size_t yy_buffer_stack_max = 0;)/$1THR_LOCAL $2/;
 	$indata =~ s/(static )(YY_BUFFER_STATE \* yy_buffer_stack = 0;)/$1THR_LOCAL $2/;
+	$indata =~ s/(static )(YY_BUFFER_STATE \* yy_buffer_stack = NULL;)/$1THR_LOCAL $2/;
 	$indata =~ s/(static )(int yy_init = 0;)/$1THR_LOCAL $2/;
 	$indata =~ s/(FILE \*replication_yyin = \(FILE \*\) 0, \*replication_yyout = \(FILE \*\) 0;)/THR_LOCAL $1/;
 	$indata =~ s/(int replication_yy_flex_debug = 0;)/THR_LOCAL $1/;
