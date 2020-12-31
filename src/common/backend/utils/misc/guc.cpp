@@ -14186,7 +14186,7 @@ char* GetConfigOptionByName(const char* name, const char** varname)
 
     if ((record->flags & GUC_SUPERUSER_ONLY) && !superuser())
         ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be initial account to examine \"%s\"", name)));
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to examine \"%s\"", name)));
 
     if (varname != NULL)
         *varname = record->name;
