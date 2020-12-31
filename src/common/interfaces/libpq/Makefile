@@ -27,7 +27,7 @@ override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_hooks
 
 ifeq "$(ENABLE_CE)" "1"
-override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
 endif
 
 ifneq ($(PORTNAME), win32)
@@ -162,9 +162,7 @@ all-lib-depends: libpq_ce subsystem
 	$(MAKE) all-lib
 endif
 
-all: gs_ktool all-lib-depends
-gs_ktool:
-	$(MAKE) -C $(top_builddir)/src/bin/gs_ktool
+all: all-lib-depends
 
 utlibpq: all-lib
 	cp libpq.so $(top_builddir)/src/distribute/test/ut/lib/libutlibpq.so

@@ -2,7 +2,6 @@
 [server]:./bin/gds
 [server]:./bin/gs_log
 [server]:./bin/gsql
-[server]:./bin/gs_ktool
 [server]:./bin/gaussdb
 [server]:./bin/gaussdb.version.GaussDB200
 [server]:./bin/gaussdb.version.GaussDB300
@@ -776,8 +775,6 @@
 [server]:./lib/postgresql/java/pljava.jar
 [server]:./lib/postgresql/gsredistribute.so*
 [server]:./lib/libpljava.so*
-[server]:./lib/libgs_ktool.so*
-[server]:./lib/libkmc.so
 [server]:./lib/libpq.a
 [server]:./lib/libpq.so*
 [server]:./lib/libpq_ce.so*
@@ -1121,7 +1118,6 @@
 [server]:./jre/THIRD_PARTY_README
 [client]
 [client]:./bin/gsql
-[client]:./bin/gs_ktool
 [client]:./bin/gs_dump
 [client]:./bin/gs_dumpall
 [client]:./bin/gs_restore
@@ -1162,8 +1158,6 @@
 [client]:./lib/postgresql/utf8_and_big5.so*
 [client]:./lib/postgresql/java/pljava.jar
 [client]:./lib/libpljava.so*
-[client]:./lib/libgs_ktool.so*
-[client]:./lib/libkmc.so
 [client]:./lib/libpq.a
 [client]:./lib/libpq.so*
 [client]:./lib/libpq_ce.so*
@@ -1192,8 +1186,6 @@
 [odbc]:./lib/libkrb5_gauss.so*
 [odbc]:./lib/libcom_err_gauss.so*
 [odbc]:./lib/libpgport_tool.so*
-[odbc]:./lib/libgs_ktool.so*
-[odbc]:./lib/libkmc.so
 [odbc]:./lib/libpq.a
 [odbc]:./lib/libpq.so*
 [odbc]:./lib/libpq_ce.so*
@@ -1206,8 +1198,6 @@
 [libpq]:./lib/libpq.a
 [libpq]:./lib/libpq.so*
 [libpq]:./lib/libpq_ce.so*
-[libpq]:./lib/libgs_ktool.so*
-[libpq]:./lib/libkmc.so
 [libpq]:./lib/libstdc++.so*
 [libpq]:./lib/libconfig.so*
 [libpq]:./lib/libcmclient.so*

@@ -348,7 +348,7 @@ static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid 
                 break;
             case ClientLogicGlobalProperty::CMK_KEY_STORE: {
                 CmkKeyStore key_store = get_key_store_from_string(global_param->value);
-                if (key_store != CmkKeyStore::GS_KTOOL) {
+                if (key_store != CmkKeyStore::LOCALKMS) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key store")));
                 }
                 string_args.set("KEY_STORE", global_param->value);
@@ -361,7 +361,7 @@ static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid 
             }
             case ClientLogicGlobalProperty::CMK_ALGORITHM: {
                 CmkAlgorithm cmk_algo = get_algorithm_from_string(global_param->value);
-                if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
+                if (cmk_algo != CmkAlgorithm::RAS_2048) {
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid algorithm")));
                 }
                 string_args.set("ALGORITHM", global_param->value);

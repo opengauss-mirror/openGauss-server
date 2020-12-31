@@ -243,7 +243,7 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
      * case 2 : do not report error and try again
      */
     CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
-    if (keyStore == CmkKeyStore::GS_KTOOL) {
+    if (keyStore == CmkKeyStore::LOCALKMS) {
         if (!kt_atoi(key_path_str, &cmk_id)) {
             return false;
         }
@@ -366,7 +366,7 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
     unsigned int cmk_id = 0;
 
-    if (keyStore == CmkKeyStore::GS_KTOOL) {
+    if (keyStore == CmkKeyStore::LOCALKMS) {
         if (!kt_atoi(key_path_str, &cmk_id)) {
             libpq_free(common_expected_value);
             return false;
