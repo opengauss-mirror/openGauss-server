@@ -2,7 +2,6 @@
 ./bin/gds
 ./bin/gs_log
 ./bin/gsql
-./bin/gs_ktool
 ./bin/gaussdb
 ./bin/gaussdb.version.GaussDB200
 ./bin/gaussdb.version.GaussDB300
@@ -780,8 +779,6 @@
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/gsredistribute.so
 ./lib/libpljava.so
-./lib/libgs_ktool.so
-./lib/libkmc.so
 ./lib/libpq.a
 ./lib/libpq.so
 ./lib/libpq.so.5
@@ -1203,7 +1200,6 @@
 ./jre/THIRD_PARTY_README
 [client]
 ./bin/gsql
-./bin/gs_ktool
 ./bin/gs_dump
 ./bin/gs_dumpall
 ./bin/gs_restore
@@ -1244,8 +1240,6 @@
 ./lib/postgresql/utf8_and_big5.so
 ./lib/postgresql/java/pljava.jar
 ./lib/libpljava.so
-./lib/libgs_ktool.so
-./lib/libkmc.so
 ./lib/libpq.a
 ./lib/libpq.so
 ./lib/libpq.so.5
@@ -1279,8 +1273,6 @@
 ./odbc/lib/psqlodbcw.la
 ./odbc/lib/psqlodbcw.so
 [libpq]
-./lib/libgs_ktool.so
-./lib/libkmc.so
 ./lib/libpq.a
 ./lib/libpq.so
 ./lib/libpq.so.5

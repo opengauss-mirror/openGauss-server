@@ -355,7 +355,7 @@ else
   LIBORC_HOME = $(with_3rd)/$(BINARYPATH)/liborc/$(LIB_SUPPORT_LLT)
   SNAPPY_HOME = $(with_3rd)/$(BINARYPATH)/snappy/$(LIB_SUPPORT_LLT)
   LIBOPENSSL_HOME = $(with_3rd)/$(BINARYPATH)/openssl/$(LIB_NOT_SUPPORT_LLT)
-  LIBKMC_HOME = $(with_3rd)/$(PLATFORMPATH)/kmc/comm
+
   SECURE_HOME = $(with_3rd)/$(PLATFORMPATH)/Huawei_Secure_C/$(LIB_NOT_SUPPORT_LLT)
   SECUREDYNAMICLIB_HOME = $(with_3rd)/$(PLATFORMPATH)/Huawei_Secure_C/Dynamic_Lib
   LICENSE_HOME = $(with_3rd)/$(PLATFORMPATH)/AdaptiveLM_C_V100R005C01SPC002/$(LIB_SUPPORT_LLT)
@@ -615,12 +615,6 @@ LIBOPENSSL_BIN_PATH = $(LIBOPENSSL_HOME)/bin
 LIBOPENSSL_LIB_PATH = $(LIBOPENSSL_HOME)/lib
 LIBOPENSSL_SSL_PATH = $(LIBOPENSSL_HOME)/ssl
 LIBOPENSSL_INCLUDE_PATH = $(LIBOPENSSL_HOME)/include
-
-#############################################################################
-# kmc component
-#############################################################################
-LIBKMC_LIB_PATH = $(LIBKMC_HOME)/lib
-LIBKMC_INCLUDE_PATH = $(LIBKMC_HOME)/include
 
 #############################################################################
 # security component
@@ -1065,7 +1059,7 @@ endif
 # This macro is for use by libraries linking to libpq.  (Because libpgport
 # isn't created with the same link flags as libpq, it can't be used.)
 libpq = -L$(libpq_builddir) -lpq
-libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
+libpq_ce = -L$(libpq_builddir) -lpq_ce
 
 # If doing static linking, shared library dependency info isn't available,
 # so add in the libraries that libpq depends on.

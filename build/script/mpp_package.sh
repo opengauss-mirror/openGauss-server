@@ -966,22 +966,11 @@ function make_package_gsql()
     mkdir -p gsql
     mkdir -p gsql/bin
     mkdir -p gsql/lib
-    mkdir -p gsql/gs_ktool_file
 
     # copy gsql and depend *.so
     cp ${BUILD_DIR}/bin/gsql gsql/bin
     if [ $? -ne 0 ]; then
         die "copy gsql failed."
-    fi
-
-    cp ${BUILD_DIR}/bin/gs_ktool gsql/bin
-    if [ $? -ne 0 ]; then
-        die "copy gsql failed."
-    fi
-
-    cp -r ${BUILD_DIR}/etc/gs_ktool_file/gs_ktool_conf.ini gsql/gs_ktool_file
-    if [ $? -ne 0 ]; then
-        die "copy gs_ktool_con.ini failed."
     fi
 
     cd gsql

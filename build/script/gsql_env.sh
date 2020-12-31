@@ -44,27 +44,17 @@ function doing()
 #------------------------------
 #       gsql things
 #------------------------------
-function cofig_gsql_and_gs_ktool()
+function cofig_gsql()
 {
-    doing 'Configuring LD_LIBRARY_PATH, PATH and GS_KTOOL_FILE_PATH for gsql and gs_ktool...'
+    doing 'Configuring LD_LIBRARY_PATH and PATH for gsql...'
     LIB_PATH="${LOCAL_PATH}/lib"
     BIN_PATH="${LOCAL_PATH}/bin"
-    GS_KT_FILE_PATH="${LOCAL_PATH}/gs_ktool_file"
     if [ ! -f "${LOCAL_PATH}/bin/gsql" ]; then
         logerr "failed to locate ./bin/gsql, please source this file at the path where it is. "
         return 1;
     fi;
-    if [ ! -f "${LOCAL_PATH}/bin/gs_ktool" ]; then
-        logerr "failed to locate ./bin/gs_ktool, please source this file at the path where it is. "
-        return 1;
-    fi;
-    if [ ! -f "${LOCAL_PATH}/gs_ktool_file/gs_ktool_conf.ini" ]; then
-        logerr "failed to locate ./gs_ktool_file/gs_ktool_con.ini, please source this file at the path where it is. "
-        return 1;
-    fi;
     export LD_LIBRARY_PATH=${LIB_PATH}:${LD_LIBRARY_PATH}
     export PATH=${BIN_PATH}:${PATH}
-    export GS_KTOOL_FILE_PATH=${GS_KT_FILE_PATH}
     echo 'done'
     return 0
 }
@@ -73,7 +63,7 @@ if [ ! -z "$1" ]; then
     echo "Usage:"
     echo "    source $0"
 else
-    cofig_gsql_and_gs_ktool
+    cofig_gsql
     if [ 0 -eq $? ]; then
         echo 'All things done.'
     fi
