@@ -321,7 +321,7 @@ typedef struct ErrorContextCallback {
 #define securec_check(errno, charList, ...)                                                                          \
     {                                                                                                                \
         if (errno == -1) {                                                                                           \
-            freeSecurityFuncSpace_c(charList, ##__VA_ARGS__);                                                        \
+            freeSecurityFuncSpace_c((char*)charList, ##__VA_ARGS__);                                                        \
             printf("ERROR at %s : %d : The destination buffer or format is a NULL pointer or the invalid parameter " \
                    "handle is invoked..\n",                                                                          \
                 __FILE__,                                                                                            \
