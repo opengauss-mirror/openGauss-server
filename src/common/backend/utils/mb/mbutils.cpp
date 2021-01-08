@@ -655,9 +655,13 @@ char* pg_server_to_any(const char* s, int len, int encoding)
     if (len <= 0) {
         return (char*)s;
     }
-    if (encoding == u_sess->mb_cxt.DatabaseEncoding->encoding || encoding == PG_SQL_ASCII ||
-        u_sess->mb_cxt.DatabaseEncoding->encoding == PG_SQL_ASCII) {
+    if (encoding == u_sess->mb_cxt.DatabaseEncoding->encoding || encoding == PG_SQL_ASCII) {
         return (char*)s; /* assume data is valid */
+    }
+    if (u_sess->mb_cxt.DatabaseEncoding->encoding == PG_SQL_ASCII) {
+        /* No conversion is possible, but we must validate the result */
+        (void) pg_verify_mbstr(encoding, s, len, false);
+        return (char*)s;
     }
     if (u_sess->mb_cxt.ClientEncoding->encoding == encoding) {
         return perform_default_encoding_conversion(s, len, false);
