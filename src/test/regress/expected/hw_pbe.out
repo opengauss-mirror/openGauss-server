@@ -21,11 +21,10 @@ explain (costs off, verbose on) execute s (1,1);
 explain (costs off, verbose on) execute i (6,6,6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 6, 6
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2,2);
                           QUERY PLAN                           
@@ -188,11 +187,10 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           
@@ -2557,11 +2555,10 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           
@@ -3642,15 +3639,16 @@ INSERT INTO pbe_prunning_001 values (1, 1, 1);
 INSERT INTO pbe_prunning_002 values (1, 1, 1);
 PREPARE pa AS SELECT * FROM pbe_prunning_001 pp1 RIGHT OUTER JOIN pbe_prunning_002 pp2 ON pp1.c_int=pp2.c_int WHERE (pp1.c_int=$1 AND pp1.c_numeric=$2 AND pp2.c_int=$3 AND pp2.c_numeric=$4) or pp1.id=$5;
 EXPLAIN(COSTS FALSE) EXECUTE pa(10,10,10,10,11);
-                                                         QUERY PLAN                                                          
------------------------------------------------------------------------------------------------------------------------------
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
  Hash Join
-   Hash Cond: (pp1.c_int = pp2.c_int)
+   Hash Cond: (pp2.c_int = pp1.c_int)
    Join Filter: (((pp1.c_int = $1) AND (pp1.c_numeric = $2) AND (pp2.c_int = $3) AND (pp2.c_numeric = $4)) OR (pp1.id = $5))
-   ->  Seq Scan on pbe_prunning_001 pp1
+   ->  Seq Scan on pbe_prunning_002 pp2
    ->  Hash
-         ->  Seq Scan on pbe_prunning_002 pp2
-(6 rows)
+         ->  Seq Scan on pbe_prunning_001 pp1
+               Filter: (((c_int = $1) AND (c_numeric = $2)) OR ((c_int = $1) AND (c_numeric = $2)) OR (id = $5) OR (id = $5))
+(7 rows)
 
 DEALLOCATE PREPARE pa;
 DROP TABLE pbe_prunning_001;

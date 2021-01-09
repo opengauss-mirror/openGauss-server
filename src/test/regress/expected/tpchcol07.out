@@ -61,10 +61,12 @@ order by
                                        ->  Vector Nest Loop
                                              Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
                                              ->  CStore Scan on nation n1
+                                                   Filter: ((n_name = 'FRANCE '::bpchar) OR (n_name = 'FRANCE '::bpchar) OR (n_name = 'GERMANY'::bpchar) OR (n_name = 'GERMANY'::bpchar))
                                              ->  Vector Materialize
                                                    ->  CStore Scan on nation n2
+                                                         Filter: ((n_name = 'GERMANY'::bpchar) OR (n_name = 'GERMANY'::bpchar) OR (n_name = 'FRANCE'::bpchar) OR (n_name = 'FRANCE'::bpchar))
                      ->  CStore Scan on supplier
-(23 rows)
+(25 rows)
 
 select
 	supp_nation,
