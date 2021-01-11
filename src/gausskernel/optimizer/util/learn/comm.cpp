@@ -272,7 +272,7 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
     return plainpwd;
 }
 
-static void CleanCertInfo(StringInfo str)
+static inline void CleanCertInfo(StringInfo str)
 {
     errno_t rc = memset_s(str->data, str->len, 0, str->len);
     securec_check(rc, "\0", "\0");
