@@ -272,6 +272,14 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
     return plainpwd;
 }
 
+static inline void CleanCertInfo(StringInfo str)
+{
+    errno_t rc = memset_s(str->data, str->len, 0, str->len);
+    securec_check(rc, "\0", "\0");
+    pfree_ext(str->data);
+    pfree_ext(str);
+}
+
 static void GetCurlClientCerts(AiConn* connHandle)
 {
     char* gausshome = getGaussHome();
@@ -300,12 +308,11 @@ static void GetCurlClientCerts(AiConn* connHandle)
         errmsg("Read certificate files failed.")));
     }
 
-    pfree_ext(caPath->data);
-    pfree_ext(certPath->data);
-    pfree_ext(keyPath->data);
-    pfree_ext(caPath);
-    pfree_ext(certPath);
-    pfree_ext(keyPath);
+    CleanCertInfo(caPath);
+    CleanCertInfo(certPath);
+    CleanCertInfo(keyPath);
+    errno_t rc = memset_s(plainpwd, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
+    securec_check(rc, "\0", "\0");
     pfree_ext(plainpwd);
 }
 
