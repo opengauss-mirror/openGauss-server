@@ -42,6 +42,7 @@ Complete list of usable sgml source files in this directory.
 <!ENTITY alterUser          SYSTEM "alter_user.sgml">
 <!ENTITY alterUserMapping   SYSTEM "alter_user_mapping.sgml">
 <!ENTITY alterView          SYSTEM "alter_view.sgml">
+<!ENTITY alterRule          SYSTEM "alter_rule.sgml">
 <!ENTITY analyze            SYSTEM "analyze.sgml">
 <!ENTITY begin              SYSTEM "begin.sgml">
 <!## XC>
