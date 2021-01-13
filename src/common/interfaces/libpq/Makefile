@@ -230,7 +230,7 @@ install: all installdirs install-lib
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/pqexpbuffer.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pg_service.conf.sample '$(DESTDIR)$(datadir)/pg_service.conf.sample'
 ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-	mkdir -p $(GAUSSHOME)/etc/localkms
+	$(MKDIR_P) '$(DESTDIR)$(includedir)/../etc/localkms'
 endif
 
 installcheck:
