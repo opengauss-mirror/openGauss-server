@@ -28,12 +28,12 @@
 
 typedef enum class CmkKeyStore {
     INVALID_KEYSTORE = -1,
-    GS_KTOOL
+    LOCALKMS
 } CmkKeyStore;
 
 typedef enum class CmkAlgorithm {
     INVALID_ALGORITHM,
-    AES_256_CBC
+    RAS_2048
 } CmkAlgorithm;
 
 typedef enum class EncryptionType {
@@ -70,7 +70,7 @@ inline CmkKeyStore get_key_store_from_string(const char *key_store)
     }
     
     if (strncasecmp(key_store, "gs_ktool", strlen("gs_ktool")) == 0) {
-        return CmkKeyStore::GS_KTOOL;
+        return CmkKeyStore::LOCALKMS;
     } 
 
     return CmkKeyStore::INVALID_KEYSTORE;
@@ -82,8 +82,8 @@ inline CmkAlgorithm get_algorithm_from_string(const char *algorithm)
         return CmkAlgorithm::INVALID_ALGORITHM;
     }
 
-    if (strncasecmp(algorithm, "AES_256_CBC", strlen("AES_256_CBC")) == 0) {
-        return CmkAlgorithm::AES_256_CBC;
+    if (strncasecmp(algorithm, "RAS_2048", strlen("RAS_2048")) == 0) {
+        return CmkAlgorithm::RAS_2048;
     }
 
     return CmkAlgorithm::INVALID_ALGORITHM;

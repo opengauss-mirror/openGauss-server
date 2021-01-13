@@ -2,7 +2,6 @@
 ./bin/gds
 ./bin/gs_log
 ./bin/gsql
-./bin/gs_ktool
 ./bin/gaussdb
 ./bin/gaussdb.version.GaussDB200
 ./bin/gaussdb.version.GaussDB300
@@ -803,8 +802,6 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
-./lib/libkmc.so
-./lib/libgs_ktool.so
 ./lib/libcgroup.so
 ./lib/libcgroup.so.1
 ./lib/libcom_err_gauss.so
@@ -1221,7 +1218,6 @@
 ./jre/THIRD_PARTY_README
 [client]
 ./bin/gsql
-./bin/gs_ktool
 ./bin/gs_dump
 ./bin/gs_dumpall
 ./bin/gs_restore
@@ -1269,8 +1265,6 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
-./lib/libkmc.so
-./lib/libgs_ktool.so
 ./lib/libcrypto.so
 ./lib/libcrypto.so.1.1
 ./lib/libstdc++.so.6
@@ -1312,8 +1306,6 @@
 ./lib/libcmcommon.so.2
 ./lib/libcmpq.so
 ./lib/libcmpq.so.1
-./lib/libkmc.so
-./lib/libgs_ktool.so
 ./lib/libcrypto.so
 ./lib/libcrypto.so.1.1
 ./lib/libstdc++.so.6

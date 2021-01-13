@@ -18235,7 +18235,9 @@ int find_guc_option(
         opt_name, 
         (targetline + 1))));
     }
-
+    if (matchtimes > 0) {
+        return targetline;
+    }
     /* The second loop is to deal with the lines commented by '#' */
     matchtimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {

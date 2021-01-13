@@ -49,7 +49,7 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
 
     /* check algorithm */
     CmkAlgorithm cmk_algo = get_algorithm_from_string(algorithm_type_str);
-    if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
+    if (cmk_algo != CmkAlgorithm::RAS_2048) {
         printfPQExpBuffer(&conn->errorMessage,
             libpq_gettext("ERROR(CLIENT): unsupported client master key algorithm\n"));
         return false;
@@ -57,7 +57,7 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
 
     /* check key store */
     CmkKeyStore key_store = get_key_store_from_string(key_store_str);
-    if (key_store != CmkKeyStore::GS_KTOOL) {
+    if (key_store != CmkKeyStore::LOCALKMS) {
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): key store are mandatory\n"));
         return false;
     }
@@ -87,7 +87,7 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
         }
     }
     /* generate cmk */
-    if (key_store == CmkKeyStore::GS_KTOOL) {
+    if (key_store == CmkKeyStore::LOCALKMS) {
         unsigned int cmk_id = 0;
 
         if (!kt_atoi(key_path_str, &cmk_id)) {

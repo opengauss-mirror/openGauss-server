@@ -25,7 +25,6 @@
 #ifndef KTOOL_KT_INTERFACES_H
 #define KTOOL_KT_INTERFACES_H
 
-#include "gs_ktool/kt_interface.h"
 #include "client_logic/client_logic_enums.h"
 
 #define DEFAULT_CMK_LEN 32
