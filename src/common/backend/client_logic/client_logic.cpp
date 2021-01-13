@@ -20,6 +20,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "pg_config.h"
 
 #include "client_logic/client_logic.h"
 #include "client_logic/client_logic_common.h"
@@ -317,13 +318,14 @@ static bool process_global_settings_flush_args(Oid global_key_id, const char *gl
     return true;
 }
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 static void check_key_path(const char *key_path)
 {
     const char *key_path_tag = "gs_ktool/";
     if (key_path == NULL) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
     }
-    if ((strlen(key_path) <= strlen(key_path_tag)) && 
+    if ((strlen(key_path) <= strlen(key_path_tag)) || 
         (strncmp(key_path, key_path_tag, strlen(key_path_tag)) != 0)) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
     }
@@ -333,6 +335,7 @@ static void check_key_path(const char *key_path)
         }
     }
 }
+#endif
 
 static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid global_key_id)
 {
@@ -348,20 +351,31 @@ static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid 
                 break;
             case ClientLogicGlobalProperty::CMK_KEY_STORE: {
                 CmkKeyStore key_store = get_key_store_from_string(global_param->value);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+                if (key_store != CmkKeyStore::GS_KTOOL) {
+#else
                 if (key_store != CmkKeyStore::LOCALKMS) {
+#endif              
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key store")));
                 }
                 string_args.set("KEY_STORE", global_param->value);
                 break;
             }
             case ClientLogicGlobalProperty::CMK_KEY_PATH: {
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
                 check_key_path(global_param->value);
+#endif  
                 string_args.set("KEY_PATH", global_param->value);
                 break;
             }
             case ClientLogicGlobalProperty::CMK_ALGORITHM: {
                 CmkAlgorithm cmk_algo = get_algorithm_from_string(global_param->value);
-                if (cmk_algo != CmkAlgorithm::RAS_2048) {
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+                if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
+#else
+                if (cmk_algo != CmkAlgorithm::RSA_2048) {
+#endif
+
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid algorithm")));
                 }
                 string_args.set("ALGORITHM", global_param->value);
@@ -388,7 +402,6 @@ static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid 
     }
     return 0;
 }
-
 
 int process_global_settings(CreateClientLogicGlobal *parsetree)
 {
@@ -445,6 +458,14 @@ int process_global_settings(CreateClientLogicGlobal *parsetree)
         CreateRlsPolicyForSystem("pg_catalog", "gs_client_global_keys", "gs_client_global_keys_rls",
             "has_cmk_privilege", "oid", "usage");
         rel = relation_open(ClientLogicGlobalSettingsId, ShareUpdateExclusiveLock);
+        ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+        relation_close(rel, ShareUpdateExclusiveLock);
+    }
+    rlsPolicyId = get_rlspolicy_oid(ClientLogicGlobalSettingsArgsId, "gs_client_global_keys_args_rls", true);
+    if (OidIsValid(rlsPolicyId) == false) {
+        CreateRlsPolicyForSystem("pg_catalog", "gs_client_global_keys_args", "gs_client_global_keys_args_rls",
+            "has_cmk_privilege", "global_key_id", "usage");
+        rel = relation_open(ClientLogicGlobalSettingsArgsId, ShareUpdateExclusiveLock);
         ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
         relation_close(rel, ShareUpdateExclusiveLock);
     }
@@ -735,6 +756,14 @@ int process_column_settings(CreateClientLogicColumn *parsetree)
         CreateRlsPolicyForSystem(
             "pg_catalog", "gs_column_keys", "gs_column_keys_rls", "has_cek_privilege", "oid", "usage");
         rel = relation_open(ClientLogicColumnSettingsId, ShareUpdateExclusiveLock);
+        ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+        relation_close(rel, ShareUpdateExclusiveLock);
+    }
+    rlsPolicyId = get_rlspolicy_oid(ClientLogicColumnSettingsArgsId, "gs_column_keys_args_rls", true);
+    if (OidIsValid(rlsPolicyId) == false) {
+        CreateRlsPolicyForSystem("pg_catalog", "gs_column_keys_args",
+            "gs_column_keys_args_rls", "has_cek_privilege", "column_key_id", "usage");
+        rel = relation_open(ClientLogicColumnSettingsArgsId, ShareUpdateExclusiveLock);
         ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
         relation_close(rel, ShareUpdateExclusiveLock);
     }

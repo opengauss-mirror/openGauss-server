@@ -24,6 +24,8 @@
 #ifndef HOOKS_MANAGER_H
 #define HOOKS_MANAGER_H
 
+#include "pg_config.h"
+
 #include <string>
 #include <client_logic_cache/icached_column.h>
 typedef unsigned int Oid;
@@ -52,6 +54,9 @@ public:
             const GlobalHookExecutor **, size_t);
         static bool post_create(PGClientLogic &clientlogic, const char *function_name, StringArgs &args);
         static bool set_deletion_expected(const char *object_name, bool is_schema);
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+        static bool delete_localkms_file(GlobalHookExecutor *global_hook_executor);
+#endif
     };
 
     class ColumnSettings {

@@ -25,6 +25,7 @@
 #ifndef KTOOL_KT_INTERFACES_H
 #define KTOOL_KT_INTERFACES_H
 
+#include "gs_ktool/kt_interface.h"
 #include "client_logic/client_logic_enums.h"
 
 #define DEFAULT_CMK_LEN 32
@@ -36,9 +37,9 @@ extern bool kt_atoi(const char *cmk_id_str, unsigned int *cmk_id);
 extern bool create_cmk(unsigned int cmk_id);
 extern bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain, bool is_report_err);
 
-extern bool encrypt_cek_with_aes_256(const unsigned char *cek_plain, size_t cek_plain_size, unsigned char *cmk_plain,
+extern bool encrypt_cek_use_aes256(const unsigned char *cek_plain, size_t cek_plain_size, unsigned char *cmk_plain,
     unsigned char *cek_ciph, size_t &cek_ciph_size, bool is_report_err);
-extern bool decrypt_cek_with_aes_256(const unsigned char *cek_ciphe, size_t cek_ciphe_size, unsigned char *cmk_plain,
+extern bool decrypt_cek_use_aes256(const unsigned char *cek_ciphe, size_t cek_ciphe_size, unsigned char *cmk_plain,
     unsigned char *cek_plain, size_t *cek_plain_len, bool is_report_err);
 
 extern void free_cmk_plain_cache();

@@ -34,6 +34,8 @@
 #include <iostream>
 #include "client_logic_cache/cached_column_setting.h"
 #include "client_logic_cache/column_hook_executors_list.h"
+#include "encryption_column_hook_executor.h"
+#include "encryption_global_hook_executor.h"
 
 /* DDL */
 GlobalHookExecutorSptr HooksManager::GlobalSettings::create_global_hook_executor(const char *function_name,
@@ -264,6 +266,10 @@ bool HooksManager::ColumnSettings::set_deletion_expected(const char *object_name
     } else {
         const CachedColumnSetting *columnSetting = CacheLoader::get_instance().get_column_setting_by_fqdn(object_name);
         column_settings = (const CachedColumnSetting **)malloc(sizeof(CachedColumnSetting *) * 1);
+        if (column_settings == NULL) {
+            fprintf(stderr, "out of memory when setting deleted objects\n");
+            return false;
+        }
         column_settings[0] = columnSetting;
         column_settings_size = 1;
     }
@@ -274,3 +280,11 @@ bool HooksManager::ColumnSettings::set_deletion_expected(const char *object_name
     libpq_free(column_settings);
     return true;
 }
+
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+bool HooksManager::GlobalSettings::delete_localkms_file(GlobalHookExecutor *global_hook_executor)
+{
+    return global_hook_executor->delete_localkms_file();
+}
+#endif
+

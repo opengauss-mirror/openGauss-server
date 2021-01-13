@@ -24,12 +24,16 @@
 #ifndef ENCRYPTION_COLUMN_HOOK_EXECUTOR_H
 #define ENCRYPTION_COLUMN_HOOK_EXECUTOR_H
 
+#include "pg_config.h"
+
 #include <memory>
 #include <string>
 #include <vector>
-
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 #include "gs_ktool_interface.h"
-
+#else
+#include "localkms_gen_cmk.h"
+#endif
 #include "column_hook_executor.h"
 #include "abstract_encryption_hook.h"
 #include "encryption_global_hook_executor.h"

@@ -36,9 +36,10 @@ void insert_into_vector(void *tmp)
     } else if (g_vec_size % g_resize_factor == 0) {
         g_vec = (void **)libpq_realloc(g_vec, g_vec_size * sizeof(*g_vec),
             (g_vec_size + g_resize_factor) * sizeof(*g_vec));
-        if (g_vec == NULL) {
-            return;
-        }
+    }
+    if (g_vec == NULL) {
+        printf("out of memory\n");
+        exit(EXIT_FAILURE);
     }
     g_vec[g_vec_size] = tmp;
     g_vec_size++;

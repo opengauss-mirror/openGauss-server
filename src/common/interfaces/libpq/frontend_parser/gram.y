@@ -155,7 +155,6 @@ static void processCASbits(int cas_bits, int location, const char *constrType,
 			   bool *no_inherit, core_yyscan_t yyscanner);
 static Expr *makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond);
 static List *mergeTableFuncParameters(List *func_args, List *columns);
-static TypeName *TableFuncTypeName(List *columns);
 
 /* Whether the statement contains operator "(+)" */
 extern THR_LOCAL bool stmt_contains_operator_plus;
@@ -2837,8 +2836,6 @@ CreateFunctionStmt:
 					n->replace = $2;
 					n->funcname = $4;
 					n->parameters = mergeTableFuncParameters($5, $9);
-					n->returnType = TableFuncTypeName($9);
-					n->returnType->location = @7;
 					n->options = $11;
 					n->withClause = $12;
 					n->isProcedure = false;
@@ -11688,25 +11685,6 @@ makeNodeDecodeCondtion(Expr* firstCond,Expr* secondCond)
 static List *mergeTableFuncParameters(List *func_args, List *columns)
 {
     return list_concat(func_args, columns);
-}
-
-/*
- * Determine return type of a TABLE function.  A single result column
- * returns setof that column's type; otherwise return setof record.
- */
-static TypeName *TableFuncTypeName(List *columns)
-{
-    TypeName *result;
-
-    if (list_length(columns) == 1) {
-        FunctionParameter *p = (FunctionParameter *) linitial(columns);
-        result = (TypeName *) copyObject(p->argType);
-    } else {
-        result = SystemTypeName("record");
-    }
-
-    result->setof = true;
-    return result;
 }
 
 /*

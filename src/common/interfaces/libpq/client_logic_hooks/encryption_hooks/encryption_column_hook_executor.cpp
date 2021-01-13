@@ -20,6 +20,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "pg_config.h"
 
 #include <iostream>
 #include <memory>
@@ -77,11 +78,9 @@ int EncryptionColumnHookExecutor::process_data_impl(bool is_during_refresh_cache
         if (algorithm_str == NULL) {
             printf("ERROR(CLIENT): failed to get column encryption algorithm.\n");
             return -1;
-        } else if (strncasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256", strlen("AEAD_AES_256_CBC_HMAC_SHA256")) ==
-            0) {
+        } else if (strcasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256") == 0) {
             column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
-        } else if (strncasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256", strlen("AEAD_AES_128_CBC_HMAC_SHA256")) ==
-            0) {
+        } else if (strcasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
             column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_128_CBC_HMAC_SHA256;
         } else {
             printf("ERROR(CLIENT): un-support invalid encryption algorithm.\n");
@@ -157,11 +156,9 @@ int EncryptionColumnHookExecutor::deprocess_data_impl(bool is_during_refresh_cac
         if (algorithm_str == NULL) {
             printf("ERROR(CLIENT): failed to get column encryption algorithm.\n");
             return -1;
-        } else if (strncasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256", strlen("AEAD_AES_256_CBC_HMAC_SHA256")) ==
-            0) {
+        } else if (strcasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256") == 0) {
             column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
-        } else if (strncasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256", strlen("AEAD_AES_128_CBC_HMAC_SHA256")) ==
-            0) {
+        } else if (strcasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
             column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_128_CBC_HMAC_SHA256;
         }
         set_column_encryption_algorithm(column_encryption_algorithm);
@@ -232,6 +229,8 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
         return false;
     }
 
+    CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     /* read cmk plain from gs_ktool */
     bool is_report_err = is_during_refresh_cache;
     unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
@@ -242,8 +241,7 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
      * case 1 : report error directly
      * case 2 : do not report error and try again
      */
-    CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
-    if (keyStore == CmkKeyStore::LOCALKMS) {
+    if (keyStore == CmkKeyStore::GS_KTOOL) {
         if (!kt_atoi(key_path_str, &cmk_id)) {
             return false;
         }
@@ -252,15 +250,35 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
             return false;
         }
 
-        if (!decrypt_cek_with_aes_256((const unsigned char *)encrypted_key_value, *encrypted_key_value_size, cmk_plain,
-            (unsigned char *)decryptedKey, decryptedKeySize, is_report_err)) {
+        if (!decrypt_cek_use_aes256((const unsigned char *)encrypted_key_value, *encrypted_key_value_size, cmk_plain,
+            decryptedKey, decryptedKeySize, is_report_err)) {
             return false;
         }
     } else {
         printf("ERROR(CLIENT): Invalid key store type, only support gs_ktool now.\n");
         return false;
     }
+#else
+    RealCmkPath real_cmk_path = {0};
+    KmsErrType err_type = SUCCEED;
 
+    if (keyStore == CmkKeyStore::LOCALKMS) {
+        err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
+        if (err_type != KEY_FILES_EXIST) {
+            handle_kms_err(err_type);
+            return false;
+        }
+
+        if (decrypt_cek_use_rsa2048((const unsigned char *)encrypted_key_value, *encrypted_key_value_size,
+            real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path),
+            decryptedKey, decryptedKeySize) != SUCCEED) {
+            return false;
+        }
+    } else {
+        printf("ERROR(CLIENT): Invalid key store type, only support localkms now.\n");
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -287,9 +305,91 @@ bool EncryptionColumnHookExecutor::is_operator_allowed(const ICachedColumn *ce, 
     return false;
 }
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain, size_t cek_plain_size,
+    unsigned char *cek_ciph, size_t &cek_ciph_len)
+{
+    /* read cmk plain from gs_ktool */
+    bool is_report_err = true;
+    unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
+    unsigned int cmk_id = 0;
+
+    if (!kt_atoi(key_path_str, &cmk_id)) {
+        return false;
+    }
+
+    if (!read_cmk_plain(cmk_id, cmk_plain, is_report_err)) {
+        return false;
+    }
+
+    if (!encrypt_cek_use_aes256(cek_plain, cek_plain_size, cmk_plain, cek_ciph, cek_ciph_len, is_report_err)) {
+        return false;
+    }
+
+    return true;
+}
+#else
+static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain, const size_t plain_len,
+    unsigned char *cek_cipher, size_t &cipher_len)
+{
+    /* read cmk plain from localkms */
+    RealCmkPath real_cmk_path = {0};
+    KmsErrType err_type = SUCCEED;
+
+    err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
+    if (err_type != KEY_FILES_EXIST) {
+        handle_kms_err(err_type);
+        return false;
+    }
+
+    if (encrypt_cek_use_ras2048(cek_plain, plain_len, real_cmk_path.real_pub_cmk_path,
+        sizeof(real_cmk_path.real_pub_cmk_path), cek_cipher, cipher_len) != SUCCEED) {
+        handle_kms_err(err_type);
+        return false;
+    }
+
+    return true;
+}
+#endif
+
+static unsigned char *create_or_check_cek(unsigned char *cek_plain, size_t &cek_plain_len)
+{    
+    /* if user has not set cek plain by use "ENCRYPTED_VALUE=" while CREATE CEK, we will create new */
+    if (cek_plain == NULL) {
+        cek_plain = (unsigned char *)malloc(MAX_CEK_LENGTH * sizeof(char));
+        if (cek_plain == NULL) {
+            printf("ERROR(CLIENT): failed to .\n");
+            return NULL;
+        }
+
+        AeadAesHamcEncKey::generate_root_key(cek_plain, cek_plain_len);
+        return cek_plain;
+    } else { /* else, we only need to check it */
+        if (cek_plain_len < (112 / 8 * 2)) {
+            printf("ERROR(CLIENT): encryption key too short\n");
+            return NULL;
+        } else if (cek_plain_len > MAX_CEK_LENGTH) {
+            printf("ERROR(CLIENT): encryption key too long\n");
+            return NULL;
+        } else {
+            return cek_plain;
+        }
+    }
+}
+
+void free_after_check(bool condition, unsigned char *ptr)
+{
+    if (condition) {
+        free(ptr);
+        ptr = NULL;
+    }
+}
+
 bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, const StringArgs &args,
     StringArgs &new_args)
 {
+    bool has_user_set_cek = false;
+    
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
         dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
     if (!encryption_global_hook_executor) {
@@ -317,7 +417,6 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
 
     ColumnEncryptionAlgorithm column_encryption_algorithm(ColumnEncryptionAlgorithm::INVALID_ALGORITHM);
     const char *expected_value = NULL;
-    char *common_expected_value = NULL;
     const char *algorithm_str = NULL;
     size_t expected_value_size(0);
 
@@ -327,66 +426,54 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     }
     expected_value = args.find("encrypted_value");
     if (expected_value != NULL) {
+        has_user_set_cek = true;
         expected_value_size = strlen(expected_value);
     }
 
     PGconn *conn = column_encryption.m_conn;
 
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
-        printf("ERROR(CLIENT): syntax error parsing cek creation query.\n");
+        printf("ERROR(CLIENT): invalid algorithm.\n");
         /* by returning false -  make sure the parser is not run again in search of DDL's */
         return false;
     }
 
     /* genereate CEK if not provided (common case) */
+    expected_value = (const char *)create_or_check_cek((unsigned char *)expected_value, expected_value_size);
     if (expected_value == NULL) {
-        common_expected_value = (char *)malloc(MAX_CEK_LENGTH * sizeof(char));
-        expected_value = common_expected_value;
-        if (expected_value == NULL) {
-            printf("ERROR(CLIENT): out of memory.\n");
-            return false;
-        }
-        AeadAesHamcEncKey::generate_root_key((unsigned char *)expected_value, expected_value_size);
-    } else if (expected_value_size < (112 / 8 * 2)) {
-        printfPQExpBuffer(&(conn->errorMessage), libpq_gettext("ERROR(CLIENT): encryption key too short\n"));
-        return false;
-    } else if (expected_value_size > MAX_CEK_LENGTH) {
-        printfPQExpBuffer(&(conn->errorMessage), libpq_gettext("ERROR(CLIENT): encryption key too long\n"));
         return false;
     }
+
     set_cek_keys((unsigned char *)expected_value, expected_value_size);
     set_cek_size(expected_value_size);
     set_column_encryption_algorithm(column_encryption_algorithm);
     /* encrypt CEK */
     unsigned char encrypted_value[MAX_CEK_LENGTH * 2];
     size_t encrypted_value_size(0);
-
-    /* read cmk plain from gs_ktool */
-    bool is_report_err = true;
-    unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
-    unsigned int cmk_id = 0;
-
-    if (keyStore == CmkKeyStore::LOCALKMS) {
-        if (!kt_atoi(key_path_str, &cmk_id)) {
-            libpq_free(common_expected_value);
-            return false;
-        }
-
-        if (!read_cmk_plain(cmk_id, cmk_plain, is_report_err)) {
-            libpq_free(common_expected_value);
-            return false;
-        }
-
-        if (!encrypt_cek_with_aes_256((unsigned char *)expected_value, expected_value_size, cmk_plain,
-            (unsigned char *)encrypted_value, encrypted_value_size, is_report_err)) {
-            libpq_free(common_expected_value);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    if (keyStore == CmkKeyStore::GS_KTOOL) {
+        if (!encrypt_cek(key_path_str, (unsigned char *)expected_value, expected_value_size,
+            encrypted_value, encrypted_value_size)) {
+            free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
             return false;
         }
     } else {
         printf("ERROR(CLIENT): Invalid key store type, only support gs_ktool now.\n");
-        libpq_free(common_expected_value);
         return false;
     }
+#else
+    if (keyStore == CmkKeyStore::LOCALKMS) {
+        if (!encrypt_cek(key_path_str, (unsigned char *)expected_value, expected_value_size, encrypted_value,
+            encrypted_value_size) != SUCCEED) {
+            free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+            return false;
+        }
+    } else {
+        printf("ERROR(CLIENT): Invalid key store type, only support localkms now.\n");
+        return false;
+    }
+#endif
+    free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
 
     /* escape encrypted CEK for BYTEA insertion */
     size_t encoded_encrypted_value_size;
@@ -394,14 +481,12 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
         encrypted_value_size, &encoded_encrypted_value_size);
     if (encoded_encrypted_value == NULL) {
         printf("ERROR(CLIENT): failed to encode encrypted values.\n");
-        libpq_free(common_expected_value);
         return false;
     } else {
         new_args.set("encrypted_value", encoded_encrypted_value, encoded_encrypted_value_size - 1);
         free(encoded_encrypted_value);
         encoded_encrypted_value = NULL;
     }
-    libpq_free(common_expected_value);
     return true;
 }
 
@@ -409,7 +494,7 @@ const char *EncryptionColumnHookExecutor::get_data_type(const ColumnDef * const 
 {
     char *data_type = NULL;
     data_type = (char *)malloc(MAX_DATATYPE_LEN);
-    if (NULL == data_type) {
+    if (data_type == NULL) {
         printf("ERROR(CLIENT): out of memory.\n");
         return data_type;
     }

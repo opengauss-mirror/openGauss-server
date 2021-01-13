@@ -18,10 +18,31 @@
 
 /* use c.h so this can be built as either frontend or backend */
 #include "c.h"
-
 #include <ctype.h>
-
+#include "postgres_fe.h"
+#include "nodes/pg_list.h"
+#include "parser/scanner.h"
+#include "parser/scansup.h"
+#include "datatypes.h"
+#include "nodes/primnodes.h"
+#include "nodes/value.h"
+#include "catalog/pg_attribute.h"
+#include "access/tupdesc.h"
+#include "nodes/parsenodes_common.h"
+#include "nodes/primnodes.h"
+#include "gram.hpp"
 #include "parser/keywords.h"
+
+#define PG_KEYWORD(a, b, c) { a, b, c },
+
+
+const ScanKeyword ScanKeywords[] = {
+#include "parser/kwlist.h"
+};
+
+const int NumScanKeywords = lengthof(ScanKeywords);
+
+
 
 /*
  * ScanKeywordLookup - see if a given word is a keyword

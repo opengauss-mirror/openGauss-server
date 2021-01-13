@@ -28,6 +28,9 @@ override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_h
 
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+override CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+endif
 endif
 
 ifneq ($(PORTNAME), win32)
@@ -113,6 +116,13 @@ encryption_hooks_files := $(shell find client_logic_hooks/encryption_hooks -name
 
 OBJS += $(hooks_files:.cpp=.o)
 OBJS += $(encryption_hooks_files:.cpp=.o)
+
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+OBJS := $(filter-out client_logic_hooks/encryption_hooks/localkms_gen_cmk.o, $(OBJS))
+else
+OBJS := $(filter-out client_logic_hooks/encryption_hooks/gs_ktool_interface.o, $(OBJS))
+endif
+
 endif
 
 files:= $(foreach DIR,$(SUBDIRS),  $(wildcard $(DIR)/*.cpp) )
@@ -144,7 +154,7 @@ endif
 
 frontend_parser/gram.hpp:
 	$(MAKE) -C frontend_parser gram.hpp
-frontend_parser/parser.o frontend_parser/keywords.o:frontend_parser/gram.hpp
+frontend_parser/parser.o frontend_parser/kwlookup.o:frontend_parser/gram.hpp
 
 
 frontend_parser_basic:
@@ -162,7 +172,13 @@ all-lib-depends: libpq_ce subsystem
 	$(MAKE) all-lib
 endif
 
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+all: gs_ktool all-lib-depends
+gs_ktool:
+	$(MAKE) -C $(top_builddir)/src/distribute/bin/gs_ktool
+else
 all: all-lib-depends
+endif
 
 utlibpq: all-lib
 	cp libpq.so $(top_builddir)/src/distribute/test/ut/lib/libutlibpq.so
@@ -213,6 +229,9 @@ install: all installdirs install-lib
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/libpq-int.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/pqexpbuffer.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pg_service.conf.sample '$(DESTDIR)$(datadir)/pg_service.conf.sample'
+ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+	$(MKDIR_P) '$(DESTDIR)$(includedir)/../etc/localkms'
+endif
 
 installcheck:
 	$(MAKE) -C test $@

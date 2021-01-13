@@ -1,5 +1,5 @@
-#!/bin/bash -ex
-
+#!/bin/bash
+# Copyright: (c) Huawei Technologies Co., Ltd. 2021. All rights reserved.
 TEMP_FILE=types_to_oid_tmp.h
 FILE=types_to_oid.h
 CPPFILE=types_to_oid.cpp
