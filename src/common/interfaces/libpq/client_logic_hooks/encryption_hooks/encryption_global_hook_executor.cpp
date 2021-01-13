@@ -20,6 +20,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "pg_config.h"
 
 #include <strings.h>
 #include <string.h>
@@ -35,6 +36,46 @@
 #include "libpq-int.h"
 #include "cl_state.h"
 
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+static bool create_cmk(const char *key_path_str)
+{
+    RealCmkPath real_cmk_path = {0};
+    KmsErrType err_type = SUCCEED;
+    RsaKeyStr *rsa_key_str = NULL;
+
+    err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
+    if (err_type != KEY_FILES_NONEXIST) {
+        handle_kms_err(err_type);
+        return false;
+    }
+
+    rsa_key_str = generate_cmk_kms();
+    if (rsa_key_str == NULL) {
+        printf("ERROR(CLIENT): failed to generate rsa key.\n");
+        return false;
+    }
+
+    err_type = write_cmk_plain_kms(real_cmk_path.real_pub_cmk_path, sizeof(real_cmk_path.real_pub_cmk_path),
+        rsa_key_str->pub_key, rsa_key_str->pub_key_len);
+    if (err_type != SUCCEED) {
+        free_rsa_str(rsa_key_str);
+        handle_kms_err(err_type);
+        return false;
+    }
+
+    err_type = write_cmk_plain_kms(real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path),
+        rsa_key_str->priv_key, rsa_key_str->priv_key_len);
+    if (err_type != SUCCEED) {
+        free_rsa_str(rsa_key_str);
+        handle_kms_err(err_type);
+        return false;
+    }
+
+    free_rsa_str(rsa_key_str);
+    return true;
+}
+#endif
+
 bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
     const GlobalHookExecutor **existing_global_hook_executors, size_t existing_global_hook_executors_size)
 {
@@ -42,14 +83,17 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
     const char *key_path_str;
     const char *algorithm_type_str;
     PGconn *conn = m_clientLogic.m_conn;
-
     key_store_str = args.find("key_store");
     key_path_str = args.find("key_path");
     algorithm_type_str = args.find("algorithm");
 
     /* check algorithm */
     CmkAlgorithm cmk_algo = get_algorithm_from_string(algorithm_type_str);
-    if (cmk_algo != CmkAlgorithm::RAS_2048) {
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
+#else
+    if (cmk_algo != CmkAlgorithm::RSA_2048) {
+#endif
         printfPQExpBuffer(&conn->errorMessage,
             libpq_gettext("ERROR(CLIENT): unsupported client master key algorithm\n"));
         return false;
@@ -57,14 +101,18 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
 
     /* check key store */
     CmkKeyStore key_store = get_key_store_from_string(key_store_str);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    if (key_store != CmkKeyStore::GS_KTOOL) {
+#else
     if (key_store != CmkKeyStore::LOCALKMS) {
-        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): key store are mandatory\n"));
+#endif
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): invalid key store\n"));
         return false;
     }
 
     /* check key path */
     if (key_path_str == NULL || strlen(key_path_str) == 0) {
-        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): key path are mandatory\n"));
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): invalid key path\n"));
         return false;
     }
 
@@ -86,10 +134,11 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
             return false;
         }
     }
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     /* generate cmk */
-    if (key_store == CmkKeyStore::LOCALKMS) {
-        unsigned int cmk_id = 0;
+    unsigned int cmk_id = 0;
 
+    if (key_store == CmkKeyStore::GS_KTOOL) {
         if (!kt_atoi(key_path_str, &cmk_id)) {
             return false;
         }
@@ -100,12 +149,52 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
     } else {
         return false;
     }
-
+#else
+    if (key_store == CmkKeyStore::LOCALKMS) {
+        if (!create_cmk(key_path_str)) {
+            return false;
+        }
+    } else {
+        /* remain */
+        return false;
+    }
+#endif
     set_keystore(key_store_str, strlen(key_store_str));
     set_keystore(key_path_str, strlen(key_path_str));
 
     return true;
 }
+
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+bool EncryptionGlobalHookExecutor::delete_localkms_file()
+{
+    const char *key_store_str = NULL;
+    const char *key_path_str = NULL;
+    size_t key_store_size = 0;
+    size_t key_path_size = 0;
+    get_argument("key_store", &key_store_str, key_store_size);
+    get_argument("key_path", &key_path_str, key_path_size);
+    CmkKeyStore key_store = get_key_store_from_string(key_store_str);
+    RealCmkPath real_cmk_path = {0};
+    KmsErrType err_type = SUCCEED;
+    if (key_store == CmkKeyStore::LOCALKMS) {
+        err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
+        if (err_type != KEY_FILES_EXIST) {
+            handle_kms_err(err_type);
+            return false;
+        }
+
+        if (!rm_cmk_store_file(real_cmk_path)) {
+            return false;
+        }
+    } else {
+        return false;
+        /* remain */
+    }
+    
+    return true;
+}
+#endif
 
 bool EncryptionGlobalHookExecutor::process(ColumnHookExecutor *column_hook_executor)
 {

@@ -58,6 +58,10 @@ kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 all: submake-aes gs_dump gs_restore gs_dumpall
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+libpq_pgport += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+endif
+
 gs_dump: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport
 	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
 

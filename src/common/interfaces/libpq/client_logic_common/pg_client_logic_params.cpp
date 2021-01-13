@@ -69,6 +69,10 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
         for (size_t i = 0; i < other.nParams; ++i) {
             if (copy_sizes != NULL && copy_sizes[i]) {
                 new_param_values[i] = (unsigned char *)malloc(other.copy_sizes[i] * sizeof(unsigned char));
+                if (new_param_values[i] == NULL) {
+                    printf("out of memory\n");
+                    exit(EXIT_FAILURE);
+                }
                 check_memcpy_s(memcpy_s(new_param_values[i], copy_sizes[i] * sizeof(unsigned char),
                     other.new_param_values[i], other.copy_sizes[i]));
             } else {

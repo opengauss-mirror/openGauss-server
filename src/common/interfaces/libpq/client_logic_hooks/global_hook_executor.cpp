@@ -45,3 +45,10 @@ bool GlobalHookExecutor::set_deletion_expected()
 {
     return true;
 }
+
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+bool GlobalHookExecutor::delete_localkms_file()
+{
+    return true;
+}
+#endif

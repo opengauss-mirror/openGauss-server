@@ -9,7 +9,7 @@
 #
 #-------------------------------------------------------------------------
 
-subdir = src/common/interfaces/libpq/parser_frontend
+subdir = src/common/interfaces/libpq/frontend_parser
 top_builddir = ../../../../../
 backenddir = $(top_builddir)/src/common/backend
 
@@ -18,20 +18,20 @@ backenddir = $(top_builddir)/src/common/backend
 # shared library parameters
 NAME= parser_frontend
 
-override CPPFLAGS := -DFRONTEND_PARSER -DFRONTEND -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq
+override CPPFLAGS := -DFRONTEND_PARSER -DFRONTEND -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq -I$(top_builddir)/src/common/interfaces/libpq/frontend_parser $(CPPFLAGS)
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 #override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
 
 # We can't use Makefile variables here because the MSVC build system scrapes
 # OBJS from this file.
-OBJS:=parser.o parser_compatibility.o  kwlookup.o scansup.o frontend_mbutils.o list.o wstrncmp.o keywords.o fe-wchar.o \
-	fe-value.o fe-makefuncs.o fe-copyfuncs.o fe-define.o fe-parse_merge.o gram.o
+OBJS:=parser.o parser_compatibility.o scansup.o frontend_mbutils.o list.o wstrncmp.o fe-wchar.o \
+	fe-value.o fe-makefuncs.o fe-copyfuncs.o fe-define.o fe-parse_merge.o gram.o kwlookup.o 
 
 include $(top_builddir)/src/Makefile.global
 include $(top_builddir)/src/Makefile.shlib
 parser.o gram.o: scan.cpp
 gram.hpp: gram.cpp
-gram.o keywords.o parser.o: gram.hpp
+gram.o  kwlookup.o parser.o: gram.hpp
 scan.o: gram.hpp scan.cpp
 #gram.cpp: build-parser
 

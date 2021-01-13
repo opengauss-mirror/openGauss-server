@@ -20,6 +20,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "pg_config.h"
 
 #include "stmt_processor.h"
 #include "client_logic_cache/icached_column_manager.h"
@@ -1378,6 +1379,20 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
                 libpq_free(depened_column_settings);
                 statement_data->conn->client_logic->droppedColumnSettings_size += column_settings_list_size;
             }
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+            GlobalHookExecutor *global_hook_executor = NULL;
+            const CachedGlobalSetting *cached_global_setting =
+                CacheLoader::get_instance().get_global_setting_by_fqdn(object_name);
+            if (cached_global_setting != NULL) {
+                global_hook_executor = cached_global_setting->get_executor();
+            } else {
+                return false;
+            }
+            bool ret = HooksManager::GlobalSettings::delete_localkms_file(global_hook_executor);
+            if (!ret) {
+                return false;
+            }
+#endif
         }
 
         PreparedStatement *prepared_statement =

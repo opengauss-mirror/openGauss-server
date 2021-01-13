@@ -63,6 +63,10 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
             statement_data->params.nParams = statement_data->nParams;
         }
         statement_data->params.new_param_values[raw_value->m_location] = (unsigned char *)malloc(copy_size);
+        if (statement_data->params.new_param_values[raw_value->m_location] == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
+            return;
+        }
         statement_data->params.copy_sizes[raw_value->m_location] = copy_size;
         check_memcpy_s(memcpy_s(statement_data->params.new_param_values[raw_value->m_location], copy_size,
             raw_value->m_processed_data, copy_size));
@@ -70,6 +74,10 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
             if (!statement_data->params.adjusted_param_values) {
                 statement_data->params.adjusted_param_values =
                     (const char **)malloc(statement_data->nParams * sizeof(const char *));
+                if (statement_data->params.adjusted_param_values ==  NULL) {
+                    fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
+                    return;
+                }
                 statement_data->params.nParams = statement_data->nParams;
             }
             Assert(!statement_data->params.new_param_values[raw_value->m_location]);
@@ -77,6 +85,10 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
                 (const char *)statement_data->params.new_param_values[raw_value->m_location];
             if (!statement_data->params.adjusted_param_lengths) {
                 statement_data->params.adjusted_param_lengths = (int *)malloc(statement_data->nParams * sizeof(int));
+                if (statement_data->params.adjusted_param_lengths == NULL) {
+                    fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
+                    return;
+                }
                 statement_data->params.nParams = statement_data->nParams;
             }
             statement_data->params.adjusted_param_lengths[raw_value->m_location] = raw_value->m_processed_data_size;
@@ -248,12 +260,23 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
     /* unescape data from its BYTEA format */
     size_t unescaped_processed_data_size = 0;
     unsigned char *unescaped_processed_data = NULL;
-    const char *final = strchr((char *)processed_data, ':');
-    bool is_unescaped(false);
     if (format) { /* binary */
         unescaped_processed_data = (unsigned char *)processed_data;
         unescaped_processed_data_size = processed_data_size;
     } else {
+        /* if the string is not NULL terminated,it cannot be send to PQunescapeBytea */
+        unsigned char *processed_data_tmp =
+            (unsigned char *)malloc((1 + processed_data_size) * sizeof(unsigned char));
+        if (processed_data_tmp == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
+            return false;
+        }
+        errno_t rc = EOK;
+        rc = memcpy_s(processed_data_tmp, processed_data_size + 1, processed_data, processed_data_size);
+        securec_check_c(rc, "\0", "\0");
+        processed_data_tmp[processed_data_size] = 0;
+
+        const char *final = strchr((char *)processed_data_tmp, ':');
         /*
          * in case of default values, the data arrives as '\x/COLUMN_SETTING_OID/CYPHER/::byteawithoutorderwithequalcol'
          * we have to ignore those chars at the end
@@ -263,35 +286,23 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
             errno_t rc = EOK;
             rc = memset_s(text_to_deprocess, sizeof(text_to_deprocess), 0, sizeof(text_to_deprocess));
             securec_check_c(rc, "\0", "\0");
-            if (final - (char *)processed_data > 2) { /* 2 is the shortest length , such as "::" */
+            if (final - (char *)processed_data_tmp > 2) { /* 2 is the shortest length , such as "::" */
                 check_strncpy_s(strncpy_s((char *)text_to_deprocess, sizeof(text_to_deprocess), 
-                    (char *)processed_data + 1, final - (char *)processed_data - 2));
-                text_to_deprocess[final - (char *)processed_data - 2] = 0;
+                    (char *)processed_data_tmp + 1, final - (char *)processed_data_tmp - 2));
+                text_to_deprocess[final - (char *)processed_data_tmp - 2] = 0;
             }
 
             unescaped_processed_data = PQunescapeBytea(text_to_deprocess, &unescaped_processed_data_size);
-        } else if (*(processed_data + processed_data_size) != 0) {
-            /* if the string is not NULL terminated,it cannot be send to PQunescapeBytea */
-            unsigned char *text_to_deprocess =
-                (unsigned char *)malloc((1 + processed_data_size) * sizeof(unsigned char));
-            if (text_to_deprocess == NULL) {
-                fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
-                return false;
-            }
-            errno_t rc = EOK;
-            rc = memcpy_s(text_to_deprocess, processed_data_size + 1, processed_data, processed_data_size);
-            securec_check_c(rc, "\0", "\0");
-            text_to_deprocess[processed_data_size] = 0;
-            unescaped_processed_data = PQunescapeBytea(text_to_deprocess, &unescaped_processed_data_size);
-            libpq_free(text_to_deprocess);
         } else {
-            unescaped_processed_data = PQunescapeBytea(processed_data, &unescaped_processed_data_size);
+            unescaped_processed_data = PQunescapeBytea(processed_data_tmp, &unescaped_processed_data_size);
         }
         if (!unescaped_processed_data) {
             fprintf(stderr, "ERROR(CLIENT): failed to unsecape processed data\n");
             return false;
         }
-        is_unescaped = true;
+        if (processed_data_tmp != NULL) {
+            libpq_free(processed_data_tmp);
+        }
     }
     if (!unescaped_processed_data_size) {
         plain_text_size = 0;
@@ -311,6 +322,11 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
     if (plain_invalid) {
         /* the only accetped way to reach here is no proper cmk permissions */
         *plain_text = (unsigned char *)malloc(processed_data_size * sizeof(unsigned char));
+        if (*plain_text == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
+            libpq_free(unescaped_processed_data);
+            return false;
+        }
         errno_t rc = memcpy_s(*plain_text, processed_data_size, processed_data, processed_data_size);
         securec_check_c(rc, "\0", "\0");
         plain_text_size = processed_data_size;
@@ -334,6 +350,11 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
             Format::restore_binary(*plain_text, plain_text_size, original_typeid, 0, -1, &result_size, err_msg);
         SAFE_FREE(*plain_text);
         *plain_text = (unsigned char *)malloc(result_size + 1);
+        if (*plain_text == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
+            libpq_free(unescaped_processed_data);
+            return false;
+        }
         rc = memcpy_s(*plain_text, result_size + 1, result, result_size);
         securec_check_c(rc, "\0", "\0");
         (*plain_text)[result_size] = 0;
@@ -383,6 +404,10 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
             *plain_text = NULL;
         }
         *plain_text = (unsigned char *)malloc(strlen(tmp_plain_text) + 1);
+        if (*plain_text == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when processing text format\n");
+            return;
+        }
         check_memcpy_s(memcpy_s((char *)*plain_text, strlen(tmp_plain_text) + 1, (char *)tmp_plain_text,
             strlen((char *)tmp_plain_text)));
         (*plain_text)[plain_text_size] = '\0';
@@ -390,6 +415,10 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
     } else {
         SAFE_FREE(*plain_text);
         *plain_text = (unsigned char *)malloc(result_size + 1);
+        if (*plain_text == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): out of memory when processing text format\n");
+            return;
+        }
         errno_t rc = EOK;
         rc = memcpy_s(*plain_text, result_size, res, result_size);
         securec_check_c(rc, "\0", "\0");

@@ -17,7 +17,7 @@
  *      APIs for Encrypted Database.
  *
  * IDENTIFICATION
- *    src/bin/gs_ktool/kt_interface.cpp
+ *    src/distribute/bin/gs_ktool/kt_interface.cpp
  *
  *-------------------------------------------------------------------------
  */

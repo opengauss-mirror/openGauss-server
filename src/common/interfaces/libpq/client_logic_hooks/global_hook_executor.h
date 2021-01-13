@@ -24,6 +24,8 @@
 #ifndef GLOBAL_HOOK_EXECUTOR_H
 #define GLOBAL_HOOK_EXECUTOR_H
 
+#include "postgres_fe.h"
+
 #include "abstract_hook_executor.h"
 
 class ColumnHookExecutor;
@@ -66,6 +68,9 @@ public:
 
     virtual bool set_deletion_expected();
 
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    virtual bool delete_localkms_file();
+#endif
     /*
      * BUILT-IN FUNCTIONS
      */

@@ -24,11 +24,16 @@
 #ifndef ENCRYPTION_GLOBAL_HOOK_EXECUTOR_H
 #define ENCRYPTION_GLOBAL_HOOK_EXECUTOR_H
 
+#include "pg_config.h"
+
 #include "abstract_encryption_hook.h"
 #include "global_hook_executor.h"
 #include "client_logic/client_logic_enums.h"
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 #include "gs_ktool_interface.h"
-
+#else
+#include "localkms_gen_cmk.h"
+#endif
 #include <memory>
 #include <vector>
 #include <string>
@@ -51,6 +56,9 @@ public:
     bool pre_create(const StringArgs &args, const GlobalHookExecutor **existing_global_hook_executors,
         size_t existing_global_hook_executors_size) override;
     bool process(ColumnHookExecutor *column_hook_executor) override;
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    bool delete_localkms_file();
+#endif
 
 private:
     const CmkKeyStore get_key_store() const;

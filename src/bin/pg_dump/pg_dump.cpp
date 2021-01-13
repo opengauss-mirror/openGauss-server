@@ -78,7 +78,11 @@
 #include "client_logic_processor/values_processor.h"
 #include "client_logic_common/client_logic_utils.h"
 #include "client_logic_cache/types_to_oid.h"
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
 #include "client_logic_hooks/encryption_hooks/gs_ktool_interface.h"
+#else
+#include "client_logic_hooks/encryption_hooks/localkms_gen_cmk.h"
+#endif
 #endif
 #ifndef WIN32_PG_DUMP
 #include "access/transam.h"
@@ -3484,6 +3488,7 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
             if (strcmp(key, "ENCRYPTED_VALUE") == 0) {
                 rc = memcpy_s(encrypted_value, MAX_CLIENT_ENCRYPTION_KEYS_SIZE, unescaped_data, unescapedDataSize);
                 securec_check_c(rc, "", "");
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
                 unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
                 unsigned int cmk_id = 0;
 
@@ -3495,10 +3500,26 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                     exit_nicely(1);
                 }
 
-                if (!decrypt_cek_with_aes_256((const unsigned char *)encrypted_value, unescapedDataSize, cmk_plain,
+                if (!decrypt_cek_use_aes256((const unsigned char *)encrypted_value, unescapedDataSize, cmk_plain,
                     (unsigned char *)decryptedKey, &decryptedKeySize, true)) {
                     exit_nicely(1);
                 }
+#else
+                RealCmkPath real_cmk_path = {0};
+                KmsErrType err_type = SUCCEED;
+
+                err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
+                if (err_type != KEY_FILES_EXIST) {
+                    handle_kms_err(err_type);
+                    exit_nicely(1);
+                }
+
+                if (decrypt_cek_use_rsa2048((const unsigned char *)encrypted_value, unescapedDataSize,
+                    real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path), decryptedKey,
+                    &decryptedKeySize) != SUCCEED) {
+                    exit_nicely(1);
+                }
+#endif
                 char ch = '\'';
                 for (size_t decrypted_key_index = 0; decryptedKey[decrypted_key_index] != '\0'; decrypted_key_index++) {
                     if (decryptedKey[decrypted_key_index] == ch) {
@@ -6801,10 +6822,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
         for (j = 0; j < ntups; j++) {
             char contype;
             contype = *(PQgetvalue(res, j, i_contype));
-            /* mot constraint indexes will be created through getConstraintsOnForeignTable */
-            if ((contype == 'p' || contype == 'u' || contype == 'x') && tbinfo->isMOT) {
-                continue;
-            }
+
             indxinfo[j].dobj.objType = DO_INDEX;
             indxinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_tableoid));
             indxinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_oid));
@@ -6840,7 +6858,7 @@ void getIndexes(Archive* fout, TableInfo tblinfo[], int numTables)
                  * marked indisprimary.
                  */
                 contrants_processed++;
-                constrinfo[j].dobj.objType = DO_CONSTRAINT;
+                constrinfo[j].dobj.objType = tbinfo->isMOT ? DO_FTBL_CONSTRAINT : DO_CONSTRAINT;
                 constrinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_contableoid));
                 constrinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_conoid));
                 AssignDumpId(&constrinfo[j].dobj);
@@ -6915,7 +6933,7 @@ static void getConstraintsOnForeignTableInternal(TableInfo* tbinfo, Archive* fou
         fdwnamestr = NULL;
         PQclear(res);
 
-        if (isHDFSFTbl || tbinfo->isMOT) {
+        if (isHDFSFTbl) {
             int ntups;
             int i_conname;
             int i_conkey;
@@ -16467,7 +16485,7 @@ static int GetDistributeKeyNum(Archive* fout, Oid tableoid)
         tableoid);
 
     res = ExecuteSqlQuery(fout, bufq->data, PGRES_TUPLES_OK);
-    num = atoi(PQgetvalue(res, 0, 0));
+    num = (int)strtol(PQgetvalue(res, 0, 0), NULL, 10);
 
     PQclear(res);
     destroyPQExpBuffer(bufq);
@@ -18493,34 +18511,73 @@ static void dumpConstraintForForeignTbl(Archive* fout, ConstraintInfo* coninfo)
         appendPQExpBuffer(q, "ALTER FOREIGN TABLE %s\n", fmtId(tbinfo->dobj.name));
         appendPQExpBuffer(q, "    ADD CONSTRAINT %s ", fmtId(coninfo->dobj.name));
 
-        appendPQExpBuffer(q, "%s (", coninfo->contype == 'p' ? "PRIMARY KEY" : "UNIQUE");
-        if (constrinfo->conkey > 0) {
-            int key = (int)constrinfo->conkey;
-            const char* attname = NULL;
-
-            if (key == InvalidAttrNumber) {
-                destroyPQExpBuffer(q);
-                destroyPQExpBuffer(delq);
-                return;
+        if (tbinfo->isMOT) {
+            /* Index-related constraint */
+            IndxInfo* indxinfo = (IndxInfo*)findObjectByDumpId(coninfo->conindex);
+            if (indxinfo == NULL) {
+                exit_horribly(NULL, "missing index for constraint \"%s\"\n", coninfo->dobj.name);
             }
-            setTableInfoAttNumAndNames(fout, tbinfo);
-            attname = getAttrName(key, tbinfo);
 
-            appendPQExpBuffer(q, "%s%s", "", fmtId(attname));
-        }
-
-        appendPQExpBuffer(q, ")");
-
-        if (constrinfo->consoft) {
-            appendPQExpBuffer(q, " NOT ENFORCED");
-            if (constrinfo->conopt) {
-                appendPQExpBuffer(q, " ENABLE QUERY OPTIMIZATION");
+            if (coninfo->condef != NULL) {
+                /* pg_get_constraintdef should have provided everything */
+                appendPQExpBuffer(q, "%s;\n", coninfo->condef);
             } else {
-                appendPQExpBuffer(q, " DISABLE QUERY OPTIMIZATION");
-            }
-        }
+                appendPQExpBuffer(q, "%s (", (coninfo->contype == 'p') ? "PRIMARY KEY" : "UNIQUE");
+                for (int k = 0; k < indxinfo->indnkeys; k++) {
+                    int indkey = (int)indxinfo->indkeys[k];
+                    const char* attname = NULL;
 
-        appendPQExpBuffer(q, ";\n");
+                    if (indkey == InvalidAttrNumber) {
+                        break;
+                    }
+                    attname = getAttrName(indkey, tbinfo);
+                    appendPQExpBuffer(q, "%s%s", (k == 0) ? "" : ", ", fmtId(attname));
+                }
+
+                appendPQExpBuffer(q, ")");
+
+                if ((indxinfo->options != NULL) && strlen(indxinfo->options) > 0) {
+                    appendPQExpBuffer(q, " WITH (%s)", indxinfo->options);
+                }
+                if (coninfo->condeferrable) {
+                    appendPQExpBuffer(q, " DEFERRABLE");
+                    if (coninfo->condeferred) {
+                        appendPQExpBuffer(q, " INITIALLY DEFERRED");
+                    }
+                }
+
+                appendPQExpBuffer(q, ";\n");
+            }
+        } else {
+            appendPQExpBuffer(q, "%s (", (coninfo->contype == 'p') ? "PRIMARY KEY" : "UNIQUE");
+            if (constrinfo->conkey > 0) {
+                int key = (int)constrinfo->conkey;
+                const char* attname = NULL;
+
+                if (key == InvalidAttrNumber) {
+                    destroyPQExpBuffer(q);
+                    destroyPQExpBuffer(delq);
+                    return;
+                }
+                setTableInfoAttNumAndNames(fout, tbinfo);
+                attname = getAttrName(key, tbinfo);
+
+                appendPQExpBuffer(q, "%s%s", "", fmtId(attname));
+            }
+
+            appendPQExpBuffer(q, ")");
+
+            if (constrinfo->consoft) {
+                appendPQExpBuffer(q, " NOT ENFORCED");
+                if (constrinfo->conopt) {
+                    appendPQExpBuffer(q, " ENABLE QUERY OPTIMIZATION");
+                } else {
+                    appendPQExpBuffer(q, " DISABLE QUERY OPTIMIZATION");
+                }
+            }
+
+            appendPQExpBuffer(q, ";\n");
+        }
 
         /*
          * DROP must be fully qualified in case same name appears in pg_catalog
