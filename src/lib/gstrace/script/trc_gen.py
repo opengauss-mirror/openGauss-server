@@ -220,7 +220,7 @@ def GenFuncCompName(map_comp, comp_with_funcnum, comps, outdir):
     res = '%s#define HASH_TRACE_CONFIG "%s"\n\n' % (res, str(sha256sum))
     res = '%s%s\n\n' % (res, struct_def)
 
-    for k,v in map_comp.iteritems():
+    for k,v in map_comp.items():
         res = '%s%s\n\n' % (res, str(FuncArray(k, v)))
 
     res = '%s%s\n\n' % (res, str(CompArray(comp_with_funcnum)))
@@ -258,13 +258,13 @@ if __name__ == '__main__':
     sha_visitor = ShaVisitor()
     sha_visitor.visit(args.source)
     str_result = ",".join(sha_visitor.result)
-    sha256sum = hashlib.sha256(str_result).hexdigest()
+    sha256sum = hashlib.sha256(str_result.encode("utf-8")).hexdigest()
 
     map_comp = {}
     for comp in comps:
         map_comp[comp] = []
 
-    for k,v in funcs.iteritems():
+    for k,v in funcs.items():
         map_comp[k] = v
 
     comp_with_funcnum = []  
@@ -279,7 +279,7 @@ if __name__ == '__main__':
     GenCompId(comps, args.output)
 
     # generate functions' trace id
-    for k,v in map_comp.iteritems():
+    for k,v in map_comp.items():
         GenFuncTrcId(k, v, args.output)
 
     # generate functions and componentes' name for gstrace tool
