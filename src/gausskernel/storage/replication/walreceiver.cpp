@@ -703,20 +703,40 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
      * replication timeout. Ping the server.
      */
     if (nowtime >= timeout) {
-        ereport(DEBUG2, (errmsg("now time(%s) timeout time(%s) last recv time(%s), heartbeat time(%s), ping_sent(%d)",
-                                timestamptz_to_str(nowtime), timestamptz_to_str(timeout),
-                                timestamptz_to_str(last_recv_timestamp), timestamptz_to_str(heartbeat), ping_sent)));
-
+        if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
+            size_t size = MAXDATELEN + 1;
+            char nowTimeStamp[size];
+            COPY_AND_CHECK_TIMESTAMP(nowTimeStamp, size, nowtime);
+            char timeoutStamp[size];
+            COPY_AND_CHECK_TIMESTAMP(timeoutStamp, size, timeout);
+            char lastRecStamp[size];
+            COPY_AND_CHECK_TIMESTAMP(lastRecStamp, size, last_recv_timestamp);
+            char heartbeatStamp[size];
+            COPY_AND_CHECK_TIMESTAMP(heartbeatStamp, size, heartbeat);
+            ereport(DEBUG2,
+                    (errmsg("now time(%s) timeout time(%s) last recv time(%s), heartbeat time(%s), ping_sent(%d)",
+                            nowTimeStamp, timeoutStamp, lastRecStamp, heartbeatStamp, ping_sent)));
+        }
         if (!ping_sent) {
             requestReply = true;
         } else {
             knl_g_set_redo_finish_status(0);
             ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false in WalRecCheckTimeOut")));
-            ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                            errmsg("terminating walreceiver due to timeout "
-                                   "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
-                                   timestamptz_to_str(nowtime), timestamptz_to_str(timeout),
-                                   timestamptz_to_str(last_recv_timestamp), timestamptz_to_str(heartbeat))));
+            if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
+                size_t size = MAXDATELEN + 1;
+                char nowTimeStamp[size];
+                COPY_AND_CHECK_TIMESTAMP(nowTimeStamp, size, nowtime);
+                char timeoutStamp[size];
+                COPY_AND_CHECK_TIMESTAMP(timeoutStamp, size, timeout);
+                char lastRecStamp[size];
+                COPY_AND_CHECK_TIMESTAMP(lastRecStamp, size, last_recv_timestamp);
+                char heartbeatStamp[size];
+                COPY_AND_CHECK_TIMESTAMP(heartbeatStamp, size, heartbeat);
+                ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                                errmsg("terminating walreceiver due to timeout "
+                                       "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
+                                       nowTimeStamp, timeoutStamp, lastRecStamp, heartbeatStamp)));
+            }
         }
     }
     return requestReply;
