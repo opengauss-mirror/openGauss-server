@@ -94,6 +94,24 @@ do {                                                                            
 #define MAX_INT32 2147483600
 #endif
 
+#define MAXTIMESTAMPLEN 128
+
+/*
+ * HA wal replication timestamp info
+ */
+typedef struct WalReplicationTimestampInfo {
+    char nowTimeStamp[MAXTIMESTAMPLEN + 1];
+    char timeoutStamp[MAXTIMESTAMPLEN + 1];
+    char lastRecStamp[MAXTIMESTAMPLEN + 1];
+    char heartbeatStamp[MAXTIMESTAMPLEN + 1];
+    TimestampTz timeout;
+    TimestampTz nowtime;
+    TimestampTz last_timestamp;
+    TimestampTz heartbeat;
+} WalReplicationTimestampInfo;
+
+void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo);
+
 /*
  * timestamp.c prototypes
  */
