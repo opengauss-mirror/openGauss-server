@@ -141,7 +141,10 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
         //@Temp Table. We allow datanode to create pg_temp namespace to enable create namespace stmt by CN to execute on
         // DN
         if (!g_instance.attr.attr_common.allowSystemTableMods && !u_sess->attr.attr_common.IsInplaceUpgrade &&
-            IsReservedName(schemaName) && !IS_PGXC_DATANODE)
+#ifdef ENABLE_MULTIPLE_NODES
+            !IS_PGXC_DATANODE &&
+#endif
+            IsReservedName(schemaName))
             ereport(ERROR,
                 (errcode(ERRCODE_RESERVED_NAME),
                     errmsg("unacceptable schema name \"%s\"", schemaName),
