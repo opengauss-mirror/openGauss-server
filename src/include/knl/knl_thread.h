@@ -2183,6 +2183,8 @@ typedef struct knl_t_walsender_context {
     struct LogicalDecodingContext* logical_decoding_ctx;
     XLogRecPtr logical_startptr;
     int remotePort;
+    /* Have we caught up with primary? */
+    bool walSndCaughtUp;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {
