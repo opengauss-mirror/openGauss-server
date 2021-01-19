@@ -1638,7 +1638,7 @@ static char *get_application_name(void)
     securec_check_ss_c(rc, "\0", "\0");
 
     if ((optlines = (char **)read_guc_file(conf_path)) != NULL) {
-        lines_index = find_guc_option(optlines, config_para_build, NULL, NULL, &optvalue_off, &optvalue_len);
+        lines_index = find_guc_option(optlines, config_para_build, NULL, NULL, &optvalue_off, &optvalue_len, false);
         if (lines_index != INVALID_LINES_IDX) {
             rc = strncpy_s(arg_str, NAMEDATALEN, optlines[lines_index] + optvalue_off, optvalue_len);
             securec_check_c(rc, "\0", "\0");
