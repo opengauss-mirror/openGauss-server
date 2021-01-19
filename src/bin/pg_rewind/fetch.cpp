@@ -359,7 +359,7 @@ BuildErrorCode fetchSourceFileList()
  * the received parts. The result set is expected to be of format:
  *
  * path		text	-- path in the data directory, e.g "base/1/123"
- * begin	int4	-- offset within the file
+ * begin	int8	-- offset within the file
  * chunk	bytea	-- file content
  * ----
  */
@@ -383,7 +383,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
     while ((res = PQgetResult(conn)) != NULL) {
         char* filename = NULL;
         int filenamelen;
-        int chunkoff;
+        int64 chunkoff;
         int chunksize;
         int chunkspace;
         char* chunk = NULL;
@@ -407,7 +407,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
         }
 
-        if (PQftype(res, 0) != TEXTOID && PQftype(res, 1) != INT4OID && PQftype(res, 2) != BYTEAOID &&
+        if (PQftype(res, 0) != TEXTOID && PQftype(res, 1) != INT8OID && PQftype(res, 2) != BYTEAOID &&
             PQftype(res, 3) != INT4OID) {
             pg_fatal("unexpected data types in result set while fetching remote files: %u %u %u %u\n",
                 PQftype(res, 0),
@@ -427,13 +427,13 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
         }
 
-        if (PQgetlength(res, 0, 1) != sizeof(int32)) {
+        if (PQgetlength(res, 0, 1) != sizeof(int64)) {
             pg_fatal("unexpected result length while fetching remote files\n");
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
         }
 
         /* Read result set to local variables */
-        errorno = memcpy_s(&chunkoff, sizeof(int32), PQgetvalue(res, 0, 1), sizeof(int32));
+        errorno = memcpy_s(&chunkoff, sizeof(int64), PQgetvalue(res, 0, 1), sizeof(int64));
         securec_check_c(errorno, "\0", "\0");
         chunkoff = ntohl(chunkoff);
         chunksize = PQgetlength(res, 0, 2);
@@ -466,8 +466,8 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             continue;
         }
 
-        pg_log(PG_DEBUG, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
-        fprintf(file, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
+        pg_log(PG_DEBUG, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n", filename, chunkoff, chunksize);
+        fprintf(file, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n", filename, chunkoff, chunksize);
 
         open_target_file(filename, false);
         pg_free(filename);
@@ -576,7 +576,7 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
      * First create a temporary table, and load it with the blocks that we
      * need to fetch.
      */
-    sql = "CREATE TEMPORARY TABLE fetchchunks(path text, begin int4, len int4);";
+    sql = "CREATE TEMPORARY TABLE fetchchunks(path text, begin int8, len int4);";
     res = PQexec(conn, sql);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         pg_fatal("could not create temporary table: %s", PQresultErrorMessage(res));

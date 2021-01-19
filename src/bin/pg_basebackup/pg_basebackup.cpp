@@ -918,7 +918,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             /*
              * All files are padded up to 512 bytes
              */
-            if (current_len_left < 0 || current_len_left > INT_MAX - 511) {
+            if (current_len_left < 0 || current_len_left > LLONG_MAX - 511) {
                 fprintf(stderr, _("%s: current_len_left is invalid\n"), progname);
                 disconnect_and_exit(1);
             }
