@@ -4299,7 +4299,8 @@ List* transformCreateSchemaStmt(CreateSchemaStmt* stmt)
                 cxt.triggers = lappend(cxt.triggers, element);
             } break;
 
-            case T_GrantStmt:
+            case T_GrantStmt: /* GRANT XXX ON XXX TO XXX */
+            case T_AlterRoleStmt: /* GRANT ALL PRIVILEGES TO XXX */
                 cxt.grants = lappend(cxt.grants, element);
                 break;
 
