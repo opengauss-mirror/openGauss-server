@@ -49,7 +49,7 @@ static bool do_drop_slot = false;
 static char** options;
 static size_t noptions = 0;
 static bool g_change_plugin = false;
-static const char* plugin = "mppdb_decoding";
+char* plugin = "mppdb_decoding";
 
 /* Global State */
 static int outfd = -1;
@@ -710,7 +710,7 @@ static int getOptions(const int argc, char* const* argv)
             break;
             case 'P':
                 check_env_value_c(optarg);
-                if (plugin) {
+                if (g_change_plugin && plugin) {
                     pfree_ext(plugin);
                 }
                 plugin = pg_strdup(optarg);
