@@ -295,7 +295,7 @@ static void show_version(int alls)
 #ifdef ENABLE_MULTIPLE_NODES
     printf("PostgreSQL 9.2.4\n");
 #else
-    printf("openGauss 1.0.1\n");
+    printf("openGauss 1.1.0\n");
 #endif
 }
 
