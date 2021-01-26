@@ -385,7 +385,7 @@ Software dependency requirements are as follows:
 | flex          | 2.5.31 or later     |
 | bison         | 2.7-4               |
 | ncurses-devel | 5.9-13.20130511     |
-| glibc.devel   | 2.17-111            |
+| glibc-devel   | 2.17-111            |
 | patch         | 2.7.1-10            |
 | lsb_release   | 4.1                 |
 
