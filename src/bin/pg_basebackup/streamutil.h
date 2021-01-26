@@ -35,7 +35,15 @@ do {                              \
         ptr = NULL;       \
     }
 
-#define pg_log(type, fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+#define pg_log(type, fmt, ...)                                                    \
+do {                                                                              \
+    time_t t = time(0);                                                           \
+    char ch[64];                                                                  \
+    tm tmStruct;                                                                  \
+    strftime(ch, sizeof(ch), "%Y-%m-%d %H:%M:%S", localtime_r(&t, &tmStruct));    \
+    fprintf(stderr, "[%s]:", ch);                                                 \
+    fprintf(stderr, fmt, ##__VA_ARGS__);                                          \
+} while(0)
 
 #define pg_fatal(fmt, ...)                   \
 do {                                         \
