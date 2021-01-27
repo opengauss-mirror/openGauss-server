@@ -31,6 +31,7 @@ char* dbhost = NULL;
 char* dbuser = NULL;
 char* dbport = NULL;
 char* dbname = NULL;
+char* baseBackupTimeout = "120"; /* default value */
 int dbgetpassword = 0; /* 0=auto, -1=never, 1=always */
 static char* dbpassword = NULL;
 PGconn* conn = NULL;
@@ -165,7 +166,7 @@ PGconn* GetConnection(void)
     keywords[3] = "connect_timeout";  /* param connect_time   */
     values[3] = "120";                  /* default connect_time */
     keywords[4] = "rw_timeout";       /* param rw_timeout     */
-    values[4] = "120";                 /* default rw_timeout   */
+    values[4] = baseBackupTimeout;		/* value rw_timeout	*/
     int i = 5;
     if (dbhost != NULL) {
         keywords[i] = "host";
