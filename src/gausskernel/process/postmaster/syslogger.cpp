@@ -701,8 +701,7 @@ static void syslogger_erewrite(FILE* file, const char* buffer)
              * and we can not report a log, because there is not space to write.
              */
             if (errno == ENOSPC) {
-                pg_usleep(1000000);
-                continue;
+                break;
             }
         }
         break;
@@ -966,7 +965,7 @@ void write_syslogger_file(char* buffer, int count, int destination)
         logfile = (destination == LOG_DESTINATION_CSVLOG) ? t_thrd.logger.csvlogFile : t_thrd.logger.syslogFile;
 
     errno = 0;
-retry1:
+
     rc = fwrite(buffer, 1, count, logfile);
 
     /* can't use ereport here because of possible recursion */
@@ -976,8 +975,7 @@ retry1:
          * and we can not report a log, because there is not space to write.
          */
         if (errno == ENOSPC) {
-            pg_usleep(1000000);
-            goto retry1;
+            return;
         }
         char errorbuf[ERROR_BUF_SIZE] = {'\0'};
         rc = sprintf_s(errorbuf, ERROR_BUF_SIZE, "ERROR: could not write to log file: %s\n", gs_strerror(errno));
@@ -1653,8 +1651,7 @@ static void LogCtlFlushBuf(LogControlData* logctl)
              * and we can not report a log, because there is not space to write.
              */
             if (errno == ENOSPC) {
-                pg_usleep(1000000);
-                continue;
+                break;
             }
 
             /* disk IO error, print message and discard this logs */
