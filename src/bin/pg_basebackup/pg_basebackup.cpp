@@ -298,14 +298,14 @@ static bool reached_end_position(XLogRecPtr segendpos, uint32 timeline, bool seg
 
             r = read(bgpipe[0], xlogend, sizeof(xlogend));
             if (r < 0) {
-                fprintf(stderr, _("%s: could not read from ready pipe: %s\n"), progname, strerror(errno));
+                pg_log(stderr, _("%s: could not read from ready pipe: %s\n"), progname, strerror(errno));
                 exit(1);
             }
 
             xlogend[63] = '\0';
 
             if (sscanf_s(xlogend, "%X/%X", &hi, &lo) != 2) {
-                fprintf(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, xlogend);
+                pg_log(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, xlogend);
                 exit(1);
             }
             xlogendptr = ((uint64)hi) << 32 | lo;
@@ -388,7 +388,7 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
 
     /* Convert the starting position */
     if (sscanf_s(startpos, "%X/%X", &hi, &lo) != 2) {
-        fprintf(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, startpos);
+        pg_log(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, startpos);
         PQfreemem(param);
         param = NULL;
         disconnect_and_exit(1);
@@ -400,7 +400,7 @@ static void StartLogStreamer(const char *startpos, uint32 timeline, char *syside
 #ifndef WIN32
     /* Create our background pipe */
     if (pipe(bgpipe) < 0) {
-        fprintf(stderr, _("%s: could not create pipe for background process: %s\n"), progname, strerror(errno));
+        pg_log(stderr, _("%s: could not create pipe for background process: %s\n"), progname, strerror(errno));
         PQfreemem(param);
         param = NULL;
         disconnect_and_exit(1);
@@ -595,14 +595,14 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
             if (compresslevel != 0) {
                 duplicatedfd = dup(fileno(stdout));
                 if (duplicatedfd == -1) {
-                    fprintf(stderr, _("%s: could not allocate dup fd by fileno(stdout): %s\n"), progname,
+                    pg_log(stderr, _("%s: could not allocate dup fd by fileno(stdout): %s\n"), progname,
                         strerror(errno));
                     disconnect_and_exit(1);
                 }
 
                 ztarfile = gzdopen(duplicatedfd, "wb");
                 if (gzsetparams(ztarfile, compresslevel, Z_DEFAULT_STRATEGY) != Z_OK) {
-                    fprintf(stderr, _("%s: could not set compression level %d: %s\n"), progname, compresslevel,
+                    pg_log(stderr, _("%s: could not set compression level %d: %s\n"), progname, compresslevel,
                         get_gz_error(ztarfile));
                     close(duplicatedfd);
                     duplicatedfd = -1;
@@ -622,7 +622,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
                 securec_check_ss_c(errorno, "", "");
                 ztarfile = openGzFile(filename, compresslevel);
                 if (ztarfile == NULL) {
-                    fprintf(stderr,
+                    pg_log(stderr,
                         _("%s: could not set compression level %d: %s\n"),
                         progname,
                         compresslevel,
@@ -662,7 +662,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
     if (compresslevel != 0) {
         if (ztarfile == NULL) {
             /* Compression is in use */
-            fprintf(stderr, _("%s: could not create compressed file \"%s\": %s\n"), progname, filename,
+            pg_log(stderr, _("%s: could not create compressed file \"%s\": %s\n"), progname, filename,
                 get_gz_error(ztarfile));
             disconnect_and_exit(1);
         }
@@ -671,7 +671,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
     {
         /* Either no zlib support, or zlib support but compresslevel = 0 */
         if (NULL == tarfile) {
-            fprintf(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
+            pg_log(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
             disconnect_and_exit(1);
         }
     }
@@ -681,7 +681,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
      */
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COPY_OUT) {
-        fprintf(stderr, _("%s: could not get COPY data stream: %s"), progname, PQerrorMessage(conn));
+        pg_log(stderr, _("%s: could not get COPY data stream: %s"), progname, PQerrorMessage(conn));
         if (tarfile != NULL) {
             fclose(tarfile);
             tarfile = NULL;
@@ -700,7 +700,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 #ifdef HAVE_LIBZ
             if (ztarfile != NULL) {
                 if (gzclose(ztarfile) != 0) {
-                    fprintf(stderr,
+                    pg_log(stderr,
                         _("%s: could not close compressed file \"%s\": %s\n"),
                         progname,
                         filename,
@@ -712,7 +712,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
             {
                 if (strcmp(basedir, "-") != 0) {
                     if (fclose(tarfile) != 0) {
-                        fprintf(stderr, _("%s: could not close file \"%s\": %s\n"), progname, filename,
+                        pg_log(stderr, _("%s: could not close file \"%s\": %s\n"), progname, filename,
                             strerror(errno));
                         tarfile = NULL;
                         disconnect_and_exit(1);
@@ -723,14 +723,14 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 
             break;
         } else if (r == -2) {
-            fprintf(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
+            pg_log(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
             disconnect_and_exit(1);
         }
 
 #ifdef HAVE_LIBZ
         if (ztarfile != NULL) {
             if (!writeGzFile(ztarfile, copybuf, r)) {
-                fprintf(stderr,
+                pg_log(stderr,
                     _("%s: could not write to compressed file \"%s\": %s\n"),
                     progname,
                     filename,
@@ -741,7 +741,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
 #endif
         {
             if (fwrite(copybuf, r, 1, tarfile) != 1) {
-                fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                pg_log(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
                 disconnect_and_exit(1);
             }
         }
@@ -789,7 +789,7 @@ static PGresult* backup_get_result(PGconn* conn)
 {
     PGresult *res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COPY_OUT) {
-        fprintf(stderr, _("%s: could not get COPY data stream: %s"), progname, PQerrorMessage(conn));
+        pg_log(stderr, _("%s: could not get COPY data stream: %s"), progname, PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
     return res;
@@ -887,7 +887,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
 
             break;
         } else if (r == TAR_READ_ERROR) {
-            fprintf(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
+            pg_log(stderr, _("%s: could not read COPY data: %s"), progname, PQerrorMessage(conn));
             disconnect_and_exit(1);
         }
 
@@ -899,19 +899,19 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              * No current file, so this must be the header for a new file
              */
             if (r != TAR_BLOCK_SIZE) {
-                fprintf(stderr, _("%s: invalid tar block header size: %d\n"), progname, r);
+                pg_log(stderr, _("%s: invalid tar block header size: %d\n"), progname, r);
                 disconnect_and_exit(1);
             }
             totaldone += TAR_BLOCK_SIZE;
 
             if (sscanf_s(copybuf + TAR_LEN_LEFT, "%201o", &current_len_left) != 1) {
-                fprintf(stderr, _("%s: could not parse file size\n"), progname);
+                pg_log(stderr, _("%s: could not parse file size\n"), progname);
                 disconnect_and_exit(1);
             }
 
             /* Set permissions on the file */
             if (sscanf_s(&copybuf[1024], "%07o ", (unsigned int*)&filemode) != 1) {
-                fprintf(stderr, _("%s: could not parse file mode\n"), progname);
+                pg_log(stderr, _("%s: could not parse file mode\n"), progname);
                 disconnect_and_exit(1);
             }
 
@@ -919,7 +919,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              * All files are padded up to 512 bytes
              */
             if (current_len_left < 0 || current_len_left > LLONG_MAX - 511) {
-                fprintf(stderr, _("%s: current_len_left is invalid\n"), progname);
+                pg_log(stderr, _("%s: current_len_left is invalid\n"), progname);
                 disconnect_and_exit(1);
             }
             current_padding = PADDING_LEFT(current_len_left);
@@ -928,7 +928,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              * First part of header is zero terminated filename
              */
             if (check_input_path_relative_path(copybuf) || check_input_path_relative_path(current_path)) {
-                fprintf(stderr,
+                pg_log(stderr,
                         _("%s: the copybuf/current_path file path including .. is unallowed: %s\n"),
                         progname,
                         strerror(errno));
@@ -942,7 +942,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                  * Ends in a slash means directory or symlink to directory
                  */
                 if (strstr(filename, "../") != NULL) {
-                    fprintf(stderr,
+                    pg_log(stderr,
                         _("%s: path is illegal \n"),
                         filename);
                     disconnect_and_exit(1);
@@ -960,7 +960,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                          */
                         if (!((pg_str_endswith(filename, "/pg_xlog") || pg_str_endswith(filename, "/archive_status")) &&
                                 errno == EEXIST)) {
-                            fprintf(stderr,
+                            pg_log(stderr,
                                 _("%s: could not create directory \"%s\": %s\n"),
                                 progname,
                                 filename,
@@ -970,7 +970,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                     }
 #ifndef WIN32
                     if (chmod(filename, (mode_t)filemode))
-                        fprintf(stderr, _("%s: could not set permissions on directory \"%s\": %s\n"), progname,
+                        pg_log(stderr, _("%s: could not set permissions on directory \"%s\": %s\n"), progname,
                             filename, strerror(errno));
 #endif
                 } else if (copybuf[TAR_FILE_TYPE] == '2') {
@@ -981,10 +981,10 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
                     mapped_tblspc_path = get_tablespace_mapping(&copybuf[TAR_FILE_TYPE + 1]);
                     if (symlink(mapped_tblspc_path, filename) != 0) {
                         if (IsXlogDir(filename)) {
-                            fprintf(stderr, _("WARNING: could not create symbolic link for pg_xlog,"
+                            pg_log(stderr, _("WARNING: could not create symbolic link for pg_xlog,"
                                 " will backup data to \"%s\" directly\n"), filename);
                         } else {
-                            fprintf(stderr,
+                            pg_log(stderr,
                                 _("%s: could not create symbolic link from \"%s\" to \"%s\": %s\n"),
                                 progname,
                                 filename,
@@ -1027,13 +1027,13 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              */
             file = fopen(filename, "wb");
             if (NULL == file) {
-                fprintf(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
+                pg_log(stderr, _("%s: could not create file \"%s\": %s\n"), progname, filename, strerror(errno));
                 disconnect_and_exit(1);
             }
 
 #ifndef WIN32
             if (chmod(filename, (mode_t)filemode))
-                fprintf(stderr, _("%s: could not set permissions on file \"%s\": %s\n"), progname, filename,
+                pg_log(stderr, _("%s: could not set permissions on file \"%s\": %s\n"), progname, filename,
                     strerror(errno));
 #endif
 
@@ -1061,7 +1061,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             }
 
             if (fwrite(copybuf, r, 1, file) != 1) {
-                fprintf(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
+                pg_log(stderr, _("%s: could not write to file \"%s\": %s\n"), progname, filename, strerror(errno));
                 fclose(file);
                 file = NULL;
                 disconnect_and_exit(1);
@@ -1085,7 +1085,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
     }     /* loop over all data blocks */
 
     if (file != NULL) {
-        fprintf(stderr, _("%s: COPY stream ended before last file was finished\n"), progname);
+        pg_log(stderr, _("%s: COPY stream ended before last file was finished\n"), progname);
         fclose(file);
         file = NULL;
         disconnect_and_exit(1);
@@ -1126,19 +1126,19 @@ static void BaseBackup(void)
      */
     res = PQexec(conn, "IDENTIFY_SYSTEM");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "IDENTIFY_SYSTEM",
+        pg_log(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "IDENTIFY_SYSTEM",
             PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
     if (PQntuples(res) != 1 || PQnfields(res) < 3) {
-        fprintf(stderr,
+        pg_log(stderr,
             _("%s: could not identify system: got %d rows and %d fields, expected %d rows and %d or more fields\n"),
             progname, PQntuples(res), PQnfields(res), 1, 3);
         disconnect_and_exit(1);
     }
     sysidentifier = strdup(PQgetvalue(res, 0, 0));
     if (NULL == sysidentifier) {
-        fprintf(stderr, _("%s: strdup for sysidentifier failed! \n"), progname);
+        pg_log(stderr, _("%s: strdup for sysidentifier failed! \n"), progname);
         disconnect_and_exit(1);
     }
     timeline = atoi(PQgetvalue(res, 0, 1));
@@ -1155,7 +1155,7 @@ static void BaseBackup(void)
     securec_check_ss_c(rc, "", "");
 
     if (PQsendQuery(conn, current_path) == 0) {
-        fprintf(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "BASE_BACKUP",
+        pg_log(stderr, _("%s: could not send replication command \"%s\": %s"), progname, "BASE_BACKUP",
             PQerrorMessage(conn));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
@@ -1166,13 +1166,13 @@ static void BaseBackup(void)
      */
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr,_("could not get xlog location: %s"), PQerrorMessage(conn));
+        pg_log(stderr,_("could not get xlog location: %s"), PQerrorMessage(conn));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
     }
     if (PQntuples(res) != 1) {
-        fprintf(stderr,_("no xlog location returned from server\n"));
+        pg_log(stderr,_("no xlog location returned from server\n"));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
@@ -1180,7 +1180,7 @@ static void BaseBackup(void)
     get_value = PQgetvalue(res, 0, 0);
     /* if linkpath is NULL ? */
     if (NULL == get_value) {
-        fprintf(stderr, _("get xlog location failed\n"));
+        pg_log(stderr, _("get xlog location failed\n"));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
@@ -1194,13 +1194,13 @@ static void BaseBackup(void)
      */
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, _("%s: could not initiate base backup: %s"), progname, PQerrorMessage(conn));
+        pg_log(stderr, _("%s: could not initiate base backup: %s"), progname, PQerrorMessage(conn));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
     }
     if (PQntuples(res) != 1) {
-        fprintf(stderr, _("%s: no start point returned from server\n"), progname);
+        pg_log(stderr, _("%s: no start point returned from server\n"), progname);
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
@@ -1208,7 +1208,7 @@ static void BaseBackup(void)
     rc = strncpy_s(xlogstart, sizeof(xlogstart), PQgetvalue(res, 0, 0), sizeof(xlogstart) - 1);
     securec_check_c(rc, "", "");
     if (verbose && includewal)
-        fprintf(stderr, "transaction log start point: %s\n", xlogstart);
+        pg_log(stderr, "transaction log start point: %s\n", xlogstart);
     PQclear(res);
 
     rc = memset_s(xlogend, sizeof(xlogend), 0, sizeof(xlogend));
@@ -1219,13 +1219,13 @@ static void BaseBackup(void)
      */
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, _("%s: could not get backup header: %s"), progname, PQerrorMessage(conn));
+        pg_log(stderr, _("%s: could not get backup header: %s"), progname, PQerrorMessage(conn));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
     }
     if (PQntuples(res) < 1) {
-        fprintf(stderr, _("%s: no data returned from server\n"), progname);
+        pg_log(stderr, _("%s: no data returned from server\n"), progname);
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
         disconnect_and_exit(1);
@@ -1278,7 +1278,7 @@ static void BaseBackup(void)
      * When writing to stdout, require a single tablespace
      */
     if (format == 't' && strcmp(basedir, "-") == 0 && PQntuples(res) > 1) {
-        fprintf(stderr, _("%s: can only write single tablespace to stdout, database has %d\n"), progname,
+        pg_log(stderr, _("%s: can only write single tablespace to stdout, database has %d\n"), progname,
             PQntuples(res));
         PQfreemem(sysidentifier);
         sysidentifier = NULL;
@@ -1294,7 +1294,7 @@ static void BaseBackup(void)
      */
     if (streamwal) {
         if (verbose) {
-            fprintf(stderr, _("%s: starting background WAL receiver\n"), progname);
+            pg_log(stderr, _("%s: starting background WAL receiver\n"), progname);
         }
         StartLogStreamer((const char *)xlogstart, timeline, sysidentifier);
     }
@@ -1324,23 +1324,23 @@ static void BaseBackup(void)
      */
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        fprintf(stderr, _("%s: could not get transaction log end position from server: %s"), progname,
+        pg_log(stderr, _("%s: could not get transaction log end position from server: %s"), progname,
             PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
     if (PQntuples(res) != 1) {
-        fprintf(stderr, _("%s: no transaction log end position returned from server\n"), progname);
+        pg_log(stderr, _("%s: no transaction log end position returned from server\n"), progname);
         disconnect_and_exit(1);
     }
     rc = strncpy_s(xlogend, sizeof(xlogend), PQgetvalue(res, 0, 0), sizeof(xlogend) - 1);
     securec_check_c(rc, "", "");
     if (verbose && includewal)
-        fprintf(stderr, "transaction log end point: %s\n", xlogend);
+        pg_log(stderr, "transaction log end point: %s\n", xlogend);
     PQclear(res);
 
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, _("%s: final receive failed: %s"), progname, PQerrorMessage(conn));
+        pg_log(stderr, _("%s: final receive failed: %s"), progname, PQerrorMessage(conn));
         disconnect_and_exit(1);
     }
 
@@ -1357,7 +1357,7 @@ static void BaseBackup(void)
          * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
          * otherwise we have problem! Report error and disconnect.
          */
-        fprintf(stderr,
+        pg_log(stderr,
             _("%s: unexpected result received after final result, status: %u\n"),
             progname,
             PQresultStatus(res));
@@ -1365,7 +1365,7 @@ static void BaseBackup(void)
     }
 
     if (verbose) {
-        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
+        pg_log(stderr, "%s: fetching MOT checkpoint\n", progname);
     }
 
     FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
@@ -1381,30 +1381,30 @@ static void BaseBackup(void)
 #endif
 
         if (verbose)
-            fprintf(stderr, _("%s: waiting for background process to finish streaming...\n"), progname);
+            pg_log(stderr, _("%s: waiting for background process to finish streaming...\n"), progname);
 
 #ifndef WIN32
         if ((unsigned int)(write(bgpipe[1], xlogend, strlen(xlogend))) != strlen(xlogend)) {
-            fprintf(stderr, _("%s: could not send command to background pipe: %s\n"), progname, strerror(errno));
+            pg_log(stderr, _("%s: could not send command to background pipe: %s\n"), progname, strerror(errno));
             disconnect_and_exit(1);
         }
 
         /* Just wait for the background process to exit */
         r = waitpid(bgchild, &status, 0);
         if (r == -1) {
-            fprintf(stderr, _("%s: could not wait for child process: %s\n"), progname, strerror(errno));
+            pg_log(stderr, _("%s: could not wait for child process: %s\n"), progname, strerror(errno));
             disconnect_and_exit(1);
         }
         if (r != bgchild) {
-            fprintf(stderr, _("%s: child %d died, expected %d\n"), progname, r, (int)bgchild);
+            pg_log(stderr, _("%s: child %d died, expected %d\n"), progname, r, (int)bgchild);
             disconnect_and_exit(1);
         }
         if (!WIFEXITED(status)) {
-            fprintf(stderr, _("%s: child process did not exit normally\n"), progname);
+            pg_log(stderr, _("%s: child process did not exit normally\n"), progname);
             disconnect_and_exit(1);
         }
         if (WEXITSTATUS(status) != 0) {
-            fprintf(stderr, _("%s: child process exited with error %d\n"), progname, WEXITSTATUS(status));
+            pg_log(stderr, _("%s: child process exited with error %d\n"), progname, WEXITSTATUS(status));
             disconnect_and_exit(1);
         }
         /* Exited normally, we're happy! */
@@ -1416,7 +1416,7 @@ static void BaseBackup(void)
          * it's there.
          */
         if (sscanf_s(xlogend, "%X/%X", &hi, &lo) != 2) {
-            fprintf(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, xlogend);
+            pg_log(stderr, _("%s: could not parse transaction log location \"%s\"\n"), progname, xlogend);
             disconnect_and_exit(1);
         }
         xlogendptr = ((uint64)hi) << 32 | lo;
@@ -1425,16 +1425,16 @@ static void BaseBackup(void)
         /* First wait for the thread to exit */
         if (WaitForSingleObjectEx((HANDLE)bgchild, INFINITE, FALSE) != WAIT_OBJECT_0) {
             _dosmaperr(GetLastError());
-            fprintf(stderr, _("%s: could not wait for child thread: %s\n"), progname, strerror(errno));
+            pg_log(stderr, _("%s: could not wait for child thread: %s\n"), progname, strerror(errno));
             disconnect_and_exit(1);
         }
         if (GetExitCodeThread((HANDLE)bgchild, &status) == 0) {
             _dosmaperr(GetLastError());
-            fprintf(stderr, _("%s: could not get child thread exit status: %s\n"), progname, strerror(errno));
+            pg_log(stderr, _("%s: could not get child thread exit status: %s\n"), progname, strerror(errno));
             disconnect_and_exit(1);
         }
         if (status != 0) {
-            fprintf(stderr, _("%s: child thread exited with error %u\n"), progname, (unsigned int)status);
+            pg_log(stderr, _("%s: child thread exited with error %u\n"), progname, (unsigned int)status);
             disconnect_and_exit(1);
         }
         /* Exited normally, we're happy */
@@ -1450,7 +1450,7 @@ static void BaseBackup(void)
     }
 
     if (verbose) {
-        fprintf(stderr, "%s: base backup completed\n", progname);
+        pg_log(stderr, "%s: base backup completed\n", progname);
     }
 }
 
@@ -1463,7 +1463,7 @@ static void remove_dw_file(const char *dw_file_name, const char *target_dir, cha
 
     if (realpath(dw_file_path, real_file_path) == NULL) {
         if (real_file_path[0] == '\0') {
-            fprintf(stderr, _("could not get canonical path for file %s: %s\n"), dw_file_path, gs_strerror(errno));
+            pg_log(stderr, _("could not get canonical path for file %s: %s\n"), dw_file_path, gs_strerror(errno));
             disconnect_and_exit(1);
         }
     }
@@ -1494,13 +1494,13 @@ static void backup_dw_file(const char *target_dir)
 
     /* Create the dw build file. */
     if ((fd = open(real_file_path, (DW_FILE_FLAG | O_CREAT), DW_FILE_PERM)) < 0) {
-        fprintf(stderr, _("could not open file %s: %s\n"), real_file_path, gs_strerror(errno));
+        pg_log(stderr, _("could not open file %s: %s\n"), real_file_path, gs_strerror(errno));
         disconnect_and_exit(1);
     }
 
     unaligned_buf = (char *)malloc(BLCKSZ + BLCKSZ);
     if (unaligned_buf == NULL) {
-        fprintf(stderr, _("out of memory"));
+        pg_log(stderr, _("out of memory"));
         close(fd);
         disconnect_and_exit(1);
     }
@@ -1510,7 +1510,7 @@ static void backup_dw_file(const char *target_dir)
     securec_check_c(rc, "\0", "\0");
 
     if (write(fd, buf, BLCKSZ) != BLCKSZ) {
-        fprintf(stderr, _("could not write data to file %s: %s\n"), real_file_path, gs_strerror(errno));
+        pg_log(stderr, _("could not write data to file %s: %s\n"), real_file_path, gs_strerror(errno));
         free(unaligned_buf);
         close(fd);
         disconnect_and_exit(1);
@@ -1891,7 +1891,7 @@ static int GsBaseBackup(int argc, char** argv)
                 check_env_value_c(optarg);
                 char realDir[PATH_MAX] = {0};
                 if (realpath(optarg, realDir) == nullptr) {
-                    fprintf(stderr, _("%s: realpath dir \"%s\" failed: %m\n"), progname, optarg);
+                    pg_log(stderr, _("%s: realpath dir \"%s\" failed: %m\n"), progname, optarg);
                     exit(1);
                 }
                 basedir = xstrdup(realDir);
@@ -2067,7 +2067,7 @@ static int GsBaseBackup(int argc, char** argv)
 
     free_basebackup();
 
-    fprintf(stderr, _("%s: base backup  successfully\n"), progname);
+    pg_log(stderr, _("%s: base backup successfully\n"), progname);
 
     return 0;
 }
