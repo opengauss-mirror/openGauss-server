@@ -25,6 +25,7 @@
 #include "common/fe_memutils.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
+#include "miscadmin.h"
 
 PGconn* conn = NULL;
 char source_slot_name[NAMEDATALEN] = {0};
@@ -435,7 +436,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         /* Read result set to local variables */
         errorno = memcpy_s(&chunkoff, sizeof(int64), PQgetvalue(res, 0, 1), sizeof(int64));
         securec_check_c(errorno, "\0", "\0");
-        chunkoff = ntohl(chunkoff);
+        chunkoff = ntohl64(chunkoff);
         chunksize = PQgetlength(res, 0, 2);
 
         filenamelen = PQgetlength(res, 0, 0);
