@@ -430,7 +430,7 @@ static void pgarch_MainLoop(void)
                 last_time = TIME_GET_MILLISEC(last_copy_time);
             }
             gettimeofday(&curtime, NULL);
-            long time_diff = (long)TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
+            long time_diff = (long)TIME_GET_MILLISEC(curtime) - last_time;
             if (time_diff < 0) {
                 time_diff = 0;
             }
