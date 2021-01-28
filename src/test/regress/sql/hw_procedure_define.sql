@@ -585,3 +585,20 @@ END;
 
 CALL PRO_NO_EXP_001_1();
 CALL PRO_NO_EXP_001_1();
+
+
+create table test_emp_001(name varchar(10));
+create or replace procedure test_proc_using_001(a int) SHIPPABLE LEAKPROOF CALLED ON NULL INPUT external security invoker cost 0.000056
+as
+    v_sql varchar2(2000);
+begin
+    v_sql := 'insert into test_emp_001 values (:v1)';
+    execute immediate v_sql using 'kimy';
+end;
+/
+call test_proc_using_001(1);
+select * from test_emp_001;
+select prosecdef,procost,proleakproof,proisstrict,proshippable,prokind from pg_proc where proname='test_proc_using_001';
+
+drop table test_emp_001;
+drop procedure test_proc_using_001;
