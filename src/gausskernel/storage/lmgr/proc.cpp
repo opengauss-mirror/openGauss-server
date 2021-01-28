@@ -90,6 +90,7 @@ static void CheckSessionTimeout(void);
 static bool CheckStandbyTimeout(void);
 extern void ResetGtmHandleXmin(GTM_TransactionKey txnKey);
 static void FiniNuma(int code, Datum arg);
+static inline void ReleaseChildSlot(void);
 
 /*
  * Report shared-memory space needed by InitProcGlobal.
@@ -437,6 +438,18 @@ PGPROC* GetFreeCMAgentProc()
     return current;
 }
 
+/* Relase child slot in some cases, other role will release slot in CleanupBackend */
+static inline void ReleaseChildSlot(void)
+{
+    if (IsUnderPostmaster &&
+        ((t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR || t_thrd.role == WLM_ARBITER ||
+          t_thrd.role == WLM_CPMONITOR) || IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND ||
+          IsStatementFlushProcess() || IsJobSnapshotProcess() || t_thrd.postmaster_cxt.IsRPCWorkerThread ||
+          IsJobPercentileProcess() || t_thrd.role == ARCH)) {
+          (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
+    }
+}
+
 /*
  * InitProcess -- initialize a per-process data structure for this backend
  */
@@ -522,12 +535,7 @@ void InitProcess(void)
          * old wlm worker process which has exited, if no new slot can be used while
          * postmaster starting thread, it will be throw a panic error.
          */
-        if (IsUnderPostmaster &&
-            (t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR || t_thrd.role == WLM_ARBITER ||
-            IsStatementFlushProcess() || t_thrd.role == WLM_CPMONITOR || IsJobAspProcess() ||
-            IsJobPercentileProcess() || IsJobSnapshotProcess() || t_thrd.role == STREAMING_BACKEND)) {
-            (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
-        }
+        ReleaseChildSlot();
 
         ereport(FATAL,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
@@ -1156,12 +1164,7 @@ static void ProcKill(int code, Datum arg)
      * old wlm worker process which has exited, if no new slot can be used while
      * postmaster starting thread, it will be throw a panic error.
      */
-    if (IsUnderPostmaster &&
-        ((t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR || t_thrd.role == WLM_ARBITER ||
-          t_thrd.role == WLM_CPMONITOR) || IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND ||
-          IsStatementFlushProcess() ||
-          IsJobSnapshotProcess() || t_thrd.postmaster_cxt.IsRPCWorkerThread || IsJobPercentileProcess()))
-        (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
+    ReleaseChildSlot();
 
     /* wake autovac launcher if needed -- see comments in FreeWorkerInfo */
     if (t_thrd.autovacuum_cxt.AutovacuumLauncherPid != 0)
