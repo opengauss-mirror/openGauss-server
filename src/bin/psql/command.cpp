@@ -1870,22 +1870,23 @@ static bool editFile(const char* fname, int lineno)
             return false;
         }
         check_env_value(editor_lineno_arg);
-    }
 
-    if (strlen(editor_lineno_arg) >= MAXPGPATH) {
-        psql_error("The value of \"editor_lineno_arg\" is too long.\n");
-        free(editor_lineno_arg);
-        editor_lineno_arg = NULL;
-        free(editorName);
-        editorName = NULL;
-        return false;
+        if (strlen(editor_lineno_arg) >= MAXPGPATH) {
+            psql_error("The value of \"editor_lineno_arg\" is too long.\n");
+            free(editor_lineno_arg);
+            editor_lineno_arg = NULL;
+            free(editorName);
+            editorName = NULL;
+            return false;
+        }
+
+        syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
+                + 1 + strlen(fname) + 10 + 1;
+    } else {
+        syssz = strlen(editorName) + strlen(fname) + 10 + 1;
     }
 
     /* Allocate sufficient memory for command line. */
-    lineno > 0 ? (syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
-            + 1 + strlen(fname) + 10 + 1) :
-            (syssz = strlen(editorName) + strlen(fname) + 10 + 1);
-
     sys = (char*)pg_malloc(syssz);
 
     /*
@@ -1902,11 +1903,12 @@ static bool editFile(const char* fname, int lineno)
         check_sprintf_s(sprintf_s(sys, syssz, "exec %s '%s'", editorName, fname));
     }
 #else
-    if (lineno > 0)
+    if (lineno > 0) {
         check_sprintf_s(sprintf_s(
             sys, syssz, SYSTEMQUOTE "\"%s\" %s%d \"%s\"" SYSTEMQUOTE, editorName, editor_lineno_arg, lineno, fname));
-    else
+    } else {
         check_sprintf_s(sprintf_s(sys, syssz, SYSTEMQUOTE "\"%s\" \"%s\"" SYSTEMQUOTE, editorName, fname));
+    }
 #endif
     result = system(sys);
     if (result == -1) {
