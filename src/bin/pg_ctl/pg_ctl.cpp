@@ -3463,7 +3463,7 @@ static void do_help(void)
     printf(_("  %s restart [-w] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
              "                 [-o \"OPTIONS\"]\n"),
         progname);
-    printf(_("  %s build   [-D DATADIR] [-r SECS] [-q]\n"), progname);
+    printf(_("  %s build   [-D DATADIR] [-b MODE] [-r SECS] [-q] [-M SERVERMODE]\n"), progname);
 #endif
 
     printf(_("  %s stop    [-W] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"), progname);
@@ -3489,7 +3489,8 @@ static void do_help(void)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
     printf(_("\nCommon options:\n"));
-    printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\"\n"));
+    printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\", "
+             "\"auto\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
