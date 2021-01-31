@@ -66,7 +66,7 @@
 #include "pgxc/barrier.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 34
+#define RESERVE_SIZE 35
 
 typedef struct ResourceOwnerData* ResourceOwner;
 
@@ -450,7 +450,10 @@ typedef struct knl_t_xlog_context {
     char* recoveryTargetBarrierId;
     char* recoveryTargetName;
     XLogRecPtr recoveryTargetLSN;
-
+#ifndef ENABLE_MULTIPLE_NODES
+    int recovery_min_apply_delay;
+    TimestampTz recoveryDelayUntilTime;
+#endif
     /* options taken from recovery.conf for XLOG streaming */
     bool StandbyModeRequested;
     char* PrimaryConnInfo;
