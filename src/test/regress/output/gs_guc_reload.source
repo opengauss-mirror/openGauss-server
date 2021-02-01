@@ -1,0 +1,39 @@
+-----gs_guc_reload(GUC)   set default value of lockwait_timeout by gs_guc reload
+--set new value
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "lockwait_timeout=1s"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c lockwait_timeout=1s reload ].
+realpath(@abs_bindir@/..//bin/cluster_static_config) failed : No such file or directory!
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc reload: lockwait_timeout=1s: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+server signaled
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
+\! sleep 10s
+show lockwait_timeout;
+ lockwait_timeout 
+------------------
+ 1s
+(1 row)
+
+--no assign value
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "lockwait_timeout"
+The gs_guc run with the following arguments: [@abs_bindir@/gs_guc -D @abs_srcdir@/tmp_check/datanode1/ -c lockwait_timeout reload ].
+realpath(@abs_bindir@/..//bin/cluster_static_config) failed : No such file or directory!
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+ERROR: lockwait_timeout parameters value is expected
+
+Total instances: 1. Failed instances: 1.
+Failed instance information:
+--?.*
+
+Failure to perform gs_guc!
+
+\! sleep 10s
+show lockwait_timeout;
+ lockwait_timeout 
+------------------
+ 1s
+(1 row)
+

@@ -748,3 +748,4 @@ test: rule_test
 # gs_guc test
 # ----------
 #test: gs_guc
+test: gs_guc_reload

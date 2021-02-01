@@ -1,0 +1,9 @@
+-----gs_guc_reload(GUC)   set default value of lockwait_timeout by gs_guc reload
+--set new value
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "lockwait_timeout=1s"
+\! sleep 10s
+show lockwait_timeout;
+--no assign value
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "lockwait_timeout"
+\! sleep 10s
+show lockwait_timeout;
