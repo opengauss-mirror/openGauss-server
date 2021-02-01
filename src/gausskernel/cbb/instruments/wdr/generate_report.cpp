@@ -3473,7 +3473,7 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
 
     appendStringInfo(&query,
         "select "
-        "    unnest(array['Buffer Hit %%', 'CPU to Elapsd %%', 'Redo NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
+        "    unnest(array['Buffer Hit %%', 'Effective CPU %%', 'Redo NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
         "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads) end, s2.cpu_to_elapsd, s3.redo_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
         "from "
         "  (select (snap_2.all_reads - coalesce(snap_1.all_reads, 0)) as all_reads, "
@@ -3569,7 +3569,7 @@ static void get_summary_instance_efficiency(report_params* params)
     dash->tableTitle = "Instance Efficiency Percentages (Target 100%)";
     dash->desc = lappend(dash->desc, (void*)desc);
 
-    /* instance efficiency, Buffer Hit %, CPU to Elapsd % extra */
+    /* instance efficiency, Buffer Hit %, Effective CPU % extra */
     get_summary_instance_efficiency_percentages(params, dash);
     GenReport::add_data(dash, &params->Contents);
 }
