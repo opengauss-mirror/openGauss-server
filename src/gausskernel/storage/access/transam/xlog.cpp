@@ -524,6 +524,9 @@ static void readRecoveryCommandFile(void);
 static void exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endSegNo);
 static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis);
 static void recoveryPausesHere(void);
+#ifndef ENABLE_MULTIPLE_NODES
+static bool RecoveryApplyDelay(const XLogReaderState *record);
+#endif
 static void SetCurrentChunkStartTime(TimestampTz xtime);
 static void CheckRequiredParameterValues(bool DBStateShutdown);
 static void XLogReportParameters(void);
@@ -7574,6 +7577,97 @@ void SetRecoveryPause(bool recoveryPause)
     SpinLockRelease(&xlogctl->info_lck);
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * When recovery_min_apply_delay is set, we wait long enough to make sure
+ * certain record types are applied at least that interval behind the master.
+ *
+ * Returns true if we waited.
+ *
+ * Note that the delay is calculated between the WAL record log time and
+ * the current time on standby. We would prefer to keep track of when this
+ * standby received each WAL record, which would allow a more consistent
+ * approach and one not affected by time synchronisation issues, but that
+ * is significantly more effort and complexity for little actual gain in
+ * usability.
+ */
+static bool RecoveryApplyDelay(const XLogReaderState *record)
+{
+    uint8 xactInfo;
+    TimestampTz xtime;
+    long secs;
+    int	microsecs;
+    long waitTime = 0;
+
+    /* nothing to do if no delay configured */
+    if (t_thrd.xlog_cxt.recovery_min_apply_delay <= 0) {
+        return false;
+    }
+
+    /* no delay is applied on a database not yet consistent */
+    if (!t_thrd.xlog_cxt.reachedConsistency) {
+        return false;
+    }
+
+    /* nothing to do if crash recovery is requested */
+    if (!t_thrd.xlog_cxt.ArchiveRecoveryRequested) {
+        return false;
+    }
+
+    /*
+     * Is it a COMMIT record?
+     * We deliberately choose not to delay aborts since they have no effect on
+     * MVCC. We already allow replay of records that don't have a timestamp,
+     * so there is already opportunity for issues caused by early conflicts on
+     * standbys
+     */
+    if (XLogRecGetRmid(record) != RM_XACT_ID) {
+        return false;
+    }
+
+    xactInfo = XLogRecGetInfo(record) & (~XLR_INFO_MASK);
+    if (xactInfo != XLOG_XACT_COMMIT) {
+        return false;
+    }
+
+    xtime = ((xl_xact_commit *)XLogRecGetData(record))->xact_time;
+    t_thrd.xlog_cxt.recoveryDelayUntilTime =
+        TimestampTzPlusMilliseconds(xtime, t_thrd.xlog_cxt.recovery_min_apply_delay);
+    
+    /* Exit without arming the latch if it's already past time to apply this record */
+    TimestampDifference(GetCurrentTimestamp(), t_thrd.xlog_cxt.recoveryDelayUntilTime, &secs, &microsecs);
+    if (secs <= 0 && microsecs <= 0) {
+        return false;
+    }
+
+    while (true) {
+        ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
+
+        /* might change the trigger file's location */
+        RedoInterruptCallBack();
+
+        if (CheckForFailoverTrigger() || CheckForSwitchoverTrigger() || CheckForStandbyTrigger()) {
+            break;
+        }
+
+        /* Wait for difference between GetCurrentTimestamp() and recoveryDelayUntilTime */
+        TimestampDifference(GetCurrentTimestamp(), t_thrd.xlog_cxt.recoveryDelayUntilTime,
+                            &secs, &microsecs);
+
+        /* NB: We're ignoring waits below min_apply_delay's resolution. */
+        if (secs <= 0 && microsecs / 1000 <= 0) {
+            break;
+        }
+
+        /* delay 1s every time */
+        waitTime = (secs >= 1) ? 1000 : (microsecs / 1000);
+        (void)WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch,
+                        WL_LATCH_SET | WL_TIMEOUT, waitTime);
+    }
+    return true;
+}
+#endif
+
 /*
  * Save timestamp of latest processed commit/abort record.
  *
@@ -8903,6 +8997,26 @@ void StartupXLOG(void)
                         break;
                     }
                 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+                /*
+                 * If we've been asked to lag the master, wait on latch until
+                 * enough time has passed.
+                 */
+                if (RecoveryApplyDelay(xlogreader)) {
+                    /*
+                     * We test for paused recovery again here. If user sets
+                     * delayed apply, it may be because they expect to pause
+                     * recovery in case of problems, so we must test again
+                     * here otherwise pausing during the delay-wait wouldn't
+                     * work.
+                     */
+                    if (xlogctl->recoveryPause) {
+                        recoveryPausesHere();
+                    }
+				}
+#endif
+                
                 /*
                  * ShmemVariableCache->nextXid must be beyond record's xid.
                  *

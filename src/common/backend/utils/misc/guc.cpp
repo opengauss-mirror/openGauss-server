@@ -3762,6 +3762,22 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"recovery_min_apply_delay",
+            PGC_SIGHUP,
+            REPLICATION_STANDBY,
+        	gettext_noop("Sets the minimum delay for applying changes during recovery."),
+        	NULL,
+        	GUC_UNIT_MS},
+            &t_thrd.xlog_cxt.recovery_min_apply_delay,
+            0,
+            0,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
         {{"wal_receiver_status_interval",
              PGC_SIGHUP,
              REPLICATION_STANDBY,

@@ -122,8 +122,10 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "enable_upsert_to_merge",
     "archive_dest",
 #ifndef ENABLE_MULTIPLE_NODES
+    "recovery_min_apply_delay",
     "sync_config_strategy"
 #else
+    NULL,
     NULL
 #endif
 };
