@@ -24,6 +24,20 @@ create table abc(
 	b int
 );
 
+--illegal schema name, start with 'pg_'
+create schema pg_error_schema;
+--create user will create a schema which name is same as username, so it is also illegal.
+create user pg_error_username password 'test-1234';
+
 drop role samedb_schema_cn_role_02_001;
+
+create user grant_user_test password 'test-1234';
+select rolsystemadmin from pg_roles where rolname='grant_user_test';
+
+create schema schema_with_grant_test grant all privileges to grant_user_test;
+select rolsystemadmin from pg_roles where rolname='grant_user_test';
+
+drop user grant_user_test;
+drop schema schema_with_grant_test;
 
 drop schema test_ns_schema_1 cascade;
