@@ -49,8 +49,10 @@ elif [ X"$kernel" == X"centos" ]; then
     dist_version="CENTOS"
 elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="OPENEULER"
+elif [ X"$kernel" == X"kylin" ]; then
+    dist_version="KYLIN"
 else
-    echo "Only support EulerOS, OPENEULER(aarch64) and CentOS platform."
+    echo "Only support EulerOS, OPENEULER(aarch64), CentOS and Kylin(aarch64) platform."
     echo "Kernel is $kernel"
     exit 1
 fi
@@ -70,6 +72,8 @@ if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
         ARCHITECTURE_EXTRA_FLAG=_openeuler_$PLATFORM_ARCH
         # it may be risk to enable 'ARM_LSE' for all ARM CPU, but we bid our CPUs are not elder than ARMv8.1
         GAUSSDB_EXTRA_FLAGS=" -D__USE_NUMA -D__ARM_LSE"
+    elif [ "$dist_version" == "KYLIN" ]; then
+        ARCHITECTURE_EXTRA_FLAG=_kylin_$PLATFORM_ARCH
     else
         ARCHITECTURE_EXTRA_FLAG=_$PLATFORM_ARCH
     fi

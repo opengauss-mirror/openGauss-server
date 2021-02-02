@@ -57,9 +57,11 @@ if [ X"$kernel" == X"centos" ]; then
 elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="openEuler"
 elif [ X"$kernel" == X"euleros" ]; then
-	dist_version="EulerOS"
+    dist_version="EulerOS"
+elif [ X"$kernel" == X"kylin" ]; then
+    dist_version="Kylin"
 else
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS platform."
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64) platform."
     echo "Kernel is $kernel"
     exit 1
 fi
@@ -68,8 +70,8 @@ gcc_version="8.2"
 ##add platform architecture information
 PLATFORM_ARCH=$(uname -p)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
-    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "EulerOS" ] ; then
-        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64) platform."
+    if [ "$dist_version" != "openEuler" ] && [ "$dist_version" != "EulerOS" ] && [ "$dist_version" != "Kylin" ] ; then
+        echo "We only support NUMA on openEuler(aarch64), EulerOS(aarch64), Kylin(aarch64) platform."
         exit 1
     fi
 fi
@@ -190,7 +192,7 @@ ROOT_DIR=$(dirname "$ROOT_DIR")
 PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
 if [ "${PLAT_FORM_STR}"x == "Failed"x ]
 then
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS platform."
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64) platform."
     exit 1;
 fi
 
