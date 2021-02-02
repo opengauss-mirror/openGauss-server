@@ -10319,9 +10319,9 @@ createfunc_opt_list:
 			| createfunc_opt_list createfunc_opt_item { $$ = lappend($1, $2); }
 	;
 opt_createproc_opt_list:
-			createproc_opt_item
+			opt_createproc_opt_list createproc_opt_item
 				{
-					$$ = list_make1($1);
+					$$ = lappend($1, $2);
 				}
 			| /* EMPTY */
 				{
