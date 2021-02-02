@@ -1782,7 +1782,9 @@ static void LogCtlCreateLogParentDirectory(void)
 {
     char* logdir = NULL;
 
-    /* create directory for profile log */
+    /* create directory for profile log.
+     * if EEXIST == errno, this directory may be created already, don't care this case.
+     */
     logdir = LogCtlGetLogDirectory(PROFILE_LOG_TAG, false);
     if (0 == mkdir(logdir, S_IRWXU) || (EEXIST == errno)) {
         /*
@@ -1792,6 +1794,10 @@ static void LogCtlCreateLogParentDirectory(void)
          * ignore its returned value of this case.
          */
         (void)chmod(logdir, S_IRWXU);
+    } else if (EEXIST != errno) {
+        ereport(FATAL,
+                (errmsg(
+                "could not create log directory \"%s\": %s\n", logdir, gs_strerror(errno))));
     }
     pfree(logdir);
 
