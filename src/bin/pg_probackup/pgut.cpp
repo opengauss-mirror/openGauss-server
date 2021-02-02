@@ -645,7 +645,8 @@ PGconn* pgut_connect(const char *host, const char *port,
 
             if (password == NULL || password[0] == '\0')
                 elog(ERROR, "no password supplied");
-
+            keywords[i] = "password";
+            values[i] = password;
             continue;
         }
         elog(ERROR, "could not connect to database %s: %s",
