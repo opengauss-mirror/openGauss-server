@@ -1023,6 +1023,60 @@ append_string_info(char **optLines, const char *newContext)
     return optLinesResult;
 }
 
+static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
+{
+    int notNullReplconninfoNums = 0;
+    bool isReplconninfoXNull = true;
+
+    for (int i = 0; optLines[i] != NULL; i++) {
+        char* p = optLines[i];
+        bool matchReplconninfoX = false;
+        /* Skip all the blanks at the begin of the optLine */
+        while (p != NULL && isspace((unsigned char)*p)) {
+            ++p;
+        }
+        if (p == NULL ) {
+            continue;
+        }
+        if (*p == '#') {
+            ++p;
+            if (p != NULL && strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
+                return false;
+            }
+            continue;
+        }
+        if (strncmp(p, "replconninfo", strlen("replconninfo")) == 0) {
+            if (strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
+                matchReplconninfoX = true;
+            }
+            p += strlen(replconninfoX);
+            /* Skip all the blanks between the param and '=' */
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            /* Skip '=' */
+            if (p != NULL && *p == '=') {
+                p++;
+            }
+            /* Skip all the blanks between the '=' and value */
+            while (p != NULL && isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (strncmp(p, "''", strlen("''")) != 0 &&
+                strncmp(p, "''", strlen("\"\"")) != 0) {
+                ++notNullReplconninfoNums;
+                if (matchReplconninfoX) {
+                    isReplconninfoXNull = false;
+                }
+            }
+        }
+    }
+    if (notNullReplconninfoNums == 1 && !isReplconninfoXNull) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -1112,6 +1166,13 @@ do_gucset(const char *action_type, const char *data_dir)
                 config_value[i] = xstrdup(azString);
                 GS_FREE(azString);
             }
+        }
+
+        if (strncmp(config_param[i], "replconninfo", strlen("replconninfo")) == 0 && 
+            config_value[i] != NULL && (config_value[i] == "" || strncmp(config_value[i], "''", strlen("''")) == 0) && 
+            IsLastNotNullReplconninfo(opt_lines, config_param[i])) {
+            write_stderr("\nWARNING: This is the last valid replConnInfo, once set to null, "
+                "the host role will be changed to Normal if the local_role is primary now.\n");
         }
 
         /* find the line where guc parameter in */
