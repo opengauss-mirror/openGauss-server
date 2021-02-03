@@ -515,7 +515,7 @@ static void do_delete_operate()
 
 static int do_validate_operate()
 {
-    if (current.backup_id == 0 && target_time == 0 && target_xid == 0 && !target_lsn)
+    if (current.backup_id == 0 && target_time == 0 && target_xid == 0 && !target_lsn && !recovery_target_options->target_name)
         return do_validate_all();
     else
         /* PITR validation and, optionally, partial validation */
