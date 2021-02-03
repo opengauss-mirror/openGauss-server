@@ -144,6 +144,7 @@ static bool dump_templatedb = false;
 static char* parallel_jobs = NULL;
 
 GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
+#define RAND_COUNT 100
 
 /* Database Security: Data importing/dumping support AES128. */
 const char* encrypt_mode = NULL;
@@ -731,11 +732,45 @@ static void do_dumpall(PGconn* conn)
         dumpDatabases(conn);
 }
 
+/*
+ * When do dumpall, dump will be called --with-salt.
+ * Because all database encrypted files are written to the same file,
+ * So it must ensure that the parameters passed in when they are called are consistent.
+ * Especially hand --with-salt
+ */
+/* Get a random values as salt for encrypt */
+static void generateRandArray()
+{
+    GS_UINT32 retval = 0;
+    bool is_rand_ok = true;
+    int k = 0;
+    int i = 0;
+
+    while (k++ < RAND_COUNT) {
+        is_rand_ok = true;
+        retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
+        if (retval != 1) {
+            exit_horribly(NULL, "Generate random key failed\n");
+        }
+        for (i = 0; i < RANDOM_LEN; i++) {
+            if (init_rand[i] == '\n' || init_rand[i] == '\r' || init_rand[i] == '\0') {
+                is_rand_ok = false;
+                break;
+            }
+        }
+        if (is_rand_ok) {
+            break;
+        }
+    }
+    if (!is_rand_ok) {
+        exit_horribly(NULL, "Generate random key failed.\n");
+    }
+}
+
 /* parse the options for the dumpall */
 static void getopt_dumpall(int argc, char** argv, struct option options[], int* result)
 {
     int c;
-    GS_UINT32 retval = 0;
     pgdumpopts = createPQExpBuffer();
 
     while ((c = getopt_long(argc, argv, "acf:gh:l:oOp:rsS:tT:U:W:vwx", options, result)) != -1) {
@@ -892,17 +927,7 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
                 appendPQExpBuffer(pgdumpopts, " --with-key ");
                 replace_password(argc, argv, "--with-key");
                 doShellQuoting(pgdumpopts, encrypt_key);
-
-                /*
-                 * When do dumpall, dump will be called --with-salt.
-                 * Because all database encrypted files are written to the same file,
-                 * So it must ensure that the parameters passed in when they are called are consistent.
-                 * Especially hand --with-salt
-                 */
-                /* Get a random values as salt for encrypt */
-                retval = RAND_priv_bytes(init_rand, RANDOM_LEN);
-                if (retval != 1)
-                    exit_horribly(NULL, "Generate random key failed\n");
+                generateRandArray();
                 appendPQExpBuffer(pgdumpopts, " --with-salt ");
                 /*
                  * --with-salt comes from random generation, so we need to make sure it doesn't contain '\n' and '\r'
