@@ -10290,7 +10290,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
 
     Assert(NULL != psrc);
-    SetUniqueSQLIdFromCachedPlanSource(psrc);
 
     /* Check command type: only support IUD */
     initStringInfo(&process_result);
@@ -10339,6 +10338,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
      * we are already in one.
      */
     start_xact_command();
+    SetUniqueSQLIdFromCachedPlanSource(psrc);
 
     if (ENABLE_WORKLOAD_CONTROL && SqlIsValid(t_thrd.postgres_cxt.debug_query_string) &&
         (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
