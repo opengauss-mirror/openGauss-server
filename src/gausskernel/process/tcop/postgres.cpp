@@ -8989,7 +8989,16 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #endif
                 exec_init_poolhandles();
 
+                /*
+                 * Enable pbe optimization in batch mode, cause it may generate too many cplan
+                 * when enable_pbe_optimization is false, which may consume lots of memory and
+                 * lead to 'memory alloc failed'. To avoid this problem, enable pbe optimization
+                 * to use gplan in this batch.
+                 */
+                bool original = u_sess->attr.attr_sql.enable_pbe_optimization;
+                u_sess->attr.attr_sql.enable_pbe_optimization = true;
                 exec_batch_bind_execute(&input_message);
+                u_sess->attr.attr_sql.enable_pbe_optimization = original;
                 if (is_unique_sql_enabled() && is_local_unique_sql()) {
                     UpdateUniqueSQLStat(NULL, NULL, GetCurrentStatementLocalStartTimestamp());
                 }
