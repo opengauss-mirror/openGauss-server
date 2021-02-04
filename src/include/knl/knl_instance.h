@@ -423,6 +423,7 @@ typedef struct knl_g_ckpt_context {
     int64 ckpt_predicate_flush_num;
     int64 ckpt_twophase_flush_num;
     volatile XLogRecPtr ckpt_current_redo_point;
+    RecoveryQueueState ckpt_redo_state;
 
 #ifdef ENABLE_MOT
     struct CheckpointCallbackItem* ckptCallback;

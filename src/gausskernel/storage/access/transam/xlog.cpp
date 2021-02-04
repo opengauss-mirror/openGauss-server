@@ -142,6 +142,8 @@
 #define STANDBY_SIGNAL_FILE "standby"
 #define XLOG_SWITCH_HISTORY_FILE "switch.history"
 #define MAX_PATH_LEN 1024
+#define MAX(A, B) ((B) > (A) ? (B) : (A))
+#define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
 
 #define RecoveryFromDummyStandby() (t_thrd.postmaster_cxt.ReplConnArray[2] != NULL && IS_DN_DUMMY_STANDYS_MODE())
 
@@ -6709,7 +6711,7 @@ void BootStrapXLOG(void)
      * segment with logid=0 logseg=1. The very first WAL segment, 0/0, is not
      * used, so that we can use 0/0 to mean "before any valid WAL segment".
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         u_sess->attr.attr_storage.fullPageWrites = false;
     }
     checkPoint.redo = XLogSegSize + SizeOfXLogLongPHD;
@@ -8591,7 +8593,7 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.RedoRecPtr = t_thrd.shemem_ptr_cxt.XLogCtl->RedoRecPtr =
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.RedoRecPtr = checkPoint.redo;
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         t_thrd.xlog_cxt.doPageWrites = false;
     } else {
         t_thrd.xlog_cxt.doPageWrites = t_thrd.xlog_cxt.lastFullPageWrites;
@@ -8865,7 +8867,7 @@ void StartupXLOG(void)
             PublishStartupProcessInformation();
             SetForwardFsyncRequests();
             SendPostmasterSignal(PMSIGNAL_RECOVERY_STARTED);
-            if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+            if (ENABLE_INCRE_CKPT) {
                 t_thrd.xlog_cxt.pagewriter_launched = true;
             } else {
                 t_thrd.xlog_cxt.bgwriterLaunched = true;
@@ -9313,7 +9315,7 @@ void StartupXLOG(void)
      * record before resource manager writes cleanup WAL records or checkpoint
      * record is written.
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         Insert->fullPageWrites = false;
     } else {
         Insert->fullPageWrites = t_thrd.xlog_cxt.lastFullPageWrites;
@@ -9490,6 +9492,12 @@ void StartupXLOG(void)
         xlogctl->SharedRecoveryInProgress = false;
         xlogctl->IsRecoveryDone = true;
         SpinLockRelease(&xlogctl->info_lck);
+        if (ENABLE_INCRE_CKPT) {
+            RecoveryQueueState *state = &g_instance.ckpt_cxt_ctl->ckpt_redo_state;
+            (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+            state->start = state->end;
+            (void)LWLockRelease(state->recovery_queue_lock);
+        }
     }
 
     NextXidAfterReovery = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
@@ -10081,7 +10089,7 @@ void InitXLOGAccess(void)
     (void)GetRedoRecPtr();
 
     /* Also update our copy of doPageWrites. */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         t_thrd.xlog_cxt.doPageWrites = false;
     } else {
         t_thrd.xlog_cxt.doPageWrites = (Insert->fullPageWrites || Insert->forcePageWrites);
@@ -10128,11 +10136,10 @@ XLogRecPtr GetRedoRecPtr(void)
  */
 void GetFullPageWriteInfo(XLogFPWInfo *fpwInfo_p)
 {
-    bool incremental = g_instance.attr.attr_storage.enableIncrementalCheckpoint;
     fpwInfo_p->redoRecPtr = t_thrd.xlog_cxt.RedoRecPtr;
-    fpwInfo_p->doPageWrites = t_thrd.xlog_cxt.doPageWrites && !incremental;
+    fpwInfo_p->doPageWrites = t_thrd.xlog_cxt.doPageWrites && !ENABLE_INCRE_CKPT;
 
-    fpwInfo_p->forcePageWrites = t_thrd.shemem_ptr_cxt.XLogCtl->FpwBeforeFirstCkpt && !IsInitdb && !incremental;
+    fpwInfo_p->forcePageWrites = t_thrd.shemem_ptr_cxt.XLogCtl->FpwBeforeFirstCkpt && !IsInitdb && !ENABLE_INCRE_CKPT;
 }
 
 /*
@@ -10249,6 +10256,7 @@ void ShutdownXLOG(int code, Datum arg)
     ckpt_shutdown_pagewriter();
     free(g_instance.ckpt_cxt_ctl->dirty_page_queue);
     g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
+    g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock = NULL;
 
     ShutdownCLOG();
     ShutdownCSNLOG();
@@ -10398,7 +10406,7 @@ void CreateCheckPoint(int flags)
     int nvxids = 0;
     errno_t errorno = EOK;
     XLogRecPtr curMinRecLSN = InvalidXLogRecPtr;
-    bool doFullCheckpoint = !g_instance.attr.attr_storage.enableIncrementalCheckpoint;
+    bool doFullCheckpoint = !ENABLE_INCRE_CKPT;
     TransactionId oldest_active_xid = InvalidTransactionId;
     TransactionId globalXmin = InvalidTransactionId;
 
@@ -10490,8 +10498,7 @@ void CreateCheckPoint(int flags)
 
     curInsert = XLogBytePosToRecPtr(Insert->CurrBytePos);
 
-    if ((g_instance.attr.attr_storage.enableIncrementalCheckpoint && (flags & CHECKPOINT_CAUSE_TIME)) ||
-        doFullCheckpoint) {
+    if ((ENABLE_INCRE_CKPT && (flags & CHECKPOINT_CAUSE_TIME)) || doFullCheckpoint) {
         update_dirty_page_queue_rec_lsn(curInsert, true);
     }
 
@@ -10526,7 +10533,7 @@ void CreateCheckPoint(int flags)
             gstrace_exit(GS_TRC_ID_CreateCheckPoint);
             return;
         }
-    } else if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && doFullCheckpoint) {
+    } else if (ENABLE_INCRE_CKPT && doFullCheckpoint) {
         /*
          * enableIncrementalCheckpoint guc is on, but some conditions shuld do
          * full checkpoint.
@@ -10889,9 +10896,9 @@ void CreateCheckPoint(int flags)
         }
     }
 
-    if (doFullCheckpoint && g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (doFullCheckpoint && ENABLE_INCRE_CKPT) {
         XLogRecPtr MinRecLSN = ckpt_get_min_rec_lsn();
-        if (!XLogRecPtrIsInvalid(curMinRecLSN) && XLByteLT(MinRecLSN, t_thrd.xlog_cxt.RedoRecPtr)) {
+        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, t_thrd.xlog_cxt.RedoRecPtr)) {
             ereport(PANIC, (errmsg("current dirty page list head recLSN %08X/%08X smaller than redo lsn %08X/%08X",
                                    (uint32)(MinRecLSN >> XLOG_LSN_SWAP), (uint32)MinRecLSN,
                                    (uint32)(t_thrd.xlog_cxt.RedoRecPtr >> XLOG_LSN_SWAP),
@@ -11021,6 +11028,26 @@ static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags, bool doFullChec
     gstrace_exit(GS_TRC_ID_CheckPointGuts);
 }
 
+void PushRestartPointToQueue(XLogRecPtr recordReadRecPtr, const CheckPoint checkPoint)
+{
+    RecoveryQueueState *state = &g_instance.ckpt_cxt_ctl->ckpt_redo_state;
+    uint loc = 0;
+
+    if (!ENABLE_INCRE_CKPT) {
+        return;
+    }
+
+    (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+    if (state->end - state->start + 1 >= RESTART_POINT_QUEUE_LEN) {
+        state->start++;
+    }
+    loc = state->end % RESTART_POINT_QUEUE_LEN;
+    state->ckpt_rec_queue[loc].CkptLSN = recordReadRecPtr;
+    state->ckpt_rec_queue[loc].checkpoint = checkPoint;
+    state->end++;
+    LWLockRelease(state->recovery_queue_lock);
+}
+
 /*
  * Save a checkpoint for recovery restart if appropriate
  *
@@ -11043,21 +11070,24 @@ static void RecoveryRestartPoint(const CheckPoint checkPoint, XLogRecPtr recordR
     if (IsExtremeRedo()) {
         XLogRecPtr safeCheckPoint = extreme_rto::GetSafeMinCheckPoint();
         if (XLByteEQ(safeCheckPoint, MAX_XLOG_REC_PTR) || XLByteLT(safeCheckPoint, recordReadRecPtr)) {
-            ereport(WARNING, (errmsg("RecoveryRestartPoint is false at %X/%X,last safe point is %X/%X", 
+            ereport(WARNING, (errmsg("RecoveryRestartPoint is false at %X/%X,last safe point is %X/%X",
                 (uint32)(recordReadRecPtr >> 32), (uint32)(recordReadRecPtr), (uint32)(safeCheckPoint >> 32), 
                 (uint32)(safeCheckPoint))));
             return;
         }
     } else if (!parallel_recovery::IsRecoveryRestartPointSafeForWorkers(recordReadRecPtr)) {
-        ereport(WARNING, (errmsg("RecoveryRestartPointSafe is false at %X/%X", 
+        ereport(WARNING, (errmsg("RecoveryRestartPointSafe is false at %X/%X",
             static_cast<uint32>(recordReadRecPtr >> shitRightLength), static_cast<uint32>(recordReadRecPtr))));
         return;
     }
+
+    update_dirty_page_queue_rec_lsn(recordReadRecPtr, true);
+    pg_write_barrier();
+    PushRestartPointToQueue(recordReadRecPtr, checkPoint);
     /*
      * Copy the checkpoint record to shared memory, so that checkpointer can
      * work out the next time it wants to perform a restartpoint.
      */
-
     SpinLockAcquire(&xlogctl->info_lck);
     xlogctl->lastCheckPointRecPtr = recordReadRecPtr;
     const_cast<CheckPoint &>(xlogctl->lastCheckPoint) = const_cast<CheckPoint &>(checkPoint);
@@ -11107,8 +11137,7 @@ bool IsRestartPointSafe(const XLogRecPtr checkPoint)
 void wait_all_dirty_page_flush(int flags, XLogRecPtr redo)
 {
     /* need wait all dirty page finish flush */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        update_dirty_page_queue_rec_lsn(redo, true);
+    if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
         pg_write_barrier();
@@ -11120,6 +11149,119 @@ void wait_all_dirty_page_flush(int flags, XLogRecPtr redo)
     }
     return;
 }
+
+bool RecoveryQueueIsEmpty()
+{
+    RecoveryQueueState *state = &g_instance.ckpt_cxt_ctl->ckpt_redo_state;
+    int num;
+
+    (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+    num = state->end - state->start;
+    (void)LWLockRelease(state->recovery_queue_lock);
+
+    if (num == 0) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+/*
+ * In the recovery phase, don't push the redo point to the latest position, avoid the I/O peak.
+ * calculate the redo point based on the page flushing speed and max_redo_log_size.
+ */
+const int BYTE_PER_KB = 1024;
+XLogRecPtr GetRestartPointInRecovery(CheckPoint *restartCheckPoint)
+{
+    volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+    XLogRecPtr restartRecPtr = InvalidXLogRecPtr;
+
+    XLogRecPtr curMinRecLSN = ckpt_get_min_rec_lsn();
+    RecoveryQueueState *state = &g_instance.ckpt_cxt_ctl->ckpt_redo_state;
+    if (XLogRecPtrIsInvalid(curMinRecLSN)) {
+        /* The dirty page queue is empty, so the redo point can be updated to the latest position. */
+        (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+        state->start = state->end > 0 ? state->end - 1 : state->end;
+        (void)LWLockRelease(state->recovery_queue_lock);
+
+        SpinLockAcquire(&xlogctl->info_lck);
+        restartRecPtr = xlogctl->lastCheckPointRecPtr;
+        *restartCheckPoint = const_cast<CheckPoint &>(xlogctl->lastCheckPoint);
+        SpinLockRelease(&xlogctl->info_lck);
+        Assert(XLByteLE(restartRecPtr, get_dirty_page_queue_rec_lsn()));
+    } else {
+        int num = 0;
+        int loc = 0;
+        int i = 0;
+        XLogRecPtr replayLastLSN;
+        XLogRecPtr targetLSN;
+
+        if (RecoveryQueueIsEmpty()) {
+            return restartRecPtr;
+        }
+        SpinLockAcquire(&xlogctl->info_lck);
+        replayLastLSN = xlogctl->lastCheckPointRecPtr;
+        SpinLockRelease(&xlogctl->info_lck);
+
+        targetLSN = replayLastLSN - u_sess->attr.attr_storage.max_redo_log_size * BYTE_PER_KB;
+
+        (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+        num = state->end - state->start;
+
+        /* 
+         * If the pagewriter flush dirty page to disk quickly, push the redo point to 
+         * the position closest to curMinRecLSN .
+         */
+        if (XLByteLE(targetLSN, curMinRecLSN)) {
+            for (i = 0; i < num; i++) {
+                loc = (state->start + i) % RESTART_POINT_QUEUE_LEN;
+                if (state->ckpt_rec_queue[loc].checkpoint.redo > curMinRecLSN) {
+                    if (i > 0) {
+                        loc = (state->start + i - 1) % RESTART_POINT_QUEUE_LEN;
+                        state->start = state->start + i - 1;
+                    }
+                    restartRecPtr = state->ckpt_rec_queue[loc].CkptLSN;
+                    *restartCheckPoint = state->ckpt_rec_queue[loc].checkpoint;
+                    break;
+                }
+            }
+        } else {
+            /* In other cases, push the checkpoint loc to the position closest to targetLSN. */
+            for (i = 0; i < num; i++) {
+                loc = (state->start + i) % RESTART_POINT_QUEUE_LEN;
+                if (state->ckpt_rec_queue[loc].CkptLSN > targetLSN) {
+                    if (i > 0) {
+                        uint64 gap = state->ckpt_rec_queue[loc].CkptLSN - targetLSN;
+                        int prevLoc = (state->start + i - 1) % RESTART_POINT_QUEUE_LEN;
+                        if (targetLSN - state->ckpt_rec_queue[prevLoc].CkptLSN < gap) {
+                            restartRecPtr = state->ckpt_rec_queue[prevLoc].CkptLSN;
+                            *restartCheckPoint = state->ckpt_rec_queue[prevLoc].checkpoint;
+                            state->start = state->start + i - 1;
+                        } else {
+                            restartRecPtr = state->ckpt_rec_queue[loc].CkptLSN;
+                            *restartCheckPoint = state->ckpt_rec_queue[loc].checkpoint;
+                            state->start = state->start + i;
+                        }
+                    } else {
+                        restartRecPtr = state->ckpt_rec_queue[loc].CkptLSN;
+                        *restartCheckPoint = state->ckpt_rec_queue[loc].checkpoint;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (XLogRecPtrIsInvalid(restartRecPtr) && num > 0) {
+            loc = (state->end - 1) % RESTART_POINT_QUEUE_LEN;
+            restartRecPtr = state->ckpt_rec_queue[loc].CkptLSN;
+            *restartCheckPoint = state->ckpt_rec_queue[loc].checkpoint;
+            state->start = state->end - 1;
+        }
+        (void)LWLockRelease(state->recovery_queue_lock);
+    }
+    return restartRecPtr;
+}
+
 /*
  * Establish a restartpoint if possible.
  *
@@ -11139,6 +11281,7 @@ bool CreateRestartPoint(int flags)
     TimestampTz xtime;
     errno_t errorno = EOK;
     bool recoveryInProgress = true;
+    bool doFullCkpt = !ENABLE_INCRE_CKPT;
 
     /* use volatile pointer to prevent code rearrangement */
     volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
@@ -11149,12 +11292,6 @@ bool CreateRestartPoint(int flags)
      */
     gstrace_entry(GS_TRC_ID_CreateRestartPoint);
     LWLockAcquire(CheckpointLock, LW_EXCLUSIVE);
-
-    /* Get a local copy of the last safe checkpoint record. */
-    SpinLockAcquire(&xlogctl->info_lck);
-    lastCheckPointRecPtr = xlogctl->lastCheckPointRecPtr;
-    lastCheckPoint = const_cast<CheckPoint &>(xlogctl->lastCheckPoint);
-    SpinLockRelease(&xlogctl->info_lck);
 
     recoveryInProgress = RecoveryInProgress();
     /*
@@ -11167,6 +11304,23 @@ bool CreateRestartPoint(int flags)
         smgrsync_with_absorption();
         gstrace_exit(GS_TRC_ID_CreateRestartPoint);
         return false;
+    }
+
+    if (doFullCkpt ||
+        ((unsigned int)flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY | CHECKPOINT_FORCE))) {
+        doFullCkpt = true;
+        if (ENABLE_INCRE_CKPT) {
+            RecoveryQueueState *state = &g_instance.ckpt_cxt_ctl->ckpt_redo_state;
+            (void)LWLockAcquire(state->recovery_queue_lock, LW_EXCLUSIVE);
+            state->start = state->end > 0 ? state->end - 1 : state->end;
+            (void)LWLockRelease(state->recovery_queue_lock);
+        }
+        SpinLockAcquire(&xlogctl->info_lck);
+        lastCheckPointRecPtr = xlogctl->lastCheckPointRecPtr;
+        lastCheckPoint = const_cast<CheckPoint &>(xlogctl->lastCheckPoint);
+        SpinLockRelease(&xlogctl->info_lck);
+    } else {
+        lastCheckPointRecPtr = GetRestartPointInRecovery(&lastCheckPoint);
     }
 
     /*
@@ -11252,8 +11406,7 @@ bool CreateRestartPoint(int flags)
         LogCheckpointStart((unsigned int)flags, true);
     }
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        update_dirty_page_queue_rec_lsn(lastCheckPoint.redo, true);
+    if (ENABLE_INCRE_CKPT && doFullCkpt) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
         pg_write_barrier();
@@ -11261,7 +11414,21 @@ bool CreateRestartPoint(int flags)
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
         }
         ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
+    } else if (ENABLE_INCRE_CKPT) {
+        g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
+        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPoint.redo);
+        pg_write_barrier();
+
+        uint64 head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
+        int64 need_flush_num = g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc > head ?
+            g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc - head : 0;
+
+        if (need_flush_num > 0) {
+            g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
+        }
+        ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages", need_flush_num)));
     }
+
     CheckPointGuts(lastCheckPoint.redo, flags, true);
 
 #ifdef ENABLE_MOT
@@ -11273,6 +11440,15 @@ bool CreateRestartPoint(int flags)
      * prior checkpoint's earliest info.
      */
     XLByteToSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, _logSegNo);
+    if (ENABLE_INCRE_CKPT) {
+        XLogRecPtr MinRecLSN = ckpt_get_min_rec_lsn();
+        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, lastCheckPoint.redo)) {
+            ereport(PANIC, (errmsg("current dirty page list head recLSN %08X/%08X smaller than redo lsn %08X/%08X",
+                                   (uint32)(MinRecLSN >> XLOG_LSN_SWAP), (uint32)MinRecLSN,
+                                   (uint32)(lastCheckPoint.redo >> XLOG_LSN_SWAP),
+                                   (uint32)lastCheckPoint.redo)));
+        }
+    }
 
     /*
      * Update pg_control, using current time.  Check that it still shows
@@ -11364,7 +11540,7 @@ bool CreateRestartPoint(int flags)
          * Reduce the frequency of trucate CSN log to avoid the probability of lock contention.
          * Incremental chekpoint does not require frequent truncate of csnlog.
          */
-        if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint ||
+        if (!ENABLE_INCRE_CKPT ||
             elapsed_secs >= u_sess->attr.attr_storage.fullCheckPointTimeout) {
             TransactionId globalXmin = InvalidTransactionId;
             (void)GetOldestActiveTransactionId(&globalXmin);
@@ -11658,7 +11834,7 @@ void UpdateFullPageWrites(void)
      * because we assume that there is no concurrently running process which
      * can update it.
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         u_sess->attr.attr_storage.fullPageWrites = false;
     }
     if (u_sess->attr.attr_storage.fullPageWrites == Insert->fullPageWrites) {
@@ -12499,7 +12675,7 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
     } else {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups++;
     }
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = false;
     } else {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = true;
@@ -14193,6 +14369,7 @@ void SetXLogReplayRecPtr(XLogRecPtr readRecPtr, XLogRecPtr endRecPtr)
     if (isUpdated && !IsExtremeRedo()) {
         RedoSpeedDiag(readRecPtr, endRecPtr);
     }
+    update_dirty_page_queue_rec_lsn(readRecPtr);
 }
 
 void DumpXlogCtl()
@@ -16709,7 +16886,7 @@ bool IsRoachRestore(void)
             strncmp(t_thrd.xlog_cxt.recoveryTargetBarrierId, ROACH_BACKUP_PREFIX, strlen(ROACH_BACKUP_PREFIX)) == 0);
 }
 
-const int UPDATE_REC_XLOG_NUM = 10;
+const uint UPDATE_REC_XLOG_NUM = 4;
 #if defined(__x86_64__) || defined(__aarch64__)
 bool atomic_update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_immediately_update)
 {
@@ -16754,7 +16931,7 @@ void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_im
     bool is_update = false;
     uint32 freespace;
 
-    if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (!ENABLE_INCRE_CKPT) {
         return;
     }
 
@@ -16812,21 +16989,20 @@ uint64 get_dirty_page_queue_rec_lsn()
 XLogRecPtr ckpt_get_min_rec_lsn(void)
 {
     uint64 queue_loc;
-    XLogRecPtr dirty_queue_min_lsn = InvalidXLogRecPtr;
-    uint64 dirty_page_queue_tail;
+    XLogRecPtr min_rec_lsn = InvalidXLogRecPtr;
 
     /*
      * If head recLSN is Invalid, then add head, get next buffer recLSN, if head equal tail,
      * return InvalidXLogRecPtr.
      */
-    queue_loc = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
-    dirty_page_queue_tail = get_dirty_page_queue_tail();
-    if (dirty_page_queue_tail - queue_loc == 0) {
+    if (get_dirty_page_num() == 0) {
         return InvalidXLogRecPtr;
     }
-    while (XLogRecPtrIsInvalid(dirty_queue_min_lsn) && (queue_loc < get_dirty_page_queue_tail())) {
+    queue_loc = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
+    while (XLogRecPtrIsInvalid(min_rec_lsn) && (queue_loc < get_dirty_page_queue_tail())) {
         Buffer buffer;
         BufferDesc *buf_desc = NULL;
+        XLogRecPtr page_rec_lsn = InvalidXLogRecPtr;
         uint64 temp_loc = queue_loc % g_instance.ckpt_cxt_ctl->dirty_page_queue_size;
         volatile DirtyPageQueueSlot *slot = &g_instance.ckpt_cxt_ctl->dirty_page_queue[temp_loc];
 
@@ -16845,9 +17021,12 @@ XLogRecPtr ckpt_get_min_rec_lsn(void)
             continue;
         }
         buf_desc = GetBufferDescriptor(buffer - 1);
-        dirty_queue_min_lsn = pg_atomic_read_u64(&buf_desc->rec_lsn);
+        page_rec_lsn = pg_atomic_read_u64(&buf_desc->rec_lsn);
+        if (!BufferIsInvalid(slot->buffer)) {
+            min_rec_lsn = page_rec_lsn;
+        }
     }
-    return dirty_queue_min_lsn;
+    return min_rec_lsn;
 }
 
 void WaitCheckpointSync(void)
