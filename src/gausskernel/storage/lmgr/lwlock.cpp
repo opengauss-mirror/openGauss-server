@@ -157,6 +157,7 @@ static const char *BuiltinTrancheNames[] = {
     "DoubleWriteLock",
     "DWSingleFlushPosLock",
     "DWSingleFlushWriteLock",
+    "RestartPointQueueLock",
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
     "MPFLLOCK",
@@ -372,6 +373,9 @@ int NumLWLocks(void)
     numLocks += NUM_DW_SINGLE_FLUSH_LOCK + 1;  /* single flush write lock and the get pos lock */
 
     /* for materialized view */
+    numLocks += 1;
+
+    /* for recovery state queue */
     numLocks += 1;
 
     /*

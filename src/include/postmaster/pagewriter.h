@@ -25,6 +25,7 @@
 #ifndef _PAGEWRITER_H
 #define _PAGEWRITER_H
 #include "storage/buf/buf.h"
+#include "catalog/pg_control.h"
 
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
@@ -66,6 +67,20 @@ typedef struct incre_ckpt_view_col {
     incre_ckpt_view_get_data_func get_val;
 } incre_ckpt_view_col;
 
+const int RESTART_POINT_QUEUE_LEN = 20;
+/* recovery checkpoint queue */
+typedef struct CheckPointItem {
+    XLogRecPtr CkptLSN;
+    CheckPoint checkpoint;
+} CheckPointItem;
+
+typedef struct RecoveryQueueState {
+    uint64 start;
+    uint64 end;
+    CheckPointItem *ckpt_rec_queue;
+    LWLock *recovery_queue_lock;
+} RecoveryQueueState;
+
 /*
  * The slot location is pre-occupied. When the slot buffer is set, the state will set
  * to valid. when remove dirty page form queue, don't change the state, only when move
@@ -89,6 +104,8 @@ extern void ckpt_shutdown_pagewriter();
 extern uint64 get_dirty_page_queue_rec_lsn();
 extern XLogRecPtr ckpt_get_min_rec_lsn(void);
 extern uint32 calculate_thread_max_flush_num(bool is_pagewriter);
+extern uint32 get_loc_for_lsn(XLogRecPtr target_lsn);
+extern uint64 get_time_ms();
 
 const int PAGEWRITER_VIEW_COL_NUM = 8;
 const int INCRE_CKPT_VIEW_COL_NUM = 7;
