@@ -1027,31 +1027,35 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
 {
     int notNullReplconninfoNums = 0;
     bool isReplconninfoXNull = true;
+    bool matchReplconninfoX = false;
+    char* p = NULL;
 
-    for (int i = 0; optLines[i] != NULL; i++) {
-        char* p = optLines[i];
-        bool matchReplconninfoX = false;
+    for (int i = 0; optLines != NULL && optLines[i] != NULL; i++) {
+        p = optLines[i];
         /* Skip all the blanks at the begin of the optLine */
         while (p != NULL && isspace((unsigned char)*p)) {
             ++p;
         }
-        if (p == NULL ) {
+        if (p == NULL) {
             continue;
         }
         if (*p == '#') {
             ++p;
+            while (p != NULL && isspace((unsigned char)*p)) {
+                ++p;
+            }
             if (p != NULL && strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
                 return false;
             }
             continue;
         }
-        if (strncmp(p, "replconninfo", strlen("replconninfo")) == 0) {
+        if (p != NULL && strncmp(p, "replconninfo", strlen("replconninfo")) == 0) {
             if (strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
                 matchReplconninfoX = true;
             }
             p += strlen(replconninfoX);
             /* Skip all the blanks between the param and '=' */
-            while (isspace((unsigned char)*p)) {
+            while (p != NULL && isspace((unsigned char)*p)) {
                 p++;
             }
             /* Skip '=' */
@@ -1062,7 +1066,7 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
             while (p != NULL && isspace((unsigned char)*p)) {
                 p++;
             }
-            if (strncmp(p, "''", strlen("''")) != 0 &&
+            if (p != NULL && strncmp(p, "''", strlen("''")) != 0 &&
                 strncmp(p, "''", strlen("\"\"")) != 0) {
                 ++notNullReplconninfoNums;
                 if (matchReplconninfoX) {
