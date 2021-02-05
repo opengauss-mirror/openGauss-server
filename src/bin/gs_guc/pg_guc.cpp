@@ -1067,7 +1067,7 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
                 p++;
             }
             if (p != NULL && strncmp(p, "''", strlen("''")) != 0 &&
-                strncmp(p, "''", strlen("\"\"")) != 0) {
+                strncmp(p, "\"\"", strlen("\"\"")) != 0) {
                 ++notNullReplconninfoNums;
                 if (matchReplconninfoX) {
                     isReplconninfoXNull = false;
