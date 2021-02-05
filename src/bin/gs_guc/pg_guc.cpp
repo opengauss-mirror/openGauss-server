@@ -1173,7 +1173,7 @@ do_gucset(const char *action_type, const char *data_dir)
         }
 
         if (strncmp(config_param[i], "replconninfo", strlen("replconninfo")) == 0 &&
-            config_value[i] != NULL && strncmp(config_value[i], "''", strlen("''") &&
+            config_value[i] != NULL && (strlen(config_value[i]) == 0 || strncmp(config_value[i], "''", strlen("''")) == 0) &&
             IsLastNotNullReplconninfo(opt_lines, config_param[i])) {
             write_stderr("\nWARNING: This is the last valid replConnInfo, once set to null, "
                 "the host role will be changed to Normal if the local_role is primary now.\n");
