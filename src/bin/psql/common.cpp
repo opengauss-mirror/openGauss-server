@@ -128,6 +128,29 @@ void* pg_calloc(size_t nmemb, size_t size)
     return tmp;
 }
 
+void* psql_realloc(void* ptr, size_t oldSize, size_t newSize)
+{
+    void* tmp = NULL;
+    errno_t rc;
+
+    if (oldSize > newSize) {
+        return NULL;
+    }
+
+    /* When malloc failed gsql will exit, with no memory leak for ptr. */
+    tmp = pg_malloc(newSize);
+    if (tmp == NULL) {
+        psql_error("out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    rc = memcpy_s(tmp, newSize, ptr, oldSize);
+    securec_check_c(rc, "\0", "\0");
+
+    free(ptr);
+    ptr = NULL;
+    return tmp;
+}
+
 /*
  * setQFout
  * -- handler for -o command line option and \o command

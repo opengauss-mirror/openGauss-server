@@ -2834,44 +2834,6 @@ bar
       </varlistentry>
 
       <varlistentry>
-        <term><varname>HISTFILE</varname></term>
-        <listitem>
-        <para>
-        The file name that will be used to store the history list. The default
-        value is <filename>~/.psql_history</filename>.  For example, putting:
-<programlisting>
-\set HISTFILE ~/.psql_history- :DBNAME
-</programlisting>
-        in <filename>~/.psqlrc</filename> will cause
-        <application>gsql</application> to maintain a separate history for
-        each database.
-        </para>
-        <note>
-        <para>
-        This feature was shamelessly plagiarized from
-        <application>Bash</application>.
-        </para>
-        </note>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>HISTSIZE</varname></term>
-        <listitem>
-        <para>
-        The number of commands to store in the command history. The
-        default value is 500.
-        </para>
-        <note>
-        <para>
-        This feature was shamelessly plagiarized from
-        <application>Bash</application>.
-        </para>
-        </note>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><varname>HOST</varname></term>
         <listitem>
         <para>
