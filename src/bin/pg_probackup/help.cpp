@@ -204,7 +204,6 @@ void help_pg_probackup(void)
     printf(_("                 [--recovery-target-time=time|--recovery-target-xid=xid\n"));
     printf(_("                  |--recovery-target-lsn=lsn|--recovery-target-name=target-name]\n"));
     printf(_("                 [--recovery-target-inclusive=boolean]\n"));
-    printf(_("                 [--recovery-target-timeline=timeline]\n"));
     printf(_("                 [--log-level-console=log-level-console]\n"));
     printf(_("                 [--log-level-file=log-level-file]\n"));
     printf(_("                 [--log-filename=log-filename]\n"));
