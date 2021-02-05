@@ -485,6 +485,11 @@ config_get_opt(int argc, char **argv, ConfigOption cmd_options[],
             opt->lname);
         /* Check 'opt == NULL' is performed in assign_option() */
         assign_option(opt, optarg, SOURCE_CMD);
+
+        if ((strncmp(opt->lname, "ttl", strlen(opt->lname)) == 0) &&
+            (*reinterpret_cast<int64 *>(opt->var) < 0)) {
+            elog(ERROR, "Option --ttl should be a 64bit unsigned integer: '%s'", optarg);
+        }
     }
     free(optstring);
     free(longopts);
