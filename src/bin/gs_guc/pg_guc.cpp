@@ -1023,6 +1023,14 @@ append_string_info(char **optLines, const char *newContext)
     return optLinesResult;
 }
 
+/*******************************************************************************
+ Function    : IsLastNotNullReplconninfo
+ Description : determine if replconninfoX which is being set is the last one valid replconninfo
+ Input       : optLines  - postgres.conf info before changing
+               replconninfoX - replconninfo param name which is being set, eg "replconninfo1"
+ Output      : None
+ Return      : bool
+*******************************************************************************/
 static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
 {
     int notNullReplconninfoNums = 0;
@@ -1044,6 +1052,7 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
             while (p != NULL && isspace((unsigned char)*p)) {
                 ++p;
             }
+            /* replconninfoX must be invalid if it is commented*/
             if (p != NULL && strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
                 return false;
             }
@@ -1075,6 +1084,7 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
             }
         }
     }
+    /* return true if replconninfoX which is being set is the last one valid replconninfo */
     if (notNullReplconninfoNums == 1 && !isReplconninfoXNull) {
         return true;
     }
@@ -1171,7 +1181,7 @@ do_gucset(const char *action_type, const char *data_dir)
                 GS_FREE(azString);
             }
         }
-
+        /* Give a warning if the last valid replconninfo is set to a invalid value currently */
         if (strncmp(config_param[i], "replconninfo", strlen("replconninfo")) == 0 &&
             config_value[i] != NULL && (strlen(config_value[i]) == 0 || strncmp(config_value[i], "''", strlen("''")) == 0) &&
             IsLastNotNullReplconninfo(opt_lines, config_param[i])) {
