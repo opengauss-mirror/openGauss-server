@@ -13149,6 +13149,38 @@ static void replace_config_value(char** optlines, char* name, char* value, confi
 }
 
 /*
+ * Only the administrator can modify the GUC.
+ * gs_guc can only modify GUC locally, and Alter System Set is a supplement.
+ * But in the case of remote connection we cannot change some param,
+ * otherwise, there will be some security risks.
+ */
+static void CheckAlterSystemSetPrivilege(const char* name)
+{
+    if (GetUserId() == BOOTSTRAP_SUPERUSERID) {
+        return;
+    } else if (superuser()) {
+        /* do nothing here, check black list later. */
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                 (errmsg("Permission denied."))));
+    }
+
+    static char* blackList[] = {
+        "modify_initial_password",
+        "enable_access_server_directory",
+        "enable_copy_server_files",
+        NULL
+    };
+    for (int i = 0; blackList[i] != NULL; i++) {
+        if (pg_strcasecmp(name, blackList[i]) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    (errmsg("GUC:%s could only be set by initial user.", name))));
+        }
+    }
+}
+
+/*
  * Persist the configuration parameter value.
  *
  * This function takes all previous configuration parameters
@@ -13172,11 +13204,7 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
     char* name = NULL;
     struct config_generic *record = NULL;
 
-    if (!superuser())
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 (errmsg("must be superuser to execute ALTER SYSTEM SET command"))));
-
+    CheckAlterSystemSetPrivilege(altersysstmt->setstmt->name);
     /*
      * Validate the name and arguments [value1, value2 ... ].
      */
