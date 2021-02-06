@@ -10256,6 +10256,7 @@ void ShutdownXLOG(int code, Datum arg)
     ckpt_shutdown_pagewriter();
     free(g_instance.ckpt_cxt_ctl->dirty_page_queue);
     g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
+    g_instance.ckpt_cxt_ctl->prune_queue_lock = NULL;
     g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock = NULL;
 
     ShutdownCLOG();
@@ -11416,7 +11417,9 @@ bool CreateRestartPoint(int flags)
         ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
     } else if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
+        (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPoint.redo);
+        LWLockRelease(g_instance.ckpt_cxt_ctl->prune_queue_lock);
         pg_write_barrier();
 
         uint64 head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
