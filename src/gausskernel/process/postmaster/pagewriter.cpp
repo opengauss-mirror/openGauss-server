@@ -1275,7 +1275,7 @@ static bool ckpt_found_valid_and_invalid_buffer_loc(
 
     dirty_page_num = get_dirty_page_num();
 
-    if (dirty_page_num < g_instance.ckpt_cxt_ctl->dirty_page_queue_size * NEED_PRUNE_DIRTY_QUEUE_SLOT) {
+    if (dirty_page_num < g_instance.ckpt_cxt_ctl->dirty_page_queue_size * NEED_PRUNE_DIRTY_QUEUE_SLOT || FULL_CKPT) {
         return false;
     }
 
@@ -1342,6 +1342,7 @@ static void ckpt_try_prune_dirty_page_queue()
          * pages are moved to a new position after slot 100 due to this prune queue. than
          * the redo point will be wrong, because some page not flush to disk.
          */
+        (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
         if (last_invalid_slot > pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc)) {
             pg_atomic_write_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc, (last_invalid_slot + 1));
         }
@@ -1381,6 +1382,7 @@ static void ckpt_try_prune_dirty_page_queue()
 
             last_invalid_slot--;
         }
+        LWLockRelease(g_instance.ckpt_cxt_ctl->prune_queue_lock);
 
         if (u_sess->attr.attr_storage.log_pagewriter) {
             print_dirty_page_queue_info(true);
