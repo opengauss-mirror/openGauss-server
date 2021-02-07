@@ -7628,11 +7628,14 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     }
 
     xactInfo = XLogRecGetInfo(record) & (~XLR_INFO_MASK);
-    if (xactInfo != XLOG_XACT_COMMIT) {
+    if (xactInfo == XLOG_XACT_COMMIT) {
+        xtime = ((xl_xact_commit *)XLogRecGetData(record))->xact_time;
+    } else if (xactInfo == XLOG_XACT_COMMIT_COMPACT) {
+        xtime = ((xl_xact_commit_compact *)XLogRecGetData(record))->xact_time;
+    } else {
         return false;
     }
-
-    xtime = ((xl_xact_commit *)XLogRecGetData(record))->xact_time;
+    
     t_thrd.xlog_cxt.recoveryDelayUntilTime =
         TimestampTzPlusMilliseconds(xtime, t_thrd.xlog_cxt.recovery_min_apply_delay);
     
