@@ -17,14 +17,28 @@ show io_limits;
 \c
 DROP user alter_system_testuser;
 
+
+------------------------------------------------------
+-- there is a black list of guc for sysadmin.
+------------------------------------------------------
+DROP ROLE IF EXISTS alter_system_testadmin;
+CREATE USER alter_system_testadmin with sysadmin PASSWORD 'test@1233';
+SET SESSION AUTHORIZATION alter_system_testadmin PASSWORD 'test@1233';
+show modify_initial_password;
+show enable_copy_server_files;
+ALTER SYSTEM SET modify_initial_password to on;
+ALTER SYSTEM SET enable_copy_server_files to on;
+show modify_initial_password;
+show enable_copy_server_files;
+\c
+DROP user alter_system_testadmin;
+
 -------------------------------------------------------
--- clear pg_query_audit for the last test
+-- make sure that audit is on.
 -------------------------------------------------------
 show audit_enabled;
 show audit_set_parameter;
 show audit_user_violation;
-SELECT pg_delete_audit('2000-01-01 ','9999-01-01');
-
 
 --------------------------------------------------------
 -- for POSTMASTER GUC
@@ -45,10 +59,12 @@ SHOW log_destination;
 ALTER SYSTEM SET log_destination to 'stderr,csvlog';
 SHOW autovacuum_mode;
 ALTER SYSTEM SET autovacuum_mode to 'analyze';
-SHOW parctl_min_cost;
-ALTER SYSTEM SET parctl_min_cost TO 1000;
+SHOW io_control_unit;
+ALTER SYSTEM SET io_control_unit TO 10000;
 SHOW vacuum_defer_cleanup_age;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
+show enable_copy_server_files;
+ALTER SYSTEM SET enable_copy_server_files to on;
 
 select pg_sleep(2);  -- wait to reload postgres.conf file
 
@@ -62,10 +78,12 @@ SHOW log_destination;
 ALTER SYSTEM SET log_destination to 'stderr';
 SHOW autovacuum_mode;
 ALTER SYSTEM SET autovacuum_mode to mix;
-SHOW parctl_min_cost;
-ALTER SYSTEM SET parctl_min_cost TO 100000;
+SHOW io_control_unit;
+ALTER SYSTEM SET io_control_unit TO 6000;
 SHOW vacuum_defer_cleanup_age;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
+show enable_copy_server_files;
+ALTER SYSTEM SET enable_copy_server_files to off;
 
 select pg_sleep(2);  -- wait to reload postgres.conf file
 
@@ -73,9 +91,8 @@ SHOW password_lock_time;
 SHOW autovacuum;
 SHOW log_destination;
 SHOW autovacuum_mode;
-SHOW parctl_min_cost;
-
-
+SHOW io_control_unit;
+SHOW enable_copy_server_files;
 
 -- some err case
 ALTER SYSTEM SET password_lock_time to true;
@@ -83,8 +100,8 @@ ALTER SYSTEM SET autovacuum to 'lalala';
 ALTER SYSTEM SET log_destination to 'abcdefg';
 ALTER SYSTEM SET autovacuum_mode to 123;
 ALTER SYSTEM SET autovacuum_mode to lalala;
-ALTER SYSTEM SET parctl_min_cost TO -100;
-ALTER SYSTEM SET parctl_min_cost TO 1.1;
+ALTER SYSTEM SET io_control_unit TO -100;
+ALTER SYSTEM SET io_control_unit TO 1.1;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
 ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
 
@@ -94,7 +111,7 @@ SHOW password_lock_time;
 SHOW autovacuum;
 SHOW log_destination;
 SHOW autovacuum_mode;
-SHOW parctl_min_cost;
+SHOW io_control_unit;
 
 ------------------------------------------------------
 -- FOR BACKEND GUC
@@ -128,13 +145,39 @@ show autoanalyze;
 
 -----------------------------------------------------
 -- UNSUPPORT SET TO DEFAULT
+-- NOTICE: we change io_control_unit here and not recover.
 -----------------------------------------------------
-SHOW parctl_min_cost;
-ALTER SYSTEM SET parctl_min_cost TO 1000;
-ALTER SYSTEM SET parctl_min_cost TO default;
+SHOW io_control_unit;
+ALTER SYSTEM SET io_control_unit TO 10000;
+ALTER SYSTEM SET io_control_unit TO default;
 select pg_sleep(1);
-SHOW parctl_min_cost;
-ALTER SYSTEM SET parctl_min_cost TO 100000;
+SHOW io_control_unit;
+
+------------------------------------------------------
+-- exception in configure file
+-- 1.duplicate parameter
+-- 2.mixed case
+------------------------------------------------------
+\! echo "# io_control_Unit = 50000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "io_control_uNit = 50000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "io_control_unIt = 60000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "# io_control_uniT = 80000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+ALTER SYSTEM SET "io_control_UNit" TO 90000;
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+select pg_sleep(1);
+SHOW io_control_unit;
+
+-------------------------------------------------------
+-- exception: configure file does not exist.
+-- expect: read bak file.
+-- NOTICE: we recover io_control_unit here.
+-------------------------------------------------------
+\! rm @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+ALTER SYSTEM SET "io_control_unIT" TO 6000;
+select pg_sleep(1);
+SHOW io_control_unit;
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf.bak
 
 -------------------------------------------------------
 -- can not in a transaction
@@ -149,6 +192,5 @@ END;
 
 -------------------------------------------------------
 -- shoule be audited.
-------------------------------------------------------
-SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00');
-
+-------------------------------------------------------
+SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00') where detail_info like 'ALTER SYSTEM SET %';

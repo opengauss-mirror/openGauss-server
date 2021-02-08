@@ -390,8 +390,8 @@ extern char* xstrdup(const char* s);
 
 extern char** read_guc_file(const char* path);
 extern ErrCode write_guc_file(const char* path, char** lines);
-extern int find_guc_option(
-    char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len);
+extern int find_guc_option(char** optlines, const char* opt_name,
+    int* name_offset, int* name_len, int* value_offset, int* value_len, bool ignore_case);
 
 extern void modify_guc_lines(char*** optlines, const char** opt_name, char** copy_from_line);
 extern ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_name);

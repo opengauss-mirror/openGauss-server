@@ -540,8 +540,8 @@ static bool check_inlist2joininfo(char** newval, void** extra, GucSource source)
 static void assign_inlist2joininfo(const char* newval, void* extra);
 static bool check_replication_type(int* newval, void** extra, GucSource source);
 static bool isOptLineCommented(char* optLine);
-static bool isMatchOptionName(
-    char* optLine, const char* paraName, int paraLength, int* paraOffset, int* valueLength, int* valueOffset);
+static bool isMatchOptionName(char* optLine, const char* paraName,
+    int paraLength, int* paraOffset, int* valueLength, int* valueOffset, bool ignore_case);
 
 static const char* logging_module_guc_show(void);
 static bool logging_module_check(char** newval, void** extra, GucSource source);
@@ -586,7 +586,8 @@ static void FinishAlterSystemSet(GucContext context);
 static void ConfFileNameCat(char* ConfFileName, char* ConfTmpFileName,
     char* ConfTmpBakFileName, char* ConfLockFileName);
 static void WriteAlterSystemSetGucFile(char* ConfFileName, char** opt_lines, ConfFileLock* filelock);
-static char** LockAndReadConfFile(char* ConfFileName, char* ConfLockFileName, ConfFileLock* filelock);
+static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, char* ConfLockFileName,
+    ConfFileLock* filelock);
 #endif
 inline void scape_space(char **pp)
 {
@@ -609,8 +610,8 @@ inline void scape_space(char **pp)
  * Returns:
  * True, iff the option name is in the configure file; else false.
  */
-static bool isMatchOptionName(
-    char* optLine, const char* paraName, int paraLength, int* paraOffset, int* valueLength, int* valueOffset)
+static bool isMatchOptionName(char* optLine, const char* paraName,
+    int paraLength, int* paraOffset, int* valueLength, int* valueOffset, bool ignore_case)
 {
     char* p = NULL;
     char* q = NULL;
@@ -628,7 +629,9 @@ static bool isMatchOptionName(
     /* Skip all the blanks after '#' and before the paraName */
     scape_space(&p);
 
-    if (strncmp(p, paraName, paraLength) != 0) {
+    if (ignore_case && strncasecmp(p, paraName, paraLength) != 0) {
+        return false;
+    } else if (!ignore_case && strncmp(p, paraName, paraLength) != 0) {
         return false;
     }
 
@@ -13126,7 +13129,7 @@ static void replace_config_value(char** optlines, char* name, char* value, confi
     }
     securec_check_ss(rc, "\0", "\0");
 
-    index = find_guc_option(optlines, name, NULL, NULL, &optvalue_off, &optvalue_len);
+    index = find_guc_option(optlines, name, NULL, NULL, &optvalue_off, &optvalue_len, true);
 
     /* add or replace */
     if (index == INVALID_LINES_IDX) {
@@ -13141,11 +13144,43 @@ static void replace_config_value(char** optlines, char* name, char* value, confi
         if (optlines[index] != NULL) {
             pfree(optlines[index]);
             optlines[index] = NULL;
-        } 
-        
+        }
+
     }
 
     optlines[index] = newline;
+}
+
+/*
+ * Only the administrator can modify the GUC.
+ * gs_guc can only modify GUC locally, and Alter System Set is a supplement.
+ * But in the case of remote connection we cannot change some param,
+ * otherwise, there will be some security risks.
+ */
+static void CheckAlterSystemSetPrivilege(const char* name)
+{
+    if (GetUserId() == BOOTSTRAP_SUPERUSERID) {
+        return;
+    } else if (superuser()) {
+        /* do nothing here, check black list later. */
+    } else {
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                 (errmsg("Permission denied."))));
+    }
+
+    static char* blackList[] = {
+        "modify_initial_password",
+        "enable_access_server_directory",
+        "enable_copy_server_files",
+        NULL
+    };
+    for (int i = 0; blackList[i] != NULL; i++) {
+        if (pg_strcasecmp(name, blackList[i]) == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                    (errmsg("GUC:%s could only be set by initial user.", name))));
+        }
+    }
 }
 
 /*
@@ -13172,11 +13207,7 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
     char* name = NULL;
     struct config_generic *record = NULL;
 
-    if (!superuser())
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                 (errmsg("must be superuser to execute ALTER SYSTEM SET command"))));
-
+    CheckAlterSystemSetPrivilege(altersysstmt->setstmt->name);
     /*
      * Validate the name and arguments [value1, value2 ... ].
      */
@@ -13282,17 +13313,31 @@ static void WriteAlterSystemSetGucFile(char* ConfFileName, char** opt_lines, Con
     }
 }
 
-static char** LockAndReadConfFile(char* ConfFileName, char* ConfLockFileName, ConfFileLock* filelock)
+static char** LockAndReadConfFile(char* ConfFileName, char* ConfTmpFileName, char* ConfLockFileName,
+    ConfFileLock* filelock)
 {
     struct stat st;
     char** opt_lines = NULL;
-    if (stat(ConfFileName, &st) == 0 && get_file_lock(ConfLockFileName, filelock) == CODE_OK) {
-        opt_lines = read_guc_file(ConfFileName);
+    char* file = NULL;
+
+    if (stat(ConfFileName, &st) == 0) {
+        file = ConfFileName;
+    } else if (stat(ConfTmpFileName, &st) == 0) {
+        file = ConfTmpFileName;
+    }
+
+    if (file != NULL && S_ISREG(st.st_mode) && get_file_lock(file, filelock) == CODE_OK) {
+        opt_lines = read_guc_file(file);
     } else {
         ereport(ERROR,
-                (errcode(ERRCODE_FILE_READ_FAILED),
-                 errmsg("File does not exits or it is being used.Can not open file: %s.", ConfFileName)));
+                (errcode(ERRCODE_FILE_READ_FAILED), errmsg("Can not open configure file.")));
     }
+
+    if (opt_lines == NULL) {
+        release_file_lock(filelock);
+        ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED), errmsg("Read configure file falied.")));
+    }
+
     return opt_lines;
 }
 
@@ -13305,12 +13350,12 @@ static char** LockAndReadConfFile(char* ConfFileName, char* ConfLockFileName, Co
  *
  * The configuration parameters are written to a temporary
  * file then renamed to the final name. The template for the
- * temporary file is postgresql.auto.conf.temp.
+ * temporary file is postgresql.conf.bak
  *
  * An LWLock is used to serialize writing to the same file.
  *
  * In case of an error, we leave the original automatic
- * configuration file (postgresql.auto.conf) intact.
+ * configuration file (postgresql.conf.bak) intact.
  */
 void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
 {
@@ -13336,7 +13381,7 @@ void AlterSystemSetConfigFile(AlterSystemStmt * altersysstmt)
      * temporary file and then rename it to postgresql.auto.conf. In case
      * there exists a temp file from previous crash, that can be reused.
      */
-    opt_lines = LockAndReadConfFile(ConfFileName, ConfLockFileName, &filelock);
+    opt_lines = LockAndReadConfFile(ConfFileName, ConfTmpFileName, ConfLockFileName, &filelock);
 
     /*
      * replace with new value if the configuration parameter already
@@ -18025,7 +18070,7 @@ ErrCode copy_guc_lines(char** copy_to_line, char** optlines, const char** opt_na
 
     if (optlines != NULL) {
         for (i = 0; i < RESERVE_SIZE; i++) {
-            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len);
+            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (INVALID_LINES_IDX != opt_name_index) {
                 errno_t errorno = EOK;
                 opt_name_len = strlen(optlines[opt_name_index]) + 1;
@@ -18071,7 +18116,7 @@ void modify_guc_lines(char*** guc_optlines, const char** opt_name, char** copy_f
         ereport(LOG, (errmsg("configuration file has not data")));
     } else {
         for (int i = 0; i < RESERVE_SIZE; i++) {
-            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len);
+            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (NULL != copy_from_line[i]) {
                 if (INVALID_LINES_IDX != opt_name_index) {
                     pfree(optlines[opt_name_index]);
@@ -18125,7 +18170,7 @@ void comment_guc_lines(char** optlines, const char** opt_name)
         ereport(LOG, (errmsg("configuration file has not data")));
     } else {
         for (int i = 0; i < RESERVE_SIZE; i++) {
-            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len);
+            opt_name_index = find_guc_option(optlines, opt_name[i], NULL, NULL, &optvalue_off, &optvalue_len, false);
             if (opt_name_index != INVALID_LINES_IDX) {
                 /* Skip all the blanks at the begin of the optLine */
                 char *p = optlines[opt_name_index];
@@ -18200,8 +18245,8 @@ int add_guc_optlines_to_buffer(char** optlines, char** buffer)
  * Description	: find the line info of the specified parameter in file
  * Notes		    :
  */
-int find_guc_option(
-    char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len)
+int find_guc_option(char** optlines, const char* opt_name,
+    int* name_offset, int* name_len, int* value_offset, int* value_len, bool ignore_case)
 {
     bool isMatched = false;
     int i = 0;
@@ -18219,7 +18264,8 @@ int find_guc_option(
     /* The first loop is to deal with the lines not commented by '#' */
     for (i = 0; optlines[i] != NULL; i++) {
         if (!isOptLineCommented(optlines[i])) {
-            isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
+            isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset,
+                                          value_len, value_offset, ignore_case);
             if (isMatched) {
                 matchtimes++;
                 targetline = i;
@@ -18242,7 +18288,8 @@ int find_guc_option(
     matchtimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
         if (isOptLineCommented(optlines[i])) {
-            isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
+            isMatched = isMatchOptionName(optlines[i], opt_name, paramlen, name_offset,
+                                          value_len, value_offset, ignore_case);
             if (isMatched) {
                 matchtimes++;
                 targetline = i;

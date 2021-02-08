@@ -1,0 +1,540 @@
+----------------------------------------------------------
+-- The common user should not have the permission.
+---------------------------------------------------------
+DROP ROLE IF EXISTS alter_system_testuser;
+NOTICE:  role "alter_system_testuser" does not exist, skipping
+CREATE USER alter_system_testuser PASSWORD 'test@1233';
+SET SESSION AUTHORIZATION alter_system_testuser PASSWORD 'test@1233';
+show use_workload_manager;
+ use_workload_manager 
+----------------------
+ on
+(1 row)
+
+ALTER SYSTEM SET use_workload_manager to off;
+ERROR:  Permission denied.
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 100;
+ERROR:  Permission denied.
+select pg_sleep(1); -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show use_workload_manager;
+ use_workload_manager 
+----------------------
+ on
+(1 row)
+
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+\c
+DROP user alter_system_testuser;
+------------------------------------------------------
+-- there is a black list of guc for sysadmin.
+------------------------------------------------------
+DROP ROLE IF EXISTS alter_system_testadmin;
+NOTICE:  role "alter_system_testadmin" does not exist, skipping
+CREATE USER alter_system_testadmin with sysadmin PASSWORD 'test@1233';
+SET SESSION AUTHORIZATION alter_system_testadmin PASSWORD 'test@1233';
+show modify_initial_password;
+ modify_initial_password 
+-------------------------
+ off
+(1 row)
+
+show enable_copy_server_files;
+ enable_copy_server_files 
+--------------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET modify_initial_password to on;
+ERROR:  GUC:modify_initial_password could only be set by initial user.
+ALTER SYSTEM SET enable_copy_server_files to on;
+ERROR:  GUC:enable_copy_server_files could only be set by initial user.
+show modify_initial_password;
+ modify_initial_password 
+-------------------------
+ off
+(1 row)
+
+show enable_copy_server_files;
+ enable_copy_server_files 
+--------------------------
+ off
+(1 row)
+
+\c
+DROP user alter_system_testadmin;
+-------------------------------------------------------
+-- make sure that audit is on.
+-------------------------------------------------------
+show audit_enabled;
+ audit_enabled 
+---------------
+ on
+(1 row)
+
+show audit_set_parameter;
+ audit_set_parameter 
+---------------------
+ 1
+(1 row)
+
+show audit_user_violation;
+ audit_user_violation 
+----------------------
+ 1
+(1 row)
+
+--------------------------------------------------------
+-- for POSTMASTER GUC
+--------------------------------------------------------
+SHOW enable_thread_pool;
+ enable_thread_pool 
+--------------------
+ on
+(1 row)
+
+ALTER SYSTEM SET enable_thread_pool to off;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+ALTER SYSTEM SET enable_thread_pool to on;
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+------------------------------------------------------
+-- for SIGHUP GUC
+------------------------------------------------------
+-- change
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1d
+(1 row)
+
+ALTER SYSTEM SET  password_lock_time to 1.1;
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+ALTER SYSTEM SET autovacuum to off;
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+ALTER SYSTEM SET log_destination to 'stderr,csvlog';
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+ALTER SYSTEM SET autovacuum_mode to 'analyze';
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 6000
+(1 row)
+
+ALTER SYSTEM SET io_control_unit TO 10000;
+SHOW vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
+show enable_copy_server_files;
+ enable_copy_server_files 
+--------------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET enable_copy_server_files to on;
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+-- check result and change back.
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1.1d
+(1 row)
+
+ALTER SYSTEM SET  password_lock_time to 1;
+SHOW autovacuum;
+ autovacuum 
+------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autovacuum to on;
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr,csvlog
+(1 row)
+
+ALTER SYSTEM SET log_destination to 'stderr';
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ analyze
+(1 row)
+
+ALTER SYSTEM SET autovacuum_mode to mix;
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 10000
+(1 row)
+
+ALTER SYSTEM SET io_control_unit TO 6000;
+SHOW vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 50000
+(1 row)
+
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
+show enable_copy_server_files;
+ enable_copy_server_files 
+--------------------------
+ on
+(1 row)
+
+ALTER SYSTEM SET enable_copy_server_files to off;
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1d
+(1 row)
+
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 6000
+(1 row)
+
+SHOW enable_copy_server_files;
+ enable_copy_server_files 
+--------------------------
+ off
+(1 row)
+
+-- some err case
+ALTER SYSTEM SET password_lock_time to true;
+ERROR:  parameter "password_lock_time" requires a numeric value
+ALTER SYSTEM SET autovacuum to 'lalala';
+ERROR:  parameter "autovacuum" requires a Boolean value
+ALTER SYSTEM SET log_destination to 'abcdefg';
+ERROR:  invalid value for parameter "log_destination": "abcdefg"
+DETAIL:  Unrecognized key word: "abcdefg".
+ALTER SYSTEM SET autovacuum_mode to 123;
+ERROR:  invalid value for parameter "autovacuum_mode": "123"
+HINT:  Available values: analyze, vacuum, mix, none.
+ALTER SYSTEM SET autovacuum_mode to lalala;
+ERROR:  invalid value for parameter "autovacuum_mode": "lalala"
+HINT:  Available values: analyze, vacuum, mix, none.
+ALTER SYSTEM SET io_control_unit TO -100;
+ERROR:  -100 is outside the valid range for parameter "io_control_unit" (1000 .. 1000000)
+ALTER SYSTEM SET io_control_unit TO 1.1;
+ERROR:  invalid value for parameter "io_control_unit": "1.1"
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO 5.1;
+ERROR:  parameter "vacuum_defer_cleanup_age" requires a numeric value
+ALTER SYSTEM SET vacuum_defer_cleanup_age TO '8#@da%';
+ERROR:  parameter "vacuum_defer_cleanup_age" requires a numeric value
+select pg_sleep(2);  -- wait to reload postgres.conf file
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW password_lock_time;
+ password_lock_time 
+--------------------
+ 1d
+(1 row)
+
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+SHOW log_destination;
+ log_destination 
+-----------------
+ stderr
+(1 row)
+
+SHOW autovacuum_mode;
+ autovacuum_mode 
+-----------------
+ mix
+(1 row)
+
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 6000
+(1 row)
+
+------------------------------------------------------
+-- FOR BACKEND GUC
+------------------------------------------------------
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET ignore_system_indexes TO on;
+NOTICE:  please reconnect the database for the BACKEND level parameter to take effect.
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+ALTER SYSTEM SET ignore_system_indexes TO off;
+NOTICE:  please reconnect the database for the BACKEND level parameter to take effect.
+show ignore_system_indexes;
+ ignore_system_indexes 
+-----------------------
+ off
+(1 row)
+
+----------------------------------------------------
+-- for USERSET GUC
+----------------------------------------------------
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 100;
+ERROR:  unsupport parameter: io_limits
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+ALTER SYSTEM SET io_limits to 0;
+ERROR:  unsupport parameter: io_limits
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show io_limits;
+ io_limits 
+-----------
+ 0
+(1 row)
+
+-----------------------------------------------------
+-- for SUSET GUC
+----------------------------------------------------
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autoanalyze to on;
+ERROR:  unsupport parameter: autoanalyze
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+ALTER SYSTEM SET autoanalyze to off;
+ERROR:  unsupport parameter: autoanalyze
+ALTER SYSTEM SET only support POSTMASTER-level, SIGHUP-level and BACKEND-level guc variable,
+and it must be allowed to set in postgresql.conf.
+show autoanalyze;
+ autoanalyze 
+-------------
+ off
+(1 row)
+
+-----------------------------------------------------
+-- UNSUPPORT SET TO DEFAULT
+-- NOTICE: we change io_control_unit here and not recover.
+-----------------------------------------------------
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 6000
+(1 row)
+
+ALTER SYSTEM SET io_control_unit TO 10000;
+ALTER SYSTEM SET io_control_unit TO default;
+ERROR:  ALTER SYSTEM SET does not support 'set to default'.
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 10000
+(1 row)
+
+------------------------------------------------------
+-- exception in configure file
+-- 1.duplicate parameter
+-- 2.mixed case
+------------------------------------------------------
+\! echo "# io_control_Unit = 50000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "io_control_uNit = 50000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "io_control_unIt = 60000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo "# io_control_uniT = 80000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+ALTER SYSTEM SET "io_control_UNit" TO 90000;
+NOTICE:  There are 3 "io_control_UNit" not commented in "postgresql.conf", and only the last one in 916th line will be set and used.
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+io_control_unit = 10000
+# io_control_Unit = 50000
+io_control_uNit = 50000
+io_control_UNit = 90000
+# io_control_uniT = 80000
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 90000
+(1 row)
+
+-------------------------------------------------------
+-- exception: configure file does not exist.
+-- expect: read bak file.
+-- NOTICE: we recover io_control_unit here.
+-------------------------------------------------------
+\! rm @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+ALTER SYSTEM SET "io_control_unIT" TO 6000;
+NOTICE:  There are 3 "io_control_unIT" not commented in "postgresql.conf", and only the last one in 916th line will be set and used.
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+SHOW io_control_unit;
+ io_control_unit 
+-----------------
+ 6000
+(1 row)
+
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+io_control_unit = 10000
+# io_control_Unit = 50000
+io_control_uNit = 50000
+io_control_unIT = 6000
+# io_control_uniT = 80000
+\! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf.bak
+io_control_unit = 10000
+# io_control_Unit = 50000
+io_control_uNit = 50000
+io_control_unIT = 6000
+# io_control_uniT = 80000
+-------------------------------------------------------
+-- can not in a transaction
+-------------------------------------------------------
+BEGIN;
+SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+ALTER SYSTEM SET autovacuum to off;
+ERROR:  ALTER SYSTEM SET cannot run inside a transaction block
+SHOW autovacuum;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ALTER SYSTEM SET autovacuum to on;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+SHOW autovacuum;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+END;
+-------------------------------------------------------
+-- shoule be audited.
+-------------------------------------------------------
+SELECT type,result,userid,database,client_conninfo,object_name,detail_info FROM pg_query_audit('2000-01-01 08:00:00','9999-01-01 08:00:00') where detail_info like 'ALTER SYSTEM SET %';
+     type      | result | userid |  database  | client_conninfo |       object_name        |                     detail_info                      
+---------------+--------+--------+------------+-----------------+--------------------------+------------------------------------------------------
+ set_parameter | ok     | 10     | regression | gsql@[local]    | enable_thread_pool       | ALTER SYSTEM SET enable_thread_pool to off;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | enable_thread_pool       | ALTER SYSTEM SET enable_thread_pool to on;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | password_lock_time       | ALTER SYSTEM SET  password_lock_time to 1.1;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | autovacuum               | ALTER SYSTEM SET autovacuum to off;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | log_destination          | ALTER SYSTEM SET log_destination to 'stderr,csvlog';
+ set_parameter | ok     | 10     | regression | gsql@[local]    | autovacuum_mode          | ALTER SYSTEM SET autovacuum_mode to 'analyze';
+ set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_unit          | ALTER SYSTEM SET io_control_unit TO 10000;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | vacuum_defer_cleanup_age | ALTER SYSTEM SET vacuum_defer_cleanup_age TO 50000;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | enable_copy_server_files | ALTER SYSTEM SET enable_copy_server_files to on;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | password_lock_time       | ALTER SYSTEM SET  password_lock_time to 1;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | autovacuum               | ALTER SYSTEM SET autovacuum to on;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | log_destination          | ALTER SYSTEM SET log_destination to 'stderr';
+ set_parameter | ok     | 10     | regression | gsql@[local]    | autovacuum_mode          | ALTER SYSTEM SET autovacuum_mode to mix;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_unit          | ALTER SYSTEM SET io_control_unit TO 6000;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | vacuum_defer_cleanup_age | ALTER SYSTEM SET vacuum_defer_cleanup_age TO 0;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | enable_copy_server_files | ALTER SYSTEM SET enable_copy_server_files to off;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes    | ALTER SYSTEM SET ignore_system_indexes TO on;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | ignore_system_indexes    | ALTER SYSTEM SET ignore_system_indexes TO off;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_unit          | ALTER SYSTEM SET io_control_unit TO 10000;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_UNit          | ALTER SYSTEM SET "io_control_UNit" TO 90000;
+ set_parameter | ok     | 10     | regression | gsql@[local]    | io_control_unIT          | ALTER SYSTEM SET "io_control_unIT" TO 6000;
+(21 rows)
+
