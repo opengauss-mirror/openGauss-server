@@ -9496,6 +9496,13 @@ static void check_and_reset_ha_listen_port(void)
             signal_child(g_instance.pid_cxt.RemoteServicePID, SIGTERM);
 
         ListenSocketRegulation();
+
+        if (t_thrd.postmaster_cxt.HaShmData != NULL && 
+            t_thrd.postmaster_cxt.HaShmData->repl_list_num == 0 && 
+            t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+            t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
+            SetServerMode(NORMAL_MODE);
+        }
     }
 
     return;
