@@ -17701,6 +17701,22 @@ static bool check_replconninfo(char** newval, void** extra, GucSource source)
 
 /*
  * @@GaussDB@@
+ * Brief			: Determine if all eight replconninfos are empty.
+ * Description		:
+ * Notes			:
+ */
+static inline bool GetReplCurArrayIsNull()
+{
+    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * @@GaussDB@@
  * Brief			: Parse replconninfo1.
  * Description		:
  * Notes			:
@@ -17720,6 +17736,12 @@ static void assign_replconninfo1(const char* newval, void* extra)
     if (u_sess->attr.attr_storage.ReplConnInfoArr[1] != NULL && newval != NULL &&
         strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[1], newval) != 0) {
         t_thrd.postmaster_cxt.ReplConnChanged[1] = true;
+        // perceive single --> primary_standby
+        if (t_thrd.postmaster_cxt.HaShmData != NULL &&
+            t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE &&
+            !GetReplCurArrayIsNull()) {
+                t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
+        }
     }
 }
 
