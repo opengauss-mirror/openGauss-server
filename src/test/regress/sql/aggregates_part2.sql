@@ -76,5 +76,12 @@ select count(*) from (select distinct(c) from t_agg1);
 explain (costs off) select count(*) from (select distinct(c*d) from t_agg1);
 select count(*) from (select distinct(c*d) from t_agg1);
 
+-- test agg with gs_index_advise
+select gs_index_advise('SELECT max(a), min(a), max(b), min(b) FROM t_agg1 order by 1, 2, 3, 4;');
+select gs_index_advise('SELECT a, b, c FROM t_agg1 order by 1 ;');
+select gs_index_advise('SELECT a, b, c FROM t_agg1 order by 1, 2;');
+select gs_index_advise('SELECT a, max(b) FROM t_agg1 group by 1;');
+select gs_index_advise('SELECT a, b, max(c) FROM t_agg1 group by 1, 2;');
+
 reset current_schema;
 drop schema if exists distribute_aggregates_part2 cascade;
