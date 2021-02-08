@@ -270,3 +270,6 @@ select t.xmin from t, ft1 where t.a=ft1.a;
 select xmin from t, ft1 where t.a=ft1.a;
 
 drop schema syscolofforeign cascade;
+
+-- test ^=
+select 1 ^= 2;
