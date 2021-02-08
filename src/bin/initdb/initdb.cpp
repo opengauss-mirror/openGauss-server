@@ -228,7 +228,7 @@ static const char* backend_options = "--single "
 
 #define FREE_AND_RESET(ptr)  \
     do {                     \
-        if (NULL != (ptr)) { \
+        if (NULL != (ptr) && (char*)(ptr) != (char*)"") { \
             free(ptr);       \
             (ptr) = NULL;    \
         }                    \
