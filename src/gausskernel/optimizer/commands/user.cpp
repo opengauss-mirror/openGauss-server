@@ -100,7 +100,7 @@ static List* GetCancelQuery(const char* user_name);
 static bool IsEligiblePid(Oid rel_oid, Oid nsp_oid, Oid pid, Oid db_oid, Form_pg_class form, List* query_list);
 static bool IsDuplicatePid(const List* query_list, Oid pid);
 static void CancelQuery(const char* user_name);
-extern void cancel_backend(Oid pid);
+extern void cancel_backend(ThreadId pid);
 static bool IsCurrentSchemaAttachRoles(List* roles);
 
 /* Database Security: Support password complexity */

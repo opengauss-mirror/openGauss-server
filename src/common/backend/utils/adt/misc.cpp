@@ -47,7 +47,7 @@
 #include "pgxc/pgxc.h"
 #endif
 
-extern void cancel_backend(Oid pid);
+extern void cancel_backend(ThreadId pid);
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 
 /*
@@ -924,7 +924,7 @@ Datum pg_test_err_contain_err(PG_FUNCTION_ARGS)
 
 // Signal to cancel a backend process. This is allowed if you are superuser
 // or have the same role as the process being canceled.
-void cancel_backend(Oid pid)
+void cancel_backend(ThreadId pid)
 {
     int sig_return = 0;
 
