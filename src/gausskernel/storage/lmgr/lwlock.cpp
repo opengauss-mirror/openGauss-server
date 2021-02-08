@@ -158,6 +158,7 @@ static const char *BuiltinTrancheNames[] = {
     "DWSingleFlushPosLock",
     "DWSingleFlushWriteLock",
     "RestartPointQueueLock",
+    "PruneDirtyQueueLock",
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
     "MPFLLOCK",
@@ -376,6 +377,9 @@ int NumLWLocks(void)
     numLocks += 1;
 
     /* for recovery state queue */
+    numLocks += 1;
+
+    /* for prune dirty queue */
     numLocks += 1;
 
     /*
