@@ -49,7 +49,7 @@ void discard_response(PGconn *conn);
 static PGresult *pgut_async_query(PGconn *conn, const char *query,
                                   int nParams, const char **params,
                                   bool text_result);
-
+extern char* inc_dbport(const char* dbport);
 /* is not used now  #define DefaultHost		"localhost"   may be remove in the future*/
 #define DefaultTty          ""
 #define DefaultOption       ""
@@ -709,7 +709,7 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     if (port)
     {
         keywords[i] = "port";
-        values[i] = port;
+        values[i] = inc_dbport(port);
         i++;
     }
 
