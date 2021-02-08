@@ -904,3 +904,9 @@ LINE 1: select xmin from t, ft1 where t.a=ft1.a;
                             ^
 drop schema syscolofforeign cascade;
 NOTICE:  drop cascades to table t
+-- test ^=
+select 1 ^= 2;
+ ?column? 
+----------
+ t
+(1 row)

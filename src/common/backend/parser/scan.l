@@ -913,7 +913,7 @@ other			.
 						yyerror("operator too long");
 
 					/* Convert "!=" operator to "<>" for compatibility */
-					if (strcmp(yytext, "!=") == 0)
+					if (strcmp(yytext, "!=") == 0 || strcmp(yytext, "^=") == 0)
 					{
 						yylval->str = pstrdup("<>");
 						yyextra->is_hint_str = false;
