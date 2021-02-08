@@ -3336,17 +3336,16 @@ static void WalSndCheckTimeOut(TimestampTz now)
          * standby.
          */
         if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
-            char nowTimeStamp[MAXDATELEN + 1];
-            COPY_AND_CHECK_TIMESTAMP(nowTimeStamp, MAXDATELEN + 1, now);
-            char timeoutStamp[MAXDATELEN + 1];
-            COPY_AND_CHECK_TIMESTAMP(timeoutStamp, MAXDATELEN + 1, timeout);
-            char lastRecStamp[MAXDATELEN + 1];
-            COPY_AND_CHECK_TIMESTAMP(lastRecStamp, MAXDATELEN + 1, last_reply_time);
-            char heartbeatStamp[MAXDATELEN + 1];
-            COPY_AND_CHECK_TIMESTAMP(heartbeatStamp, MAXDATELEN + 1, heartbeat);
+            WalReplicationTimestampInfo timeStampInfo;
+            timeStampInfo.timeout = timeout;
+            timeStampInfo.nowtime = now;
+            timeStampInfo.last_timestamp = last_reply_time;
+            timeStampInfo.heartbeat = heartbeat;
+            WalReplicationTimestampToString(&timeStampInfo);
             ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."
-                                   "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)", nowTimeStamp,
-                                   timeoutStamp, lastRecStamp, heartbeatStamp)));
+                                   "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)", 
+                                   timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
+                                   timeStampInfo.lastRecStamp, timeStampInfo.heartbeatStamp)));
         }
         WalSndShutdown();
     }
