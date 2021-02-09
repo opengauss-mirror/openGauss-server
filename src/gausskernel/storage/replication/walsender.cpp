@@ -160,6 +160,7 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd);
 static void DropReplicationSlot(DropReplicationSlotCmd *cmd);
 static void StartReplication(StartReplicationCmd *cmd);
 static void StartLogicalReplication(StartReplicationCmd *cmd);
+static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd);
 static void ProcessStandbyMessage(void);
 static void ProcessStandbyReplyMessage(void);
 static void ProcessStandbyHSFeedbackMessage(void);
@@ -347,10 +348,12 @@ int WalSenderMain(void)
 /* check PMstate and RecoveryInProgress */
 void CheckPMstateAndRecoveryInProgress(void)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     if (!PMstateIsRun() || RecoveryInProgress()) {
         ereport(ERROR, (errcode(ERRCODE_LOGICAL_DECODE_ERROR),
                         errmsg("can't decode in pmState is not run or recovery in progress.")));
     }
+#endif
 }
 
 /*
@@ -1385,6 +1388,115 @@ static void StartLogicalReplication(StartReplicationCmd *cmd)
 }
 
 /*
+ * Notify the primary to advance logical replication slot.
+ */
+static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
+{
+    StringInfoData buf;
+    XLogRecPtr flushRecPtr;
+    XLogRecPtr minLsn;
+    char xpos[MAXFNAMELEN];
+    int rc = 0;
+
+    if (RecoveryInProgress()) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("couldn't advance in recovery")));
+    }
+
+    Assert(!t_thrd.slot_cxt.MyReplicationSlot);
+
+    /*
+     * We can't move slot past what's been flushed so clamp the target
+     * possition accordingly.
+     */
+    flushRecPtr = GetFlushRecPtr();
+    if (XLByteLT(flushRecPtr, cmd->restartpoint)) {
+        cmd->restartpoint = flushRecPtr;
+    }
+
+    if (XLogRecPtrIsInvalid(cmd->restartpoint)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid target wal lsn while advancing "
+                               "logical replication restart lsn.")));
+    }
+
+    /* Acquire the slot so we "own" it */
+    ReplicationSlotAcquire(cmd->slotname, false);
+
+    Assert(OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database));
+
+    /*
+     * Check if the slot is not moving backwards. Logical slots have confirmed
+     * consumption up to confirmed_lsn, meaning that data older than that is
+     * not available anymore.
+     */
+    minLsn = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
+    if (XLByteLT(cmd->restartpoint, minLsn)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot move slot to %X/%X, minimum is %X/%X",
+                               (uint32)(cmd->restartpoint >> 32), (uint32)cmd->restartpoint,
+                               (uint32)(minLsn >> 32), (uint32)(minLsn))));
+    }
+
+    LogicalConfirmReceivedLocation(cmd->restartpoint);
+    ReplicationSlotMarkDirty();
+    log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
+
+    if (log_min_messages <= DEBUG2) {
+        ereport(LOG, (errmsg("AdvanceLogicalReplication, slotname = %s, endpoint = %X/%X.",
+                             cmd->slotname,
+                             (uint32)(cmd->restartpoint >> 32),
+                             (uint32)cmd->restartpoint)));
+    }
+
+    rc = snprintf_s(xpos, sizeof(xpos), sizeof(xpos) - 1,
+                    "%X/%X", (uint32)(cmd->restartpoint >> 32), (uint32)cmd->restartpoint);
+    securec_check_ss(rc, "\0", "\0");
+
+    pq_beginmessage(&buf, 'T');
+    pq_sendint16(&buf, 2); /* 2 field */
+
+    /* first field: slot name */
+    pq_sendstring(&buf, "slot_name"); /* col name */
+    pq_sendint32(&buf, 0);            /* table oid */
+    pq_sendint16(&buf, 0);            /* attnum */
+    pq_sendint32(&buf, TEXTOID);      /* type oid */
+    pq_sendint16(&buf, UINT16_MAX);   /* typlen */
+    pq_sendint32(&buf, 0);            /* typmod */
+    pq_sendint16(&buf, 0);            /* format code */
+
+    /* second field: LSN at which we became consistent */
+    pq_sendstring(&buf, "confirmed_flush"); /* col name */
+    pq_sendint32(&buf, 0);                   /* table oid */
+    pq_sendint16(&buf, 0);                   /* attnum */
+    pq_sendint32(&buf, TEXTOID);             /* type oid */
+    pq_sendint16(&buf, UINT16_MAX);          /* typlen */
+    pq_sendint32(&buf, 0);                   /* typmod */
+    pq_sendint16(&buf, 0);                   /* format code */
+    pq_endmessage_noblock(&buf);
+
+    /* Send a DataRow message */
+    pq_beginmessage(&buf, 'D');
+    pq_sendint16(&buf, 2); /* # of columns */
+
+    /* slot_name */
+    pq_sendint32(&buf, strlen(cmd->slotname)); /* col1 len */
+    pq_sendbytes(&buf, cmd->slotname, strlen(cmd->slotname));
+
+    /* consistent wal location */
+    pq_sendint32(&buf, strlen(xpos)); /* col2 len */
+    pq_sendbytes(&buf, xpos, strlen(xpos));
+    pq_endmessage_noblock(&buf);
+
+    /* Send CommandComplete and ReadyForQuery messages */
+    EndCommand_noblock("SELECT", DestRemote);
+    ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
+    /* ReadyForQuery did pq_flush_if_available for us */
+
+    ReplicationSlotRelease();
+}
+
+/*
  * LogicalDecodingContext 'prepare_write' callback.
  *
  * Prepare a write into a StringInfo.
@@ -1687,6 +1799,16 @@ static bool cmdStringLengthCheck(const char* cmd_string)
         strncmp(cmd_string, "DROP_REPLICATION_SLOT", strlen("DROP_REPLICATION_SLOT")) == 0) {
         sub_cmd = strtok_r(comd, " ", &rm_cmd);
         slot_name = strtok_r(NULL, " ", &rm_cmd);
+    /* ADVANCE_REPLICATION SLOT slotname LOGICAL %X/%X */
+    } else if (cmd_length > strlen("ADVANCE_REPLICATION") &&
+        strncmp(cmd_string, "ADVANCE_REPLICATION", strlen("ADVANCE_REPLICATION")) == 0) {
+        sub_cmd = strtok_r(comd, " ", &rm_cmd);
+        sub_cmd = strtok_r(NULL, " ", &rm_cmd);
+        if (strlen(sub_cmd) != strlen("SLOT") ||
+            strncmp(sub_cmd, "SLOT", strlen("SLOT")) != 0) {
+            return false;
+        }
+        slot_name = strtok_r(NULL, " ", &rm_cmd);
     } else {
         return true;
     }
@@ -1763,6 +1885,14 @@ static void IdentifyCommand(Node* cmd_node, bool* replication_started, const cha
             } else {
                 CheckPMstateAndRecoveryInProgress();
                 StartLogicalReplication(cmd);
+            }
+            break;
+        }
+
+        case T_AdvanceReplicationCmd: {
+            AdvanceReplicationCmd *cmd = (AdvanceReplicationCmd *)cmd_node;
+            if (cmd->kind == REPLICATION_KIND_LOGICAL) {
+                AdvanceLogicalReplication(cmd);
             }
             break;
         }
@@ -2171,6 +2301,10 @@ static void ProcessStandbyReplyMessage(void)
     if (t_thrd.slot_cxt.MyReplicationSlot && (!XLByteEQ(reply.flush, InvalidXLogRecPtr))) {
         if (t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid) {
             LogicalConfirmReceivedLocation(reply.flush);
+            if (RecoveryInProgress() && OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database)) {
+                /* Notify the primary to advance logical slot location */
+                NotifyPrimaryAdvance(reply.flush);
+            }
         } else {
             PhysicalConfirmReceivedLocation(reply.flush);
         }
@@ -3475,6 +3609,9 @@ static void WalSndKill(int code, Datum arg)
     WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
     Assert(walsnd != NULL);
+
+    /* Clean the connection for advance logical replication slot. */
+    CloseLogicalAdvanceConnect();
 
     /*
      * Clear MyWalSnd first; then disown the latch.  This is so that signal

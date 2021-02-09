@@ -417,7 +417,11 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby)
     if (slot == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("replication slot \"%s\" does not exist", name)));
     if (active) {
-        if (slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
+        if ((slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
+#ifndef ENABLE_MULTIPLE_NODES
+            && !RecoveryInProgress()
+#endif
+            )
             ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("replication slot \"%s\" is already active", name)));
         else {
             ereport(WARNING,
@@ -433,6 +437,31 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby)
 
     /* We made this slot active, so it's ours now. */
     t_thrd.slot_cxt.MyReplicationSlot = slot;
+}
+
+/*
+ * Find out if we have an active slot by slot name
+ */
+bool IsReplicationSlotActive(const char *name)
+{
+    bool active = false;
+
+    Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
+
+    ReplicationSlotValidateName(name, ERROR);
+
+    /* Search for the named slot to identify whether it is active or not. */
+    LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+        if (s->active && strcmp(name, NameStr(s->data.name)) == 0) {
+            active = true;
+            break;
+        }
+    }
+    LWLockRelease(ReplicationSlotControlLock);
+
+    return active;
 }
 
 /*

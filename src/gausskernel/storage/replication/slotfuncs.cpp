@@ -91,7 +91,13 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
     XLogFlush(Ptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
+
     END_CRIT_SECTION();
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
+        SyncRepWaitForLSN(Ptr);
+#endif
 }
 
 void log_slot_drop(const char *name)
@@ -828,6 +834,17 @@ void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
     errno_t rc;
 
     Assert(!t_thrd.slot_cxt.MyReplicationSlot);
+
+    /*
+     * If logical replication slot is active on the current standby, the current
+     * standby notify the primary to advance the logical replication slot.
+     * Thus, we do not redo the slot_advance log.
+     */
+#ifndef ENABLE_MULTIPLE_NODES
+    if (IsReplicationSlotActive(NameStr(slotInfo->name))) {
+        return;
+    }
+#endif
 
     /* Acquire the slot so we "own" it */
     ReplicationSlotAcquire(NameStr(slotInfo->name), false);

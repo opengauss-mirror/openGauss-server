@@ -49,7 +49,7 @@ static bool do_drop_slot = false;
 static char** options;
 static size_t noptions = 0;
 static bool g_change_plugin = false;
-char* plugin = "mppdb_decoding";
+static const char* plugin = NULL;
 
 /* Global State */
 static int outfd = -1;
@@ -805,9 +805,8 @@ static void process_free_option(void)
     if (dbuser != NULL) {
         pfree_ext(dbuser);
     }
-    if (g_change_plugin) {
+    if (g_change_plugin || plugin != NULL) {
         pfree_ext(plugin);
-    } else if (plugin != NULL) {
         plugin = NULL;
     }
     if (replication_slot != NULL) {
@@ -827,6 +826,7 @@ int main(int argc, char** argv)
 {
     PGresult* res = NULL;
     progname = get_progname("pg_recvlogical");
+    plugin = pg_strdup("mppdb_decoding");
     int rc = 0;
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("pg_recvlogical"));
 
