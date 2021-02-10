@@ -2188,6 +2188,8 @@ typedef struct knl_t_walsender_context {
     int remotePort;
     /* Have we caught up with primary? */
     bool walSndCaughtUp;
+    /* Notify primary to advance logical replication slot. */
+    struct pg_conn* advancePrimaryConn;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {

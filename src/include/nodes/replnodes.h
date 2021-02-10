@@ -96,6 +96,17 @@ typedef struct StartReplicationCmd {
 } StartReplicationCmd;
 
 /* ----------------------
+ *		ADVANCE_REPLICATION command
+ * ----------------------
+ */
+typedef struct AdvanceReplicationCmd {
+    NodeTag type;
+    ReplicationKind kind;
+    char* slotname;
+    XLogRecPtr restartpoint;
+} AdvanceReplicationCmd;
+
+/* ----------------------
  *		START_REPLICATION(DATA) command
  * ----------------------
  */

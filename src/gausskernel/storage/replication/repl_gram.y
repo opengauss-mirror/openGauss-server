@@ -92,6 +92,7 @@
 %token K_DATA
 %token K_START_REPLICATION
 %token K_FETCH_MOT_CHECKPOINT
+%token K_ADVANCE_REPLICATION
 %token K_CREATE_REPLICATION_SLOT
 %token K_DROP_REPLICATION_SLOT
 %token K_PHYSICAL
@@ -99,7 +100,7 @@
 %token K_SLOT
 
 %type <node>	command
-%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
+%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication advance_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <list>    plugin_options plugin_opt_list
@@ -128,6 +129,7 @@ command:
 			| start_data_replication
 			| fetch_mot_checkpoint
 			| start_logical_replication
+			| advance_logical_replication
 			| create_replication_slot
 			| drop_replication_slot
 			| identify_maxlsn
@@ -315,6 +317,19 @@ start_logical_replication:
 				}
 			;
 	
+/* ADVANCE_REPLICATION SLOT slot LOGICAL %X/%X */
+advance_logical_replication:
+            K_ADVANCE_REPLICATION K_SLOT IDENT K_LOGICAL RECPTR
+				{
+					AdvanceReplicationCmd *cmd;
+					cmd = makeNode(AdvanceReplicationCmd);
+					cmd->kind = REPLICATION_KIND_LOGICAL;;
+					cmd->slotname = $3;
+					cmd->restartpoint = $5;
+					$$ = (Node *) cmd;
+				}
+			;
+
 /* CREATE_REPLICATION_SLOT SLOT slot [%X/%X] */
  create_replication_slot:
 			/* CREATE_REPLICATION_SLOT SLOT slot PHYSICAL [init_slot_lsn] */

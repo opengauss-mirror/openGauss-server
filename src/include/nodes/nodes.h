@@ -547,6 +547,7 @@ typedef enum NodeTag {
     T_CreateReplicationSlotCmd,
     T_DropReplicationSlotCmd,
     T_StartReplicationCmd,
+    T_AdvanceReplicationCmd,
     T_StartDataReplicationCmd,
     T_FetchMotCheckpointCmd,
 

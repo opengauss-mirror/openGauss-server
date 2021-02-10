@@ -38,11 +38,13 @@
 #include "access/xlogdefs.h"
 #include "access/transam.h"
 #include "access/xlog_internal.h"
+#include "libpq/libpq-int.h"
 
 #include "replication/decode.h"
 #include "replication/logical.h"
 #include "replication/reorderbuffer.h"
 #include "replication/snapbuild.h"
+#include "replication/walreceiver.h"
 
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -900,4 +902,209 @@ void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
         SpinLockRelease(&slot->mutex);
     }
     LWLockRelease(LogicalReplicationSlotPersistentDataLock);
+}
+
+/* Connect primary to advance logical replication slot. */
+void LogicalAdvanceConnect()
+{
+    char conninfoRepl[MAXCONNINFO + 75];
+    char conninfo[MAXCONNINFO];
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    PGresult* res = NULL;
+    int count = 0;
+    int retryNum = 10;
+    uint32 remoteSversion;
+    uint32 localSversion;
+    char *remotePversion = NULL;
+    char *localPversion = NULL;
+    uint32 remoteTerm;
+    uint32 localTerm;
+    errno_t rc = 0;
+    int nRet = 0;
+
+    rc = memset_s(conninfo, MAXCONNINFO, 0, MAXCONNINFO);
+    securec_check(rc, "\0", "\0");
+
+    /* Fetch information required to start streaming */
+    rc = strncpy_s(conninfo, MAXCONNINFO, (char *)walrcv->conninfo, MAXCONNINFO - 1);
+    securec_check(rc, "\0", "\0");
+
+    nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                      "%s dbname=replication replication=true "
+                      "fallback_application_name=%s "
+                      "connect_timeout=%d",
+                      conninfo,
+                      (u_sess->attr.attr_common.application_name &&
+                      strlen(u_sess->attr.attr_common.application_name) > 0) ?
+                      u_sess->attr.attr_common.application_name : "pg_recvlogical_sender",
+                      u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+    securec_check_ss(nRet, "", "");
+
+retry:
+    /* 1. try to connect to primary */
+    t_thrd.walsender_cxt.advancePrimaryConn = PQconnectdb(conninfoRepl);
+    if (PQstatus(t_thrd.walsender_cxt.advancePrimaryConn) != CONNECTION_OK) {
+        if (++count < retryNum) {
+            ereport(LOG,
+                (errmsg("pg_recvlogical_sender could not connect to the remote server, "
+                        "the connection info :%s : %s",
+                        conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+
+            PQfinish(t_thrd.walsender_cxt.advancePrimaryConn);
+            t_thrd.walsender_cxt.advancePrimaryConn = NULL;
+
+            /* sleep 0.1 s */
+            pg_usleep(100000L);
+            goto retry;
+        }
+        ereport(FATAL,
+            (errmsg("pg_recvlogical_sender could not connect to the remote server, "
+                    "we have tried %d times, the connection info :%s : %s",
+                    count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+    }
+
+    /* 2. identify version */
+    res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, "IDENTIFY_VERSION");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not receive database system version and protocol "
+                               "version from the remote server: %s",
+                               PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+
+        return;
+    }
+    if (PQnfields(res) != 3 || PQntuples(res) != 1) {
+        int numTuples = PQntuples(res);
+        int numFields = PQnfields(res);
+
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("invalid response from remote server"),
+                        errdetail("Expected 1 tuple with 3 fields, got %d tuples with %d fields.",
+                                  numTuples, numFields)));
+
+        return;
+    }
+    remoteSversion = pg_strtoint32(PQgetvalue(res, 0, 0));
+    localSversion = PG_VERSION_NUM;
+    remotePversion = PQgetvalue(res, 0, 1);
+    localPversion = pstrdup(PG_PROTOCOL_VERSION);
+    remoteTerm = pg_strtoint32(PQgetvalue(res, 0, 2));
+    localTerm = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
+                    g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    ereport(LOG, (errmsg("remote term[%u], local term[%u]", remoteTerm, localTerm)));
+
+    if (remoteSversion != localSversion ||
+        strncmp(remotePversion, localPversion, strlen(PG_PROTOCOL_VERSION)) != 0) {
+        PQclear(res);
+
+        if (remoteSversion != localSversion) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("database system version is different between the remote and local"),
+                            errdetail("The remote's system version is %u, the local's system version is %u.",
+                                      remoteSversion, localSversion)));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("the remote protocal version %s is not the same as "
+                                   "the local protocal version %s.",
+                                   remotePversion, localPversion)));
+        }
+
+        if (localPversion != NULL) {
+            pfree(localPversion);
+            localPversion = NULL;
+        }
+        return;
+    }
+
+    PQclear(res);
+
+    /* 3. connect to primary, check remote role */
+    res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, "IDENTIFY_MODE");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not receive the ongoing mode infomation from "
+                               "the remote server: %s",
+                               PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+
+        return;
+    }
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        int numTuples = PQntuples(res);
+        int numFields = PQnfields(res);
+
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("invalid response from remote server"),
+                        errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.",
+                                  numTuples, numFields)));
+
+        return;
+    }
+    ServerMode remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
+    if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && remoteMode != PRIMARY_MODE) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("the mode of the remote server must be primary, current is %s",
+                               wal_get_role_string(remoteMode))));
+
+        return;
+    }
+
+    PQclear(res);
+}
+
+/* Clean the connection for advance logical replication slot. */
+void CloseLogicalAdvanceConnect()
+{
+    if (t_thrd.walsender_cxt.advancePrimaryConn != NULL) {
+        PQfinish(t_thrd.walsender_cxt.advancePrimaryConn);
+        t_thrd.walsender_cxt.advancePrimaryConn = NULL;
+    }
+}
+
+/* Notify the primary to advance logical replication slot. */
+void NotifyPrimaryAdvance(XLogRecPtr flush)
+{
+    char query[256];
+    PGresult* res = NULL;
+    int nRet = 0;
+
+    nRet = snprintf_s(query, sizeof(query), sizeof(query) - 1,
+                      "ADVANCE_REPLICATION SLOT \"%s\" LOGICAL %X/%X",
+                      NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name),
+                      (uint32)(flush >> 32),
+                      (uint32)flush);
+
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (t_thrd.walsender_cxt.advancePrimaryConn == NULL) {
+        LogicalAdvanceConnect();
+    }
+    res = PQexec(t_thrd.walsender_cxt.advancePrimaryConn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("could not send replication command \"%s\": %s\n",
+                               query, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+
+        return;
+    }
+
+    if (PQnfields(res) != 2 || PQntuples(res) != 1) {
+            int numTuples = PQntuples(res);
+            int numFields = PQnfields(res);
+
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("invalid response from remote server"),
+                            errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.",
+                                      numTuples, numFields)));
+
+            return;
+    }
+
+    PQclear(res);
 }
