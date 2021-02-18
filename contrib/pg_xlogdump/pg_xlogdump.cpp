@@ -733,7 +733,7 @@ static void XLogDumpDisplayStats(XLogDumpConfig* config, XLogDumpStats* stats)
 
 static void usage(void)
 {
-    printf("%s decodes and displays PostgreSQL transaction logs for debugging.\n\n", progname);
+    printf("%s decodes and displays openGauss transaction logs for debugging.\n\n", progname);
     printf("Usage:\n");
     printf("  %s [OPTION]... [STARTSEG [ENDSEG]] \n", progname);
     printf("\nOptions:\n");

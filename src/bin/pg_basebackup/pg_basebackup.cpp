@@ -197,7 +197,7 @@ static void show_full_build_process(const char *errmg)
 
 static void usage(void)
 {
-    printf(_("%s takes a base backup of a running PostgreSQL server.\n\n"), progname);
+    printf(_("%s takes a base backup of a running openGauss server.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]...\n"), progname);
     printf(_("\nOptions controlling the output:\n"));
@@ -228,7 +228,7 @@ static void usage(void)
     printf(_("  -U, --username=NAME    connect as specified database user\n"));
     printf(_("  -w, --no-password      never prompt for password\n"));
     printf(_("  -W, --password         force password prompt (should happen automatically)\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+    printf(_("\nReport bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
 }
 
 static void GsTarUsage(void)

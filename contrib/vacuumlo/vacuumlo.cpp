@@ -344,7 +344,7 @@ static void usage(const char* progname)
     printf("  -w             never prompt for password\n");
     printf("  -W             force password prompt\n");
     printf("\n");
-    printf("Report bugs to <pgsql-bugs@postgresql.org>.\n");
+    printf("Report bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n");
 }
 
 int main(int argc, char** argv)

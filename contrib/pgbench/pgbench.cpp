@@ -416,7 +416,7 @@ static char* xstrdup(const char* s)
 
 static void usage(const char* progname)
 {
-    printf("%s is a benchmarking tool for PostgreSQL.\n\n"
+    printf("%s is a benchmarking tool for openGauss.\n\n"
            "Usage:\n"
            "  %s [OPTION]... [DBNAME]\n"
            "\nInitialization options:\n"
@@ -468,7 +468,7 @@ static void usage(const char* progname)
            "  -V, --version  output version information, then exit\n"
            "  -?, --help     show this help, then exit\n"
            "\n"
-           "Report bugs to <pgsql-bugs@postgresql.org>.\n",
+           "Report bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n",
         progname,
         progname);
 }
