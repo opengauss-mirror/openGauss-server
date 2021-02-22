@@ -33,6 +33,8 @@ typedef struct AccountLockHashEntry {
 } AccountLockHashEntry;
 
 #define PASSWORD_TYPE_SHA256 2
+#define PASSWORD_TYPE_SM3 3
+
 #define UNLOCK_FLAG -1
 
 /* status of the account */

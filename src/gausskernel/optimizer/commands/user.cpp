@@ -4155,6 +4155,23 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
             securec_check(rc, "\0", "\0");
             return true;
         }
+    } else if (isSM3(passwd2)) {
+        rc = strncpy_s(salt, sizeof(salt), &passwd2[SM3_LENGTH], sizeof(salt) - 1);
+        securec_check(rc, "\0", "\0");
+        salt[sizeof(salt) - 1] = '\0';
+
+        iteration_count = get_stored_iteration(rolename);
+        if (!pg_sm3_encrypt(passwd1, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
+            rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sha256-password encryption failed.")));
+        }
+
+        if (strncmp(passwd2, encrypted_sha256_password, SM3_PASSWD_LEN) == 0) {
+            rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            return true;
+        }
     } else if (isCOMBINED(passwd2)) {
         rc = strncpy_s(salt, sizeof(salt), &passwd2[SHA256_LENGTH], sizeof(salt) - 1);
         securec_check(rc, "\0", "\0");
@@ -5990,6 +6007,48 @@ Datum calculate_encrypted_sha256_password(const char* password, const char* roln
     return datum_value;
 }
 
+Datum calculate_encrypted_sm3_password(const char* password, const char* rolname, const char* salt_string)
+{
+    char encrypted_sha256_password[SM3_PASSWD_LEN + 1] = {0};
+    char encrypted_sha256_password_complex[SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1] = {0};
+    char iteration_string[ITERATION_STRING_LEN + 1] = {0};
+    Datum datum_value;
+    errno_t rc = EOK;
+
+    if (!pg_sm3_encrypt(password,
+            salt_string,
+            strlen(salt_string),
+            encrypted_sha256_password,
+            NULL,
+            u_sess->attr.attr_security.auth_iteration_count)) {
+        rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+        securec_check(rc, "\0", "\0");
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("password encryption failed")));
+    }
+
+    encode_iteration(u_sess->attr.attr_security.auth_iteration_count, iteration_string);
+    rc = snprintf_s(encrypted_sha256_password_complex,
+        SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1,
+        SM3_PASSWD_LEN + ITERATION_STRING_LEN,
+        "%s%s",
+        encrypted_sha256_password,
+        iteration_string);
+    securec_check_ss(rc, "\0", "\0");
+
+    datum_value = CStringGetTextDatum(encrypted_sha256_password_complex);
+    rc = memset_s(encrypted_sha256_password_complex,
+        SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1,
+        0,
+        SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(iteration_string, ITERATION_STRING_LEN + 1, 0, ITERATION_STRING_LEN + 1);
+    securec_check(rc, "\0", "\0");
+
+    return datum_value;
+}
+
 /*
  * @Description: calculate the encrypted password for different conditions.
  * @bool is_encrypted : whether password need encrypted, must be true currently.
@@ -6028,6 +6087,8 @@ Datum calculate_encrypted_password(bool is_encrypted, const char* password, cons
         ereport(NOTICE, (errmsg("The encrypted password contains MD5 ciphertext, which is not secure.")));
     } else if (u_sess->attr.attr_security.Password_encryption_type == 1) {
         datum_value = calculate_encrypted_combined_password(password, rolname, salt_string);
+    } else if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
+        datum_value = calculate_encrypted_sm3_password(password, rolname, salt_string);
     } else {
         datum_value = calculate_encrypted_sha256_password(password, rolname, salt_string);
     }

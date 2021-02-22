@@ -2787,6 +2787,44 @@ keep_going: /* We will come back to here until there is
                     }
                 }
             }
+            if (areq == AUTH_REQ_SM3) {
+                if (pqGetInt((int*)(&(conn->password_stored_method)), 4, conn)) {
+                    return PGRES_POLLING_READING;
+                }
+
+                if (SM3_PASSWORD == conn->password_stored_method) {
+                    if (pqGetnchar(conn->salt, SALT_LENGTH * 2, conn)) {
+                        /* We'll come back when there are more data */
+                        return PGRES_POLLING_READING;
+                    }
+                    conn->salt[SALT_LENGTH * 2] = '\0';
+
+                    if (pqGetnchar(conn->token, TOKEN_LENGTH * 2, conn)) {
+                        /* We'll come back when there are more data */
+                        return PGRES_POLLING_READING;
+                    }
+                    conn->token[TOKEN_LENGTH * 2] = '\0';
+
+                    /*
+                     * Recivce the sever_signature before client_signature is not safe.
+                     * need to : The rfc5802 authentication protocol need be enhanced.
+                     */
+                    if (PG_PROTOCOL_MINOR(conn->pversion) < PG_PROTOCOL_GAUSS_BASE) {
+                        if (pqGetnchar(conn->sever_signature, HMAC_LENGTH * 2, conn)) {
+                            /* We'll come back when there are more data */
+                            return PGRES_POLLING_READING;
+                        }
+                        conn->sever_signature[HMAC_LENGTH * 2] = '\0';
+                    }
+
+                    /* Recv iteration of rfc5802 from server. */
+                    if (PG_PROTOCOL_MINOR(conn->pversion) > PG_PROTOCOL_GAUSS_BASE) {
+                        if (pqGetInt((int*)(&(conn->iteration_count)), 4, conn)) {
+                            return PGRES_POLLING_READING;
+                        }
+                    }
+                }  
+            }
 
 #if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
 

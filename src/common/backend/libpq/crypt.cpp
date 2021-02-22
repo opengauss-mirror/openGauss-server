@@ -33,14 +33,7 @@
 #include "cipher.h"
 #include "openssl/evp.h"
 
-/* Database Security: Support password complexity */
-typedef struct password_info {
-    char* shadow_pass;
-    TimestampTz vbegin;
-    TimestampTz vuntil;
-    bool isnull_begin;
-    bool isnull_until;
-} password_info;
+
 
 /* IAM authenication: iam role and config path info. */
 #define IAM_ROLE_WITH_DWSDB_PRIV "dws_db_acc"
@@ -50,7 +43,7 @@ typedef struct password_info {
 
 
 
-static bool get_stored_password(const char *role,password_info *pass_info);
+
 static bool GetValidPeriod(const char *role, password_info *passInfo);
 
 /*
@@ -79,6 +72,10 @@ int32 get_password_stored_method(const char* role, char* encrypted_string, int l
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
         return SHA256_PASSWORD;
+    } else if (isSM3(shadow_pass)) {
+        rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SM3_LENGTH, ENCRYPTED_STRING_LENGTH);
+        securec_check(rc, "\0", "\0");
+        return SM3_PASSWORD;
     } else if (isCOMBINED(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
@@ -92,7 +89,7 @@ int32 get_password_stored_method(const char* role, char* encrypted_string, int l
  *Funcation  : get_stored_password
  *Description: get user password information
  */
-static bool get_stored_password(const char* role, password_info* pass_info)
+bool get_stored_password(const char* role, password_info* pass_info)
 {
     HeapTuple roleTup = NULL;
     Datum datum1;
@@ -310,7 +307,7 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
             break;
 
         /* Database Security:  Support SHA256.*/
-        case uaSHA256:
+        case uaSHA256: {
             crypt_pwd = (char*)palloc(SHA256_MD5_ENCRY_PASSWD_LEN + 1);
             if (crypt_pwd == NULL) {
                 pfree_ext(pass_info.shadow_pass);
@@ -400,6 +397,72 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                 return STATUS_ERROR;
             }
             break;
+        }
+        case uaSm3: {
+            char stored_key[STORED_KEY_BYTES_LENGTH + 1] = {0};
+            char stored_key_string[STORED_KEY_STRING_LENGTH + 1] = {0};
+            char hmac_result[HMAC_LENGTH + 1] = {0};
+            char xor_result[HMAC_LENGTH + 1] = {0};
+            char token[TOKEN_LENGTH + 1] = {0};
+            char hash_result[HMAC_LENGTH + 1] = {0};
+            char hash_result_string[HMAC_LENGTH * 2 + 1] = {0};
+            char client_pass_bytes[HMAC_LENGTH + 1] = {0};
+            int hmac_length = HMAC_LENGTH;
+
+            if (H_LENGTH != strlen(client_pass)) {
+                pfree_ext(pass_info.shadow_pass);
+                return STATUS_WRONG_PASSWORD;
+            }
+
+            errorno = strncpy_s(stored_key_string,
+                sizeof(stored_key_string),
+                &shadow_pass[SM3_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
+                sizeof(stored_key_string) - 1);
+            securec_check(errorno, "\0", "\0");
+            stored_key_string[sizeof(stored_key_string) - 1] = '\0';
+            sha_hex_to_bytes32(stored_key, stored_key_string);
+            sha_hex_to_bytes4(token, (char*)port->token);
+            CRYPT_hmac_ret = CRYPT_hmac(NID_hmacWithSHA256,
+                (GS_UCHAR*)stored_key,
+                STORED_KEY_LENGTH,
+                (GS_UCHAR*)token,
+                TOKEN_LENGTH,
+                (GS_UCHAR*)hmac_result,
+                (GS_UINT32*)&hmac_length);
+
+            if (CRYPT_hmac_ret) {
+                pfree_ext(pass_info.shadow_pass);
+                return STATUS_ERROR;
+            }
+
+            sha_hex_to_bytes32(client_pass_bytes, client_pass);
+            if (XOR_between_password(hmac_result, client_pass_bytes, xor_result, HMAC_LENGTH)) {
+                pfree_ext(pass_info.shadow_pass);
+                return STATUS_ERROR;
+            }
+
+            CRYPT_digest_ret = EVP_Digest((GS_UCHAR*)xor_result,
+                HMAC_LENGTH,
+                (GS_UCHAR*)hash_result,
+                (GS_UINT32*)&hmac_length,
+                EVP_sm3(),
+                NULL);
+
+            if (!CRYPT_digest_ret) {
+                pfree_ext(pass_info.shadow_pass);
+                return STATUS_ERROR;
+            }
+
+            sha_bytes_to_hex64((uint8*)hash_result, hash_result_string);
+            if (strncmp(hash_result_string, stored_key_string, HMAC_LENGTH * 2) == 0) {
+                RFC5802_pass = true;
+            } else {
+                pfree_ext(pass_info.shadow_pass);
+                return STATUS_WRONG_PASSWORD;
+            }
+            break;
+        }
+
         default:
             if (isMD5(shadow_pass)) {
                 /*Encrypt user-supplied password to match stored MD5 */
@@ -423,6 +486,21 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                     securec_check(errorno, "\0", "\0");
                 }
                 if (!pg_sha256_encrypt(
+                        client_pass, port->user_name, strlen(port->user_name), crypt_client_pass, NULL)) {
+                    pfree_ext(crypt_client_pass);
+                    pfree_ext(pass_info.shadow_pass);
+                    return STATUS_ERROR;
+                }
+            }
+    
+            if (isSM3(shadow_pass)) {
+                /*Encrypt user-supplied password to match stored SHA256 */
+                crypt_client_pass = (char*)palloc(SM3_PASSWD_LEN + 1);
+                if (crypt_client_pass != NULL) {
+                    errorno = memset_s(crypt_client_pass, (SM3_PASSWD_LEN + 1), 0, (SM3_PASSWD_LEN + 1));
+                    securec_check(errorno, "\0", "\0");
+                }
+                if (!pg_sm3_encrypt(
                         client_pass, port->user_name, strlen(port->user_name), crypt_client_pass, NULL)) {
                     pfree_ext(crypt_client_pass);
                     pfree_ext(pass_info.shadow_pass);
@@ -472,6 +550,8 @@ int get_stored_iteration(const char* role)
         iteration_count = decode_iteration(&pass_info.shadow_pass[SHA256_PASSWD_LEN + MD5_PASSWD_LEN]);
     } else if (isSHA256(pass_info.shadow_pass)) {
         iteration_count = decode_iteration(&pass_info.shadow_pass[SHA256_PASSWD_LEN]);
+    } else if (isSM3(pass_info.shadow_pass)) {
+        iteration_count = decode_iteration(&pass_info.shadow_pass[SM3_PASSWD_LEN]);
     } else {
         iteration_count = ITERATION_COUNT;
     }

@@ -2329,3 +2329,225 @@ bool isEncryptedCluster()
     }
     return true;
 }
+
+Datum gs_encrypt_sm4(PG_FUNCTION_ARGS)
+{
+    char* key = NULL;
+    GS_UINT32 keylen = 0;
+    char* plaintext = NULL;
+    GS_UINT32 plaintextlen = 0;
+
+    char* ciphertext = NULL;
+    char* encodestring = NULL;
+    GS_UINT32 encodetextlen = 0;
+    GS_UINT32 ciphertextlenmax = 0;
+    GS_UCHAR user_key[SM4_KEY_LENGTH];
+    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+
+    text* outtext = NULL;
+    errno_t errorno = EOK;
+    GS_UINT32 ret = 0;
+    size_t cipherLength = 0;
+
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
+    }
+
+
+    plaintext = (char*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
+    plaintextlen = strlen((const char*)plaintext);
+
+    key = (text_to_cstring(PG_GETARG_TEXT_P(1)));
+    keylen = strlen((const char*)key);
+
+    /* The input key must shorter than RANDOM_LEN(16) */
+    if (keylen > SM4_KEY_LENGTH) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("The encryption key must be shorter than 16 bytes!")));
+    }
+
+    if (!check_input_password(key)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("The encryption key must be %d~%d bytes and contain at least three kinds of characters!",
+                MIN_KEY_LEN, SM4_KEY_LENGTH)));
+    }
+    errorno = memcpy_s(user_key, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
+    securec_check_c(errorno, "\0", "\0");
+
+
+    if (keylen < SM4_KEY_LENGTH) {
+        errorno = memset_s(user_key + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+
+    errorno = memset_s(key, keylen, '\0', keylen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(key);
+
+    /*
+     * Calculate the max length of ciphertext:
+     */
+
+    ciphertextlenmax = plaintextlen + SM4_BLOCK_SIZE - 1;
+    ciphertext = (char*)palloc(ciphertextlenmax);
+    errorno = memset_s(ciphertext, ciphertextlenmax, '\0', ciphertextlenmax);
+    securec_check(errorno, "\0", "\0");
+
+
+    ret = sm4_ctr_enc_partial_mode(
+        plaintext, plaintextlen, ciphertext, &cipherLength, user_key, useriv);
+    if (ret !=  0) {
+        ereport(ERROR,
+            (errmsg("sm4 encrypt fail"),
+                errdetail("sm4_ctr_enc_partial_mode fail")));
+    }
+
+    errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(plaintext);
+
+
+    /* encode the ciphertext for nice show and decrypt operation */
+    encodestring = SEC_encodeBase64((const char*)ciphertext, cipherLength);
+    errorno = memset_s(ciphertext, cipherLength, '\0', cipherLength);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(ciphertext);
+
+    if (encodestring == NULL) {
+        ciphertextlenmax = 0;
+        ereport(
+            ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("encode the plain text failed!")));
+    }
+    encodetextlen = strlen((const char*)encodestring);
+
+    outtext = cstring_to_text((const char*)encodestring);
+    errorno = memset_s(encodestring, encodetextlen, '\0', encodetextlen);
+    securec_check(errorno, "\0", "\0");
+    OPENSSL_free(encodestring);
+    encodestring = NULL;
+
+
+    PG_RETURN_TEXT_P(outtext);
+}
+
+Datum gs_decrypt_sm4(PG_FUNCTION_ARGS)
+{
+    GS_UCHAR* key = NULL;
+    GS_UINT32 keylen = 0;
+    char* ciphertext = NULL;
+    GS_UINT32 ciphertextlen = 0;
+    char* encodetext = NULL;
+    GS_UCHAR* decodetext;
+    GS_UINT32 ret = 0;
+
+    GS_UINT32 decodetextlen = 0;
+    GS_UINT32 ciphertextlenmax = 0;
+    GS_UCHAR userkey[SM4_KEY_LENGTH];
+    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+    text* outtext = NULL;
+    errno_t errorno = EOK;
+    size_t encodetextlen = 0;
+
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
+    }
+
+    decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
+
+    decodetextlen = strlen((const char*)decodetext);
+
+    key = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(1)));
+    keylen = strlen((const char*)key);
+	
+    /* The input key must shorter than RANDOM_LEN(16) */
+    if (keylen > SM4_KEY_LENGTH) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("The decryption key must be shorter than 16 bytes!")));
+    }
+
+
+    ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext , &ciphertextlen));
+    if ((ciphertext == NULL)) {
+        if (ciphertext != NULL) {
+            OPENSSL_free(ciphertext);
+            ciphertext = NULL;
+        }
+        errorno = memset_s(decodetext, decodetextlen, '\0', decodetextlen);
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(decodetext);
+        errorno = memset_s(key, keylen, '\0', keylen);
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(key);
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Decode the cipher text failed or the ciphertext is wrong!")));
+    }
+
+	
+    errorno = memset_s(decodetext, decodetextlen, '\0', decodetextlen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(decodetext);
+
+
+    errorno = memcpy_s(userkey, SM4_KEY_LENGTH, key, keylen);
+    securec_check_c(errorno, "\0", "\0");
+
+
+    if (keylen < SM4_KEY_LENGTH) {
+        errorno = memset_s(userkey + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    errorno = memset_s(key, keylen, '\0', keylen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(key);
+
+    ciphertextlenmax = ciphertextlen + SM4_BLOCK_SIZE - 1;
+    encodetext = (char*)palloc(ciphertextlenmax);
+    errorno = memset_s(encodetext, ciphertextlenmax, '\0', ciphertextlenmax);
+    securec_check(errorno, "\0", "\0");
+
+
+    ret = sm4_ctr_dec_partial_mode(
+                ciphertext, ciphertextlen, encodetext, &encodetextlen, userkey, useriv);   
+    if (ret !=  0) {
+        ereport(ERROR,
+            (errmsg("sm4 decrypt fail"),
+                errdetail("sm4_ctr_dec_partial_mode fail")));
+    }
+
+    errorno = memset_s(ciphertext, ciphertextlen, '\0', ciphertextlen);
+    securec_check(errorno, "\0", "\0");
+    OPENSSL_free(ciphertext);
+    ciphertext = NULL;	
+
+
+    encodetextlen = strlen((const char*)encodetext);
+
+    outtext = cstring_to_text((char*)encodetext);
+    errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
+    securec_check(errorno, "\0", "\0");
+   	pfree_ext(encodetext);
+    encodetext = NULL;
+
+    PG_RETURN_TEXT_P(outtext);
+}
+

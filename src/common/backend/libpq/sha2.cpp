@@ -763,3 +763,149 @@ bool pg_sha256_encrypt_for_md5(const char* password, const char* salt, size_t sa
 
     return true;
 }
+
+bool pg_sm3_encrypt(
+    const char* password, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf, int iteration_count)
+{
+    size_t password_len = 0;
+    char k[K_LENGTH + 1] = {0};
+    char client_key[CLIENT_KEY_BYTES_LENGTH + 1] = {0};
+    char sever_key[HMAC_LENGTH + 1] = {0};
+    char stored_key[STORED_KEY_LENGTH + 1] = {0};
+    char salt[SALT_LENGTH + 1] = {0};
+    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char stored_key_string[STORED_KEY_LENGTH * 2 + 1] = {0};
+    int pkcs_ret;
+    int sever_ret;
+    int client_ret;
+    int hash_ret;
+    int hmac_length = HMAC_LENGTH;
+    int stored_key_length = STORED_KEY_LENGTH;
+    int total_encrypt_length;
+    char sever_string[SEVER_STRING_LENGTH] = "Sever Key";
+    char client_string[CLIENT_STRING_LENGTH] = "Client Key";
+    errno_t rc = 0;
+
+    if (NULL == password || NULL == buf)
+        return false;
+
+    password_len = strlen(password);
+    sha_hex_to_bytes32(salt, (char*)salt_s);
+    /* calculate k */
+    pkcs_ret = PKCS5_PBKDF2_HMAC((char*)password,
+        password_len,
+        (unsigned char*)salt,
+        SALT_LENGTH,
+        iteration_count,
+        (EVP_MD*)EVP_sha1(),
+        K_LENGTH,
+        (unsigned char*)k);
+    if (!pkcs_ret) {
+        rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        return false;
+    }
+
+    /* We have already get k ,then we calculate client key and sever key,
+     * then calculate stored key by using client key */
+
+    /* calculate sever key */
+    sever_ret = CRYPT_hmac(NID_hmacWithSHA256,
+        (GS_UCHAR*)k,
+        K_LENGTH,
+        (GS_UCHAR*)sever_string,
+        SEVER_STRING_LENGTH - 1,
+        (GS_UCHAR*)sever_key,
+        (GS_UINT32*)&hmac_length);
+    if (sever_ret) {
+        rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(sever_key, HMAC_LENGTH + 1, 0, HMAC_LENGTH + 1);
+        SECUREC_CHECK(rc);
+        return false;
+    }
+
+    /* calculate client key */
+    client_ret = CRYPT_hmac(NID_hmacWithSHA256,
+        (GS_UCHAR*)k,
+        K_LENGTH,
+        (GS_UCHAR*)client_string,
+        CLIENT_STRING_LENGTH - 1,
+        (GS_UCHAR*)client_key,
+        (GS_UINT32*)&hmac_length);
+    if (client_ret) {
+        rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(client_key, CLIENT_KEY_BYTES_LENGTH + 1, 0, CLIENT_KEY_BYTES_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(sever_key, HMAC_LENGTH + 1, 0, HMAC_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        return false;
+    }
+
+    if (NULL != client_key_buf) {
+        sha_bytes_to_hex64((uint8*)client_key, client_key_buf);
+    }
+
+    hash_ret = EVP_Digest(
+        (GS_UCHAR*)client_key, HMAC_LENGTH, (GS_UCHAR*)stored_key, (GS_UINT32*)&stored_key_length, EVP_sm3(), NULL);
+
+    if (!hash_ret) {
+        rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(client_key, CLIENT_KEY_BYTES_LENGTH + 1, 0, CLIENT_KEY_BYTES_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(sever_key, HMAC_LENGTH + 1, 0, HMAC_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        rc = memset_s(stored_key, STORED_KEY_LENGTH + 1, 0, STORED_KEY_LENGTH + 1);
+        SECUREC_CHECK(rc);
+
+        return false;
+    }
+
+    // Mark the type in the stored string
+    rc = strncpy_s(buf, SM3_LENGTH + 1, "sm3", SM3_LENGTH);
+    SECUREC_CHECK(rc);
+
+    buf[SM3_LENGTH] = '\0';
+
+    total_encrypt_length = SALT_LENGTH * 2 + HMAC_LENGTH * 2 + STORED_KEY_LENGTH * 2;
+
+    sha_bytes_to_hex64((uint8*)sever_key, sever_key_string);
+    sha_bytes_to_hex64((uint8*)stored_key, stored_key_string);
+
+    rc = snprintf_s(buf + SM3_LENGTH,
+        total_encrypt_length + 1,
+        total_encrypt_length,
+        "%s%s%s",
+        salt_s,
+        sever_key_string,
+        stored_key_string);
+    SECUREC_CHECK_SS(rc);
+
+    buf[(unsigned int)(SM3_LENGTH + total_encrypt_length)] = '\0';
+
+    // We must clear the mem before we free it for the safe
+    rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
+    SECUREC_CHECK(rc);
+
+    rc = memset_s(client_key, CLIENT_KEY_BYTES_LENGTH + 1, 0, CLIENT_KEY_BYTES_LENGTH + 1);
+    SECUREC_CHECK(rc);
+
+    rc = memset_s(sever_key, HMAC_LENGTH + 1, 0, HMAC_LENGTH + 1);
+    SECUREC_CHECK(rc);
+
+    rc = memset_s(stored_key, STORED_KEY_LENGTH + 1, 0, STORED_KEY_LENGTH + 1);
+    SECUREC_CHECK(rc);
+
+    return true;
+}
+

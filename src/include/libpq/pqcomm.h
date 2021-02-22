@@ -200,6 +200,7 @@ typedef struct StartupPacket {
 #define AUTH_REQ_SHA256 10     /* sha256 password */
 #define AUTH_REQ_MD5_SHA256 11 /* md5_auth_sha256_stored password */
 #define AUTH_REQ_IAM 12        /* iam token authenication */
+#define AUTH_REQ_SM3 13        /* sm3 password */
 
 typedef uint32 AuthRequest;
 

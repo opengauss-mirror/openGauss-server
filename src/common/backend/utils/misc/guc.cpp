@@ -5610,7 +5610,7 @@ static void InitConfigureNamesInt()
             &u_sess->attr.attr_security.Password_encryption_type,
             2,
             0,
-            2,
+            3,
             check_int_parameter,
             NULL,
             NULL},
@@ -17187,6 +17187,22 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
                 str_reset(passwd);
                 str_reset(rolepasswd);
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sha256-password encryption failed")));
+            }
+
+            if (strncmp(rolepasswd, encrypted_sha256_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
+                isPwdEqual = false;
+            }
+        } else if (isSM3(rolepasswd)) {
+
+            ss_rc = strncpy_s(salt, sizeof(salt), &rolepasswd[SM3_LENGTH], sizeof(salt) - 1);
+            securec_check(ss_rc, "", "");
+            salt[sizeof(salt) - 1] = '\0';
+
+            iteration_count = decode_iteration(&rolepasswd[SM3_PASSWD_LEN]);
+            if (!pg_sm3_encrypt(passwd, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
+                str_reset(passwd);
+                str_reset(rolepasswd);
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed")));
             }
 
             if (strncmp(rolepasswd, encrypted_sha256_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
