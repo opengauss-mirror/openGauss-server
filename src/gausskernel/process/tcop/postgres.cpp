@@ -6556,6 +6556,7 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
         /* Treat it as a Datanode for initdb to work properly */
         g_instance.role = VDATANODE;
         isSingleMode = true;
+        useLocalXid = true;
     }
 #endif
 
