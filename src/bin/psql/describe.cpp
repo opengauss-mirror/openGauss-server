@@ -3752,6 +3752,7 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
     PGresult* res = NULL;
     printQueryOpt myopt = pset.popt;
     const char* username = session_username();
+    bool havewhere = false;
 
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
@@ -3769,14 +3770,20 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
 
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_namespace n\n");
 
-    if (!showSystem && (pattern == NULL))
+    if (!showSystem && (pattern == NULL)) {
         appendPQExpBuffer(&buf, "WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'\n");
+        havewhere = true;
+    }
 
-    (void)processSQLNamePattern(
-        pset.db, &buf, pattern, !showSystem && (pattern == NULL), false, NULL, "n.nspname", NULL, NULL);
+    havewhere |= processSQLNamePattern(
+        pset.db, &buf, pattern, havewhere, false, NULL, "n.nspname", NULL, NULL);
 
     if (!is_superuser()) {
-        appendPQExpBuffer(&buf, " AND pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
+        if (havewhere) {
+            appendPQExpBuffer(&buf, " AND pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
+        } else {
+            appendPQExpBuffer(&buf, " WHERE pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
+        }
     }
 
     appendPQExpBuffer(&buf, "ORDER BY 1;");
