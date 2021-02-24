@@ -372,6 +372,7 @@ openGauss支持以下操作系统：
 
 - openEuler-20.03-LTS（aarch64架构）
 
+对于其他系统的编译，可以参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
 
 以下表格列举了编译openGauss的软件要求。
 
