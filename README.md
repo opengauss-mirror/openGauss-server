@@ -360,6 +360,8 @@ gs_uninstall --delete-data -L
 
 - binarylibs：openGauss依赖的第三方开源软件，你可以直接编译openGauss-third_party代码获取，也可以从开源社区下载已经编译好的并上传的一个副本。
 
+对于数据库、三方库、GCC的编译以及常见问题，参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
+
 在编译openGauss之前，请检查操作系统和软件依赖要求。
 
 openGauss可以通过一键式shell工具build.sh进行编译，也可以通过命令进行编译。安装包由build.sh生成。
@@ -372,7 +374,7 @@ openGauss支持以下操作系统：
 
 - openEuler-20.03-LTS（aarch64架构）
 
-对于其他系统的编译，可以参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
+适配其他系统，参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
 
 以下表格列举了编译openGauss的软件要求。
 
