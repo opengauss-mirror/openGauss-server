@@ -185,6 +185,7 @@ static void check_snapshot_thd_exit()
     char* redis_group = PgxcGroupGetInRedistributionGroup();
     if (redis_group != NULL) {
         need_exit = true;
+        u_sess->attr.attr_common.ExitOnAnyError = true;
     }
     finish_xact_command();
 
@@ -1421,6 +1422,7 @@ void SnapshotNameSpace::SubSnapshotMain(void)
     TimestampTz next_timestamp = GetCurrentTimestamp();
     const int SLEEP_GAP_AFTER_ERROR = 1;
     InitSnapshot();
+    u_sess->attr.attr_common.ExitOnAnyError = false;
 
     while (!t_thrd.perf_snap_cxt.need_exit &&
            (PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) || IS_SINGLE_NODE) &&
