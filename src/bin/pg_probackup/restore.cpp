@@ -603,7 +603,7 @@ static XLogRecPtr determine_shift_lsn(pgBackup *dest_backup)
     get_redo(instance_config.pgdata, &redo);
 
     if (redo.checksum_version == 0)
-        elog(ERROR, "Incremental restore in 'lsn' mode require "
+        elog(INFO, "Incremental restore in 'lsn' mode require "
             "data_checksums to be enabled in destination data directory");
 
     timelines = read_timeline_history(arclog_path, redo.tli, false);
