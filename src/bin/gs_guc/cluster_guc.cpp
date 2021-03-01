@@ -1906,11 +1906,19 @@ char* get_AZ_value(const char* value, const char* data_dir)
     nRet = memset_s(level, sizeof(level) / sizeof(char), '\0', sizeof(level) / sizeof(char));
     securec_check_c(nRet, "\0", "\0");
 
-    /* the value including ''', so skip it */
+    /* the value including ''' or space, so skip it */
     nRet = memset_s(tmp, MAX_VALUE_LEN, '\0', MAX_VALUE_LEN);
     securec_check_c(nRet, "\0", "\0");
-    for (i = 0, j = 1; j < (int)strlen(value) - 1; i++, j++) {
-        tmp[i] = value[j];
+    i = 0;
+    j = 1;
+    while (j < (int)strlen(value) - 1) {
+        if (!isspace(value[j])) {
+            tmp[i] = value[j];
+            i++;
+            j++;
+        } else {
+            j++;
+        }
     }
 
     /* check value length */
@@ -1919,98 +1927,57 @@ char* get_AZ_value(const char* value, const char* data_dir)
         return NULL;
     }
 
-    /* must start with "FIRST " or "ANY " */
     p = tmp;
-    // skip the space
-    while (isspace((unsigned char)*p))
-        p++;
-
-    if (strlen(p) == 0) {
-        len = strlen(emptyvalue) + 1;
+    if (strlen(p) == 0 || *p == '*') {
+        len = strlen(emptyvalue) + strlen(p) + 1;
         result = (char*)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(result, len, len - 1, "%s", emptyvalue);
+        nRet = snprintf_s(result, len, len - 1, "'%s'", p);
         securec_check_ss_c(nRet, "\0", "\0");
         return result;
     }
 
-    if (0 != strncmp(p, "FIRST ", strlen("FIRST ")) && 0 != strncmp(p, "ANY ", strlen("ANY "))) {
-        (void)write_stderr("ERROR: The value of pamameter synchronous_standby_names is incorrect.\n");
-        return NULL;
-    }
-
     // Assign values to preStr
     /* FIRST branch */
-    if (0 == strncmp(p, "FIRST ", strlen("FIRST "))) {
+    if (0 == strncmp(p, "FIRST", strlen("FIRST"))) {
         nRet = strncpy_s(preStr, sizeof(preStr) / sizeof(char), "FIRST ", strlen("FIRST "));
         securec_check_c(nRet, "\0", "\0");
-        p = p + strlen("FIRST ");
+        p = p + strlen("FIRST");
     }
     /* ANY branch */
-    else {
+    if (0 == strncmp(p, "ANY", strlen("ANY"))) {
         nRet = strncpy_s(preStr, sizeof(preStr) / sizeof(char), "ANY ", strlen("ANY "));
         securec_check_c(nRet, "\0", "\0");
-        p = p + strlen("ANY ");
+        p = p + strlen("ANY");
     }
 
-    // skip the space
-    while (isspace((unsigned char)*p))
-        p++;
-
-    if (strncmp(p, "NODE ", strlen("NODE ")) == 0) {
+    if (strncmp(p, "NODE", strlen("NODE")) == 0) {
         isNodeName = true;
-        p = p + strlen("NODE ");
-        while (isspace((unsigned char)*p)) {
-            p++;
-        }
+        p = p + strlen("NODE");
     }
 
     /* make sure it is digit and between 1 and 7, including 1 and 7 */
-    if (!isdigit((unsigned char)*p)) {
-        goto failed;
+    if (isdigit((unsigned char)*p)) {
+        nRet = snprintf_s(level, sizeof(level) / sizeof(char), 
+            sizeof(level) / sizeof(char) - 1, "%c", (unsigned char)*p);
+        securec_check_ss_c(nRet, "\0", "\0");
+        if (atoi(level) < 1 || atoi(level) > 7) {
+            goto failed;
+        }
+
+        if (strchr(p, '(') && strrchr(p, ')')) {
+            q = strchr(p, '(');
+            q++;
+            s = strrchr(p, ')');
+            s[0] = '\0';
+        } else {
+            goto failed;
+        }
+    } else {
+        q = p;
     }
 
-    nRet = snprintf_s(level, sizeof(level) / sizeof(char), sizeof(level) / sizeof(char) - 1, "%c", (unsigned char)*p);
-    securec_check_ss_c(nRet, "\0", "\0");
-    if (atoi(level) < 1 || atoi(level) > 7) {
-        goto failed;
-    }
-    // next character
-    p++;
-
-    // the result is 'ANY/FIRST X
-    nRet = strncat_s(preStr, sizeof(preStr) / sizeof(char), level, strlen(level));
-    securec_check_c(nRet, "\0", "\0");
-
-    // skip the space
-    while (isspace((unsigned char)*p))
-        p++;
-
-    /* p like this: (AZ1,AZ2,..)  or (dn_6001, dn_6002) */
-    if ('(' != (unsigned char)*p) {
-        goto failed;
-    }
-    p++;
-
-    /*q like this: AZ1,AZ2,..)   */
-    q = p;
-    while (')' != (unsigned char)*p)
-        p++;
-
-    /*s like this: )   */
-    s = p;
-    p++;
-    s[0] = '\0';
-
-    /* skip this branch ANY 1()*/
-    if (NULL == q || 0 == (int)strlen(q)) {
-        goto failed;
-    }
-
-    // skip the space
-    while (isspace((unsigned char)*p))
-        p++;
-
-    if (*p != '\0') {
+    /* skip this branch ANY 1() or ANY 1(*) */
+    if (*q == '\0' || *q == '*') {
         goto failed;
     }
 
@@ -2028,23 +1995,30 @@ char* get_AZ_value(const char* value, const char* data_dir)
         if (nodenameList == NULL) {
             goto failed;
         }
+        nodenameList[strlen(nodenameList)] = ',';
 
-        vptr = strtok_r(q, delims, &vouter_ptr);
+        len = strlen(q);
+        s = (char *)pg_malloc_zero(len * sizeof(char));
+        nRet = snprintf_s(s, len + 1, len, "%s", q);
+        securec_check_ss_c(nRet, s, "\0");
+
+        vptr = strtok_r(s, delims, &vouter_ptr);
         while (vptr != NULL) {
             p = vptr;
-            // p like this:   dn_6001,  dn_6002...
-            while (isspace((unsigned char)*p))
-                p++;
+            int len_p = strlen(p) + 1;
+            char *temp = (char *)pg_malloc_zero(len_p * sizeof(char));
+            nRet = snprintf_s(temp, len_p + 1, len_p, "%s,", p);
+            securec_check_ss_c(nRet, temp, "\0");
 
-            if (strstr(nodenameList, p) == NULL) {
+            if (strstr(nodenameList, temp) == NULL) {
                 goto failed;
             }
             vptr = strtok_r(NULL, delims, &vouter_ptr);
         }
 
-        len = strlen(nodenameList);
+        GS_FREE(s);
         nRet = snprintf_s(nodenameList, len + 1, len, "%s", q);
-
+        securec_check_ss_c(nRet, nodenameList, "\0");
     } else if ('\0' == nodenameList[0]) {
         (void)write_stderr("ERROR: There is no standby node name. Please make sure the value of "
                            "synchronous_standby_names is correct.\n");
@@ -2062,10 +2036,17 @@ char* get_AZ_value(const char* value, const char* data_dir)
     }
 
     // ANY/FIRST X + nodenameList + () + '' + \0
-    len = strlen(preStr) + 5 + strlen(nodenameList);
-    result = (char*)pg_malloc_zero(len * sizeof(char));
-    nRet = snprintf_s(result, len, len - 1, "'%s(%s)'", preStr, nodenameList);
-    securec_check_ss_c(nRet, "\0", "\0");
+    if (atoi(level) >= 1) {
+        len = strlen(preStr) + 6 + strlen(nodenameList);
+        result = (char*)pg_malloc_zero(len * sizeof(char));
+        nRet = snprintf_s(result, len, len - 1, "'%s%s(%s)'", preStr, level, nodenameList);
+        securec_check_ss_c(nRet, "\0", "\0");
+    } else {
+        len = 3 + strlen(nodenameList);
+        result = (char*)pg_malloc_zero(len * sizeof(char));
+        nRet = snprintf_s(result, len, len - 1, "'%s'", nodenameList);
+        securec_check_ss_c(nRet, "\0", "\0");
+    }
 
     GS_FREE(nodenameList);
     return result;
