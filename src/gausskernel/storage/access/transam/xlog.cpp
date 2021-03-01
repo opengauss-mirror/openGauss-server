@@ -7628,7 +7628,7 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     }
 
     xactInfo = XLogRecGetInfo(record) & (~XLR_INFO_MASK);
-    if (xactInfo == XLOG_XACT_COMMIT) {
+    if ((xactInfo == XLOG_XACT_COMMIT) || (xactInfo == XLOG_STANDBY_CSN_COMMITTING)) {
         xtime = ((xl_xact_commit *)XLogRecGetData(record))->xact_time;
     } else if (xactInfo == XLOG_XACT_COMMIT_COMPACT) {
         xtime = ((xl_xact_commit_compact *)XLogRecGetData(record))->xact_time;
@@ -7658,6 +7658,9 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
         /* Wait for difference between GetCurrentTimestamp() and recoveryDelayUntilTime */
         TimestampDifference(GetCurrentTimestamp(), t_thrd.xlog_cxt.recoveryDelayUntilTime,
                             &secs, &microsecs);
+
+        /* To clear LSNMarker item that has not been processed  in  pageworker*/
+        ProcTxnWorkLoad(false);
 
         /* NB: We're ignoring waits below min_apply_delay's resolution. */
         if (secs <= 0 && microsecs / 1000 <= 0) {
