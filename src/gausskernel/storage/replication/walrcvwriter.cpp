@@ -653,6 +653,16 @@ static void ShutdownWalRcvWriter(int code, Datum arg)
     emptyWalRcvWriterLatch();
 }
 
+/* SIGUSR1: let latch facility handle the signal */
+static void WalRcvWriterProcSigUsr1Handler(SIGNAL_ARGS)
+{
+    int saveErrno = errno;
+
+    latch_sigusr1_handler();
+
+    errno = saveErrno;
+}
+
 void walrcvWriterMain(void)
 {
     sigjmp_buf localSigjmpBuf;
@@ -669,7 +679,7 @@ void walrcvWriterMain(void)
     (void)gspqsignal(SIGQUIT, walrcvWriterQuickDie); /* hard crash time */
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
-    (void)gspqsignal(SIGUSR1, SIG_IGN);
+    (void)gspqsignal(SIGUSR1, WalRcvWriterProcSigUsr1Handler);
     (void)gspqsignal(SIGUSR2, SIG_IGN);
 
     /*
