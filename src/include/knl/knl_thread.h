@@ -1407,7 +1407,7 @@ typedef struct knl_t_bgwriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
     int thread_id;
-    pg_time_t next_flush_time;
+    uint64 next_flush_time;
 } knl_t_bgwriter_context;
 
 typedef struct knl_t_pagewriter_context {
@@ -1415,7 +1415,7 @@ typedef struct knl_t_pagewriter_context {
     volatile sig_atomic_t shutdown_requested;
     int page_writer_after;
     int pagewriter_id;
-    pg_time_t next_flush_time;
+    uint64 next_flush_time;
 } knl_t_pagewriter_context;
 
 #define MAX_SEQ_SCANS 100

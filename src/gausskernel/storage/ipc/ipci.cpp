@@ -363,6 +363,10 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 
     LsnXlogFlushChkShmInit();   
 
+    if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {
+        g_instance.ckpt_cxt_ctl->prune_queue_lock = LWLockAssign(LWTRANCHE_PRUNE_DIRTY_QUEUE);
+    }
+
     if (g_instance.pid_cxt.PageWriterPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
         g_instance.pid_cxt.PageWriterPID =
@@ -381,6 +385,21 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
         g_instance.bgwriter_cxt.bgwriter_procs == NULL) {
         incre_ckpt_bgwriter_cxt_init();
+    }
+
+    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.ckpt_rec_queue == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock = LWLockAssign(LWTRANCHE_REDO_POINT_QUEUE);
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.ckpt_rec_queue =
+            (CheckPointItem*)palloc0(sizeof(CheckPointItem) * RESTART_POINT_QUEUE_LEN);
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.start = 0;
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.end = 0;
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    if (g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock == NULL) {
+        g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock = LWLockAssign(LWTRANCHE_REDO_POINT_QUEUE);
     }
 
     /*

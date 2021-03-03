@@ -22,6 +22,7 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/proc.h"
 #include "postmaster/aiocompleter.h" /* this is for the function AioCompltrIsReady() */
+#include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "postmaster/postmaster.h"
 #include "access/double_write.h"
@@ -467,7 +468,8 @@ BufferAccessStrategy GetAccessStrategy(BufferAccessStrategyType btype)
             ring_size = (u_sess->attr.attr_storage.bulk_write_ring_size / BLCKSZ) * 1024;
             break;
         case BAS_VACUUM:
-            ring_size = 256 * 1024 / BLCKSZ;
+            ring_size = g_instance.attr.attr_storage.NBuffers / 32 /
+                Max(g_instance.attr.attr_storage.autovacuum_max_workers, 1);
             break;
 
         default:
@@ -508,6 +510,8 @@ void FreeAccessStrategy(BufferAccessStrategy strategy)
     }
 }
 
+const int MAX_RETRY_RING_TIMES = 100;
+const float MAX_RETRY_RING_PCT = 0.1;
 /*
  * GetBufferFromRing -- returns a buffer from the ring, or NULL if the
  *		ring is empty.
@@ -519,10 +523,13 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_
     BufferDesc *buf = NULL;
     Buffer buf_num;
     uint32 local_buf_state; /* to avoid repeated (de-)referencing */
+    uint16 retry_times = 0;
 
+RETRY:
     /* Advance to next ring slot */
     if (++strategy->current >= strategy->ring_size)
         strategy->current = 0;
+    retry_times++;
 
     ADIO_RUN()
     {
@@ -575,6 +582,15 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_
      * shouldn't re-use it.
      */
     buf = GetBufferDescriptor(buf_num - 1);
+    if ((pg_atomic_read_u32(&buf->state) & BM_DIRTY) &&
+        retry_times < Min(MAX_RETRY_RING_TIMES, strategy->ring_size * MAX_RETRY_RING_PCT)) {
+        goto RETRY;
+    } else if (get_curr_candidate_nums() >= (uint32)g_instance.attr.attr_storage.NBuffers *
+        u_sess->attr.attr_storage.candidate_buf_percent_target) {
+        strategy->current_was_in_ring = false;
+        return NULL;
+    }
+
     local_buf_state = LockBufHdr(buf);
     if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(local_buf_state) <= 1 &&
         (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
@@ -582,6 +598,7 @@ static BufferDesc *GetBufferFromRing(BufferAccessStrategy strategy, uint32 *buf_
         *buf_state = local_buf_state;
         return buf;
     }
+
     UnlockBufHdr(buf, local_buf_state);
     /*
      * Tell caller to allocate a new buffer with the normal allocation

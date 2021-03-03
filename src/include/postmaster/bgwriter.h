@@ -59,6 +59,7 @@ extern void incre_ckpt_background_writer_main(void);
 extern void ckpt_shutdown_bgwriter();
 extern int get_bgwriter_thread_id(void);
 extern bool candidate_buf_pop(int *bufId, int threadId);
+extern uint32 get_curr_candidate_nums(void);
 
 typedef struct BgWriterProc {
     PGPROC *proc;
