@@ -262,7 +262,7 @@ static void CompltrShutdown(SIGNAL_ARGS);
  */
 ThreadId Compltrfork_exec(int compltrIdx)
 {
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("XuanYuanDB current do not support AIO")));
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("openGauss current do not support AIO")));
     return InvalidTid;
 }
 

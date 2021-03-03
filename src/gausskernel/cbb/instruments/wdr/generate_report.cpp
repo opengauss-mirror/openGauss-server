@@ -149,7 +149,7 @@ char* GenReport::GenerateHtmlReport(List* Contents)
      * declare css for html
      */
     const char* css =
-        "<html lang=\"en\"><head><title>XuanYuan WDR Workload Diagnosis Report</title>\n"
+        "<html lang=\"en\"><head><title>openGauss WDR Workload Diagnosis Report</title>\n"
         "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n"
         "<style type=\"text/css\">\n"
         "a.wdr {font:bold 8pt Arial,Helvetica,sans-serif;color:#663300;vertical-align:top;"
