@@ -169,6 +169,7 @@ exit_if_necessary(int elevel)
         if (remote_agent)
             sleep(1); /* Let parent receive sent messages */
 
+        on_cleanup();
         exit(elevel);
     }
 }

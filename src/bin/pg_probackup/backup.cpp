@@ -1572,9 +1572,6 @@ static void create_restore_point(pgBackup *backup, PGconn  *conn)
     nRet = snprintf_s(name, lengthof(name), lengthof(name) - 1,"pg_probackup, backup_id %s",
                 base36enc(backup->start_time));
     securec_check_ss_c(nRet, "\0", "\0");
-    nRet = snprintf_s(backup->recovery_name, lengthof(backup->recovery_name), lengthof(backup->recovery_name) - 1,
-                      "backup %s", base36enc((unsigned long)backup->start_time));
-    securec_check_ss_c(nRet, "\0", "\0");
     params[0] = name;
 
     res = pgut_execute(conn, "SELECT pg_catalog.pg_create_restore_point($1)", 1, params);
@@ -1799,6 +1796,13 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
     if (backup != nullptr && !backup->from_replica)
     {
         create_restore_point(backup, conn);
+    }
+
+    if (backup != nullptr) {
+        ret = snprintf_s(backup->recovery_name, lengthof(backup->recovery_name),
+                      lengthof(backup->recovery_name) - 1,
+                      "backup %s", base36enc((unsigned long)backup->start_time));
+        securec_check_ss_c(ret, "\0", "\0");
     }
 
     /*

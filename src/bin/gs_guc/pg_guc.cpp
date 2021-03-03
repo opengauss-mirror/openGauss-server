@@ -1023,6 +1023,74 @@ append_string_info(char **optLines, const char *newContext)
     return optLinesResult;
 }
 
+/*******************************************************************************
+ Function    : IsLastNotNullReplconninfo
+ Description : determine if replconninfoX which is being set is the last one valid replconninfo
+ Input       : optLines  - postgres.conf info before changing
+               replconninfoX - replconninfo param name which is being set, eg "replconninfo1"
+ Output      : None
+ Return      : bool
+*******************************************************************************/
+static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
+{
+    int notNullReplconninfoNums = 0;
+    bool isReplconninfoXNull = true;
+    bool matchReplconninfoX = false;
+    char* p = NULL;
+
+    for (int i = 0; optLines != NULL && optLines[i] != NULL; i++) {
+        p = optLines[i];
+        /* Skip all the blanks at the begin of the optLine */
+        while (p != NULL && isspace((unsigned char)*p)) {
+            ++p;
+        }
+        if (p == NULL) {
+            continue;
+        }
+        if (*p == '#') {
+            ++p;
+            while (p != NULL && isspace((unsigned char)*p)) {
+                ++p;
+            }
+            /* replconninfoX must be invalid if it is commented*/
+            if (p != NULL && strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
+                return false;
+            }
+            continue;
+        }
+        if (p != NULL && strncmp(p, "replconninfo", strlen("replconninfo")) == 0) {
+            if (strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
+                matchReplconninfoX = true;
+            }
+            p += strlen(replconninfoX);
+            /* Skip all the blanks between the param and '=' */
+            while (p != NULL && isspace((unsigned char)*p)) {
+                p++;
+            }
+            /* Skip '=' */
+            if (p != NULL && *p == '=') {
+                p++;
+            }
+            /* Skip all the blanks between the '=' and value */
+            while (p != NULL && isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (p != NULL && strncmp(p, "''", strlen("''")) != 0 &&
+                strncmp(p, "\"\"", strlen("\"\"")) != 0) {
+                ++notNullReplconninfoNums;
+                if (matchReplconninfoX) {
+                    isReplconninfoXNull = false;
+                }
+            }
+        }
+    }
+    /* return true if replconninfoX which is being set is the last one valid replconninfo */
+    if (notNullReplconninfoNums == 1 && !isReplconninfoXNull) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -1113,6 +1181,13 @@ do_gucset(const char *action_type, const char *data_dir)
                 GS_FREE(azString);
             }
         }
+        /* Give a warning if the last valid replconninfo is set to a invalid value currently */
+        if (strncmp(config_param[i], "replconninfo", strlen("replconninfo")) == 0 &&
+            config_value[i] != NULL && (strlen(config_value[i]) == 0 || strncmp(config_value[i], "''", strlen("''")) == 0) &&
+            IsLastNotNullReplconninfo(opt_lines, config_param[i])) {
+            write_stderr("\nWARNING: This is the last valid replConnInfo, once set to null, "
+                "the host role will be changed to Normal if the local_role is primary now.\n");
+        }
 
         /* find the line where guc parameter in */
         lines_index = find_gucoption(opt_lines, config_param[i], NULL, NULL, &optvalue_off, &optvalue_len);
@@ -1138,9 +1213,8 @@ do_gucset(const char *action_type, const char *data_dir)
                     rc = strncpy_s(newconf_line, MAX_PARAM_LEN*2, optconf_line, (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
                     securec_check_c(rc, "\0", "\0");
                 } else {
-                    write_stderr( _("ERROR: %s parameters value is expected\n"), config_param[i]);
+                    write_stderr(_("ERROR: %s parameters value is expected\n"), config_param[i]);
                     return FAILURE;
-
                 }
             }
             updateoradd = UPDATE_PARAMETER;

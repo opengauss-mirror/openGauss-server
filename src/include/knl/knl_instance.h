@@ -399,6 +399,7 @@ typedef struct knl_g_ckpt_context {
     pg_atomic_uint64 dirty_page_queue_head;
     pg_atomic_uint32 actual_dirty_page_num;
     slock_t queue_lock;
+    struct LWLock* prune_queue_lock;
 
     /* pagewriter thread */
     PageWriterProcs page_writer_procs;
@@ -423,6 +424,7 @@ typedef struct knl_g_ckpt_context {
     int64 ckpt_predicate_flush_num;
     int64 ckpt_twophase_flush_num;
     volatile XLogRecPtr ckpt_current_redo_point;
+    RecoveryQueueState ckpt_redo_state;
 
 #ifdef ENABLE_MOT
     struct CheckpointCallbackItem* ckptCallback;

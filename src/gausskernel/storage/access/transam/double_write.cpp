@@ -1075,7 +1075,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     uint16 page_num;
     uint32 buf_state;
     errno_t rc;
-    *is_skipped = false;
+    *is_skipped = true;
 
     buf_desc = GetBufferDescriptor(buf_desc_id);
     buf_state = LockBufHdr(buf_desc);
@@ -1100,9 +1100,9 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
      */
     if (!LWLockConditionalAcquire(buf_desc->content_lock, LW_SHARED)) {
         UnpinBuffer(buf_desc, true);
-        *is_skipped = true;
         return page_lsn;
     }
+    *is_skipped = false;
     thrd_dw_cxt->write_pos++;
     if (thrd_dw_cxt->write_pos <= GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket)) {
         batch = (dw_batch_t*)thrd_dw_cxt->dw_buf;
@@ -1205,12 +1205,12 @@ static void dw_batch_flush(knl_g_dw_context* dw_cxt, XLogRecPtr latest_lsn, Thrd
     dw_file_head_t* file_head = NULL;
     errno_t rc;
 
-    (void)LWLockAcquire(dw_cxt->flush_lock, LW_EXCLUSIVE);
-
     if (!XLogRecPtrIsInvalid(latest_lsn)) {
         XLogFlush(latest_lsn);
         g_instance.ckpt_cxt_ctl->page_writer_xlog_flush_loc = latest_lsn;
     }
+
+    (void)LWLockAcquire(dw_cxt->flush_lock, LW_EXCLUSIVE);
 
     if (thrd_dw_cxt->contain_hashbucket) {
         dw_cxt->contain_hashbucket = true;

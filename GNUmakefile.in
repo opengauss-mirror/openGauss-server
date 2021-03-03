@@ -57,6 +57,7 @@ install:
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/pagehack $@
+	$(MAKE) -C contrib/pg_stat_statements $@
 	$(MAKE) -C contrib/pg_xlogdump $@
 	$(MAKE) -C contrib/gsredistribute $@
 	$(MAKE) -C src/distribute/kernel/extension/dimsearch $@
@@ -70,6 +71,7 @@ install:
 	$(MAKE) install_oracle_fdw
 	$(MAKE) install_pldebugger
 	$(MAKE) -C contrib/postgres_fdw $@
+	$(MAKE) -C contrib/pg_stat_statements $@
 	$(MAKE) -C contrib/hstore $@
 	$(MAKE) -C src/distribute/kernel/extension/packages $@
 	$(MAKE) -C contrib/gsredistribute $@
