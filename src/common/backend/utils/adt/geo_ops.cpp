@@ -4092,14 +4092,18 @@ Datum circle_in(PG_FUNCTION_ARGS)
     while (isspace((unsigned char)*s)) {
         s++;
     }
-    if ((*s == LDELIM_C) || (*s == LDELIM)) {
+    if (*s == LDELIM_C) {
         depth++;
+	s++;
+    } else if (*s == LDELIM) {
         cp = (s + 1);
         while (isspace((unsigned char)*cp)) {
             cp++;
         }
-        if (*cp == LDELIM)
-            s = cp;
+        if (*cp == LDELIM) {
+            depth++;
+	    s = cp;
+	}
     }
 
     if (!pair_decode(s, &circle->center.x, &circle->center.y, &s))
