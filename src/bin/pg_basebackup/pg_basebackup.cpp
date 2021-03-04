@@ -906,7 +906,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
             }
             totaldone += TAR_BLOCK_SIZE;
 
-            if (sscanf_s(copybuf + TAR_LEN_LEFT, "%201o", &current_len_left) != 1) {
+            if (sscanf_s(copybuf + TAR_LEN_LEFT, "%20lo", &current_len_left) != 1) {
                 pg_log(stderr, _("%s: could not parse file size\n"), progname);
                 disconnect_and_exit(1);
             }
@@ -1670,7 +1670,7 @@ static int GsTar(int argc, char** argv)
             }
             totaldone += TAR_BLOCK_SIZE;
 
-            if (sscanf_s(copybuf + 1048, "%201o", &current_len_left) != 1) {
+            if (sscanf_s(copybuf + 1048, "%20lo", &current_len_left) != 1) {
                 fprintf(stderr, "%s: could not parse file size\n", progname);
                 GS_FREE(copybuf);
                 CLOSE_AND_RETURN(tarfile);
