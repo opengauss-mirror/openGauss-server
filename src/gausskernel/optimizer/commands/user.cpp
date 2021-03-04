@@ -97,10 +97,10 @@ static void DelRoleMems(const char* rolename, Oid roleid, const List* memberName
 /* to check whether the current schema belongs to one of the role in the llist */
 static bool IsLockOnRelation(const LockInstanceData* instance);
 static List* GetCancelQuery(const char* user_name);
-static bool IsEligiblePid(Oid rel_oid, Oid nsp_oid, Oid pid, Oid db_oid, Form_pg_class form, List* query_list);
-static bool IsDuplicatePid(const List* query_list, Oid pid);
+static bool IsEligiblePid(Oid rel_oid, Oid nsp_oid, ThreadId pid, Oid db_oid, Form_pg_class form, List* query_list);
+static bool IsDuplicatePid(const List* query_list, ThreadId pid);
 static void CancelQuery(const char* user_name);
-extern void cancel_backend(Oid pid);
+extern void cancel_backend(ThreadId pid);
 static bool IsCurrentSchemaAttachRoles(List* roles);
 
 /* Database Security: Support password complexity */
@@ -4022,7 +4022,7 @@ static List* GetCancelQuery(const char* user_name)
 }
 
 // check weather the pid is recorded already
-static bool IsDuplicatePid(const List* query_list, Oid pid)
+static bool IsDuplicatePid(const List* query_list, ThreadId pid)
 {
     LockInfoBuck* lock_info = NULL;
     ListCell* curcell = NULL;
@@ -4046,7 +4046,7 @@ static bool IsDuplicatePid(const List* query_list, Oid pid)
 //		: the relation is an ordinary table or is a sequence
 //		: the oid of the relation is equale to the field 'relfilenode' in pg_class
 //		: the pid locked the relation is unique for the existing records
-static bool IsEligiblePid(Oid rel_oid, Oid nsp_oid, Oid pid, Oid db_oid, const Form_pg_class form, List* query_list)
+static bool IsEligiblePid(Oid rel_oid, Oid nsp_oid, ThreadId pid, Oid db_oid, const Form_pg_class form, List* query_list)
 {
     if (db_oid && pid && rel_oid && (nsp_oid == form->relnamespace) && ('r' == form->relkind || 'S' == form->relkind) &&
         (rel_oid == form->relfilenode) && (u_sess->proc_cxt.MyDatabaseId == db_oid) && !IsDuplicatePid(query_list, pid))

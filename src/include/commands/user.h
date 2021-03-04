@@ -18,7 +18,7 @@
 #define PASSWORD_TYPE_PLAINTEXT 0
 #define PASSWORD_TYPE_MD5 1
 typedef struct LockInfoBuck {
-    Oid pid;
+    ThreadId pid;
     Oid relation;
     Oid database;
     Oid nspoid;
