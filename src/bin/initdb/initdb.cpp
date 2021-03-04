@@ -3292,7 +3292,7 @@ static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo)
  */
 static void usage(const char* prog_name)
 {
-    printf(_("%s initializes a PostgreSQL database cluster.\n\n"), prog_name);
+    printf(_("%s initializes a openGauss database cluster.\n\n"), prog_name);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DATADIR]\n"), prog_name);
     printf(_("\nOptions:\n"));
@@ -3334,7 +3334,7 @@ static void usage(const char* prog_name)
     printf(_("  -?, --help                show this help, then exit\n"));
     printf(_("\nIf the data directory is not specified, the environment variable PGDATA\n"
              "is used.\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+    printf(_("\nReport bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
 }
 
 static void check_authmethod_unspecified(const char** authmethod)

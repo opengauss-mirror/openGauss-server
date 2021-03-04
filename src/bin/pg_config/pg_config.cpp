@@ -336,7 +336,7 @@ static const InfoItem info_items[] = {{"--bindir", show_bindir},
 
 static void help(void)
 {
-    printf(("\n%s provides information about the installed version of PostgreSQL.\n\n"), progname);
+    printf(("\n%s provides information about the installed version of openGauss.\n\n"), progname);
     printf(("Usage:\n"));
     printf(("  %s [OPTION]...\n\n"), progname);
     printf(("Options:\n"));
@@ -355,19 +355,19 @@ static void help(void)
     printf(("  --sysconfdir          show location of system-wide configuration files\n"));
     printf(("  --pgxs                show location of extension makefile\n"));
     printf(("  --configure           show options given to \"configure\" script when\n"
-            "                        PostgreSQL was built\n"));
-    printf(("  --cc                  show CC value used when PostgreSQL was built\n"));
-    printf(("  --cppflags            show CPPFLAGS value used when PostgreSQL was built\n"));
-    printf(("  --cflags              show CFLAGS value used when PostgreSQL was built\n"));
-    printf(("  --cflags_sl           show CFLAGS_SL value used when PostgreSQL was built\n"));
-    printf(("  --ldflags             show LDFLAGS value used when PostgreSQL was built\n"));
-    printf(("  --ldflags_ex          show LDFLAGS_EX value used when PostgreSQL was built\n"));
-    printf(("  --ldflags_sl          show LDFLAGS_SL value used when PostgreSQL was built\n"));
-    printf(("  --libs                show LIBS value used when PostgreSQL was built\n"));
-    printf(("  --version             show the PostgreSQL version\n"));
+            "                        openGauss was built\n"));
+    printf(("  --cc                  show CC value used when openGauss was built\n"));
+    printf(("  --cppflags            show CPPFLAGS value used when openGauss was built\n"));
+    printf(("  --cflags              show CFLAGS value used when openGauss was built\n"));
+    printf(("  --cflags_sl           show CFLAGS_SL value used when openGauss was built\n"));
+    printf(("  --ldflags             show LDFLAGS value used when openGauss was built\n"));
+    printf(("  --ldflags_ex          show LDFLAGS_EX value used when openGauss was built\n"));
+    printf(("  --ldflags_sl          show LDFLAGS_SL value used when openGauss was built\n"));
+    printf(("  --libs                show LIBS value used when openGauss was built\n"));
+    printf(("  --version             show the openGauss version\n"));
     printf(("  -?, --help            show this help, then exit\n"));
     printf(("\nWith no arguments, all known items are shown.\n\n"));
-    printf(("Report bugs to <pgsql-bugs@postgresql.org>.\n"));
+    printf(("Report bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
 }
 
 static void show_all(void)
