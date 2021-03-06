@@ -5024,7 +5024,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
 #ifdef BUILD_BY_CMAKE
 #define BASE_GLOBAL_VARIABLE_NUM 211
 #else
-#define BASE_GLOBAL_VARIABLE_NUM 226
+#define BASE_GLOBAL_VARIABLE_NUM 215
 #endif
 
 #define CMAKE_CMD_BUF_LEN 1000
