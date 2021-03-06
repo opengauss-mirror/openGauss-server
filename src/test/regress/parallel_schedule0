@@ -747,7 +747,7 @@ test: rule_test
 #delete limit
 test: delete_limit
 
-test: hotpatch
+#test: hotpatch
 
 #--------------------------
 # AI test case
