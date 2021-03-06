@@ -19,13 +19,13 @@
 -- select cmk
 \! gs_ktool -s 1
 \! gs_ktool -s 2
-\! gs_ktool -s 7
+\! gs_ktool -s 6
 \! gs_ktool -s all
 
 
 -- delete cmk (&& generate to be deleted)
 \! gs_ktool -d 3
-\! gs_ktool -d 7
+\! gs_ktool -d 6
 \! gs_ktool -g && gs_ktool -d all
 \! gs_ktool -g && gs_ktool -d all && gs_ktool -d all
 --

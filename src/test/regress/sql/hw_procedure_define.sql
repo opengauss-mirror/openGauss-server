@@ -586,7 +586,6 @@ END;
 CALL PRO_NO_EXP_001_1();
 CALL PRO_NO_EXP_001_1();
 
-
 create table test_emp_001(name varchar(10));
 create or replace procedure test_proc_using_001(a int) SHIPPABLE LEAKPROOF CALLED ON NULL INPUT external security invoker cost 0.000056
 as

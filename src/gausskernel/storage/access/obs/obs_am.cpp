@@ -48,6 +48,20 @@
 #define ERROR_MESSAGE_LEN 1024
 #define ERROR_DETAIL_LEN 4096
 #define MAX_PATH_LEN 1024
+
+#define OBS_CIPHER_LIST "DHE-RSA-AES128-GCM-SHA256:" \
+                        "DHE-RSA-AES256-GCM-SHA384:" \
+                        "DHE-DSS-AES128-GCM-SHA256:" \
+                        "DHE-DSS-AES256-GCM-SHA384:" \
+                        "ECDHE-ECDSA-AES128-GCM-SHA256:" \
+                        "ECDHE-ECDSA-AES256-GCM-SHA384:" \
+                        "ECDHE-RSA-AES128-GCM-SHA256:" \
+                        "ECDHE-RSA-AES256-GCM-SHA384:" \
+                        "DHE-RSA-AES128-CCM:" \
+                        "DHE-RSA-AES256-CCM:" \
+                        "ECDHE-ECDSA-AES128-CCM:" \
+                        "ECDHE-ECDSA-AES256-CCM"
+
 using namespace std;
 
 extern void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainLength, const char *obskey);
@@ -639,6 +653,7 @@ List *list_bucket_objects_analyze(const char *uri, bool encrypt, const char *acc
     option.bucket_options.access_key = (char *)access_key;
     option.bucket_options.secret_access_key = (char *)secret_access_key;
     option.bucket_options.certificate_info = encrypt ? t_thrd.obs_cxt.pCAInfo : NULL;
+    option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     obs_list_objects_handler listBucketHandler = {{ &responsePropertiesCallback, &responseCompleteCallback },
                                                   &listBucketObjectCallbackForAnalyze };
@@ -712,6 +727,7 @@ List *list_obs_bucket_objects(const char *uri, bool encrypt, const char *access_
     option.bucket_options.access_key = (char *)access_key;
     option.bucket_options.secret_access_key = (char *)secret_access_key;
     option.bucket_options.certificate_info = encrypt ? t_thrd.obs_cxt.pCAInfo : NULL;
+    option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     obs_list_objects_handler listBucketHandler = {{ &responsePropertiesCallback, &responseCompleteCallback },
                                                   &listBucketObjectCallback };
@@ -1237,6 +1253,7 @@ OBSReadWriteHandler *CreateObsReadWriteHandler(const char *object_url, OBSHandle
     handler->m_option.bucket_options.access_key = options->access_key;
     handler->m_option.bucket_options.secret_access_key = options->secret_access_key;
     handler->m_option.bucket_options.certificate_info = options->encrypt ? t_thrd.obs_cxt.pCAInfo : NULL;
+    handler->m_option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     handler->m_object_info.version_id = NULL;
 
@@ -1282,6 +1299,7 @@ OBSReadWriteHandler *CreateObsReadWriteHandlerForQuery(ObsOptions *options)
     handler->m_option.bucket_options.access_key = options->access_key;
     handler->m_option.bucket_options.secret_access_key = options->secret_access_key;
     handler->m_option.bucket_options.certificate_info = options->encrypt ? t_thrd.obs_cxt.pCAInfo : NULL;
+    handler->m_option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     handler->m_object_info.key = NULL;
     handler->m_object_info.version_id = NULL;
@@ -1586,6 +1604,7 @@ void checkOBSServerValidity(char *hostName, char *ak, char *sk, bool encrypt)
     option.bucket_options.access_key = ak;
     option.bucket_options.secret_access_key = sk;
     option.bucket_options.certificate_info = encrypt ? t_thrd.obs_cxt.pCAInfo : NULL;
+    option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     obs_list_service_obs_handler listServiceHandle = {{ &responsePropertiesCallback, &responseCompleteCallback },
                                                       &listServiceCallback };
@@ -1767,6 +1786,7 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Obs
 
     t_thrd.obs_cxt.pCAInfo = getCAInfo();
     handler->m_option.bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
+    handler->m_option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
 
     /* Fill in obs full file path */
     rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->obs_prefix, key);

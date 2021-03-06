@@ -1365,17 +1365,18 @@ size_t char2wchar(wchar_t* to, size_t tolen, const char* from, size_t fromlen, p
 #endif /* USE_WIDE_UPPER_LOWER */
 
 /* for locale memory leak in multithreading */
-void freeLocaleCacheAtThreadExit(void)
+void freeLocaleCache(bool threadExit)
 {
     HASH_SEQ_STATUS hash_seq;
     collation_cache_entry* cache_entry = NULL;
 
-    if (t_thrd.port_cxt.save_locale_r != (pg_locale_t)0) {
+    if (threadExit &&
+        t_thrd.port_cxt.save_locale_r != (pg_locale_t)0) {
         freelocale(t_thrd.port_cxt.save_locale_r);
         t_thrd.port_cxt.save_locale_r = (pg_locale_t)0;
     }
 
-    if (NULL == u_sess->lc_cxt.collation_cache)
+    if (u_sess->lc_cxt.collation_cache == NULL)
         return;
 
     hash_seq_init(&hash_seq, u_sess->lc_cxt.collation_cache);

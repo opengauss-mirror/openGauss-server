@@ -1386,6 +1386,9 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
      */
     if (!OidIsValid(prsOid))
         ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("text search parser is required")));
+    if (prsOid == ZHPARSER_PARSER) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("Zhparser is not supported!")));
+    }
 
     /*
      * Looks good, build tuple and insert

@@ -73,6 +73,17 @@
 #define STATEMENT_DETAILS_HEAD_SIZE (1 + 1)     /* [VERSION] + [TRUNCATED] */
 #define INSTR_STMT_UNIX_DOMAIN_PORT (-1)
 
+/* lock/lwlock's detail information */
+typedef struct {
+    StmtDetailType type;        /* statement details kind. */
+    const LOCKTAG *locktag;     /* for Lock, this field is used. */
+    uint16 lwlockId;            /* for LWLock, this field is used. */
+    int lockmode;               /* lockmode for this request. */
+} StmtLockDetail;
+
+static bytea* get_statement_detail(StatementDetail *text, bool oom);
+static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 details_len);
+
 static List* split_levels_into_list(const char* levels)
 {
     List *result = NIL;
@@ -249,8 +260,6 @@ static void ProcessSignal(void)
         }                                             \
     } while (0)
 
-bytea *get_statement_detail(StatementDetail *detail);
-
 static void set_stmt_row_activity_cache_io(StatementStatContext* statementInfo, Datum values[], int* i)
 {
     /* row activity */
@@ -351,15 +360,12 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     set_stmt_lock_summary(&statementInfo->lock_summary, values, &i);
 
     /* lock detail */
-    if (statementInfo->details.n_items == 0) {
+    if (unlikely(statementInfo->details.oom)) {
+        values[i++] = PointerGetDatum(get_statement_detail(&statementInfo->details, true));
+    } else if (statementInfo->details.n_items == 0) {
         nulls[i++] = true;
     } else {
-        bytea *details = get_statement_detail(&statementInfo->details);
-        if (details == NULL) {
-            nulls[i++] = true;
-        } else {
-            values[i++] = PointerGetDatum(details);
-        }
+        values[i++] = PointerGetDatum(get_statement_detail(&statementInfo->details, false));
     }
 
     /* is slow sql */
@@ -497,6 +503,7 @@ static void CleanStatementTable()
     PG_TRY();
     {
         StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
         /* get statement_history relation and index oid  */
         RangeVar* relrv = InitStatementRel();
         Relation rel = heap_openrv(relrv, RowExclusiveLock);
@@ -510,6 +517,7 @@ static void CleanStatementTable()
         CleanStatementByIdx(rel, statementTimeIndexId, t_thrd.statement_cxt.slow_sql_retention_time, true);
         CleanStatementByIdx(rel, statementTimeIndexId, t_thrd.statement_cxt.full_sql_retention_time, false);
         heap_close(rel, RowExclusiveLock);
+        PopActiveSnapshot();
         CommitTransactionCommand();
     }
     PG_CATCH();
@@ -520,6 +528,7 @@ static void CleanStatementTable()
             errmsg("[Statement] delete statement_history table failed, cause: %s", edata->message)));
         FlushErrorState();
         FreeErrorData(edata);
+        PopActiveSnapshot();
         AbortCurrentTransaction();
     }
     PG_END_TRY();
@@ -528,7 +537,6 @@ static void CleanStatementTable()
 static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
 {
     Assert (suspendList != NULL);
-    RangeVar* relrv = InitStatementRel();
     HeapTuple tuple = NULL;
     StatementStatContext *flushItem = suspendList;
 
@@ -537,6 +545,8 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
     PG_TRY();
     {
         StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
+        RangeVar* relrv = InitStatementRel();
         Relation rel = heap_openrv(relrv, RowExclusiveLock);
         while (flushItem != NULL) {
             tuple = GetStatementTuple(rel, flushItem, statementCxt);
@@ -546,6 +556,7 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
             flushItem = (StatementStatContext *)flushItem->next;
         }
         heap_close(rel, RowExclusiveLock);
+        PopActiveSnapshot();
         CommitTransactionCommand();
     }
     PG_CATCH();
@@ -559,6 +570,7 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
         ereport(WARNING, (errmodule(MOD_INSTR),
             errmsg("[Statement] flush suspend list to statement_history failed, reason: '%s'", edata->message)));
         FreeErrorData(edata);
+        PopActiveSnapshot();
         AbortCurrentTransaction();
     }
     PG_END_TRY();
@@ -754,7 +766,7 @@ NON_EXEC_STATIC void CleanStatementMain()
 }
 
 
-size_t get_statement_detail_size(StatementDetailType type)
+size_t get_statement_detail_size(StmtDetailType type)
 {
     switch (type) {
         case LOCK_START:
@@ -783,12 +795,11 @@ size_t get_statement_detail_size(StatementDetailType type)
     }
 }
 
-void* get_statement_detail_struct(StatementDetailType type,
-    int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0)
+static void* get_stmt_lock_detail(const StmtLockDetail *detail, TimestampTz curTime, size_t *size)
 {
     void *info = NULL;
 
-    switch (type) {
+    switch (detail->type) {
         case LOCK_START:
         case LOCK_WAIT_START:
         case LOCK_RELEASE:
@@ -796,10 +807,11 @@ void* get_statement_detail_struct(StatementDetailType type,
             if (info == NULL) {
                 break;
             }
-            ((LockEventStartInfo *)info)->eventType = (char)type;
-            ((LockEventStartInfo *)info)->timestamp = GetCurrentTimestamp();
-            ((LockEventStartInfo *)info)->tag = *locktag;
-            ((LockEventStartInfo *)info)->mode = (LOCKMODE)lockmode;
+            ((LockEventStartInfo *)info)->eventType = (char)detail->type;
+            ((LockEventStartInfo *)info)->timestamp = curTime;
+            ((LockEventStartInfo *)info)->tag = *detail->locktag;
+            ((LockEventStartInfo *)info)->mode = (LOCKMODE)detail->lockmode;
+            *size = sizeof(LockEventStartInfo);
             break;
         case LWLOCK_START:
         case LWLOCK_WAIT_START:
@@ -808,10 +820,11 @@ void* get_statement_detail_struct(StatementDetailType type,
             if (info == NULL) {
                 break;
             }
-            ((LWLockEventStartInfo *)info)->eventType = (char)type;
-            ((LWLockEventStartInfo *)info)->timestamp = GetCurrentTimestamp();
-            ((LWLockEventStartInfo *)info)->id = lwlockId;
-            ((LWLockEventStartInfo *)info)->mode = (LWLockMode)lockmode;
+            ((LWLockEventStartInfo *)info)->eventType = (char)detail->type;
+            ((LWLockEventStartInfo *)info)->timestamp = curTime;
+            ((LWLockEventStartInfo *)info)->id = detail->lwlockId;
+            ((LWLockEventStartInfo *)info)->mode = (LWLockMode)detail->lockmode;
+            *size = sizeof(LWLockEventStartInfo);
             break;
         case LOCK_END:
         case LOCK_WAIT_END:
@@ -821,8 +834,9 @@ void* get_statement_detail_struct(StatementDetailType type,
             if (info == NULL) {
                 break;
             }
-            ((LockEventEndInfo *)info)->eventType = (char)type;
-            ((LockEventEndInfo *)info)->timestamp = GetCurrentTimestamp();
+            ((LockEventEndInfo *)info)->eventType = (char)detail->type;
+            ((LockEventEndInfo *)info)->timestamp = curTime;
+            *size = sizeof(LockEventEndInfo);
             break;
         case TYPE_INVALID:
         default:
@@ -832,7 +846,7 @@ void* get_statement_detail_struct(StatementDetailType type,
     return info;
 }
 
-bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
+static bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
 {
     MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
     StatementDetailItem *item = (StatementDetailItem *)palloc0_noexcept(sizeof(StatementDetailItem));
@@ -840,6 +854,7 @@ bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
 
     if (item == NULL) {
         ereport(LOG, (errmodule(MOD_INSTR), errmsg("[Statement] detail is lost due to OOM.")));
+        ssctx->details.oom = true;
         return false;
     }
 
@@ -862,7 +877,7 @@ bool statement_extend_detail_item(StatementStatContext *ssctx, bool first)
     return true;
 }
 
-void *palloc_statement_detail(StatementDetailType type)
+void *palloc_statement_detail(StmtDetailType type)
 {
     void *info = NULL;
     switch (type) {
@@ -889,7 +904,7 @@ void *palloc_statement_detail(StatementDetailType type)
     return info;
 }
 
-const char* get_statement_event_type(StatementDetailType type)
+const char* get_statement_event_type(StmtDetailType type)
 {
     switch (type) {
         case LOCK_START:
@@ -918,66 +933,65 @@ const char* get_statement_event_type(StatementDetailType type)
     }
 }
 
-void *check_statement_detail_info_record(StatementStatContext *ssctx, StatementDetailType type,
-    int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+static bool check_statement_detail_info_record(StatementStatContext *ssctx, const char *detail)
 {
-    if (u_sess->attr.attr_common.track_stmt_details_size == 0) {
-        return NULL;
+    if (u_sess->attr.attr_common.track_stmt_details_size == 0 || ssctx->details.oom) {
+        return false;
     }
 
     if (ssctx->details.n_items > 0 && u_sess->attr.attr_common.track_stmt_details_size <
         (ssctx->details.n_items - 1) * STATEMENT_DETAIL_BUFSIZE + ssctx->details.cur_pos) {
         ssctx->details.head->buf[1] = (char)STATEMENT_DETAIL_TRUNCATED;
-        return NULL;
+        return false;
     }
 
-    return get_statement_detail_struct(type, lockmode, locktag, lwlockId);
+    if (detail == NULL) {
+        ssctx->details.oom = true;
+        return false;
+    }
+
+    return true;
 }
 
-void statement_detail_info_record(StatementStatContext *ssctx, StatementDetailType type,
-    int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+static void statement_detail_info_record(StatementStatContext *ssctx, const char *detail, size_t detailSize)
 {
-    void *info = check_statement_detail_info_record(ssctx, type, lockmode, locktag, lwlockId);
-    if (info == NULL) {
-        return;
-    }
+    errno_t rc;
 
-    size_t detailSize = get_statement_detail_size(type);
+    if (!check_statement_detail_info_record(ssctx, detail))
+        return;
+
     Assert(detailSize < STATEMENT_DETAIL_BUFSIZE);
 
-    errno_t rc;
     if (ssctx->details.n_items <= 0) {
         if (statement_extend_detail_item(ssctx, true)) {
             rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos,
-                STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, info, detailSize);
+                STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, detail, detailSize);
             securec_check(rc, "", "");
             ssctx->details.cur_pos += detailSize;
         }
     } else if (ssctx->details.cur_pos + detailSize <= STATEMENT_DETAIL_BUFSIZE) {
         rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos,
-            STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, info, detailSize);
+            STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos, detail, detailSize);
         securec_check(rc, "", "");
         ssctx->details.cur_pos += detailSize;
     } else {
         size_t last = STATEMENT_DETAIL_BUFSIZE - ssctx->details.cur_pos;
 
         if (last > 0) {
-            rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos, last, info, last);
+            rc = memcpy_s(ssctx->details.tail->buf + ssctx->details.cur_pos, last, detail, last);
             securec_check(rc, "", "");
         }
 
         if (statement_extend_detail_item(ssctx, false)) {
             rc = memcpy_s(ssctx->details.tail->buf,
-                STATEMENT_DETAIL_BUFSIZE, (char *)info + last, detailSize - last);
+                STATEMENT_DETAIL_BUFSIZE, detail + last, detailSize - last);
             securec_check(rc, "", "");
             ssctx->details.cur_pos += detailSize - last;
         }
     }
-
-    pfree(info);
 }
 
-void update_statement_lock_cnt(StatementStatContext *ssctx, StatementDetailType type, int lockmode)
+void update_stmt_lock_cnt(StatementStatContext *ssctx, StmtDetailType type, int lockmode)
 {
     switch (type) {
         case LOCK_START:
@@ -1007,59 +1021,63 @@ void update_statement_lock_cnt(StatementStatContext *ssctx, StatementDetailType 
     }
 }
 
-void update_statement_time(StatementStatContext *ssctx, StatementDetailType type)
+static void update_stmt_lock_time(StatementStatContext *ssctx, StmtDetailType type, TimestampTz curTime)
 {
     switch (type) {
         case LOCK_START:
-            ssctx->lock_summary.lock_start_time = GetCurrentTimestamp();
+            ssctx->lock_summary.lock_start_time = curTime;
             break;
         case LOCK_END:
-            ssctx->lock_summary.lock_time += GetCurrentTimestamp() - ssctx->lock_summary.lock_start_time;
+            ssctx->lock_summary.lock_time += curTime - ssctx->lock_summary.lock_start_time;
             break;
         case LOCK_WAIT_START:
-            ssctx->lock_summary.lock_wait_start_time = GetCurrentTimestamp();
+            ssctx->lock_summary.lock_wait_start_time = curTime;
             break;
         case LOCK_WAIT_END:
-            ssctx->lock_summary.lock_wait_time += GetCurrentTimestamp() - ssctx->lock_summary.lock_wait_start_time;
+            ssctx->lock_summary.lock_wait_time += curTime - ssctx->lock_summary.lock_wait_start_time;
             break;
         case LWLOCK_START:
-            ssctx->lock_summary.lwlock_start_time = GetCurrentTimestamp();
+            ssctx->lock_summary.lwlock_start_time = curTime;
             break;
         case LWLOCK_END:
-            ssctx->lock_summary.lwlock_time += GetCurrentTimestamp() - ssctx->lock_summary.lwlock_start_time;
+            ssctx->lock_summary.lwlock_time += curTime - ssctx->lock_summary.lwlock_start_time;
             break;
         case LWLOCK_WAIT_START:
-            ssctx->lock_summary.lwlock_wait_start_time = GetCurrentTimestamp();
+            ssctx->lock_summary.lwlock_wait_start_time = curTime;
             break;
         case LWLOCK_WAIT_END:
-            ssctx->lock_summary.lwlock_wait_time += GetCurrentTimestamp() - ssctx->lock_summary.lwlock_wait_start_time;
+            ssctx->lock_summary.lwlock_wait_time += curTime - ssctx->lock_summary.lwlock_wait_start_time;
             break;
         default:
             break;
     }
 }
 
-void statement_full_info_record(StatementDetailType type, int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
+void instr_stmt_report_lock(StmtDetailType type, int lockmode, const LOCKTAG *locktag, uint16 lwlockId)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-    if (ssctx == NULL) {
-        return;
-    }
 
-    switch (ssctx->level) {
-        case STMT_TRACK_L2:
-            statement_detail_info_record(ssctx, type, lockmode, locktag, lwlockId);
-            /* fall-through */
-        case STMT_TRACK_L1:
-            update_statement_time(ssctx, type);
-            /* fall-through */
-        case STMT_TRACK_L0:
-            /* always capture the lock count */
-            update_statement_lock_cnt(ssctx, type, lockmode);
-            break;
-        case LEVEL_INVALID:
-        default:
-            break;
+    if (likely(ssctx != NULL)) {
+        Assert(ssctx->level == STMT_TRACK_L0 ||
+            ssctx->level == STMT_TRACK_L1 || ssctx->level == STMT_TRACK_L2);
+
+        /* always capture the lock count */
+        update_stmt_lock_cnt(ssctx, type, lockmode);
+
+        if (ssctx->level != STMT_TRACK_L0) {
+            TimestampTz curTime = GetCurrentTimestamp();
+
+            update_stmt_lock_time(ssctx, type, curTime);
+            if (ssctx->level == STMT_TRACK_L2) {
+                size_t size = 0;
+                char *bytes = NULL;
+                StmtLockDetail detail = {type, locktag, lwlockId, lockmode};
+
+                bytes = (char*)get_stmt_lock_detail(&detail, curTime, &size);
+                statement_detail_info_record(ssctx, bytes, size);
+                pfree_ext(bytes);
+            }
+        }
     }
 }
 
@@ -1088,9 +1106,8 @@ char *get_lock_mode_name(LOCKMODE mode)
     }
 }
 
-void write_state_detail_lock_start(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+void write_state_detail_lock_start(void *info, size_t *detailsCnt, StringInfo resultBuf, bool pretty)
 {
-    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
     errno_t ret = 0;
     char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
     if (pretty) {
@@ -1099,21 +1116,14 @@ void write_state_detail_lock_start(void *info, size_t *detailsCnt, char *details
         ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s',");
     }
     securec_check(ret, "\0", "\0");
-    ret = sprintf_s(tmp,
-        sizeof(tmp),
-        formatStr,
-        *detailsCnt,
-        get_statement_event_type((StatementDetailType)((LockEventStartInfo *)info)->eventType),
+
+    char *lock_tag = LocktagToString(((LockEventStartInfo *)info)->tag);
+    appendStringInfo(resultBuf, formatStr, *detailsCnt,
+        get_statement_event_type((StmtDetailType)((LockEventStartInfo *)info)->eventType),
         timestamptz_to_str(((LockEventStartInfo *)info)->timestamp),
-        LocktagToString(((LockEventStartInfo *)info)->tag),
+        lock_tag,
         get_lock_mode_name(((LockEventStartInfo *)info)->mode));
-    securec_check_ss(ret, "\0", "\0");
-    if (*detailsLen < strlen(tmp)) {
-        return;
-    }
-    ret = strcat_s(details, *detailsLen, tmp);
-    securec_check(ret, "\0", "\0");
-    *detailsLen -= strlen(tmp);
+    pfree(lock_tag);
     (*detailsCnt)++;
 }
 
@@ -1131,9 +1141,8 @@ char *get_lwlock_mode_name(LWLockMode mode)
     }
 }
 
-void write_state_detail_lwlock_start(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+void write_state_detail_lwlock_start(void *info, size_t *detailsCnt, StringInfo resultBuf, bool pretty)
 {
-    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
     errno_t ret = 0;
     char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
     if (pretty) {
@@ -1142,27 +1151,16 @@ void write_state_detail_lwlock_start(void *info, size_t *detailsCnt, char *detai
         ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s'\t'%s'\t'%s',");
     }
     securec_check(ret, "\0", "\0");
-    ret = sprintf_s(tmp,
-        sizeof(tmp),
-        formatStr,
-        *detailsCnt,
-        get_statement_event_type((StatementDetailType)((LWLockEventStartInfo *)info)->eventType),
+    appendStringInfo(resultBuf, formatStr, *detailsCnt,
+        get_statement_event_type((StmtDetailType)((LWLockEventStartInfo *)info)->eventType),
         timestamptz_to_str(((LWLockEventStartInfo *)info)->timestamp),
         GetLWLockIdentifier(PG_WAIT_LWLOCK, ((LWLockEventStartInfo *)info)->id),
         get_lwlock_mode_name(((LWLockEventStartInfo *)info)->mode));
-    securec_check_ss(ret, "\0", "\0");
-    if (*detailsLen < strlen(tmp)) {
-        return;
-    }
-    ret = strcat_s(details, *detailsLen, tmp);
-    securec_check(ret, "\0", "\0");
-    *detailsLen -= strlen(tmp);
     (*detailsCnt)++;
 }
 
-void write_state_detail_end_event(void *info, size_t *detailsCnt, char *details, size_t *detailsLen, bool pretty)
+void write_state_detail_end_event(void *info, size_t *detailsCnt, StringInfo resultBuf, bool pretty)
 {
-    char tmp[STATEMENT_DETAIL_BUF] = { 0 };
     errno_t ret = 0;
     char formatStr[STATEMENT_DETAIL_BUF] = { 0 };
     if (pretty) {
@@ -1171,120 +1169,100 @@ void write_state_detail_end_event(void *info, size_t *detailsCnt, char *details,
         ret = strcpy_s(formatStr, STATEMENT_DETAIL_BUF, "'%lu'\t'%s'\t'%s',");
     }
     securec_check(ret, "\0", "\0");
-    ret = sprintf_s(tmp,
-        sizeof(tmp),
-        formatStr,
-        *detailsCnt,
-        get_statement_event_type((StatementDetailType)((LockEventEndInfo *)info)->eventType),
+    appendStringInfo(resultBuf, formatStr, *detailsCnt,
+        get_statement_event_type((StmtDetailType)((LockEventEndInfo *)info)->eventType),
         timestamptz_to_str(((LockEventEndInfo *)info)->timestamp));
-    securec_check_ss(ret, "\0", "\0");
-    if (*detailsLen < strlen(tmp)) {
-        return;
-    }
-    ret = strcat_s(details, strlen(details) + *detailsLen, tmp);
-    securec_check(ret, "\0", "\0");
-    *detailsLen -= strlen(tmp);
     (*detailsCnt)++;
 }
 
-void write_statement_detail_text(void *info, StatementDetailType type, char *details, size_t *detailsLen, bool pretty)
+/* return true if run successfully */
+bool write_statement_detail_text(void *info, StmtDetailType type, StringInfo resultBuf, size_t *detailsCnt, bool pretty)
 {
-    static size_t detailsCnt = 1;
-    if (strcmp(get_statement_event_type(type), "TYPE_INVALID") == 0) {
-        return;
-    }
-    if (strlen(details) == 0) {
-        detailsCnt = 1;
-    }
+    bool result = false;
     switch (type) {
         case LOCK_START:
         case LOCK_WAIT_START:
         case LOCK_RELEASE:
-            write_state_detail_lock_start(info, &detailsCnt, details, detailsLen, pretty);
+            write_state_detail_lock_start(info, detailsCnt, resultBuf, pretty);
+            result = true;
             break;
         case LWLOCK_START:
         case LWLOCK_WAIT_START:
         case LWLOCK_RELEASE:
-            write_state_detail_lwlock_start(info, &detailsCnt, details, detailsLen, pretty);
+            write_state_detail_lwlock_start(info, detailsCnt, resultBuf, pretty);
+            result = true;
             break;
         case LOCK_END:
         case LOCK_WAIT_END:
         case LWLOCK_END:
         case LWLOCK_WAIT_END:
-            write_state_detail_end_event(info, &detailsCnt, details, detailsLen, pretty);
+            write_state_detail_end_event(info, detailsCnt, resultBuf, pretty);
+            result = true;
             break;
         case TYPE_INVALID:
         default:
             break;
     }
-}
-
-char *palloc_statement_detail_string(uint32 nums)
-{
-    char *info = NULL;
-    info = (char *)palloc0_noexcept(nums);
-    errno_t rc = memset_s(info, nums, 0, nums);
-    securec_check(rc, "\0", "\0");
-    return info;
-}
-
-bytea *palloc_statement_detail_text(const char* s, uint32 len)
-{
-    text *info = NULL;
-    info = (text *)palloc0_noexcept(len + VARHDRSZ);
-    SET_VARSIZE(info, len + VARHDRSZ);
-    if (len > 0) {
-        int rc = memcpy_s(VARDATA(info), len, s, len);
-        securec_check(rc, "\0", "\0");
-    }
-    return info;
-}
-
-bytea *get_statement_detail(StatementDetail *detail)
-{
-    if (detail == NULL || detail->n_items <= 0) {
-        return NULL;
-    }
-
-    uint32 detailsLen = sizeof(uint32) + (uint32)((detail->n_items - 1) * STATEMENT_DETAIL_BUFSIZE) + detail->cur_pos;
-    char *details = (char *)palloc_statement_detail_string(detailsLen);
-    int itemCnt = 0;
-    int rc = memcpy_s(details, detailsLen, &detailsLen, sizeof(uint32));
-    securec_check(rc, "\0", "\0");
-
-    uint32 pos = sizeof(uint32);
-    for (StatementDetailItem *item = (StatementDetailItem *)(detail->head); item != NULL;
-            item = (StatementDetailItem *)(item->next)) {
-        itemCnt++;
-
-        size_t itemSize = STATEMENT_DETAIL_BUFSIZE;
-        // the last item of list
-        if (itemCnt == detail->n_items) {
-            itemSize = detail->cur_pos;
-        }
-
-        if (pos + itemSize > detailsLen) {
-            break;
-        }
-        rc = memcpy_s(details + pos, detailsLen - pos, item->buf, itemSize);
-        securec_check(rc, "\0", "\0");
-
-        pos += itemSize;
-    }
-
-    bytea *result = (bytea*)palloc_statement_detail_text(details, detailsLen);
-    pfree_ext(details);
     return result;
 }
 
-char *decode_statement_detail_text(bytea *detail, const char *format, bool pretty)
+static bytea* get_statement_detail(StatementDetail *detail, bool oom)
+{
+    text *result = NULL;
+    uint32 size;
+
+    Assert (detail != NULL && (oom || detail->n_items > 0));
+
+    if (oom) {
+        size = sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE;
+    } else {
+        size = sizeof(uint32) + (uint32)((detail->n_items - 1) * STATEMENT_DETAIL_BUFSIZE) + detail->cur_pos;
+    }
+
+    result = (text*)palloc(size + VARHDRSZ);
+    SET_VARSIZE(result, size + VARHDRSZ);
+
+    int rc = memcpy_s(VARDATA(result), size, &size, sizeof(uint32));
+    securec_check(rc, "\0", "\0");
+
+    char *details = VARDATA(result) + sizeof(uint32);
+    if (oom) {
+        details[0] = (char)STATEMENT_DETAIL_VERSION;
+        details[1] = (char)STATEMENT_DETAIL_MISSING_OOM;
+    } else {
+        uint32 pos = 0;
+        size_t itemSize;
+
+        for (StatementDetailItem *item = detail->head; item != NULL; item = (StatementDetailItem *)(item->next)) {
+            itemSize = (item == detail->tail) ? detail->cur_pos : STATEMENT_DETAIL_BUFSIZE;
+
+            rc = memcpy_s(details + pos, (size - pos - sizeof(uint32)), item->buf, itemSize);
+            securec_check(rc, "\0", "\0");
+            pos += itemSize;
+        }
+    }
+
+    return result;
+}
+
+static void handle_detail_flag(char flag, StringInfo result)
+{
+    if (flag == STATEMENT_DETAIL_TRUNCATED) {
+        appendStringInfoString(result, "Truncated...");
+    } else if (flag == STATEMENT_DETAIL_MISSING_OOM) {
+        appendStringInfoString(result, "Missing(OOM)...");
+    }
+}
+
+static char *decode_statement_detail_text(bytea *detail, const char *format, bool pretty)
 {
     if (strcmp(format, STATEMENT_DETAIL_FORMAT_STRING) != 0) {
         ereport(WARNING, ((errmodule(MOD_INSTR), errmsg("decode format should be 'plaintext'!"))));
         return NULL;
     }
 
-    if (VARSIZE(detail) - VARHDRSZ == 0) {
+    uint32 bytea_data_len = VARSIZE(detail) - VARHDRSZ;
+    if (bytea_data_len == 0) {
         return NULL;
     }
 
@@ -1292,23 +1270,28 @@ char *decode_statement_detail_text(bytea *detail, const char *format, bool prett
     uint32 detailsLen = 0;
     int rc = memcpy_s(&detailsLen, sizeof(uint32), details, sizeof(uint32));
     securec_check(rc, "\0", "\0");
-    if (detailsLen == 0) {
-        return NULL;
+
+    if (!is_valid_detail_record(bytea_data_len, details, detailsLen)) {
+        return pstrdup("invalid_detail_header_format");
     }
 
-    size_t resultLen = detailsLen * STATEMENT_DETAIL_BUF_MULTI;
-    char *result = (char *)palloc_statement_detail_string(resultLen + 1);
-    bool truncatedFlag = (details[sizeof(uint32) + 1] == (char)STATEMENT_DETAIL_TRUNCATED);
-
+    StringInfoData resultBuf;
+    initStringInfo(&resultBuf);
+    char flag = details[sizeof(uint32) + 1];
     size_t pos = sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE;
-    while (pos < detailsLen) {
-        StatementDetailType itemType = (StatementDetailType)details[pos];
+    bool is_valid_record = true;
+    size_t detailsCnt = 1;
+
+    while (pos < detailsLen && is_valid_record) {
+        StmtDetailType itemType = (StmtDetailType)details[pos];
         size_t size = get_statement_detail_size(itemType);
         if (size == INVALID_DETAIL_BUFSIZE) {
+            is_valid_record = false;
             break;
         }
         if (pos + size > detailsLen) {
-            // invalid buf
+            /* invalid buf */
+            is_valid_record = false;
             break;
         }
         void *info = palloc_statement_detail(itemType);
@@ -1319,17 +1302,19 @@ char *decode_statement_detail_text(bytea *detail, const char *format, bool prett
         securec_check(rc, "", "");
         pos += size;
 
-        // write to string
-        write_statement_detail_text(info, itemType, result, &resultLen, pretty);
+        /* write to string */
+        is_valid_record = write_statement_detail_text(info, itemType, &resultBuf, &detailsCnt, pretty);
         pfree(info);
     }
-
-    result[strlen(result) - 1] = '\0';
-    if (truncatedFlag) {
-        rc = strcat_s(result, detailsLen * STATEMENT_DETAIL_BUF_MULTI, " Truncated...");
-        securec_check(rc, "", "");
+    if (!is_valid_record) {
+        pfree(resultBuf.data);
+        return pstrdup("invalid_detail_data_format");
     }
-    return result;
+
+    /* after is_valid_detail_record called, resultBuf.len never equal to 0 */
+    resultBuf.data[resultBuf.len - 1] = ' ';
+    handle_detail_flag(flag, &resultBuf);
+    return resultBuf.data;
 }
 
 Datum statement_detail_decode(PG_FUNCTION_ARGS)
@@ -1638,4 +1623,36 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
         (errmodule(MOD_INSTR), errmsg("exec_auto_explain %s %s to %lu",
             ssctx->query_plan, queryDesc->sourceText, u_sess->unique_sql_cxt.unique_sql_id)));
     pfree(es.str->data);
+}
+
+/* check the header and valid length of the detail binary data */
+static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, uint32 details_len)
+{
+    /* VERSIZE(bytea) - VARHDRSZ should be > sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE */
+    if (bytea_data_len <= (sizeof(uint32) + STATEMENT_DETAILS_HEAD_SIZE)) {
+        return false;
+    }
+
+    /* details binary length should be same with VERSIZE(bytea) - VARHDRSZ */
+    if (bytea_data_len != details_len) {
+        return false;
+    }
+
+    /* record version, should be [1, STATEMENT_DETAIL_VERSION] */
+    int32 version = (int32)details[sizeof(uint32)];
+    if (version == 0 || version > STATEMENT_DETAIL_VERSION) {
+        return false;
+    }
+
+    /* record flag area, should be
+     *   STATEMENT_DETAIL_NOT_TRUNCATED/STATEMENT_DETAIL_TRUNCATED/STATEMENT_DETAIL_MISSING_OOM
+     */
+    int32 flag = (int32)details[sizeof(uint32) + 1];
+    if (flag != STATEMENT_DETAIL_NOT_TRUNCATED &&
+        flag != STATEMENT_DETAIL_TRUNCATED &&
+        flag != STATEMENT_DETAIL_MISSING_OOM) {
+        return false;
+    }
+
+    return true;
 }

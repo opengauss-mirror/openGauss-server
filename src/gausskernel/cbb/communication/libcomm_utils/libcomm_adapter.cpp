@@ -1282,6 +1282,7 @@ void gs_delay_survey()
 {
     int node_idx = -1;
     int socket = -1;
+    int socket_id = -1;
 
     errno_t ss_rc = 0;
     struct libcomm_delay_package msg;
@@ -1297,11 +1298,13 @@ void gs_delay_survey()
         }
 
         socket = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket;
+        socket_id = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket_id;
         msg.sn = libcomm_delay_no;
         msg.start_time = (uint32)mc_timers_us();
 
         LibcommSendInfo send_info;
         send_info.socket = socket;
+        send_info.socket_id = socket_id;
         send_info.node_idx = node_idx;
         send_info.streamid = 0;
         send_info.version = 0;

@@ -195,9 +195,9 @@ class ModelInfo:
         self.batch_size = 500
         self.dim_red = -1
         self.model_targets = ''
-        self.model_dir = os.path.join(settings.PATH_MODELS_INFO, self.model_name)
-        self.conf_path = os.path.join(self.model_dir, self.model_name + '.conf')
-        self.model_path = os.path.join(self.model_dir, self.model_name + '.h5')
+        self.model_dir = os.path.realpath(os.path.join(settings.PATH_MODELS_INFO, self.model_name))
+        self.conf_path = os.path.realpath(os.path.join(self.model_dir, self.model_name + '.conf'))
+        self.model_path = os.path.realpath(os.path.join(self.model_dir, self.model_name + '.h5'))
         self.feature_length = None
         self.label_length = None
         self.max_startup = None
@@ -483,7 +483,8 @@ class RnnModel():
             self.model_info.max_mem = max(max_mem, 1)
             self.model_info.feature_length = feature_length
             shutil.rmtree(self.model_info.model_path, ignore_errors=True)
-            shutil.rmtree(os.path.join(settings.PATH_LOG, self.model_info.model_name), ignore_errors=True)
+            shutil.rmtree(os.path.realpath(
+                os.path.join(settings.PATH_LOG, self.model_info.model_name), ignore_errors=True))
         arr_startup = np.array(arr_startup, dtype=float).reshape((-1, 1))
         arr_total = np.array(arr_total, dtype=float).reshape((-1, 1))
         arr_row = np.array(arr_row, dtype=float).reshape((-1, 1))
@@ -553,7 +554,7 @@ class RnnModel():
                                         custom_objects={'ratio_error': ratio_error, 'ratio_acc': ratio_acc_2})
             self.model_info.last_epoch = int(self.model_info.max_epoch) + epoch_start
             self.model_info.dump_dict()
-            log_path = os.path.join(settings.PATH_LOG, self.model_info.model_name + '_log.json')
+            log_path = os.path.realpath(os.path.join(settings.PATH_LOG, self.model_info.model_name + '_log.json'))
             if not os.path.exists(log_path):
                 os.mknod(log_path, mode=0o600)
             json_logging_callback = LossHistory(log_path, self.model_info.model_name, self.model_info.last_epoch)

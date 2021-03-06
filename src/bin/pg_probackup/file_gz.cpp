@@ -241,7 +241,7 @@ fio_gzclose(gzFile f)
             Assert(rc == Z_STREAM_END && gz->strm.avail_out != ZLIB_BUFFER_SIZE);
             deflateEnd(&gz->strm);
             rc = fio_write(gz->fd, gz->buf, ZLIB_BUFFER_SIZE - gz->strm.avail_out);
-            if (rc != ZLIB_BUFFER_SIZE - gz->strm.avail_out)
+            if (rc != (int)(ZLIB_BUFFER_SIZE - gz->strm.avail_out))
             {
                 return -1;
             }
@@ -322,7 +322,7 @@ int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* o
     
 
     IO_CHECK(fio_write_all(fio_stdout, &hdr, sizeof(hdr)), sizeof(hdr));
-    IO_CHECK(fio_write_all(fio_stdout, from_fullpath, path_len), path_len);
+    IO_CHECK(fio_write_all(fio_stdout, from_fullpath, path_len), (ssize_t)path_len);
 
     for (;;)
     {
@@ -335,10 +335,11 @@ int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* o
         }
         else if (hdr.cop == FIO_ERROR)
         {
+            bool valid = hdr.size > 0 && hdr.size <= CHUNK_SIZE;
             /* handle error, reported by the agent */
-            if (hdr.size > 0)
+            if (valid)
             {
-                IO_CHECK(fio_read_all(fio_stdin, in_buf, hdr.size), hdr.size);
+                IO_CHECK(fio_read_all(fio_stdin, in_buf, hdr.size), (ssize_t)hdr.size);
                 *errormsg = (char *)pgut_malloc(hdr.size);
                 nRet = snprintf_s(*errormsg, hdr.size, hdr.size - 1, "%s", in_buf);
                 securec_check_ss_c(nRet, "\0", "\0");
@@ -350,7 +351,10 @@ int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* o
         {
             int rc;
             Assert(hdr.size <= CHUNK_SIZE);
-            IO_CHECK(fio_read_all(fio_stdin, in_buf, hdr.size), hdr.size);
+            if (hdr.size > CHUNK_SIZE) {
+                hdr.size = CHUNK_SIZE;
+            }
+            IO_CHECK(fio_read_all(fio_stdin, in_buf, hdr.size), (ssize_t)hdr.size);
 
             /* We have received a chunk of compressed data, lets decompress it */
             if (strm == NULL)
@@ -432,7 +436,7 @@ int fio_send_file_gz(const char *from_fullpath, const char *to_fullpath, FILE* o
             {
                 int len = OUT_BUF_SIZE - strm->avail_out;
 
-                if (fwrite(out_buf, 1, len, out) != len)
+                if (fwrite(out_buf, 1, len, out) != (size_t)len)
                 {
                     exit_code = WRITE_FAILED;
                     goto cleanup;

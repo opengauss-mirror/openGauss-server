@@ -505,9 +505,6 @@ extern unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retb
 /* These forms are deprecated! */
 extern size_t PQescapeString(char* to, const char* from, size_t length);
 extern unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size_t* to_length);
-#ifdef HAVE_CE
-extern void checkRefreshCacheOnError(PGconn* conn);
-#endif
 
 /* === in fe-print.c === */
 

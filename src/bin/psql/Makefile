@@ -24,7 +24,7 @@ SGMLDIR= $(top_builddir)/doc/src/sgml
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE $(CPPFLAGS)
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+CPPFLAGS += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o:
@@ -70,8 +70,9 @@ FLEXFLAGS = -Cfe -b -p -p
 all: submake-aes gsql
 
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
+
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+libpq_pgport += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/lib/elog/elog.a:
@@ -99,9 +100,9 @@ sql_help.h: create_help.pl $(wildcard $(REFDOCDIR)/*.sgml)
 	$(PERL) $< $(REFDOCDIR) $*
 
 # psqlscan is compiled as part of mainloop
-mainloop.o: psqlscan.cpp
+mainloop.o: psqlscan.inc
 
-psqlscan.cpp: psqlscan.l
+psqlscan.inc: psqlscan.l
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
 	@if [ `wc -l <lex.backup` -eq 1 ]; then rm lex.backup; else echo "Scanner requires backup, see lex.backup."; exit 1; fi
@@ -112,7 +113,7 @@ endif
 .PHONY: submake-aes
 submake-aes:
 	$(MAKE) -C $(top_builddir)/src/gausskernel/cbb/utils/aes aes.o
-distprep: sql_help.h psqlscan.cpp
+distprep: sql_help.h psqlscan.inc
 
 install: all installdirs
 	$(INSTALL_PROGRAM) gsql$(X) '$(DESTDIR)$(bindir)/gsql$(X)'
@@ -126,10 +127,10 @@ installdirs:
 uninstall:
 	rm -f '$(DESTDIR)$(bindir)/gsql$(X)' '$(DESTDIR)$(datadir)/psqlrc.sample' '$(DESTDIR)$(bindir)/retry_errcodes.conf'
 
-# psqlscan.cpp is in the distribution tarball, so is not cleaned here
+# psqlscan.inc is in the distribution tarball, so is not cleaned here
 clean distclean:
 	rm -f gsql$(X) $(OBJS) dumputils.cpp keywords.cpp kwlookup.cpp lex.backup *.depend
 	$(MAKE) -C $(libpq_builddir) clean ENABLE_CE=1
 maintainer-clean: distclean
-	rm -f sql_help.h sql_help.cpp psqlscan.cpp
+	rm -f sql_help.h sql_help.cpp psqlscan.inc
 

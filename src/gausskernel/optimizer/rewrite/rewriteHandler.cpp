@@ -2741,7 +2741,7 @@ char* GetCreateViewStmt(Query* parsetree, CreateTableAsStmt* stmt)
     view_stmt->query = stmt->query;
     view_stmt->view->relpersistence = RELPERSISTENCE_PERMANENT;
     view_stmt->aliases = stmt->into->colNames;
-    view_stmt->options = NIL;
+    view_stmt->options = stmt->into->options;
     view_stmt->relkind = OBJECT_MATVIEW;
     view_stmt->ivm = stmt->into->ivm;
 

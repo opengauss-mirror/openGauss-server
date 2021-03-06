@@ -2538,6 +2538,12 @@ Datum schema_to_xml(PG_FUNCTION_ARGS)
         targetns = text_to_cstring(PG_GETARG_TEXT_PP(3));
 
     schemaname = NameStr(*name);
+
+    if (schemaname == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("schema name is NULL.")));
+    }
+
     nspid = LookupExplicitNamespace(schemaname);
 
     PG_RETURN_XML_P(stringinfo_to_xmltype(schema_to_xml_internal(nspid, NULL, nulls, tableforest, targetns, true)));
@@ -2576,6 +2582,11 @@ static StringInfo schema_to_xmlschema_internal(
     int rc = 0;
 
     result = makeStringInfo();
+
+    if (schemaname == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("schema name is NULL.")));
+    }
 
     nspid = LookupExplicitNamespace(schemaname);
 
@@ -2657,6 +2668,12 @@ Datum schema_to_xml_and_xmlschema(PG_FUNCTION_ARGS)
         targetns = text_to_cstring(PG_GETARG_TEXT_PP(3));
 
     schemaname = NameStr(*name);
+
+    if (schemaname == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("schema name is NULL.")));
+    }
+
     nspid = LookupExplicitNamespace(schemaname);
 
     xmlschema = schema_to_xmlschema_internal(schemaname, nulls, tableforest, targetns);

@@ -31,7 +31,7 @@ char* dbhost = NULL;
 char* dbuser = NULL;
 char* dbport = NULL;
 char* dbname = NULL;
-char* baseBackupTimeout = "120"; /* default value */
+int   rwtimeout = 0;
 int dbgetpassword = 0; /* 0=auto, -1=never, 1=always */
 static char* dbpassword = NULL;
 PGconn* conn = NULL;
@@ -151,6 +151,8 @@ PGconn* GetConnection(void)
     const char** keywords;
     const char** values;
     const char* tmpparam = NULL;
+    errno_t rc = EOK;
+    char rwtimeoutStr[12] = {0};
 
     CalculateArgCount(&argcount);
 
@@ -165,8 +167,13 @@ PGconn* GetConnection(void)
     values[2] = progname;
     keywords[3] = "connect_timeout";  /* param connect_time   */
     values[3] = "120";                  /* default connect_time */
+
+    rc = snprintf_s(rwtimeoutStr, sizeof(rwtimeoutStr), sizeof(rwtimeoutStr) - 1, "%d",
+                    rwtimeout ? rwtimeout : 120); /* default rw_timeout 120 */
+    securec_check_ss_c(rc, "", "");
+
     keywords[4] = "rw_timeout";       /* param rw_timeout     */
-    values[4] = baseBackupTimeout;		/* value rw_timeout	*/
+    values[4] = rwtimeoutStr;         /* rw_timeout value     */
     int i = 5;
     if (dbhost != NULL) {
         keywords[i] = "host";

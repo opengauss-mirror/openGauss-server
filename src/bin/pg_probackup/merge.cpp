@@ -115,7 +115,6 @@ do_merge(time_t backup_id)
     parray  *merge_list = parray_new();
     pgBackup   *dest_backup = NULL;
     pgBackup   *full_backup = NULL;
-    int     i;
 
     if (backup_id == INVALID_BACKUP_ID)
         elog(ERROR, "required parameter is not specified: --backup-id");
@@ -247,7 +246,7 @@ do_merge(time_t backup_id)
 
 static pgBackup* find_dest_backup(parray *backups, time_t backup_id)
 {
-    int i = 0;
+    size_t i = 0;
     pgBackup *dest_backup = NULL;
 
     /* Find destination backup first */
@@ -300,7 +299,7 @@ static pgBackup* find_dest_backup(parray *backups, time_t backup_id)
 static pgBackup *check_dest_backup(parray *backups,
                                    pgBackup *full_backup)
 {
-    int i = 0;
+    size_t i = 0;
     pgBackup *dest_backup = NULL;
 
     /* Case #1 */
@@ -456,7 +455,7 @@ static pgBackup* find_full_backup(pgBackup *dest_backup, parray *backups)
                 base36enc(dest_backup->start_time));
 
         /* Find FULL backup that has unfinished merge with dest backup */
-        for (int i = 0; i < parray_num(backups); i++)
+        for (size_t i = 0; i < parray_num(backups); i++)
         {
             pgBackup   *backup = (pgBackup *) parray_get(backups, i);
 
@@ -773,7 +772,7 @@ static void threads_handle(pgBackup *dest_backup,
         use_bitmap = false;
 
     /* Setup threads */
-    for (i = 0; i < parray_num(dest_backup->files); i++)
+    for (i = 0; (size_t)i < parray_num(dest_backup->files); i++)
     {
         pgFile   *file = (pgFile *) parray_get(dest_backup->files, i);
 
@@ -883,7 +882,6 @@ static void threads_handle(pgBackup *dest_backup,
     full_backup->recovery_time = dest_backup->recovery_time;
     full_backup->recovery_xid = dest_backup->recovery_xid;
     full_backup->tli = dest_backup->tli;
-    full_backup->from_replica = dest_backup->from_replica;
 
     pfree(full_backup->external_dir_str);
     full_backup->external_dir_str = pgut_strdup(dest_backup->external_dir_str);
@@ -933,7 +931,7 @@ static void del_full_backup_files(pgBackup *dest_backup,
     */
     parray_qsort(dest_backup->files, pgFileCompareRelPathWithExternalDesc);
     parray_qsort(full_backup->files, pgFileCompareRelPathWithExternalDesc);
-    for (int i = 0; i < parray_num(full_backup->files); i++)
+    for (size_t i = 0; i < parray_num(full_backup->files); i++)
     {
         pgFile	   *full_file = (pgFile *) parray_get(full_backup->files, i);
 
@@ -1071,7 +1069,7 @@ static void merge_rename(pgBackup *dest_backup,
 static void *
 merge_files(void *arg)
 {
-    int i;
+    size_t i = 0;
     bool iscontinue = false;
     merge_files_arg *arguments = (merge_files_arg *) arg;
     size_t n_files = parray_num(arguments->dest_backup->files);
@@ -1289,7 +1287,7 @@ static void
 remove_dir_with_files(const char *path)
 {
     parray  *files = parray_new();
-    int     i;
+    size_t  i = 0;
     char    full_path[MAXPGPATH];
 
     dir_list_file(files, path, false, false, true, false, false, 0, FIO_LOCAL_HOST);
@@ -1313,7 +1311,7 @@ remove_dir_with_files(const char *path)
 static int
 get_external_index(const char *key, const parray *list)
 {
-    int     i;
+    size_t     i = 0;
 
     if (!list) /* Nowhere to search */
         return -1;
@@ -1331,7 +1329,7 @@ reorder_external_dirs(pgBackup *to_backup, parray *to_external,
                                             parray *from_external)
 {
     char    externaldir_template[MAXPGPATH];
-    int         i;
+    size_t  i = 0;
 
     join_path_components(externaldir_template, to_backup->root_dir, EXTERNAL_DIR);
     for (i = 0; i < parray_num(to_external); i++)
@@ -1344,7 +1342,7 @@ reorder_external_dirs(pgBackup *to_backup, parray *to_external,
             makeExternalDirPathByNum(old_path, externaldir_template, i + 1);
             remove_dir_with_files(old_path);
         }
-        else if (from_num != i + 1)
+        else if ((size_t)from_num != i + 1)
         {
             char old_path[MAXPGPATH];
             char new_path[MAXPGPATH];
@@ -1462,7 +1460,7 @@ merge_non_data_file(parray *parent_chain, pgBackup *full_backup,
                                         pgBackup *dest_backup, pgFile *dest_file, pgFile *tmp_file,
                                         const char *full_database_dir, const char *to_external_prefix)
 {
-    int     i;
+    size_t  i = 0;
     char    to_fullpath[MAXPGPATH];
     char    to_fullpath_tmp[MAXPGPATH]; /* used for backup */
     char    from_fullpath[MAXPGPATH];

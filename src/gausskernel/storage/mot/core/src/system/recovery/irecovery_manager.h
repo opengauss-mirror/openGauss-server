@@ -82,22 +82,6 @@ public:
      */
     virtual bool CommitRecoveredTransaction(uint64_t externalTransactionId) = 0;
 
-    /**
-     * @brief performs a commit or abort on an in-process transaction
-     * @param id the transaction id.
-     * @param isCommit specifies commit or abort.
-     * @return Int indicates the internal transaction id or 0 in case
-     * the transaction id was not found
-     */
-    virtual uint64_t PerformInProcessTx(uint64_t id, bool isCommit) = 0;
-
-    /**
-     * @brief applies a failed 2pc transaction according to its type.
-     * a detailed info is described in the function's implementation.
-     * @param internalTransactionId the transaction id to apply
-     * @return RC value denoting the operation's status
-     */
-    virtual RC ApplyInProcessTransaction(uint64_t internalTransactionId) = 0;
     virtual void SetLastReplayLsn(uint64_t lastReplayLsn) = 0;
     virtual uint64_t GetLastReplayLsn() const = 0;
 

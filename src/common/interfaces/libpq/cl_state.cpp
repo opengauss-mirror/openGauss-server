@@ -35,6 +35,9 @@ PGClientLogic::PGClientLogic(PGconn *conn)
       disable_once(false),
       preparedStatements(NULL),
       pendingStatements(NULL),
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+      query_type(CE_IGNORE),
+#endif
       droppedSchemas(NULL),
       droppedSchemas_size(0),
       droppedSchemas_allocated(0),
@@ -44,8 +47,6 @@ PGClientLogic::PGClientLogic(PGconn *conn)
       droppedColumnSettings(NULL),
       droppedColumnSettings_size(0),
       droppedColumnSettings_allocated(0),
-      isInvalidOperationOnColumn(false),
-      isDuringRefreshCacheOnError(false),
       cacheRefreshType(CacheRefreshType::ALL),
       m_hookResources(),
       val_to_update(updateGucValues::GUC_NONE)
@@ -56,6 +57,9 @@ PGClientLogic::PGClientLogic(PGconn *conn)
     pendingStatements = new PreparedStatementsList;
     TypesMap::fill_types_map();
     lastStmtName[0] = '\0';
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    query_args[0] = '\0';
+#endif
 }
 
 PGClientLogic::~PGClientLogic()

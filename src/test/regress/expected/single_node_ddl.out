@@ -36,9 +36,8 @@ drop table table1;
 create barrier;
 ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.
-clean connection to node (dn2);
-ERROR:  Un-support feature
-DETAIL:  The distributed capability is not supported currently.
+clean connection to node (dn2) for database regression;
+ERROR:  Node dn2: object not defined
 execute direct on (dn2) 'select * from table1';
 ERROR:  Un-support feature
 DETAIL:  The distributed capability is not supported currently.

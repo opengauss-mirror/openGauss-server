@@ -42,10 +42,6 @@
 #include "client_logic_cache/dataTypes.def"
 #include "client_logic_cache/types_to_oid.h"
 
-#define SAFE_FREE(p) \
-    if (p)           \
-        free(p);
-
 static void process_prepare_state(const RawValue *raw_value, StatementData *statement_data)
 {
     if (raw_value->m_is_param) {
@@ -103,7 +99,7 @@ static bool process_inside_value(const StatementData *statement_data, RawValue *
     errno_t rc = EOK;
     rc = memset_s(err_msg, MAX_ERRMSG_LENGTH, 0, MAX_ERRMSG_LENGTH);
     securec_check_c(rc, "\0", "\0");
-    if (!raw_value->process(statement_data->conn->client_logic->isDuringRefreshCacheOnError, cached_column, err_msg)) {
+    if (!raw_value->process(cached_column, err_msg)) {
         if (strlen(err_msg) == 0) {
             printfPQExpBuffer(&statement_data->conn->errorMessage,
                 libpq_gettext("ERROR(CLIENT): failed to process data of processed column\n"));
@@ -125,10 +121,18 @@ static bool save_prepared_statement(const StatementData *statement_data, const R
             return false;
         }
         if (!prepared_statement->cached_params) {
-            prepared_statement->cached_params = new CachedColumns(false, false, true);
+            prepared_statement->cached_params = new (std::nothrow) CachedColumns(false, false, true);
+            if (prepared_statement->cached_params == NULL) {
+                fprintf(stderr, "failed to new CachedColumns object\n");
+                return false;
+            }
         }
 
-        ICachedColumn *prepared_cached_column = new CachedColumn(cached_column);
+        ICachedColumn *prepared_cached_column = new (std::nothrow) CachedColumn(cached_column);
+        if (prepared_cached_column == NULL) {
+            fprintf(stderr, "failed to new CachedColumn object\n");
+            return false;
+        }
         prepared_cached_column->set_use_in_prepare(true);
         prepared_statement->cached_params->set(raw_value->m_location, prepared_cached_column);
     }
@@ -254,12 +258,17 @@ bool ValuesProcessor::process_values(StatementData *statement_data, const ICache
     return true;
 }
 
-bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *processed_data, size_t processed_data_size,
-    int original_typeid, int format, unsigned char **plain_text, size_t &plain_text_size, bool is_default)
+DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *processed_data,
+    size_t processed_data_size, int original_typeid, int format, unsigned char **plain_text, size_t &plain_text_size,
+    bool is_default)
 {
     /* unescape data from its BYTEA format */
     size_t unescaped_processed_data_size = 0;
     unsigned char *unescaped_processed_data = NULL;
+    DecryptDataRes dec_dat_res = DEC_DATA_ERR;
+    int plain_text_size_tmp = 0;
+    errno_t rc = EOK;
+
     if (format) { /* binary */
         unescaped_processed_data = (unsigned char *)processed_data;
         unescaped_processed_data_size = processed_data_size;
@@ -269,9 +278,8 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
             (unsigned char *)malloc((1 + processed_data_size) * sizeof(unsigned char));
         if (processed_data_tmp == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
-            return false;
+            return CLIENT_HEAP_ERR;
         }
-        errno_t rc = EOK;
         rc = memcpy_s(processed_data_tmp, processed_data_size + 1, processed_data, processed_data_size);
         securec_check_c(rc, "\0", "\0");
         processed_data_tmp[processed_data_size] = 0;
@@ -283,7 +291,6 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
          */
         if (final != NULL) {
             unsigned char text_to_deprocess[176]; /* see above changing the query in case of CE */
-            errno_t rc = EOK;
             rc = memset_s(text_to_deprocess, sizeof(text_to_deprocess), 0, sizeof(text_to_deprocess));
             securec_check_c(rc, "\0", "\0");
             if (final - (char *)processed_data_tmp > 2) { /* 2 is the shortest length , such as "::" */
@@ -296,17 +303,18 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
         } else {
             unescaped_processed_data = PQunescapeBytea(processed_data_tmp, &unescaped_processed_data_size);
         }
-        if (!unescaped_processed_data) {
-            fprintf(stderr, "ERROR(CLIENT): failed to unsecape processed data\n");
-            return false;
-        }
         if (processed_data_tmp != NULL) {
             libpq_free(processed_data_tmp);
         }
+        if (unescaped_processed_data == NULL) {
+            fprintf(stderr, "ERROR(CLIENT): failed to unescape processed data\n");
+            return DEC_DATA_ERR;
+        }
     }
+
     if (!unescaped_processed_data_size) {
         plain_text_size = 0;
-        return true;
+        return DEC_DATA_SUCCEED;
     } else if (unescaped_processed_data_size < sizeof(Oid)) {
         /*
          * if the size is smaller the size of Oid, so setting oid is not there
@@ -314,10 +322,14 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
          */
         fprintf(stderr, "ERROR(CLIENT): wrong value for processed column\n");
         libpq_free(unescaped_processed_data);
-        return false;
+        return DEC_DATA_ERR;
     }
-    int plain_text_size_tmp = HooksManager::deprocess_data(*conn->client_logic, unescaped_processed_data,
-        unescaped_processed_data_size, plain_text);
+    dec_dat_res = HooksManager::deprocess_data(*conn->client_logic, unescaped_processed_data,
+        unescaped_processed_data_size, plain_text, &plain_text_size_tmp);
+    if (dec_dat_res != DEC_DATA_SUCCEED) {
+        return dec_dat_res;
+    }
+
     bool plain_invalid = plain_text_size_tmp == 0 && !(*plain_text);
     if (plain_invalid) {
         /* the only accetped way to reach here is no proper cmk permissions */
@@ -325,18 +337,20 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
         if (*plain_text == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
             libpq_free(unescaped_processed_data);
-            return false;
+            return CLIENT_HEAP_ERR;
         }
         errno_t rc = memcpy_s(*plain_text, processed_data_size, processed_data, processed_data_size);
         securec_check_c(rc, "\0", "\0");
         plain_text_size = processed_data_size;
         libpq_free(unescaped_processed_data);
-        return true;
+        return DEC_DATA_SUCCEED;
     }
+
     libpq_free(unescaped_processed_data);
     if (plain_text_size_tmp < 0 || !(*plain_text)) {
-        return false;
+        return DEC_DATA_SUCCEED;
     }
+
     plain_text_size = plain_text_size_tmp;
     if (!format) { /* text */
         process_text_format(plain_text, plain_text_size, is_default, original_typeid);
@@ -348,19 +362,21 @@ bool ValuesProcessor::deprocess_value(PGconn *conn, const unsigned char *process
         securec_check_c(rc, "\0", "\0");
         unsigned char *result =
             Format::restore_binary(*plain_text, plain_text_size, original_typeid, 0, -1, &result_size, err_msg);
-        SAFE_FREE(*plain_text);
+        libpq_free(*plain_text);
         *plain_text = (unsigned char *)malloc(result_size + 1);
         if (*plain_text == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
             libpq_free(unescaped_processed_data);
-            return false;
+            return CLIENT_HEAP_ERR;
         }
         rc = memcpy_s(*plain_text, result_size + 1, result, result_size);
         securec_check_c(rc, "\0", "\0");
         (*plain_text)[result_size] = 0;
         plain_text_size = result_size;
+        libpq_free(result);
     }
-    return true;
+
+    return DEC_DATA_SUCCEED;
 }
 
 const bool ValuesProcessor::textual_rep(const Oid oid)
@@ -379,6 +395,7 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
         size_t tmp_plain_text_allocated = strlen((char *)*plain_text) + 256;
         char *tmp_plain_text = (char *)malloc(tmp_plain_text_allocated);
         if (tmp_plain_text == NULL) {
+            libpq_free(res);
             return;
         }
         if (textual_rep(original_typeid)) {
@@ -392,8 +409,8 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
         check_strncat_s(strncat_s(tmp_plain_text, tmp_plain_text_allocated, "::", 2));
         const char *type = TypesMap::typesTextToOidMap.find_by_oid(original_typeid);
         if (type == NULL) {
-            free(tmp_plain_text);
-            tmp_plain_text = NULL;
+            libpq_free(tmp_plain_text);
+            libpq_free(res);
             return;
         }
         check_strncat_s(
@@ -406,21 +423,24 @@ void ValuesProcessor::process_text_format(unsigned char **plain_text, size_t &pl
         *plain_text = (unsigned char *)malloc(strlen(tmp_plain_text) + 1);
         if (*plain_text == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when processing text format\n");
+            libpq_free(tmp_plain_text);
+            libpq_free(res);
             return;
         }
         check_memcpy_s(memcpy_s((char *)*plain_text, strlen(tmp_plain_text) + 1, (char *)tmp_plain_text,
             strlen((char *)tmp_plain_text)));
         (*plain_text)[plain_text_size] = '\0';
-        free(tmp_plain_text);
+        libpq_free(tmp_plain_text);
     } else {
-        SAFE_FREE(*plain_text);
+        libpq_free(*plain_text);
         *plain_text = (unsigned char *)malloc(result_size + 1);
         if (*plain_text == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when processing text format\n");
+            libpq_free(res);
             return;
         }
         errno_t rc = EOK;
-        rc = memcpy_s(*plain_text, result_size, res, result_size);
+        rc = memcpy_s(*plain_text, result_size + 1, res, result_size);
         securec_check_c(rc, "\0", "\0");
         (*plain_text)[result_size] = 0;
         plain_text_size = result_size;

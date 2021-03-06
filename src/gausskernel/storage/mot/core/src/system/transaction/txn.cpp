@@ -317,8 +317,7 @@ void TxnManager::LiteCommitPrepared()
 
 void TxnManager::EndTransaction()
 {
-    if (GetGlobalConfiguration().m_enableRedoLog &&
-        IsFailedCommitPrepared() == false) {
+    if (GetGlobalConfiguration().m_enableRedoLog) {
         m_occManager.ReleaseLocks(this);
     }
     CleanDDLChanges();
@@ -332,33 +331,6 @@ void TxnManager::RedoWriteAction(bool isCommit)
         m_redoLog.Commit();
     else
         m_redoLog.Rollback();
-}
-
-RC TxnManager::FailedCommitPrepared()
-{
-    if (m_isLightSession && m_txnDdlAccess->Size() == 0) {
-        return RC_OK;
-    }
-
-    if (m_csn == CSNManager::INVALID_CSN) {
-        SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
-    }
-
-    if (m_isLightSession == false) {
-        // Row already Locked!
-        m_occManager.WriteChanges(this);
-    }
-
-    if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->EndCommit(this);
-    }
-
-    if (SavePreparedData() != RC_OK) {
-        return RC_PANIC;
-    }
-
-    Cleanup();
-    return RC_OK;
 }
 
 void TxnManager::Cleanup()
@@ -376,7 +348,6 @@ void TxnManager::Cleanup()
     m_internalTransactionId++;
     m_internalStmtCount = 0;
     m_redoLog.Reset();
-    SetFailedCommitPrepared(false);
     GcSessionEnd();
     ClearErrorStack();
     m_accessMgr->ClearTableCache();
@@ -668,7 +639,6 @@ TxnManager::TxnManager(SessionContext* session_context)
       m_internalTransactionId(((uint64_t)m_sessionContext->GetSessionId()) << SESSION_ID_BITS),
       m_internalStmtCount(0),
       m_isolationLevel(READ_COMMITED),
-      m_failedCommitPrepared(false),
       m_isLightSession(false),
       m_errIx(nullptr),
       m_err(RC_OK)
@@ -681,13 +651,6 @@ TxnManager::~TxnManager()
 {
     if (GetGlobalConfiguration().m_enableCheckpoint) {
         GetCheckpointManager()->EndCommit(this);
-    }
-
-    if (m_state == MOT::TxnState::TXN_PREPARE) {
-        if (SavePreparedData() != RC_OK) {
-            MOT_LOG_ERROR("savePreparedData failed");
-        }
-        Cleanup();
     }
 
     MOT_LOG_DEBUG("txn_man::~txn_man - memory pools released for thread_id=%lu", m_threadId);
@@ -1032,6 +995,16 @@ Index* TxnManager::GetIndexByExternalId(uint64_t table_id, uint64_t index_id)
 
 RC TxnManager::CreateTable(Table* table)
 {
+    size_t serializeRedoSize = table->SerializeRedoSize();
+    if (serializeRedoSize > RedoLogWriter::REDO_MAX_TABLE_SERIALIZE_SIZE) {
+        MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
+            "Create Table",
+            "Table Serialize size %zu exceeds the maximum allowed limit %u",
+            serializeRedoSize,
+            RedoLogWriter::REDO_MAX_TABLE_SERIALIZE_SIZE);
+        return RC_ERROR;
+    }
+
     TxnDDLAccess::DDLAccess* ddl_access =
         new (std::nothrow) TxnDDLAccess::DDLAccess(table->GetTableExId(), DDL_ACCESS_CREATE_TABLE, (void*)table);
     if (ddl_access == nullptr) {
@@ -1170,6 +1143,15 @@ RC TxnManager::TruncateTable(Table* table)
 
 RC TxnManager::CreateIndex(Table* table, MOT::Index* index, bool is_primary)
 {
+    size_t serializeRedoSize = table->SerializeItemSize(index);
+    if (serializeRedoSize > RedoLogWriter::REDO_MAX_INDEX_SERIALIZE_SIZE) {
+        MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT,
+            "Create Index",
+            "Index Serialize size %zu exceeds the maximum allowed limit %u",
+            serializeRedoSize,
+            RedoLogWriter::REDO_MAX_INDEX_SERIALIZE_SIZE);
+        return RC_ERROR;
+    }
 
     // allocate DDL before work and fail immediately if required
     TxnDDLAccess::DDLAccess* ddl_access =
@@ -1254,28 +1236,5 @@ RC TxnManager::DropIndex(MOT::Index* index)
     table->RemoveSecondaryIndexFromMetaData(index);
     m_txnDdlAccess->Add(new_ddl_access);
     return res;
-}
-
-RC TxnManager::SavePreparedData()
-{
-    m_redoLog.Reset();
-    SetFailedCommitPrepared(true);
-
-    if (m_redoLog.PrepareToInProcessTxns() != RC_OK) {
-        MOT_LOG_ERROR("PrepareToInProcessTxns failed [%lu]", m_transactionId);
-        return RC_ERROR;
-    }
-
-    if (MOT::GetRecoveryManager()->ApplyInProcessTransaction(m_internalTransactionId) != RC_OK) {
-        MOT_LOG_ERROR("ApplyInProcessTransaction failed [%lu]", m_transactionId);
-        return RC_ERROR;
-    }
-
-    if (m_transactionId != INVALID_TRANSACTION_ID) {
-        MOT_LOG_DEBUG("mapping ext txid %lu to %lu", m_transactionId, m_internalTransactionId);
-        MOTEngine::GetInstance()->GetInProcessTransactions().UpdateTxIdMap(m_internalTransactionId, m_transactionId);
-    }
-
-    return RC_OK;
 }
 }  // namespace MOT

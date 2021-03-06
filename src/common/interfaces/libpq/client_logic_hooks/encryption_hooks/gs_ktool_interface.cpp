@@ -92,8 +92,7 @@ bool create_cmk(unsigned int cmk_id)
     }
 
     if (cmk_len != DEFAULT_CMK_LEN) {
-        printf(
-            "ERROR(GS_KTOOL): Default cmk len is %u, but the len of cmk read from gs_ktool is %u.\n",
+        printf("ERROR(GS_KTOOL): Default cmk len is %u, but the len of cmk read from gs_ktool is %u.\n",
             DEFAULT_CMK_LEN, cmk_len);
         return false;
     }
@@ -101,7 +100,7 @@ bool create_cmk(unsigned int cmk_id)
     return true;
 }
 
-bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain, bool is_report_err)
+bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain)
 {
     unsigned int cmk_len = 0;
 
@@ -120,17 +119,14 @@ bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain, bool is
     /* case a : try to get cmk plain from cache */
     if (!get_cmk_from_cache(cmk_cache_list, cmk_id, cmk_plain)) {
         /* case b : failed to get cmk plian from cache, try to get it from gs_ktool */
-        if (!get_cmk_plain(cmk_id, cmk_plain, &cmk_len, is_report_err)) {
+        if (!get_cmk_plain(cmk_id, cmk_plain, &cmk_len)) {
             return false;
         }
 
         /* check the length of cmk plain read from gs_ktool */
         if (cmk_len != DEFAULT_CMK_LEN) {
-            if (is_report_err) {
-                printf(
-                    "ERROR(GS_KTOOL): Default cmk len is %u, but the len of cmk read from gs_ktool is %u.\n",
-                    DEFAULT_CMK_LEN, cmk_len);
-            }
+            printf("ERROR(CLIENT): Default cmk len is %u, but the len of cmk read from gs_ktool is %u.\n",
+                DEFAULT_CMK_LEN, cmk_len);
             return false;
         }
 
@@ -141,7 +137,7 @@ bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain, bool is
 }
 
 bool encrypt_cek_use_aes256(const unsigned char *cek_plain, size_t cek_plain_size, unsigned char *cmk_plain,
-    unsigned char *cek_ciph, size_t &cek_ciph_len, bool is_report_err)
+    unsigned char *cek_ciph, size_t &cek_ciph_len)
 {
     /* use cmk_plian to generate derived_cmk_plain */
     AeadAesHamcEncKey aes_and_hmac_cek = AeadAesHamcEncKey(cmk_plain, (size_t)DEFAULT_CMK_LEN);
@@ -151,28 +147,24 @@ bool encrypt_cek_use_aes256(const unsigned char *cek_plain, size_t cek_plain_siz
     /* encrypt cek with cmk */
     cek_ciph_len =
         encrypt_data(cek_plain, cek_plain_size, *p_aes_and_hmac_cek, enc_type, cek_ciph, AEAD_AES_256_CBC_HMAC_SHA256);
-    if (cek_ciph_len <= 0 && is_report_err) {
-        if (is_report_err) {
-            printf("ERROR(CLIENT): Fail to encrypt cek with cmk.\n");
-        }
+    if (cek_ciph_len <= 0) {
+        printf("ERROR(CLIENT): Fail to encrypt cek with cmk.\n");
         return false;
     }
 
     return true;
 }
 
-bool decrypt_cek_use_aes256(const unsigned char *cek_ciphe, size_t cek_ciphe_size, unsigned char *cmk_plain,
-    unsigned char *cek_plain, size_t *cek_plain_len, bool is_report_err)
+bool decrypt_cek_use_aes256(const unsigned char *cek_cipher, size_t cek_cipher_size, unsigned char *cmk_plain,
+    unsigned char *cek_plain, size_t *cek_plain_len)
 {
     AeadAesHamcEncKey derived_cmk_plain = AeadAesHamcEncKey(cmk_plain, (size_t)DEFAULT_CMK_LEN);
     AeadAesHamcEncKey *p_derived_cmk_plain = &derived_cmk_plain;
 
     *cek_plain_len =
-        decrypt_data(cek_ciphe, cek_ciphe_size, *p_derived_cmk_plain, cek_plain, AEAD_AES_256_CBC_HMAC_SHA256);
+        decrypt_data(cek_cipher, cek_cipher_size, *p_derived_cmk_plain, cek_plain, AEAD_AES_256_CBC_HMAC_SHA256);
     if (*cek_plain_len <= 0) {
-        if (is_report_err) {
-            printf("ERROR(CLIENT): Fail to dencrypt cek with cmk.\n");
-        }
+        printf("ERROR(CLIENT): Fail to dencrypt cek with cmk.\n");
         return false;
     }
 

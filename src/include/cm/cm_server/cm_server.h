@@ -195,6 +195,11 @@ typedef struct cm_instance_report_status {
     uint32 obs_delete_xlog_time;
     struct timeval finishredo_time;
     bool finish_redo;
+    DatanodeSyncList currentSyncList;
+    DatanodeSyncList exceptSyncList;
+    int waitReduceTimes;
+    int waitIncreaseTimes;
+    int waitSyncTime;
 } cm_instance_report_status;
 
 typedef struct cm_instance_group_report_status {
@@ -231,8 +236,10 @@ typedef enum ProcessingMode {
 
 extern volatile sig_atomic_t got_stop;
 extern volatile sig_atomic_t got_parameter_reload;
+extern volatile sig_atomic_t g_SetReplaceCnStatus;
 extern volatile sig_atomic_t ha_connection_closed;
 extern THR_LOCAL volatile sig_atomic_t got_conns_close;
+extern char g_replaceCnStatusFile[MAX_PATH_LEN];
 
 extern void ProcessStartupPacket(int epollFd, int events, void* arg);
 extern int cm_server_process_ha_startuppacket(CM_Connection* con, CM_StringInfo msg);

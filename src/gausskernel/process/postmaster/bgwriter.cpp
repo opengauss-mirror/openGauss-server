@@ -819,6 +819,7 @@ void incre_ckpt_background_writer_main(void)
 
     pgstat_report_appname("IncrBgWriter");
     pgstat_report_activity(STATE_IDLE, NULL);
+
 	/* Loop forever */
     for (;;) {
         int rc;
@@ -852,7 +853,8 @@ void incre_ckpt_background_writer_main(void)
                 proc_exit(0);
             }
         }
-		pgstat_report_activity(STATE_IDLE, NULL);
+
+        pgstat_report_activity(STATE_IDLE, NULL);
         sleep_time = get_bgwriter_sleep_time();
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, sleep_time);
         if (rc & WL_POSTMASTER_DEATH) {
@@ -861,8 +863,8 @@ void incre_ckpt_background_writer_main(void)
 
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);
-		
-		pgstat_report_activity(STATE_RUNNING, NULL);
+
+        pgstat_report_activity(STATE_RUNNING, NULL);
 
         now = get_time_ms();
         t_thrd.bgwriter_cxt.next_flush_time = now + u_sess->attr.attr_storage.BgWriterDelay;

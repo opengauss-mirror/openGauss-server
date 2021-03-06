@@ -588,9 +588,9 @@ typedef MinimalTupleData* MinimalTuple;
  * should be explicitly set invalid in manufactured tuples.
  */
 typedef struct HeapTupleData {
+    uint32 t_len;           /* length of *t_data */
     uint1 tupTableType = HEAP_TUPLE;
     int2   t_bucketId;
-    uint32 t_len;           /* length of *t_data */
     ItemPointerData t_self; /* SelfItemPointer */
     Oid t_tableOid;         /* table the tuple came from */
     TransactionId t_xid_base;

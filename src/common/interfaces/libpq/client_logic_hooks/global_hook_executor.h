@@ -69,7 +69,7 @@ public:
     virtual bool set_deletion_expected();
 
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    virtual bool delete_localkms_file();
+    virtual bool get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len);
 #endif
     /*
      * BUILT-IN FUNCTIONS

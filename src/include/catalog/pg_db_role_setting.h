@@ -64,6 +64,9 @@ typedef FormData_pg_db_role_setting *Form_pg_db_role_setting;
 extern void AlterSetting(Oid databaseid, Oid roleid, VariableSetStmt *setstmt);
 extern void DropSetting(Oid databaseid, Oid roleid);
 extern void ApplySetting(Oid databaseid, Oid roleid, Relation relsetting, GucSource source);
+#ifdef ENABLE_MULTIPLE_NODES
+extern void printHintInfo(const char* dbName, const char* userName);
+#endif
 
 #endif   /* PG_DB_ROLE_SETTING_H */
 

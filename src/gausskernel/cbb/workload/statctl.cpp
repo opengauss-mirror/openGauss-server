@@ -2630,6 +2630,10 @@ void WLMUpdateSingleNodeUserInfo(UserData* userData)
     int curr_iops,peak_iops;
     int memsize = 0;
 
+    if (userData == NULL) {
+        ereport(LOG, (errmsg("userData is NULL.")));
+        return;
+    }
     memsize = WLMGetUserMemory(userData);
     if (userData->childlist) {
         foreach_cell(cell, userData->childlist) {

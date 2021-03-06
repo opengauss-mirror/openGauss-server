@@ -39,11 +39,13 @@ DECLARE_LOGGER(RedoLog, TxnLogger);
 bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, Key* primaryKey, uint64_t attr,
     uint64_t attrSize, const void* newValue, uint64_t externalId)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + primaryKey->GetKeyLength() +
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + primaryKey->GetKeyLength() +
                          sizeof(attr) + sizeof(attrSize) + attrSize;
     entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
+    if (redoLogBuffer.FreeSize() < entrySize) {
         return false;
+    }
+
     redoLogBuffer.Append(OperationCode::UPDATE_ROW_VARIABLE);
     redoLogBuffer.Append(table);
     redoLogBuffer.Append(externalId);
@@ -51,35 +53,6 @@ bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, K
     redoLogBuffer.Append(attr);
     redoLogBuffer.Append(attrSize);
     redoLogBuffer.Append(newValue, attrSize);
-    return true;
-}
-
-bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, uint64_t primaryKey, uint64_t attr,
-    uint64_t attrSize, uint64_t newValue, uint64_t externalId)
-{
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + sizeof(primaryKey) +
-                         sizeof(attr) + sizeof(newValue);
-    entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
-        return false;
-    redoLogBuffer.Append(OperationCode::UPDATE_ROW, table, externalId, primaryKey, attr, newValue);
-    return true;
-}
-
-bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, Key* primaryKey, uint64_t attr,
-    uint64_t attrSize, uint64_t newValue, uint64_t externalId)
-{
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + primaryKey->GetKeyLength() +
-                         sizeof(attr) + sizeof(newValue);
-    entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
-        return false;
-    redoLogBuffer.Append(OperationCode::UPDATE_ROW);
-    redoLogBuffer.Append(table);
-    redoLogBuffer.Append(externalId);
-    redoLogBuffer.Append(primaryKey->GetKeyBuf(), primaryKey->GetKeyLength());
-    redoLogBuffer.Append(attr);
-    redoLogBuffer.Append(newValue);
     return true;
 }
 
@@ -92,14 +65,15 @@ bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, Row* row, BitmapS
     Table* table = row->GetTable();
     uint64_t tableId = table->GetTableId();
     uint64_t externalId = table->GetTableExId();
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(tableId) + sizeof(externalId) +
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(tableId) + sizeof(externalId) +
                          sizeof(uint16_t) /* key_length */ + index->GetKeyLength() +
                          modifiedColumns->GetLength()   /* updated columns bitmap */
                          + modifiedColumns->GetLength() /* null fields bitmap (should be the same length) */
                          + row->GetTupleSize();         /* not accurate, avoid double looping on updated column */
     entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
+    if (redoLogBuffer.FreeSize() < entrySize) {
         return false;
+    }
 
     const Key* key = &maxKey;
     uint8_t* rowData = const_cast<uint8_t*>(row->GetData());
@@ -128,12 +102,14 @@ bool RedoLogWriter::AppendUpdate(RedoLogBuffer& redoLogBuffer, Row* row, BitmapS
 bool RedoLogWriter::AppendOverwriteRow(RedoLogBuffer& redoLogBuffer, uint64_t table, Key* primaryKey,
     const void* rowData, uint64_t rowDataSize, uint64_t externalId)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) +
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) +
                          sizeof(uint16_t) /* key_length */ + primaryKey->GetKeyLength() + sizeof(rowDataSize) +
                          rowDataSize;
     entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
+    if (redoLogBuffer.FreeSize() < entrySize) {
         return false;
+    }
+
     redoLogBuffer.Append(OperationCode::OVERWRITE_ROW);
     redoLogBuffer.Append(table);
     redoLogBuffer.Append(externalId);
@@ -147,12 +123,14 @@ bool RedoLogWriter::AppendOverwriteRow(RedoLogBuffer& redoLogBuffer, uint64_t ta
 bool RedoLogWriter::AppendCreateRow(RedoLogBuffer& redoLogBuffer, uint64_t table, Key* primaryKey, const void* rowData,
     uint64_t rowDataSize, uint64_t externalId, uint64_t rowId)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + sizeof(rowId) +
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) + sizeof(rowId) +
                          sizeof(uint16_t) /* key_length */ + primaryKey->GetKeyLength() + sizeof(rowDataSize) +
                          rowDataSize;
     entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
+    if (redoLogBuffer.FreeSize() < entrySize) {
         return false;
+    }
+
     redoLogBuffer.Append(OperationCode::CREATE_ROW);
     redoLogBuffer.Append(table);
     redoLogBuffer.Append(externalId);
@@ -167,11 +145,13 @@ bool RedoLogWriter::AppendCreateRow(RedoLogBuffer& redoLogBuffer, uint64_t table
 bool RedoLogWriter::AppendRemove(
     RedoLogBuffer& redoLogBuffer, uint64_t table, const Key* primaryKey, uint64_t externalId)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) +
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(table) + sizeof(externalId) +
                          sizeof(uint16_t) /* key_length */ + primaryKey->GetKeyLength();
     entrySize += sizeof(EndSegmentBlock);
-    if (redoLogBuffer.FreeSize() < entrySize)
+    if (redoLogBuffer.FreeSize() < entrySize) {
         return false;
+    }
+
     redoLogBuffer.Append(OperationCode::REMOVE_ROW);
     redoLogBuffer.Append(table);
     redoLogBuffer.Append(externalId);
@@ -237,34 +217,31 @@ bool RedoLogWriter::AppendPartial(RedoLogBuffer& redoLogBuffer, TxnManager* txn)
 
 bool RedoLogWriter::AppendIndex(RedoLogBuffer& buffer, Table* table, Index* index)
 {
-    size_t bufSize = table->SerializeItemSize(index);
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(size_t) + sizeof(uint64_t) + bufSize + sizeof(EndSegmentBlock);
-    if (buffer.FreeSize() < entrySize)
-        return false;
-
-    char* buf = new (std::nothrow) char[bufSize];
-    if (buf == nullptr) {
-        MOT_LOG_ERROR("Failed to allocate buffer");
+    size_t serializeSize = table->SerializeItemSize(index);
+    uint64_t entrySize = REDO_CREATE_INDEX_FORMAT_OVERHEAD + serializeSize;
+    if (buffer.FreeSize() < entrySize) {
         return false;
     }
 
     uint64_t tableId = table->GetTableExId();
-    table->SerializeItem(buf, index);
     buffer.Append(OperationCode::CREATE_INDEX);
-    buffer.Append(bufSize);
+    buffer.Append(serializeSize);
     buffer.Append(tableId);
-    buffer.Append(buf, bufSize);
+    char* serializeBuf = (char*)buffer.AllocAppend(serializeSize);
+    MOT_ASSERT(serializeBuf != nullptr);
+    table->SerializeItem(serializeBuf, index);
 
-    delete[] buf;
     return true;
 }
 
 bool RedoLogWriter::AppendDropIndex(RedoLogBuffer& buffer, Table* table, Index* index)
 {
-    uint16_t entrySize =
+    uint64_t entrySize =
         sizeof(OperationCode) + sizeof(uint64_t) + sizeof(size_t) + index->GetName().length() + sizeof(EndSegmentBlock);
-    if (buffer.FreeSize() < entrySize)
+    if (buffer.FreeSize() < entrySize) {
         return false;
+    }
+
     uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::DROP_INDEX);
     buffer.Append(tableId);
@@ -275,31 +252,27 @@ bool RedoLogWriter::AppendDropIndex(RedoLogBuffer& buffer, Table* table, Index* 
 
 bool RedoLogWriter::AppendTable(RedoLogBuffer& buffer, Table* table)
 {
-    size_t bufSize = table->SerializeSize();
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(size_t) + bufSize + sizeof(EndSegmentBlock);
-    if (buffer.FreeSize() < entrySize)
-        return false;
-
-    char* buf = new (std::nothrow) char[bufSize];
-    if (buf == nullptr) {
-        MOT_LOG_ERROR("Failed to allocate buffer");
+    size_t serializeSize = table->SerializeRedoSize();
+    uint64_t entrySize = REDO_CREATE_TABLE_FORMAT_OVERHEAD + serializeSize;
+    if (buffer.FreeSize() < entrySize) {
         return false;
     }
 
-    table->Serialize(buf);
     buffer.Append(OperationCode::CREATE_TABLE);
-    buffer.Append(bufSize);
-    buffer.Append(buf, bufSize);
+    buffer.Append(serializeSize);
+    char* serializeBuf = (char*)buffer.AllocAppend(serializeSize);
+    MOT_ASSERT(serializeBuf != nullptr);
+    table->SerializeRedo(serializeBuf);
 
-    delete[] buf;
     return true;
 }
 
 bool RedoLogWriter::AppendDropTable(RedoLogBuffer& buffer, Table* table)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
-    if (buffer.FreeSize() < entrySize)
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
+    if (buffer.FreeSize() < entrySize) {
         return false;
+    }
 
     uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::DROP_TABLE);
@@ -309,9 +282,10 @@ bool RedoLogWriter::AppendDropTable(RedoLogBuffer& buffer, Table* table)
 
 bool RedoLogWriter::AppendTruncateTable(RedoLogBuffer& buffer, Table* table)
 {
-    uint16_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
-    if (buffer.FreeSize() < entrySize)
+    uint64_t entrySize = sizeof(OperationCode) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
+    if (buffer.FreeSize() < entrySize) {
         return false;
+    }
 
     uint64_t tableId = table->GetTableExId();
     buffer.Append(OperationCode::TRUNCATE_TABLE);

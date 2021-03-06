@@ -1781,7 +1781,7 @@ static void asyncQueueAdvanceTail(void)
          * SimpleLruTruncate() will ask for AsyncCtlLock but will also release
          * the lock again.
          */
-        SimpleLruTruncate(AsyncCtl, newtailpage);
+        SimpleLruTruncate(AsyncCtl, newtailpage, false, NUM_SLRU_DEFAULT_PARTITION);
     }
 }
 

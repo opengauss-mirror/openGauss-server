@@ -641,6 +641,7 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     bucket->rd_node.bucketNode = bucketId;
     bucket->rd_rel = NULL;
     bucket->rd_options = NULL;
+    bucket->rd_indexcxt = NULL;
 
     if (!IsBootstrapProcessingMode()) {
         ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, bucket);
@@ -675,6 +676,14 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     RelationOpenSmgr(bucket);
     /* just reuse relatition or partition's stat info */    
     bucket->pgstat_info = (part == NULL) ? rel->pgstat_info : part->pd_pgstat_info; 
+
+    if (OidIsValid(rel->rd_rel->relam)) {
+        bucket->rd_indexcxt = AllocSetContextCreate(u_sess->cache_mem_cxt,
+            PointerIsValid(part) ? PartitionGetPartitionName(part) : RelationGetRelationName(rel),
+            ALLOCSET_SMALL_MINSIZE,
+            ALLOCSET_SMALL_INITSIZE,
+            ALLOCSET_SMALL_MAXSIZE);
+    }
 
     if (NULL != merge_reloption) {
         int relOptSize = VARSIZE_ANY(merge_reloption);

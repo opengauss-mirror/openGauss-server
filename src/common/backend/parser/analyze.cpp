@@ -408,7 +408,7 @@ bool analyze_requires_snapshot(Node* parseTree)
 #endif
         case T_RefreshMatViewStmt:
             /* yes, because the SELECT from pg_rewrite must be analyzed */
-            if (IS_PGXC_DATANODE) {
+            if ((!((RefreshMatViewStmt *)parseTree)->incremental) || IS_PGXC_DATANODE) {
                 result = true;
             }
             break;
@@ -807,6 +807,17 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
                 errmsg("Un-support feature"),
                 errdetail("replication table doesn't allow DELETE LIMIT")));
     }
+
+    if (qry->limitCount != NULL) {
+        /* flag for discriminating rownum */
+        Const *flag = makeNode(Const);
+        flag->ismaxvalue = true;
+        flag->location = -1;
+        flag->consttype = INT8OID;
+        flag->consttypmod = -1;
+        qry->limitOffset = (Node*)flag;
+    }
+    
 #ifdef ENABLE_MULTIPLE_NODES
     CheckTsDelete(pstate, qry);
 #endif   /* ENABLE_MULTIPLE_NODES */

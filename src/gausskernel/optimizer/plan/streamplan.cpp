@@ -1020,8 +1020,10 @@ List* distributeKeyIndex(PlannerInfo* root, List* distributed_keys, List* target
      */
     bool* matched_key = (bool*)palloc0(sizeof(bool) * list_length(targetlist));
 
-    if (NIL == distributed_keys)
+    if (NIL == distributed_keys) {
+        pfree_ext(matched_key);
         return NIL;
+    }
 
     foreach (cell, distributed_keys) {
         int index = 0, matched_index = 0;
@@ -1053,12 +1055,14 @@ List* distributeKeyIndex(PlannerInfo* root, List* distributed_keys, List* target
             if (matched_index != 0)
                 result = lappend_int(result, matched_index);
             else {
+                pfree_ext(matched_key);
                 list_free_ext(result);
                 return NULL;
             }
         }
     }
 
+    pfree_ext(matched_key);
     return result;
 }
 

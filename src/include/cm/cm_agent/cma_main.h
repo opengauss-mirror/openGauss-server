@@ -210,10 +210,11 @@ extern pthread_rwlock_t g_datanodes_failover_lock;
 extern pthread_rwlock_t g_gtms_failover_lock;
 extern int g_gtmMode;
 
-extern int datanode_status_check_and_report_wrapper(agent_to_cm_datanode_status_report* report_msg, uint32 ii,
-    char* data_path, bool do_build, uint32 check_dn_sql5_timer, agent_to_cm_datanode_barrier_status_report* barrier_info);
-extern int node_match_find(char* node_type, const char* node_port, const char* node_host, char* node_port1,
-    char* node_host1, int* node_index, int* instance_index, int* inode_type);
+extern int datanode_status_check_and_report_wrapper(agent_to_cm_datanode_status_report *report_msg, uint32 ii,
+    char *data_path, bool do_build, uint32 check_dn_sql5_timer,
+    agent_to_cm_coordinate_barrier_status_report* barrier, AgentToCmserverDnSyncList *syncListMsg);
+extern int node_match_find(char *node_type, const char *node_port, const char *node_host, char *node_port1,
+    char *node_host1, int *node_index, int *instance_index, int *inode_type);
 extern int check_one_instance_status(const char *process_name, const char *cmd_line, int *isPhonyDead);
 extern void report_conn_fail_alarm(AlarmType alarmType, InstanceTypes instance_type, uint32 instanceId);
 extern int get_connection_to_coordinator();

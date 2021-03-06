@@ -30,7 +30,12 @@
 // DEFINE NEW HOOKS HERE
 static GlobalHookExecutor *EncryptionGlobalHookExecutorCreator(PGClientLogic &client_logic)
 {
-    return new EncryptionGlobalHookExecutor(client_logic);
+    GlobalHookExecutor *encryption_global_hook = new (std::nothrow) EncryptionGlobalHookExecutor(client_logic);
+    if (encryption_global_hook == NULL) {
+        fprintf(stderr, "failed to new GlobalHookExecutor object\n");
+        exit(EXIT_FAILURE);
+    }
+    return encryption_global_hook;
 }
 
 static void EncryptionGlobalHookExecutorDeleter(GlobalHookExecutor *global_hook_executor)
@@ -40,7 +45,13 @@ static void EncryptionGlobalHookExecutorDeleter(GlobalHookExecutor *global_hook_
 
 static ColumnHookExecutor *EncryptionColumnHookExecutorCreator(GlobalHookExecutor *global_hook_executor, Oid oid)
 {
-    return new EncryptionColumnHookExecutor(global_hook_executor, oid);
+    ColumnHookExecutor *encryption_column_hook =
+        new (std::nothrow) EncryptionColumnHookExecutor(global_hook_executor, oid);
+    if (encryption_column_hook == NULL) {
+        fprintf(stderr, "failed to new ColumnHookExecutor object\n");
+        exit(EXIT_FAILURE);
+    }
+    return encryption_column_hook;
 }
 
 static void EncryptionColumnHookExecutorDeleter(ColumnHookExecutor *column_hook_executor)

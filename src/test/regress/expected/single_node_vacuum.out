@@ -72,9 +72,11 @@ ERROR:  ANALYZE cannot be executed from a function or multi-command string
 CONTEXT:  SQL function "do_analyze" statement 1
 SQL function "wrap_do_analyze" statement 1
 ANALYZE vaccluster;
+set xc_maintenance_mode = on;
 VACUUM FULL pg_am;
 VACUUM FULL pg_class;
 VACUUM FULL pg_database;
+set xc_maintenance_mode = off;
 VACUUM FULL vaccluster;
 VACUUM FULL vactst;
 -- check behavior with duplicate column mentions

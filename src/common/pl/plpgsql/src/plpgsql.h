@@ -764,7 +764,6 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
 
 typedef struct PLpgSQL_execstate { /* Runtime execution data	*/
     PLpgSQL_function* func;        /* function being executed */
-
     Datum retval;
     bool retisnull;
     Oid rettype; /* type of current retval */
@@ -932,7 +931,9 @@ extern bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgs
 extern void plpgsql_HashTableDeleteAll();
 extern void plpgsql_HashTableDeleteFunc(Oid func_oid);
 extern void plpgsql_HashTableDelete(PLpgSQL_function* func);
-
+extern bool plpgsql_get_current_value_stp_with_exception();
+extern void plpgsql_restore_current_value_stp_with_exception(bool saved_current_stp_with_exception);
+extern void plpgsql_set_current_value_stp_with_exception();
 /* ----------
  * Functions in pl_handler.c
  * ----------

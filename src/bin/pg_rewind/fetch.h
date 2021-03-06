@@ -33,18 +33,14 @@ extern PGconn* conn;
  */
 extern BuildErrorCode fetchSourceFileList();
 extern char* fetchFile(char* filename, size_t* filesize);
-extern BuildErrorCode executeWalDataMap(filemap_t* map);
 extern BuildErrorCode executeFileMap(filemap_t* map, FILE *file);
 extern BuildErrorCode libpqConnect(const char* connstr);
 extern bool checkDummyStandbyConnection(void);
 extern void libpqDisconnect(void);
 extern BuildErrorCode libpqGetParameters(void);
-extern XLogRecPtr libpqGetCurrentXlogInsertLocation(void);
+extern XLogRecPtr libpqGetCurrentXlogFlushLocation(void);
 
-extern void libpqGetSourceSlot(XLogRecPtr* recptr);
 extern void libpqRequestCheckpoint(void);
-
-extern char* libpqGetTargetSlotName();
 
 typedef void (*process_file_callback_t)(const char* path, file_type_t type, size_t size, const char* link_target);
 extern BuildErrorCode traverse_datadir(const char* datadir, process_file_callback_t callback);

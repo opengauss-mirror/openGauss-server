@@ -457,6 +457,7 @@ struct node_sock {
     //
     int ctrl_tcp_sock_id;
     int libcomm_reply_sock;
+    int libcomm_reply_sock_id;
     void reset_all();
     void init();
     void clear();

@@ -29,7 +29,7 @@ FLEXFLAGS = -CF -b -p -p
 include $(top_srcdir)/src/gausskernel/common.mk
 
 # scan is compiled as part of gram
-gram.o: scan.cpp
+gram.o: scan.inc
 
 # Latest flex causes warnings in this file.
 ifeq ($(GCC),yes)
@@ -54,7 +54,7 @@ else
 	sed -i 's/YY_NULL nullptr/YY_NULL 0/g' gram.cpp
 endif
 
-scan.cpp: scan.l
+scan.inc: scan.l
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
 #	@if [ `wc -l <lex.backup` -eq 1 ]; then rm lex.backup; else echo "Scanner requires backup, see lex.backup."; exit 1; fi
@@ -65,7 +65,7 @@ endif
 # Force these dependencies to be known even without dependency info built:
 gram.o keywords.o parser.o: gram.hpp
 
-hint_gram.o: hint_scan.cpp
+hint_gram.o: hint_scan.inc
 ifeq ($(GCC),yes)
 hint_gram.o: CXXFLAGS += -Wno-error
 endif
@@ -81,7 +81,7 @@ else
 	sed -i 's/YY_NULL nullptr/YY_NULL 0/g' hint_gram.cpp
 endif
 
-hint_scan.cpp: hint_scan.l | scan.cpp
+hint_scan.inc: hint_scan.l | scan.inc
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
 	@if [ `wc -l <lex.backup` -eq 1 ]; then rm lex.backup; else echo "Hint Scanner requires backup, see lex.backup."; exit 1; fi
@@ -91,7 +91,7 @@ endif
 
 hint_gram.o: hint_gram.hpp
 
-# gram.cpp, gram.hpp, and scan.cpp are in the distribution tarball, so they
+# gram.cpp, gram.hpp, and scan.inc are in the distribution tarball, so they
 # are not cleaned here.
 clean distclean maintainer-clean:
 	rm -f lex.backup

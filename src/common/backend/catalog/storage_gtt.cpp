@@ -353,8 +353,9 @@ void remember_gtt_storage_info(const RelFileNode rnode, Relation rel)
         securec_check(rc, "", "");
         ctl.keysize = sizeof(Oid);
         ctl.entrysize = sizeof(gtt_local_hash_entry);
-        u_sess->gtt_ctx.gtt_storage_local_hash =
-            hash_create("global temporary table info", GTT_LOCAL_HASH_SIZE, &ctl, HASH_ELEM | HASH_BLOBS);
+        ctl.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
+        u_sess->gtt_ctx.gtt_storage_local_hash = hash_create(
+            "global temporary table info", GTT_LOCAL_HASH_SIZE, &ctl, HASH_ELEM | HASH_CONTEXT | HASH_BLOBS);
 
         if (u_sess->cache_mem_cxt == nullptr) {
             u_sess->cache_mem_cxt =
@@ -463,6 +464,7 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
             gtt_relfilenode* gttnode2 = NULL;
 
             entry2 = gtt_search_by_relid(entry->oldrelid, false);
+            Assert(entry2 != NULL);
             gttnode2 = gtt_search_relfilenode(entry2, rnode.relNode, false);
             Assert(gttnode2->relfilenode == rnode.relNode);
             Assert(list_length(entry->relfilenode_list) == 1);
@@ -503,6 +505,7 @@ void forget_gtt_storage_info(Oid relid, const RelFileNode rnode, bool isCommit)
             gtt_local_hash_entry* entry2 = NULL;
 
             entry2 = gtt_search_by_relid(entry->oldrelid, false);
+            Assert(entry2 != NULL);
             /* clean up footprint */
             entry2->oldrelid = InvalidOid;
         }
@@ -1072,9 +1075,17 @@ Datum pg_gtt_attached_pid(PG_FUNCTION_ARGS)
             if (ENABLE_THREAD_POOL) {
                 ThreadPoolSessControl* sess_ctrl = g_threadPoolControler->GetSessionCtrl();
                 knl_session_context* sess = sess_ctrl->GetSessionByIdx(backendid);
+                if (sess == NULL) {     // session already exited while processing bitmap
+                    backendid = bms_next_member(map, backendid);
+                    continue;
+                }
                 pid = sess->attachPid;
             } else {
                 proc = BackendIdGetProc(backendid);
+                if (proc == NULL) {     // session already exited while processing bitmap
+                    backendid = bms_next_member(map, backendid);
+                    continue;
+                }
                 pid = proc->pid;
             }
 
@@ -1215,11 +1226,86 @@ void gtt_fix_index_state(Relation index)
     return;
 }
 
-void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
+/* remove junk files when other session exited unexpected */
+static void UnlinkJunkRelFile(Relation rel)
+{
+    if (rel->rd_smgr == NULL) {
+        RelationOpenSmgr(rel);
+    }
+    if (smgrexists(rel->rd_smgr, MAIN_FORKNUM)) {
+        elog(WARNING, "gtt relfilenode %u already exists", rel->rd_node.relNode);
+        smgrdounlink(rel->rd_smgr, false);
+        smgrclose(rel->rd_smgr);
+    }
+
+    gtt_local_hash_entry* entry = gtt_search_by_relid(rel->rd_id, true);
+    if (entry == NULL) {
+        return;
+    }
+    gtt_relfilenode* dRnode = gtt_search_relfilenode(entry, rel->rd_node.relNode, true);
+    if (dRnode != NULL) {
+        entry->relfilenode_list = list_delete_ptr(entry->relfilenode_list, dRnode);
+        pfree(dRnode);
+    }
+
+    return;
+}
+
+static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
 {
     Relation relation = resultRelInfo->ri_RelationDesc;
     int i;
-    Oid toastrelid;
+
+    /* remove junk files when other session exited unexpected */
+    UnlinkJunkRelFile(relation);
+
+    RelationCreateStorage(
+        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, InvalidOid, relation);
+    for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
+        Relation index = resultRelInfo->ri_IndexRelationDescs[i];
+        /* remove junk files when other session exited unexpected */
+        UnlinkJunkRelFile(index);
+
+        IndexInfo* info = resultRelInfo->ri_IndexRelationInfo[i];
+        Assert(index->rd_index->indisvalid);
+        Assert(index->rd_index->indisready);
+        index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
+    }
+
+    Oid toastrelid = relation->rd_rel->reltoastrelid;
+    if (OidIsValid(toastrelid)) {
+        Relation toastrel = relation_open(toastrelid, RowExclusiveLock);
+        /* remove junk files when other session exited unexpected */
+        UnlinkJunkRelFile(toastrel);
+
+        RelationCreateStorage(
+            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, InvalidOid, toastrel);
+
+        ListCell* indlist = NULL;
+        foreach (indlist, RelationGetIndexList(toastrel)) {
+            Oid indexId = lfirst_oid(indlist);
+            Relation currentIndex;
+            IndexInfo* indexInfo = NULL;
+
+            currentIndex = index_open(indexId, RowExclusiveLock);
+            /* remove junk files when other session exited unexpected */
+            UnlinkJunkRelFile(currentIndex);
+
+            indexInfo = BuildDummyIndexInfo(currentIndex);
+            index_build(
+                toastrel, NULL, currentIndex, NULL, indexInfo, currentIndex->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
+            index_close(currentIndex, NoLock);
+        }
+
+        relation_close(toastrel, NoLock);
+    }
+
+    return;
+}
+
+void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
+{
+    Relation relation = resultRelInfo->ri_RelationDesc;
 
     if (!RELATION_IS_GLOBAL_TEMP(relation)) {
         return;
@@ -1237,46 +1323,12 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
         /* Open it at the smgr level if not already done */
         RelationOpenSmgr(relation);
     }
-    if (smgrexists(relation->rd_smgr, MAIN_FORKNUM) && gtt_storage_attached(RelationGetRelid(relation))) {
+
+    if (gtt_storage_attached(RelationGetRelid(relation))) {
         return;
     }
 
-    RelationCreateStorage(
-        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, InvalidOid, relation);
-    for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
-        Relation index = resultRelInfo->ri_IndexRelationDescs[i];
-        IndexInfo* info = resultRelInfo->ri_IndexRelationInfo[i];
-        Assert(index->rd_index->indisvalid);
-        Assert(index->rd_index->indisready);
-        index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
-    }
-
-    toastrelid = relation->rd_rel->reltoastrelid;
-    if (OidIsValid(toastrelid)) {
-        Relation toastrel;
-        ListCell* indlist;
-
-        toastrel = relation_open(toastrelid, RowExclusiveLock);
-        RelationCreateStorage(
-            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, InvalidOid, toastrel);
-
-        foreach (indlist, RelationGetIndexList(toastrel)) {
-            Oid indexId = lfirst_oid(indlist);
-            Relation currentIndex;
-            IndexInfo* indexInfo = NULL;
-
-            currentIndex = index_open(indexId, RowExclusiveLock);
-
-            indexInfo = BuildDummyIndexInfo(currentIndex);
-            index_build(
-                toastrel, NULL, currentIndex, NULL, indexInfo, currentIndex->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
-            index_close(currentIndex, NoLock);
-        }
-
-        relation_close(toastrel, NoLock);
-    }
-
-    return;
+    CreateGTTRelFiles(resultRelInfo);
 }
 
 static void gtt_reset_statistics(gtt_local_hash_entry* entry)
@@ -1354,9 +1406,11 @@ void gtt_switch_rel_relfilenode(Oid rel1, Oid relfilenode1, Oid rel2, Oid relfil
         return;
 
     entry1 = gtt_search_by_relid(rel1, false);
+    Assert(entry1 != NULL);
     gttRnode1 = gtt_search_relfilenode(entry1, relfilenode1, false);
 
     entry2 = gtt_search_by_relid(rel2, false);
+    Assert(entry2 != NULL);
     gttRnode2 = gtt_search_relfilenode(entry2, relfilenode2, false);
 
     oldcontext = MemoryContextSwitchTo(u_sess->gtt_ctx.gtt_relstats_context);

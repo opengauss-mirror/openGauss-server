@@ -31,6 +31,12 @@
 #include "utils/globalplancore.h"
 #include "executor/spi.h"
 
+enum  PlansourceInvalidAction
+{
+    ACTION_RECREATE,
+    ACTION_RELOAD,
+    ACTION_CN_RETRY
+};
 
 class GlobalPlanCache : public BaseObject
 {
@@ -44,20 +50,22 @@ public:
     void DropInvalid();
     void AddInvalidList(CachedPlanSource* plansource);
     void RemoveEntry(uint32 htblIdx, GPCEntry *entry);
-    void RemovePlanSourceInRecreate(CachedPlanSource* plansource);
+    template<PlansourceInvalidAction action_type>
+    void RemovePlanSource(CachedPlanSource* plansource, const char* stmt_name);
     bool TryStore(CachedPlanSource *plansource,  PreparedStatement *ps);
     Datum PlanClean();
+    void CleanUpByTime();
     /* cnretry and pool reload invalid */
-    void InvalidPlanSourceForCNretry(CachedPlanSource* plansource);
-    void InvalidPlanSourceForReload(CachedPlanSource* plansource, const char* stmt_name);
+    void InvalidPlanSource(CachedPlanSource* plansource, const char* stmt_name, bool clear_dnstmt);
 
     /* cache invalid */
     void InvalMsg(const SharedInvalidationMessage *msgs, int n);
 
     /* transaction */
-    void RecreateCachePlan(PreparedStatement *entry, const char* stmt_name);
+    void RecreateCachePlan(CachedPlanSource* oldsource, const char* stmt_name,
+                           PreparedStatement *entry, SPIPlanPtr spiplan, ListCell* spiplanCell);
     void Commit();
-    bool CheckRecreateCachePlan(PreparedStatement *entry);
+    bool CheckRecreateCachePlan(CachedPlanSource* psrc);
 
     void CNCommit();
     void DNCommit();
@@ -85,4 +93,7 @@ private:
 
     DList *m_invalid_list;
 };
+
+
+
 #endif   /* PLANCACHE_H */

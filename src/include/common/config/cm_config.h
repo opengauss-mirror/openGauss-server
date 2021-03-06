@@ -49,6 +49,7 @@
 #define CM_MAX_COMMAND_LEN 1024
 #define CM_MAX_COMMAND_LONG_LEN 2048
 #define CONNSTR_LEN 256
+#define DN_SYNC_LEN (256)
 
 // A logic datanode number in a node, The logic datanode can be include the primary, standby and dummystandby DN.
 #define LOGIC_DN_PER_NODE 32

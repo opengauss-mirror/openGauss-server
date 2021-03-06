@@ -425,15 +425,27 @@ Datum window_delta(PG_FUNCTION_ARGS)
     WindowObject winobj = PG_WINDOW_OBJECT();
     bool is_pre_null = false;
     bool is_cur_null = false;
-    Datum pre, cur;
+    Datum pre, cur, res;
 
     pre = WinGetFuncArgInFrame(winobj, 0, -1, WINDOW_SEEK_CURRENT, true, &is_pre_null, NULL);
+    /* tuple will be freed when next WinGetFuncArgInFrame called. make a copy of pre datum deeply. */
+    if (!is_pre_null) {
+        pre = PointerGetDatum(PG_DETOAST_DATUM_COPY(pre));
+    }
     cur = WinGetFuncArgInFrame(winobj, 0, 0, WINDOW_SEEK_CURRENT, true, &is_cur_null, NULL);
+    
     if (is_cur_null) {
-        PG_RETURN_NULL();
+        fcinfo->isnull = true;
+        res = (Datum) 0;
+    } else if (is_pre_null) {
+        res = DirectFunctionCall2(numeric_sub, cur, cur);
+    } else {
+        res = DirectFunctionCall2(numeric_sub, cur, pre);
     }
-    if (is_pre_null) {
-        PG_RETURN_DATUM(DirectFunctionCall2(numeric_sub, cur, cur));
+
+    if (PointerIsValid(DatumGetPointer(pre))) {
+        pfree(DatumGetPointer(pre));
     }
-    PG_RETURN_DATUM(DirectFunctionCall2(numeric_sub, cur, pre));
+
+    PG_RETURN_DATUM(res);
 }

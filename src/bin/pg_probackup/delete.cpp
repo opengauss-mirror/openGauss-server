@@ -46,7 +46,7 @@ do_delete(time_t backup_id)
     delete_list = parray_new();
 
     /* Find backup to be deleted and make increment backups array to be deleted */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; (size_t)i < parray_num(backup_list); i++)
     {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -65,7 +65,7 @@ do_delete(time_t backup_id)
          base36enc((unsigned long)backup_id), dry_run ? "can" : "will");
 
     /* form delete list */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; (size_t)i < parray_num(backup_list); i++)
     {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -237,7 +237,7 @@ void evaluate_backups(parray *backup_list, parray *redundancy_full_backup_list,
             (backup->status == BACKUP_STATUS_OK ||
             backup->status == BACKUP_STATUS_DONE))
         {
-            *cur_full_backup_num++;
+            *cur_full_backup_num = *cur_full_backup_num + 1;
         }
 
         /* Invalid and running backups most likely to have recovery_time == 0,
@@ -290,7 +290,7 @@ void evaluate_backups(parray *backup_list, parray *redundancy_full_backup_list,
 
 void get_keep_list(parray *backup_list, parray *to_keep_list, parray *to_purge_list)
 {
-    for (int i = 0; i < parray_num(backup_list); i++)
+    for (size_t i = 0; i < parray_num(backup_list); i++)
     {
         pgBackup   *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -330,7 +330,7 @@ void get_keep_list(parray *backup_list, parray *to_keep_list, parray *to_purge_l
 static void
 do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purge_list)
 {
-    int     i;
+    size_t  i = 0;
 
     parray *redundancy_full_backup_list = NULL;
 
@@ -442,7 +442,7 @@ do_retention_internal(parray *backup_list, parray *to_keep_list, parray *to_purg
 static void
 do_retention_merge(parray *backup_list, parray *to_keep_list, parray *to_purge_list)
 {
-    int i;
+    size_t i = 0;
     int j;
 
     /* IMPORTANT: we can merge to only those FULL backup, that is NOT
@@ -580,8 +580,8 @@ do_retention_merge(parray *backup_list, parray *to_keep_list, parray *to_purge_l
 static void
 do_retention_purge(parray *to_keep_list, parray *to_purge_list)
 {
-    int i;
-    int j;
+    size_t i = 0;
+    size_t j = 0;
 
     /* Remove backups by retention policy. Retention policy is configured by
     * retention_redundancy and retention_window
@@ -668,7 +668,7 @@ static void
 do_retention_wal(bool dry_run)
 {
     parray  *tli_list;
-    int i;
+    size_t  i = 0;
 
     tli_list = catalog_get_timelines(&instance_config);
 
@@ -902,8 +902,7 @@ delete_walfiles_in_tli(XLogRecPtr keep_lsn, timelineInfo *tlinfo,
     XLogSegNo   OldestToKeepSegNo = 0;
     char    first_to_del_str[MAXFNAMELEN];
     char    oldest_to_keep_str[MAXFNAMELEN];
-    int     i;
-    size_t      wal_size_logical = 0;
+    size_t     i = 0;
     size_t      wal_size_actual = 0;
     char        wal_pretty_size[20];
     bool        purge_all = false;
@@ -1003,7 +1002,7 @@ int
 do_delete_instance(void)
 {
     parray  *backup_list;
-    int     i;
+    size_t  i = 0;
     char    instance_config_path[MAXPGPATH];
 
 
@@ -1050,7 +1049,7 @@ do_delete_instance(void)
 void
 do_delete_status(InstanceConfig *instance_config, const char *status)
 {
-    int         i;
+    size_t      i = 0;
     parray     *backup_list, *delete_list;
     const char *pretty_status;
     int         n_deleted = 0, n_found = 0;

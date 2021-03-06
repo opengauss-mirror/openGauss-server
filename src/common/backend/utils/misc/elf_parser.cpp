@@ -55,11 +55,14 @@ bool elf_parser::load(const char *filename)
         return false;
     }
 
+    dyn = (ehdr.e_type == ET_DYN) ? true : false;
+
     const int limit = 1000;
     if (ehdr.e_shnum > limit) {
         return false;
     }
 
+    /* get the section headers representing the symbol talbe */
     Elf64_Shdr shdr;
     for (int i = 0; i < ehdr.e_shnum; i++) {
         off_t off = (off_t)(ehdr.e_shoff + i * ehdr.e_shentsize);
@@ -147,24 +150,27 @@ void elf_parser::init()
     fd = -1;
     fname = NULL;
     sym_count = 0;
+    dyn = true;
     (void)memset_s(&ehdr, sizeof(Elf64_Ehdr), 0, sizeof(Elf64_Ehdr));
     (void)memset_s(symhdr, sizeof(symhdr), 0, sizeof(symhdr));
 }
 
 /*
- * Reset elf parser
+ * Reset elf parser, in other words, unload the previously opened file and load the new file.
  */
 bool elf_parser::reset(const char *filename)
 {
+    Assert(filename);
     if (fd != -1) {
         (void)close(fd);
     }
 
     init();
 
-    /*  If caller give a valid file, load it */
-    if (filename && !load(filename)) {
-        (void)close(fd);
+    if (!load(filename)) {
+        if (fd != -1) {
+            (void)close(fd);
+        }
         init();
         return false;
     }

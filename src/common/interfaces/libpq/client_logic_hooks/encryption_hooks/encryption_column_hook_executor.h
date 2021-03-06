@@ -40,6 +40,7 @@
 #include "encrypt_decrypt.h"
 #include "aead_aes_hamc_enc_key.h"
 #include "postgres_ext.h"
+#include "client_logic_processor/values_processor.h"
 
 #define MAX_DATATYPE_LEN 30
 
@@ -65,10 +66,10 @@ public:
         m_cek_keys = NULL;
     }
     int get_estimated_processed_data_size_impl(int data_size) const override;
-    int process_data_impl(bool is_during_refresh_cache, const ICachedColumn *cached_column, const unsigned char *data,
+    int process_data_impl(const ICachedColumn *cached_column, const unsigned char *data,
         int data_size, unsigned char *processed_data) override;
-    int deprocess_data_impl(bool is_during_refresh_cache, const unsigned char *data_processed, int data_processed_size,
-        unsigned char **data) override;
+    DecryptDataRes deprocess_data_impl(const unsigned char *data_processed,
+        int data_proceeed_size, unsigned char **data, int *data_plain_size) override;
     bool is_set_operation_allowed(const ICachedColumn *cached_column) const override;
     bool is_operator_allowed(const ICachedColumn *ce, const char * const op) const override;
     bool pre_create(PGClientLogic &column_encryption, const StringArgs &args, StringArgs &new_args) override;
@@ -90,9 +91,9 @@ private:
 
         return;
     }
-    bool deprocess_column_encryption_key(bool is_during_refresh_cache, 
-        EncryptionGlobalHookExecutor *encryption_global_hook_executor, unsigned char *decryptedKey,
-        size_t *decryptedKeySize, const char *encrypted_key_value, const size_t *encrypted_key_value_size) const;
+    bool deprocess_column_encryption_key(EncryptionGlobalHookExecutor *encryption_global_hook_executor, 
+        unsigned char *decryptedKey, size_t *decryptedKeySize, const char *encrypted_key_value, 
+        const size_t *encrypted_key_value_size) const;
     void set_cek_keys(const unsigned char *cek_keys, size_t cek_size)
     {
         if (cek_keys == NULL || cek_size == 0 || m_cek_keys == NULL) {

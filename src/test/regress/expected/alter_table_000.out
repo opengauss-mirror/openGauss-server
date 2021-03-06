@@ -41,15 +41,10 @@ column_clause
     | ENABLE TRIGGER [ trigger_name | ALL | USER ]
     | ENABLE REPLICA TRIGGER trigger_name
     | ENABLE ALWAYS TRIGGER trigger_name
-    | DISABLE RULE rewrite_rule_name
-    | ENABLE RULE rewrite_rule_name
-    | ENABLE REPLICA RULE rewrite_rule_name
-    | ENABLE ALWAYS RULE rewrite_rule_name
     | ENABLE ROW LEVEL SECURITY
     | DISABLE ROW LEVEL SECURITY
     | FORCE ROW LEVEL SECURITY
     | NO FORCE ROW LEVEL SECURITY
-    | REPLICA IDENTITY {DEFAULT | USING INDEX index_name | FULL | NOTHING}
 where column_clause can be:
 ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
     | MODIFY column_name data_type

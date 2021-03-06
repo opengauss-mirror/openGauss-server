@@ -3038,7 +3038,7 @@ static void BufferSync(int flags)
      * Unless this is a shutdown checkpoint, we write only permanent, dirty
      * buffers.  But at shutdown or end of recovery, we write all dirty buffers.
      */
-    if (!(((uint32)flags & CHECKPOINT_IS_SHUTDOWN) || ((uint32)flags & CHECKPOINT_END_OF_RECOVERY))) {
+    if (!((uint32)flags & (CHECKPOINT_IS_SHUTDOWN | CHECKPOINT_END_OF_RECOVERY))) {
         mask |= BM_PERMANENT;
     }
 
@@ -3128,11 +3128,8 @@ static void BufferSync(int flags)
              */
             sz = sizeof(CkptTsStatus) * num_spaces;
 
-            if (per_ts_stat == NULL) {
-                per_ts_stat = (CkptTsStatus *)palloc(sz);
-            } else {
-                per_ts_stat = (CkptTsStatus *)repalloc(per_ts_stat, sz);
-            }
+            per_ts_stat = (per_ts_stat == NULL) ? (CkptTsStatus *)palloc(sz) :
+                (CkptTsStatus *)repalloc(per_ts_stat, sz);
 
             s = &per_ts_stat[num_spaces - 1];
             rc = memset_s(s, sizeof(*s), 0, sizeof(*s));
@@ -5162,6 +5159,21 @@ void LockBufferForCleanup(Buffer buffer)
         } else {
             ProcWaitForSignal();
         }
+
+        /*
+         * Remove flag marking us as waiter. Normally this will not be set
+         * anymore, but ProcWaitForSignal() can return for other signals as
+         * well.  We take care to only reset the flag if we're the waiter, as
+         * theoretically another backend could have started waiting. That's
+         * impossible with the current usages due to table level locking, but
+         * better be safe.
+         */
+        buf_state = LockBufHdr(buf_desc);
+        if ((buf_state & BM_PIN_COUNT_WAITER) != 0 &&
+            buf_desc->wait_backend_pid == t_thrd.proc_cxt.MyProcPid) {
+            buf_state &= ~BM_PIN_COUNT_WAITER;
+        }
+        UnlockBufHdr(buf_desc, buf_state);
 
         t_thrd.storage_cxt.PinCountWaitBuf = NULL;
         /* Loop back and try again */

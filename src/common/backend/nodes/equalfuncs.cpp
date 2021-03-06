@@ -194,9 +194,7 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
 #ifdef PGXC
     COMPARE_SCALAR_FIELD(aggtrantype);
     COMPARE_SCALAR_FIELD(agghas_collectfn);
-#ifdef ENABLE_MULTIPLE_NODES
     COMPARE_SCALAR_FIELD(aggstage);
-#endif
 #endif /* PGXC */
     COMPARE_SCALAR_FIELD(aggcollid);
     COMPARE_SCALAR_FIELD(inputcollid);
@@ -1867,6 +1865,7 @@ static bool _equalCreateRlsPolicyStmt(const CreateRlsPolicyStmt* a, const Create
     COMPARE_NODE_FIELD(relation);
     COMPARE_STRING_FIELD(cmdName);
     COMPARE_SCALAR_FIELD(isPermissive);
+    COMPARE_SCALAR_FIELD(fromExternal);
     COMPARE_NODE_FIELD(roleList);
     COMPARE_NODE_FIELD(usingQual);
 

@@ -941,16 +941,15 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity AS
             S.enqueue,
             S.state,
             CASE
-			WHEN T.session_respool = 'unknown' THEN (U.rolrespool) :: name
-			ELSE T.session_respool
+			WHEN S.srespool = 'unknown' THEN (U.rolrespool) :: name
+			ELSE S.srespool
 			END AS resource_pool,
             S.query_id,
             S.query,
             S.connection_info
-    FROM pg_database D, pg_stat_get_activity_with_conninfo(NULL) AS S, pg_authid U, gs_wlm_session_respool(0) AS T
+    FROM pg_database D, pg_stat_get_activity_with_conninfo(NULL) AS S, pg_authid U
     WHERE S.datid = D.oid AND
-            S.usesysid = U.oid AND
-            T.sessionid = S.sessionid;
+            S.usesysid = U.oid;
 
 CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity_ng AS
     SELECT
@@ -972,16 +971,15 @@ CREATE OR REPLACE VIEW pg_catalog.pg_stat_activity_ng AS
             S.enqueue,
             S.state,
             CASE
-                        WHEN T.session_respool = 'unknown' THEN (U.rolrespool) :: name
-                        ELSE T.session_respool
+                        WHEN S.srespool = 'unknown' THEN (U.rolrespool) :: name
+                        ELSE S.srespool
                         END AS resource_pool,
             S.query_id,
             S.query,
             N.node_group
-    FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_stat_get_activity_ng(NULL) AS N, pg_authid U, gs_wlm_session_respool(0) AS T
+    FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_stat_get_activity_ng(NULL) AS N, pg_authid U
     WHERE S.datid = D.oid AND
             S.usesysid = U.oid AND
-            T.sessionid = S.sessionid AND
             S.sessionid = N.sessionid;
 
 ALTER TEXT SEARCH CONFIGURATION pound ADD MAPPING

@@ -44,6 +44,7 @@
 #include "libpq/libpq.h"
 #include "commands/user.h"
 #include "instruments/unique_sql_basic.h"
+#include "instruments/instr_handle_mgr.h"
 #include "optimizer/streamplan.h"
 
 static bool need_reuse_unique_sql_id(Query *query);
@@ -291,6 +292,11 @@ static void UpdateUniqueSQLElapseTime(UniqueSQL* unique_sql, int64 elapse_start)
     }
 
     TimestampTz elapse_time = GetCurrentTimestamp() - elapse_start;
+    /* Because the time precision is microseconds,
+     * all actions less than microseconds are recorded as 0.
+     * When the duration is 0, we set the duration to 1
+     * */
+    elapse_time = (elapse_time == 0) ? 1 : elapse_time;
 
     /* update unique sql's total/max/min time */
     gs_atomic_add_64(&(unique_sql->elapse_time.total_time), elapse_time);
@@ -501,7 +507,7 @@ static void mask_unique_sql_str(UniqueSQL* unique_sql)
     }
 }
 
-static void set_unique_sql_string_in_entry(UniqueSQL* entry, Query* query, const char* sql)
+static void set_unique_sql_string_in_entry(UniqueSQL* entry, Query* query, const char* sql, int32 multi_sql_offset)
 {
     errno_t rc = EOK;
 
@@ -517,7 +523,8 @@ static void set_unique_sql_string_in_entry(UniqueSQL* entry, Query* query, const
     if (entry->unique_sql != NULL && sql != NULL && query != NULL) {
         entry->is_local = true;
         // generate and store normalized query string
-        if (normalized_unique_querystring(query, sql, entry->unique_sql, UNIQUE_SQL_MAX_LEN - 1)) {
+        if (normalized_unique_querystring(query, sql, entry->unique_sql, UNIQUE_SQL_MAX_LEN - 1,
+            multi_sql_offset)) {
             mask_unique_sql_str(entry);
             entry->unique_sql = trim(entry->unique_sql);
         } else {
@@ -663,7 +670,7 @@ void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
 
         if (!found) {
             resetUniqueSQLEntry(entry);
-            set_unique_sql_string_in_entry(entry, query, sql);
+            set_unique_sql_string_in_entry(entry, query, sql, u_sess->unique_sql_cxt.multi_sql_offset);
         }
     }
 
@@ -2398,6 +2405,7 @@ void ResetCurrentUniqueSQL(bool need_reset_cn_id)
     /* multi query only used in exec_simple_query */
     u_sess->unique_sql_cxt.is_multi_unique_sql = false;
     u_sess->unique_sql_cxt.curr_single_unique_sql = NULL;
+    u_sess->unique_sql_cxt.multi_sql_offset = 0;
     u_sess->unique_sql_cxt.need_update_calls = true;
 
     /* used when nested portal calling case */
@@ -2496,6 +2504,13 @@ static void instr_unique_sql_handle_multi_sql_time_info()
 /* handle multi sql case in exec_simple_query */
 void instr_unique_sql_handle_multi_sql(bool is_first_parsetree)
 {
+
+    if (!is_first_parsetree) {
+        statement_commit_metirc_context();
+        statement_init_metric_context();
+        instr_stmt_report_start_time();
+    }
+
     if (is_local_unique_sql()) {
         if (IS_SINGLE_NODE || IS_PGXC_COORDINATOR) {
             u_sess->debug_query_id = generate_unique_id64(&gt_queryId);

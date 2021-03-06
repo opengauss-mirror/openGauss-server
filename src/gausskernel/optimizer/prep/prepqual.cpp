@@ -40,7 +40,7 @@
 
 static List* pull_ands(List* andlist);
 static List* pull_ors(List* orlist);
-static Expr* find_duplicate_ors(Expr* qual);
+static Expr* find_duplicate_ors(Expr* qual, bool is_check);
 static Expr* process_duplicate_ors(List* orlist);
 
 /*
@@ -253,7 +253,7 @@ Node* negate_clause(Node* node)
  *
  * Returns the modified qualification.
  */
-Expr* canonicalize_qual(Expr* qual)
+Expr* canonicalize_qual(Expr* qual, bool is_check)
 {
     Expr* newqual = NULL;
     /* Quick exit for empty qual */
@@ -265,7 +265,8 @@ Expr* canonicalize_qual(Expr* qual)
      * within the top-level AND/OR structure; there's no point in looking
      * deeper.
      */
-    newqual = find_duplicate_ors(qual);
+    newqual = find_duplicate_ors(qual, is_check);
+
     return newqual;
 }
 
@@ -326,6 +327,80 @@ static List* pull_ors(List* orlist)
     }
     return out_list;
 }
+/**
+ * call it on in Recurse find_duplicate_ors 
+ * @return NULL or true,
+ * NULL means continue the loop, true means finish and return the value
+ */
+static Expr *ReduceConstWithinOr(Const *var, bool is_check)
+{
+    Assert(var != NULL && IsA(var, Const));
+    if (var->constisnull) {
+        if (is_check) {
+            /* within OR in CHECK, Constant NULL, reduces to TRUE */
+            return (Expr *) makeBoolConst(true, false);
+        } else {
+            /* Within OR in WHERE, drop constant NULL */
+            return NULL;
+        }
+    }
+    
+    if (!DatumGetBool(var->constvalue)) {
+        /* Within OR, drop constant FALSE */
+        return NULL;
+    }
+    /* Within OR, save Constant TRUE */
+    return (Expr *) var;
+}
+
+/**
+ * call it on in Recurse find_duplicate_ors 
+ * @return NULL or false,
+ * NULL means continue the loop, false means finish and return the value
+ */
+
+static Expr *ReduceConstWithinAnd(Const *var, bool is_check)
+{
+    if (var->constisnull) {
+        if (is_check) {
+            /* Within AND in CHECK, drop constant NULL */
+            return NULL;
+        } else {
+            /* Within AND in WHERE, constant NULL, reduces to FALSE */
+            return (Expr *) makeBoolConst(false, false);
+        }
+    }
+    
+    if (DatumGetBool(var->constvalue)) {
+        /* Within AND, drop constant TRUE */
+        return NULL;
+    }
+    /* Constant FALSE, save it */
+    return (Expr *) var;
+}
+
+/**
+ * call it on in Recurse find_duplicate_ors 
+ * @return true, false, or the @param var,
+ * constant NULL:Bool reduces to true iff is_check else false, others return itself
+ */
+static Expr *ReduceConstWithinOther(Const *var, bool is_check)
+{
+    if (var == NULL || !IsA(var, Const)) {
+        return (Expr *)var;
+    }
+    if (var->constisnull) {
+        if (is_check) {
+            /* in CHECK, constant NULL, reduces to TRUE */
+            return (Expr *) makeBoolConst(true, false);
+        } else {
+            /* in WHERE, constant NULL, reduces to FALSE */
+            return (Expr *) makeBoolConst(false, false);
+        }
+    }
+    /* Constant FALSE or TRUE, save it */
+    return (Expr *)var;
+}
 
 /* --------------------
  * The following code attempts to apply the inverse OR distributive law:
@@ -355,34 +430,77 @@ static List* pull_ors(List* orlist)
  *
  * Returns the modified qualification.	AND/OR flatness is preserved.
  */
-static Expr* find_duplicate_ors(Expr* qual)
+static Expr* find_duplicate_ors(Expr* qual, bool is_check)
 {
     if (or_clause((Node*)qual)) {
         List* orlist = NIL;
         ListCell* temp = NULL;
 
         /* Recurse */
-        foreach (temp, ((BoolExpr*)qual)->args)
-            orlist = lappend(orlist, find_duplicate_ors((Expr*)lfirst(temp)));
+        foreach (temp, ((BoolExpr*)qual)->args) {
+            Expr *arg = find_duplicate_ors((Expr*)lfirst(temp), is_check);
+            if (arg && IsA(arg, Const)) {
+                Expr *res = ReduceConstWithinOr((Const *)arg, is_check);
+                /* NULL means continue */
+                if (res == NULL) {
+                    continue;
+                } else {
+                    return res;
+                }
+            }
+            orlist = lappend(orlist, arg);
+        }
 
-        /*
-         * Don't need pull_ors() since this routine will never introduce an OR
-         * where there wasn't one before.
-         */
+        /* Flatten any ORs pulled up to just below here */
+        List* temp_orlist = pull_ors(orlist);
+        list_free(orlist);
+        orlist = temp_orlist;
+        /* OR of no inputs reduces to FALSE */
+        if (orlist == NIL) {
+            return (Expr *) makeBoolConst(false, false);
+        }
+        /* Single-expression OR just reduces to that expression */
+        if (list_length(orlist) == 1) {
+            return (Expr*)linitial(orlist);
+        }
+        
+        /* Now we can look for duplicate ORs */
         return process_duplicate_ors(orlist);
     } else if (and_clause((Node*)qual)) {
         List* andlist = NIL;
         ListCell* temp = NULL;
 
         /* Recurse */
-        foreach (temp, ((BoolExpr*)qual)->args)
-            andlist = lappend(andlist, find_duplicate_ors((Expr*)lfirst(temp)));
+        foreach (temp, ((BoolExpr*)qual)->args) {
+            Expr *arg = find_duplicate_ors((Expr*)lfirst(temp), is_check);
+            if (arg && IsA(arg, Const)) {
+                Expr *res = ReduceConstWithinAnd((Const *)arg, is_check);
+                /* NULL means continue */
+                if (res == NULL) {
+                    continue;
+                } else {
+                    return res;
+                }
+            }
+            andlist = lappend(andlist, arg);
+        }
         /* Flatten any ANDs introduced just below here */
-        andlist = pull_ands(andlist);
+        List* temp_andlist = pull_ands(andlist);
+        list_free(andlist);
+        andlist = temp_andlist;
+        /* AND of no inputs reduces to TRUE */
+        if (andlist == NIL) {
+            return (Expr *) makeBoolConst(true, false);
+        }
+        /* Single-expression AND just reduces to that expression */
+        if (list_length(andlist) == 1) {
+            return (Expr *) linitial(andlist);
+        }
         /* The AND list can't get shorter, so result is always an AND */
         return make_andclause(andlist);
-    } else
-        return qual;
+    } else {
+        return ReduceConstWithinOther((Const *)qual, is_check);
+    }
 }
 
 /*
@@ -400,13 +518,8 @@ static Expr* process_duplicate_ors(List* orlist)
     List* winners = NIL;
     List* neworlist = NIL;
     ListCell* temp = NULL;
-
-    if (orlist == NIL)
-        return NULL;              /* probably can't happen */
-    if (list_length(orlist) == 1) /* single-expression OR (can this
-                                   * happen?) */
-        return (Expr*)linitial(orlist);
-
+    
+    Assert(orlist != NULL && list_length(orlist) > 1);
     /*
      * Choose the shortest AND clause as the reference list --- obviously, any
      * subclause not in this clause isn't in all the clauses. If we find a

@@ -109,6 +109,7 @@ int StreamMain()
 
     while (true) {
         if (IS_THREAD_POOL_STREAM) {
+            pgstat_report_activity(STATE_IDLE, NULL);
             pgstat_report_waitstatus(STATE_WAIT_COMM);
             t_thrd.threadpool_cxt.stream->WaitMission();
             pgstat_report_waitstatus(STATE_WAIT_UNDEFINED);

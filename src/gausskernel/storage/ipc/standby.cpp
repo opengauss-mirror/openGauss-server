@@ -776,6 +776,9 @@ void standby_redo(XLogReaderState* record)
         ProcArrayApplyRecoveryInfo(&running);
     } else if (info == XLOG_STANDBY_CSN) {
         TransactionId new_global_xmin = *((TransactionId*)XLogRecGetData(record));
+        if (!TransactionIdIsValid(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin)) {
+            t_thrd.xact_cxt.ShmemVariableCache->standbyXmin = new_global_xmin;
+        }
         if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, new_global_xmin)) {
             t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = new_global_xmin;
         }
@@ -1069,6 +1072,48 @@ void StandbyXlogStartup(void)
     t_thrd.xlog_cxt.committing_csn_list = NIL;
 }
 
+void *XLogReleaseAdnGetCommittingCsnList()
+{
+    ListCell* l = NULL;
+    foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
+        TransactionId* action = (TransactionId*)lfirst(l);
+        if (log_min_messages <= DEBUG4) {
+            ereport(LOG, (errmsg("XLogReleaseAdnGetCommittingCsnList: action xid:%lu", *action)));
+        }
+        CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
+        XactLockTableDelete(*action);
+    }
+
+    List* committingCsnList = t_thrd.xlog_cxt.committing_csn_list;
+    t_thrd.xlog_cxt.committing_csn_list = NIL;
+    return committingCsnList;
+}
+
+void CleanUpMakeCommitAbort(List* committingCsnList)
+{
+    ListCell* l = NULL;
+    foreach (l, committingCsnList) {
+        TransactionId* action = (TransactionId*)lfirst(l);
+        if (log_min_messages <= DEBUG4) {
+            ereport(LOG, (errmsg("CleanUpMakeCommitAbort: action xid:%lu", *action)));
+        }
+        XLogBeginInsert();
+        XLogRegisterData((char *)action, sizeof(TransactionId));
+        XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
+    }
+
+    MemoryContext oldCtx = NULL;
+    if (IsExtremeRtoRunning()) {
+        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+    }
+    list_free(committingCsnList);
+    if (IsExtremeRtoRunning()) {
+        (void)MemoryContextSwitchTo(oldCtx);
+    }
+}
+
+
+
 void StandbyXlogCleanup(void)
 {
     ListCell* l = NULL;
@@ -1087,14 +1132,19 @@ void StandbyXlogCleanup(void)
         }
         CSNLogSetCommitSeqNo(*action, 0, NULL, COMMITSEQNO_ABORTED);
         XactLockTableDelete(*action);
-        if (g_supportHotStandby) {
-            XLogBeginInsert();
-            XLogRegisterData((char *)action, sizeof(TransactionId));
-            XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
-        }
-    }
+        XLogBeginInsert();
+        XLogRegisterData((char *)action, sizeof(TransactionId));
+        XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_ABORTED);
 
+    }
+    MemoryContext oldCtx = NULL;
+    if (IsExtremeRtoRunning()) {
+        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+    }
     list_free(t_thrd.xlog_cxt.committing_csn_list);
+    if (IsExtremeRtoRunning()) {
+        (void)MemoryContextSwitchTo(oldCtx);
+    }
     t_thrd.xlog_cxt.committing_csn_list = NIL;
 }
 
@@ -1107,6 +1157,10 @@ bool StandbySafeRestartpoint(void)
 
 static void RecordCommittingCsnInfo(TransactionId xid)
 {
+    MemoryContext oldCtx = NULL;
+    if (IsExtremeRtoRunning()) {
+        oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+    }
     TransactionId* action = (TransactionId*)palloc(sizeof(TransactionId));
     if (log_min_messages <= DEBUG4) {
         ereport(LOG,
@@ -1117,12 +1171,15 @@ static void RecordCommittingCsnInfo(TransactionId xid)
     *action = xid;
 
     t_thrd.xlog_cxt.committing_csn_list = lappend(t_thrd.xlog_cxt.committing_csn_list, action);
+    if (IsExtremeRtoRunning()) {
+        (void)MemoryContextSwitchTo(oldCtx);
+    }
 }
 
 bool RemoveCommittedCsnInfo(TransactionId xid)
 {
     ListCell* l = NULL;
-
+    
     foreach (l, t_thrd.xlog_cxt.committing_csn_list) {
         TransactionId* action = (TransactionId*)lfirst(l);
 
@@ -1132,9 +1189,15 @@ bool RemoveCommittedCsnInfo(TransactionId xid)
                     (errmsg("RemoveCommittedCsnInfo successfully: input xid:%lu, action xid:%lu",
                         xid, *action)));
             }
-
+            MemoryContext oldCtx = NULL;
+            if (IsExtremeRtoRunning()) {
+                oldCtx = MemoryContextSwitchTo(g_instance.comm_cxt.predo_cxt.parallelRedoCtx);
+            }
             t_thrd.xlog_cxt.committing_csn_list = list_delete_ptr(t_thrd.xlog_cxt.committing_csn_list, action);
             pfree(action);
+            if (IsExtremeRtoRunning()) {
+                (void)MemoryContextSwitchTo(oldCtx);
+            }
             return true; /* need not look further */
         }
     }

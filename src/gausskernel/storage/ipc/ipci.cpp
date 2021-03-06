@@ -366,7 +366,6 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     if (g_instance.ckpt_cxt_ctl->prune_queue_lock == NULL) {
         g_instance.ckpt_cxt_ctl->prune_queue_lock = LWLockAssign(LWTRANCHE_PRUNE_DIRTY_QUEUE);
     }
-
     if (g_instance.pid_cxt.PageWriterPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
         g_instance.pid_cxt.PageWriterPID =

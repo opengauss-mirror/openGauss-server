@@ -58,7 +58,7 @@ public:
 
     static void setCurrentOpFusionObj(OpFusion* obj);
 
-    static bool process(int op, StringInfo msg, char* completionTag, bool isTopLevel);
+    static bool process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted);
 
     void CopyFormats(int16* formats, int numRFormats);
 
@@ -66,7 +66,7 @@ public:
 
     void useOuterParameter(ParamListInfo params);
 
-    void decribe(StringInfo msg);
+    void describe(StringInfo msg);
 
     virtual bool execute(long max_rows, char* completionTag)
     {
@@ -98,7 +98,7 @@ public:
 
     void executeInit();
 
-    void executeEnd(const char* portal_name);
+    void executeEnd(const char* portal_name, bool* completionTag);
 
     void auditRecord();
 

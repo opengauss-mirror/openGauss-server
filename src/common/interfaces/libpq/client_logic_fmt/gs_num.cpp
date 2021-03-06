@@ -28,7 +28,7 @@
 #include <endian.h>
 #include "gs_num.h"
 #include "int8.h"
-#include "float.h"
+#include "gs_float.h"
 #include "numeric.h"
 #include "numutils.h"
 #include "libpq-int.h"

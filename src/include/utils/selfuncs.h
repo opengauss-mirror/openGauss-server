@@ -99,6 +99,7 @@ typedef struct VariableStatData {
     int32 atttypmod;                   /* typmod to pass to get_attstatsslot */
     bool isunique;                     /* matches unique index or DISTINCT clause */
     bool enablePossion;                /* indentify we can use possion or not */
+    bool acl_ok;                       /* result of ACL check on table or column */
 } VariableStatData;
 
 #define ReleaseVariableStats(vardata)                    \
@@ -161,6 +162,7 @@ extern double get_global_rows(double local_rows, double multiple, unsigned int n
 /* Functions in selfuncs.c */
 
 extern void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatData* vardata);
+extern bool statistic_proc_security_check(const VariableStatData *vardata, Oid func_oid);
 extern bool get_restriction_variable(
     PlannerInfo* root, List* args, int varRelid, VariableStatData* vardata, Node** other, bool* varonleft);
 extern void get_join_variables(PlannerInfo* root, List* args, SpecialJoinInfo* sjinfo, VariableStatData* vardata1,

@@ -54,6 +54,12 @@
 /* PGXC_COORD */
 #include "access/gtm.h"
 #include "utils/memutils.h"
+#include "pgxc/remoteCombiner.h"
+#include "pgxc/execRemote.h"
+#include "pgxc/pgxcXact.h"
+#include "libpq/pqformat.h"
+#include "libpq/libpq.h"
+
 #endif
 
 /*
@@ -125,6 +131,15 @@ static int64 GetNextvalLocal(SeqTable elm, Relation seqrel);
 static void ResetvalGlobal(Oid relid);
 static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, int64 minv, int64 fetch,
     int64 log, int64 incby, int64 rescnt, bool is_cycled, int64 cache, Relation seqrel);
+#ifdef ENABLE_MULTIPLE_NODES
+static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value);
+static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char* seqname, const int64 last_value);
+#endif
+static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel, 
+                                    int64 result);
+static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple, 
+    Buffer buf, int64* rangemax, SeqTable elm, GTM_UUID uuid);
+
 /*
  * Sequence concurrent improvements
  *
@@ -461,10 +476,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     int64 sesscache; 
     int64 range;
     int64 rangemax;
-    char* seqname = NULL;
-    uint32 hash;
-    bool need_wal = false;
-    bool get_next_for_datanode = false;
+    uint32 hash = 0;
     hash = RelidGetHash(sess_elm->relid);
     /* guc */
     sesscache = u_sess->attr.attr_common.session_sequence_cache;
@@ -535,67 +547,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
 
     range = seq->cache_value; /* how many values to ask from GTM? */
     rangemax = 0;             /* the max value returned from the GTM for our request */
-    seqname = GetGlobalSeqName(seqrel, NULL, NULL);
-    /*
-     * Before connect GTM to get seqno we need check if current thread is able
-     * to get connection.
-    */
-    get_next_for_datanode = range > 1 && IS_PGXC_DATANODE;
-    if (get_next_for_datanode) {
-        int retry_times = 0;
-        const int retry_warning_threshold = 100;
-        const int retry_error_threshold = 30000; /* retry exceeds 5: minutes report error */
-
-        AutoMutexLock gtmConnLock(&gtm_conn_lock);
-
-        while (!gtmConnLock.TryLock()) {
-            if (retry_times == retry_warning_threshold) {
-                elog(WARNING,
-                    "Sequence \"%s\" retry %d times to connect GTM on datanode %s",
-                    seqname,
-                    retry_warning_threshold,
-                    g_instance.attr.attr_common.PGXCNodeName);
-            }
-
-            if (retry_times > retry_error_threshold) {
-                LWLockRelease(GetMainLWLockByIndex(bucket->lock_id));
-                UnlockReleaseBuffer(buf);
-
-                ereport(ERROR,
-                    (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                        errmsg("Sequence \"%s\" retry %d times to connect GTM on datanode %s",
-                            seqname,
-                            retry_error_threshold,
-                            g_instance.attr.attr_common.PGXCNodeName),
-                        errhint("Need reduce the num of concurrent Sequence request")));
-            }
-            retry_times++;
-            pg_usleep(SEQUENCE_GTM_RETRY_SLEEPING_TIME);
-        }
-
-        result = (int64)GetNextValGTM(seq, range, &rangemax, uuid);
-
-        ereport(DEBUG2,
-            (errmodule(MOD_SEQ),
-                (errmsg("Sequence %s get ID %ld from GTM, the rangemax is %ld, ",
-                    RelationGetRelationName(seqrel),
-                    result,
-                    rangemax))));
-
-        CloseGTM();
-        gtmConnLock.unLock();
-    } else {
-        result = (int64)GetNextValGTM(seq, range, &rangemax, uuid);
-
-        ereport(DEBUG2,
-            (errmodule(MOD_SEQ),
-                (errmsg("Sequence %s get ID %ld from GTM, the rangemax is %ld, ",
-                    RelationGetRelationName(seqrel),
-                    result,
-                    rangemax))));
-    }
-
-    pfree_ext(seqname);
+    result = GetNextvalResult(sess_elm, seqrel, seq, seqtuple, buf, &rangemax, elm, uuid);
 
     /* Update the on-disk data */
     seq->last_value = result; /* disable the unreliable last_value */
@@ -654,58 +606,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     log  -= cache;
     Assert(log >= 0);
 
-    /* ready to change the on-disk (or really, in-buffer) tuple */
-    START_CRIT_SECTION();
-    need_wal = getObsReplicationSlot() != NULL && RelationNeedsWAL(seqrel);
-    /* when obs archive is on, we need xlog to keep hadr standby get sequence */
-    if (need_wal) {
-        xl_seq_rec xlrec;
-        XLogRecPtr recptr;
-
-        /*
-         * We don't log the current state of the tuple, but rather the state
-         * as it would appear after "log" more fetches.  This lets us skip
-         * that many future WAL records, at the cost that we lose those
-         * sequence values if we crash.
-         */
-        /* set values that will be saved in xlog */
-        seq->last_value = result;
-        seq->is_called = true;
-        seq->log_cnt = 0;
-        seqtuple.t_data->t_ctid = seqtuple.t_self;
-
-        RelFileNodeRelCopy(xlrec.node, seqrel->rd_node);
-
-        XLogBeginInsert();
-        XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
-        XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
-        XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
-
-        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, seqrel->rd_node.bucketNode);
-
-        PageSetLSN(page, recptr);
-    }
-    
-    /*
-     * We must mark the buffer dirty before doing XLogInsert(); see notes in
-     * SyncOneBuffer().  However, we don't apply the desired changes just yet.
-     * This looks like a violation of the buffer update protocol, but it is
-     * in fact safe because we hold exclusive lock on the buffer.  Any other
-     * process, including a checkpoint, that tries to examine the buffer
-     * contents will block until we release the lock, and then will see the
-     * final state that we install below.
-     */
-    MarkBufferDirty(buf);
-
-    /* Now update sequence tuple to the intended final state */
-    seq->last_value = last; /* last fetched number */
-    seq->is_called = true;
-    seq->log_cnt = log; /* how much is logged */
-
-    END_CRIT_SECTION();
-
-    UnlockReleaseBuffer(buf);
-
+    updateNextValForSequence(buf, seq, seqtuple, seqrel, result);
     return result;
 }
 
@@ -1981,6 +1882,7 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
 
     /* Note we currently only bother to set these two fields of *seqtuple */
     seqtuple->t_data = (HeapTupleHeader)PageGetItem(page, lp);
+    seqtuple->t_self = seqtuple->t_data->t_ctid;
     seqtuple->t_len = ItemIdGetLength(lp);
     HeapTupleCopyBaseFromPage(seqtuple, page);
 
@@ -2724,3 +2626,312 @@ void drop_sequence_cb(GTMEvent event, void* args)
 #endif
 
 #endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value)
+{
+    List* dataNodeList = NULL;
+    PGXCNodeAllHandles* conn_handles = NULL;
+    int msglen;
+    int low = 0; 
+    int high = 0;
+    errno_t rc = 0;
+    GlobalTransactionId gxid =  GetCurrentTransactionId();
+    PGXCNodeHandle *exec_handle = NULL;
+    exec_handle = GetRegisteredTransactionNodes(true);
+    if (exec_handle == NULL) {
+        /* not transaction already, choose first node */
+        dataNodeList = lappend_int(dataNodeList, 0);
+        conn_handles = get_handles(dataNodeList, NULL, false);
+        list_free_ext(dataNodeList);
+        if (conn_handles->dn_conn_count != 1) {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), 
+                            errmsg("Could not get handle  on datanode for sequence")));
+        }
+        exec_handle = conn_handles->datanode_handles[0];
+    }
+    uint64 u_last_value;
+    ereport(DEBUG1,
+        (errmsg("sendUpdateSequenceMsgToDn %s %ld", seqname, last_value)));
+    if (pgxc_node_begin(1, &exec_handle, gxid, true, false, PGXC_NODE_DATANODE)) {
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), 
+                errmsg("Could not begin transaction on datanode for sequence")));
+    }
+    
+    PGXCNodeHandle* handle = NULL;
+
+    handle = exec_handle;
+
+    /* Invalid connection state, return error */
+    if (handle->state != DN_CONNECTION_STATE_IDLE)
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_FAILED),
+                errmsg("Failed to send sendUpdateSequenceMsgToDn request "
+                       "to the node")));
+
+    msglen = 4; /* for the length itself */
+    msglen +=  1; /* for signed */
+    msglen += sizeof(int64);
+    msglen += strlen(seqname) + 1;
+
+    /* msgType + msgLen */
+    ensure_out_buffer_capacity(1 + msglen, handle);
+
+    Assert(handle->outBuffer != NULL);
+    handle->outBuffer[handle->outEnd++] = 'y';
+    msglen = htonl(msglen);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, sizeof(int));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += 4;
+    if (last_value < 0) {
+        handle->outBuffer[handle->outEnd++] = '-';
+        u_last_value = (uint64)(last_value * -1);
+    } else {
+        handle->outBuffer[handle->outEnd++] = '+';
+        u_last_value = (uint64)(last_value);
+    }
+    low = u_last_value & 0xFFFFFFFF;
+    high   = (u_last_value >> 32) & 0xFFFFFFFF;
+    low = htonl(low);
+    high = htonl(high);
+
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &high, sizeof(high));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(high);
+
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &low, sizeof(low));
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += sizeof(low);
+
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+        seqname, strlen(seqname) + 1);
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += strlen(seqname) + 1;
+    handle->state = DN_CONNECTION_STATE_QUERY;
+    pgxc_node_flush(handle);
+    CheckUpdateSequenceMsgStatus(exec_handle, seqname, last_value);
+    pfree_pgxc_all_handles(conn_handles);
+}
+#endif // ENABLE_MULTIPLE_NODES
+
+void  processUpdateSequenceMsg(const char* seqname, int64 lastvalue)
+{
+    StringInfoData retbuf;
+    RangeVar* sequence = NULL;
+    Oid relid;
+    Form_pg_sequence seq;
+    HeapTupleData seqtuple;
+    text *seqname_text = cstring_to_text(seqname);
+    List* nameList = textToQualifiedNameList(seqname_text);
+    sequence = makeRangeVarFromNameList(nameList);
+    GTM_UUID uuid;
+    Buffer buf;
+    SeqTable elm = NULL;
+    Relation seqrel;
+    /*
+     * XXX: This is not safe in the presence of concurrent DDL, but acquiring
+     * a lock here is more expensive than letting nextval_internal do it,
+     * since the latter maintains a cache that keeps us from hitting the lock
+     * manager more than once per transaction.	It's not clear whether the
+     * performance penalty is material in practice, but for now, we do it this
+     * way.
+     */
+    relid = RangeVarGetRelid(sequence, NoLock, true);
+    list_free_deep(nameList);
+    if (!OidIsValid(relid)) {
+        ereport(
+            WARNING, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to find relation %s for sequence update", seqname)));
+        goto SEND_SUCCESS_MSG;
+    }
+    /* open and lock sequence */
+    init_sequence(relid, &elm, &seqrel);
+    /* lock page' buffer and read tuple */
+    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    updateNextValForSequence(buf, seq, seqtuple, seqrel, lastvalue);
+    relation_close(seqrel, NoLock);
+SEND_SUCCESS_MSG:
+    pq_beginmessage(&retbuf, 'y');
+    pq_endmessage(&retbuf);
+    pq_flush();
+}
+
+#ifdef ENABLE_MULTIPLE_NODES
+static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char* seqname, const int64 last_value)
+{
+    RemoteQueryState* combiner = NULL;
+    ereport(DEBUG1,
+        (errmodule(MOD_SEQ),
+             (errmsg("Check update sequence <%s> %ld command status", seqname, last_value))));
+
+    combiner = CreateResponseCombiner(1, COMBINE_TYPE_NONE);
+
+    if (pgxc_node_receive(1, &exec_handle, NULL))
+        ereport(
+            ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to receive response from the remote side")));
+    if (handle_response(exec_handle, combiner) != RESPONSE_SEQUENCE_OK)
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_FAILED),
+                errmsg("update sequence %s command failed with error %s", seqname, exec_handle->error)));
+    CloseCombiner(combiner);
+    ereport(DEBUG1,
+        (errmsg("Successfully completed update sequence <%s> to %ld command on all nodes", seqname, last_value)));
+}
+#endif // ENABLE_MULTIPLE_NODES
+
+static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel, 
+            int64 result)
+{
+    Page page;
+    bool need_wal = false;
+    char *seqname = NULL;
+    page = BufferGetPage(buf);
+    /* ready to change the on-disk (or really, in-buffer) tuple */
+    
+    need_wal = RelationNeedsWAL(seqrel);
+    if (IS_PGXC_DATANODE) {
+        START_CRIT_SECTION();
+        /* when obs archive is on, we need xlog to keep hadr standby get sequence */
+        if (need_wal) {
+            xl_seq_rec xlrec;
+            XLogRecPtr recptr;
+            /*
+             * We don't log the current state of the tuple, but rather the state
+             * as it would appear after "log" more fetches.  This lets us skip
+             * that many future WAL records, at the cost that we lose those
+             * sequence values if we crash.
+             */
+            /* set values that will be saved in xlog */
+            seq->last_value = result;
+            seq->is_called = true;
+            seq->log_cnt = 0;
+            RelFileNodeRelCopy(xlrec.node, seqrel->rd_node);
+            XLogBeginInsert();
+            XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
+            XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
+            XLogRegisterData((char*)seqtuple.t_data, seqtuple.t_len);
+            recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, seqrel->rd_node.bucketNode);
+            PageSetLSN(page, recptr);
+        }
+        /*
+         * We must mark the buffer dirty before doing XLogInsert(); see notes in
+         * SyncOneBuffer().  However, we don't apply the desired changes just yet.
+         * This looks like a violation of the buffer update protocol, but it is
+         * in fact safe because we hold exclusive lock on the buffer.  Any other
+         * process, including a checkpoint, that tries to examine the buffer
+         * contents will block until we release the lock, and then will see the
+         * final state that we install below.
+         */
+        MarkBufferDirty(buf);
+        /* Now update sequence tuple to the intended final state */
+        seq->last_value = result; /* last fetched number */
+        seq->is_called = true;
+        seq->log_cnt = 0;
+        END_CRIT_SECTION();
+    }
+    UnlockReleaseBuffer(buf);
+    /* 1 nextval execute on dn, will record in xlog above 
+     * 2 nextval execute on cn, will notify to dn for record
+     * 3 nextval execute direct on another cn, will ignore it for execute direct on is against with write transaction
+    */
+    if (need_wal && IS_PGXC_COORDINATOR) {
+        if (!IsConnFromCoord()) {
+            MemoryContext curr;
+            seqname = GetGlobalSeqName(seqrel, NULL, NULL);
+            curr = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
+            u_sess->xact_cxt.send_seqname = pstrdup(seqname);
+            u_sess->xact_cxt.send_result = result;
+            MemoryContextSwitchTo(curr);
+            pfree_ext(seqname);
+        } else {
+            /* nexval execute direct on cn will not notify dn */
+            ereport(WARNING,
+                (errmodule(MOD_SEQ),
+                    (errmsg("Sequence %s execute nextval direct on cn, will not notify dn ",
+                        RelationGetRelationName(seqrel)))));
+        }
+    }
+    return;
+}
+
+static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple,
+                              Buffer buf, int64* rangemax, SeqTable elm, GTM_UUID uuid)
+{
+    GlobalSeqInfoHashBucket* bucket = NULL;
+    int64 range;
+    char* seqname = NULL;
+    uint32 hash;
+    bool get_next_for_datanode = false;
+    hash = RelidGetHash(sess_elm->relid);
+    bucket = &g_instance.global_seq[hash];
+    int64 result = 0;
+
+    range = seq->cache_value; /* how many values to ask from GTM? */
+    seqname = GetGlobalSeqName(seqrel, NULL, NULL);
+    /*
+    * Before connect GTM to get seqno we need check if current thread is able
+    * to get connection.
+    */
+    get_next_for_datanode = range > 1 && IS_PGXC_DATANODE;
+    if (get_next_for_datanode) {
+        int retry_times = 0;
+        const int retry_warning_threshold = 100;
+        const int retry_error_threshold = 30000; /* retry exceeds 5: minutes report error */
+
+        AutoMutexLock gtmConnLock(&gtm_conn_lock);
+
+        while (!gtmConnLock.TryLock()) {
+            if (retry_times == retry_warning_threshold) {
+                elog(WARNING,
+                    "Sequence \"%s\" retry %d times to connect GTM on datanode %s",
+                    seqname,
+                    retry_warning_threshold,
+                    g_instance.attr.attr_common.PGXCNodeName);
+            }
+
+            if (retry_times > retry_error_threshold) {
+                LWLockRelease(GetMainLWLockByIndex(bucket->lock_id));
+                UnlockReleaseBuffer(buf);
+
+                ereport(ERROR,
+                    (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                        errmsg("Sequence \"%s\" retry %d times to connect GTM on datanode %s",
+                            seqname,
+                            retry_error_threshold,
+                            g_instance.attr.attr_common.PGXCNodeName),
+                        errhint("Need reduce the num of concurrent Sequence request")));
+            }
+            retry_times++;
+            pg_usleep(SEQUENCE_GTM_RETRY_SLEEPING_TIME);
+        }
+        result = (int64)GetNextValGTM(seq, range, rangemax, uuid);
+        ereport(DEBUG2,
+            (errmodule(MOD_SEQ),
+                (errmsg("Sequence %s get ID %ld from GTM, the rangemax is %ld, ",
+                    RelationGetRelationName(seqrel),
+                    result,
+                    *rangemax))));
+        CloseGTM();
+        gtmConnLock.unLock();
+    } else {
+        result = (int64)GetNextValGTM(seq, range, rangemax, uuid);
+
+        ereport(DEBUG2,
+            (errmodule(MOD_SEQ),
+                (errmsg("Sequence %s get ID %ld from GTM, the rangemax is %ld, ",
+                    RelationGetRelationName(seqrel),
+                    result,
+                    *rangemax))));
+    }
+    pfree_ext(seqname);
+    return result;
+}
+
+void checkAndDoUpdateSequence()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if(u_sess->xact_cxt.send_seqname != NULL) {
+        sendUpdateSequenceMsgToDn(u_sess->xact_cxt.send_seqname, u_sess->xact_cxt.send_result);
+        pfree_ext(u_sess->xact_cxt.send_seqname);
+    }
+#endif 
+}

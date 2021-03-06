@@ -1566,7 +1566,7 @@ static bool SnapBuildRestore(SnapBuild *builder, XLogRecPtr lsn)
     COMP_CRC32(checksum, ondisk.builder.was_running.was_xip, sz);
 
     /* restore committed xacts information */
-    if (MAX_SIZE_T_NUM / sizeof(TransactionId) < ondisk.builder.committed.xcnt_space) {
+    if (MAX_SIZE_T_NUM / sizeof(TransactionId) < ondisk.builder.committed.xcnt) {
         (void)CloseTransientFile(fd);
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\", size overflow", path)));
     }

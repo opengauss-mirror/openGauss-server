@@ -179,7 +179,8 @@ static void agent_acquire_connections_parallel(
 static uint32 get_current_connection_nums(Oid* cnOids, Oid* dnOids, List* cn_list, List* dn_list);
 static void agent_acquire_connections_start(PoolAgent* agent, List* datanodelist, List* coordlist);
 static void agent_acquire_connections_end(PoolAgent* agent);
-static bool is_current_node_during_connecting(PoolAgent* agent, Oid node_oid, char node_type);
+static bool is_current_node_during_connecting(
+    PoolAgent* agent, const NodeRelationInfo *needClearNodeArray, int waitClearCnt, char node_type);
 
 extern void reset_params_htab(HTAB* htab, bool);
 extern PGresult* LibcommGetResult(NODE_CONNECTION* conn);
@@ -1356,26 +1357,11 @@ List* PoolCleanInvalidFreeSlot(List* invalid_slots, Oid node_oid, char* invalid_
 /*
  * check whether current node is under connecting process
  */
-bool is_current_node_during_connecting(PoolAgent* agent, Oid node_oid, char node_type)
+bool is_current_node_during_connecting(
+    PoolAgent* agent, NodeRelationInfo *needClearNodeArray, int waitClearCnt, char node_type)
 {
-    int i;
-
-    if (node_type == PGXC_NODE_DATANODE && agent->dn_connecting_cnt != 0) {
-        for (i = 0; i < agent->dn_connecting_cnt; i++) {
-            if (agent->dn_connecting_oids[i] == node_oid) {
-                return true;
-            }
-        }
-    }
-
-    if (node_type == PGXC_NODE_COORDINATOR && agent->coord_connecting_cnt != 0) {
-        for (i = 0; i < agent->coord_connecting_cnt; i++) {
-            if (agent->coord_connecting_oids[i] == node_oid) {
-                return true;
-            }
-        }
-    }
-
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return false;
 }
 
@@ -1402,6 +1388,7 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
     /* invalid slot list, it free in destroy_slots() */
     List* invalid_slots = NIL;
     pg_conn* invalid_conn = NULL;
+    NodeRelationInfo needClearNodeArray = {0};
 
     /* Lock in exclusive mode so we can see a static pooler. */
     LWLockAcquire(PoolerLock, LW_EXCLUSIVE);
@@ -1471,7 +1458,8 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
                         entry[i].total_len += strlen(node_name) + 1;
                         entry[i].is_connecting = false;
                         entry[i].num_nodes++;
-                    } else if (is_current_node_during_connecting(poolAgents[i], node_oid, node_form->node_type)) {
+                    } else if (is_current_node_during_connecting(
+                        poolAgents[i], &needClearNodeArray, 0, node_form->node_type)) {
                         /* current agent is going to connect this invalid node_oid */
                         if (entry[i].tid == 0) {
                             entry[i].tid = poolAgents[i]->pid;
@@ -1516,7 +1504,8 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
                         entry[i].is_connecting = false;
                         entry[i].num_nodes++;
                     }
-                } else if (is_current_node_during_connecting(poolAgents[i], node_oid, node_form->node_type)) {
+                } else if (is_current_node_during_connecting(
+                    poolAgents[i], &needClearNodeArray, 0, node_form->node_type)) {
                     /* current agent is going to connect this invalid node_oid */
                     if (entry[i].tid == 0) {
                         entry[i].tid = poolAgents[i]->pid;
@@ -2124,7 +2113,7 @@ int create_connections_parallel(
  * @Return: slaveNodeNums
  * @See also:
  */
-int get_nodeinfo_from_matric(PoolGeneralInfo *info, int needCreateArrayLen, NodeRelationInfo *needCreateNodeArray)
+int get_nodeinfo_from_matric(char nodeType, int needCreateArrayLen, NodeRelationInfo *needCreateNodeArray)
 {
     int i = 0;
     int slaveNodeNums = 0;
@@ -2137,7 +2126,7 @@ int get_nodeinfo_from_matric(PoolGeneralInfo *info, int needCreateArrayLen, Node
             "get_nodeInfo_from_matric: needCreateNodeArray is null.")));
     }
     
-    if (IS_DN_DUMMY_STANDYS_MODE() || info->node_type == POOL_NODE_CN) {
+    if (IS_DN_DUMMY_STANDYS_MODE() || nodeType == PGXC_NODE_COORDINATOR) {
         slaveNodeNums = 1;
         /* total primary dn num is slaveNodeNums, but we will try the dummy node again when the failure occurs */
         tmpNodeArray = (Oid*)palloc0(sizeof(Oid) * needCreateArrayLen * (slaveNodeNums + 1));
@@ -2923,13 +2912,15 @@ int one_round_create_connection(PoolGeneralInfo* info, NodeRelationInfo *needCre
     int slaveNodeNums = 0;
     int circleLoopNums = 0;
     int failedCount = 0;
+    char nodeType;
     
     /* add the active/standby relationship table for retry connections when connect primary node failed. */
     if (needCreateArrayLen > 0) {
         /* only the primary node needs to be tried when PoolerConnectMaxRetries is 0. */ 
-        slaveNodeNums = get_nodeinfo_from_matric(info, needCreateArrayLen, needCreateNodeArray);
+        nodeType = (info->node_type == POOL_NODE_CN) ? PGXC_NODE_COORDINATOR : PGXC_NODE_DATANODE;
+        slaveNodeNums = get_nodeinfo_from_matric(nodeType, needCreateArrayLen, needCreateNodeArray);
         circleLoopNums = (u_sess->attr.attr_network.PoolerConnectMaxLoops == 0 ||
-            info->node_type == POOL_NODE_CN) ? 1 : (slaveNodeNums + 1);
+            nodeType == PGXC_NODE_COORDINATOR) ? 1 : (slaveNodeNums + 1);
     }
 
     /* Create data node connections parallel */

@@ -34,7 +34,8 @@ SUBDIRS = \
 	gsqlerr \
 	pg_upgrade \
 	pg_basebackup \
-	pg_probackup
+	pg_probackup \
+	gs_ktool
 
 ifeq ($(PORTNAME), win32)
 SUBDIRS += pgevent
@@ -56,7 +57,9 @@ SUBDIRS = \
 	pg_basebackup \
 	pg_probackup
 
-
+ifeq ($(enable_privategauss), yes)
+SUBDIRS += gs_ktool
+endif
 
 endif
 

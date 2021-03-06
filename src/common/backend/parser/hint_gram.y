@@ -521,5 +521,5 @@ makeBoolValue(bool state)
 }
 
 
-#include "hint_scan.cpp"
+#include "hint_scan.inc"
 

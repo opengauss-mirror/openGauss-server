@@ -30,16 +30,16 @@ ERROR:  duplicate key value violates unique constraint "gs_client_global_keys_na
 DETAIL:  Key (global_key_name, key_namespace)=(imgcmk, 2200) already exists.
 -- fail   didn't support RSA_2048 algorithm
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2" , ALGORITHM = RSA_2048);
-ERROR(CLIENT): unsupported global setting algorithm
+ERROR(CLIENT): unsupported client master key algorithm
 -- fail  ALGORITHM is missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2");
-ERROR(CLIENT): unsupported global setting algorithm
+ERROR(CLIENT): unsupported client master key algorithm
 -- fail  KEY_PATHis missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, ALGORITHM = AES_256_CBC);
-ERROR(CLIENT): key path are mandatory
+ERROR(CLIENT): invalid key path
 -- fail  KEY_STORE is missing or invalid
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_PATH = "gs_ktool/2", ALGORITHM = AES_256_CBC);
-ERROR(CLIENT): key store are mandatory
+ERROR(CLIENT): invalid key store
 -- fail duplicate KEY_PATHargs
 CREATE CLIENT MASTER KEY ImgCMK1 WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/2", KEY_PATH = "gs_ktool/3", ALGORITHM = AES_256_CBC);
 ERROR(CLIENT): duplicate keyPath args
@@ -57,23 +57,23 @@ CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, AL
 ERROR(CLIENT): encryption key too short
 --fail object does not exist
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK2, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
-ERROR(CLIENT): failed to get global setting imgcmk2 from cache
+ERROR(CLIENT): failed to get client master key imgcmk2 from cache
 -- fail   duplicate key value
 CREATE COLUMN ENCRYPTION KEY ImgCEK WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
 ERROR:  duplicate key value violates unique constraint "gs_column_keys_name_index"
 DETAIL:  Key (column_key_name, key_namespace)=(imgcek, 2200) already exists.
 --fail    ImgCMK1 dose not exist
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
-ERROR(CLIENT): failed to get global setting imgcmk1 from cache
+ERROR(CLIENT): failed to get client master key imgcmk1 from cache
 -- fail  didn't support AES_128_CBC algorithm
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AES_128_CBC);
-ERROR(CLIENT): syntax error parsing cek creation query.
+ERROR(CLIENT): invalid algorithm.
 -- fail   syntax error parsing cek creation query
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK);
-ERROR(CLIENT): syntax error parsing cek creation query.
+ERROR(CLIENT): invalid algorithm.
 -- fail   syntax error parsing cek creation query
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
-ERROR(CLIENT): failed to get global setting from cache
+ERROR(CLIENT): failed to get client master key from cache
 select  count(*), 'count' from gs_client_global_keys;
  count | ?column? 
 -------+----------
@@ -89,11 +89,11 @@ select  count(*), 'count' from gs_column_keys;
 --cek dose not exist
 CREATE TABLE account(user_id INT, username VARCHAR (50)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ImgCEK3, ENCRYPTION_TYPE = DETERMINISTIC)
 );
-ERROR(CLIENT):error while trying to retrieve column setting from cache
+ERROR(CLIENT):error while trying to retrieve column encryption key from cache
 DROP CLIENT MASTER KEY ImgCMK CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to column setting: imgcek
-drop cascades to column setting: imgcek1
+DETAIL:  drop cascades to column encryption key: imgcek
+drop cascades to column encryption key: imgcek1
 \! gs_ktool -d all
 DELETE ALL
  1 2 3

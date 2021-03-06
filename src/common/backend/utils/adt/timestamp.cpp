@@ -5774,10 +5774,11 @@ void timestamp_CalculateFields(TimestampTz* dt1, TimestampTz* dt2, fsec_t* fsec,
     }
 }
 
-void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo)
+void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo, TimestampTz nowtime,
+    TimestampTz timeout, TimestampTz lastTimestamp, TimestampTz heartbeat)
 {
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, timeStampInfo->nowtime);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->timeoutStamp, MAXTIMESTAMPLEN + 1, timeStampInfo->timeout);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, timeStampInfo->last_timestamp);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, timeStampInfo->heartbeat);
+    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, nowtime);
+    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->timeoutStamp, MAXTIMESTAMPLEN + 1, timeout);
+    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, lastTimestamp);
+    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, heartbeat);
 }

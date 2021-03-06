@@ -156,13 +156,11 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
         text *start_lsn_arg = PG_GETARG_TEXT_P(0);
         text *end_lsn_arg = PG_GETARG_TEXT_P(1);
 
-#ifdef ENABLE_MULTIPLE_NODES
         /* At present, we only allow merging CBM files on master */
         if (RecoveryInProgress())
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("recovery is in progress"),
                             errhint("pg_cbm_get_changed_block() cannot be executed"
                                     "during recovery.")));
-#endif
 
         char *start_lsn_str = text_to_cstring(start_lsn_arg);
         char *end_lsn_str = text_to_cstring(end_lsn_arg);

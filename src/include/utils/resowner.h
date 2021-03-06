@@ -153,4 +153,9 @@ extern void ResourceOwnerEnlargePartitionMapRefs(ResourceOwner owner);
 extern void ResourceOwnerRememberPartitionMapRef(ResourceOwner owner, PartitionMap* partmap);
 extern void ResourceOwnerForgetPartitionMapRef(ResourceOwner owner, PartitionMap* partmap);
 
+extern void ResourceOwnerEnlargeGMemContext(ResourceOwner owner);
+extern void ResourceOwnerRememberGMemContext(ResourceOwner owner, MemoryContext memcontext);
+extern void ResourceOwnerForgetGMemContext(ResourceOwner owner, MemoryContext memcontext);
+extern void PrintGMemContextLeakWarning(MemoryContext memcontext);
+
 #endif /* RESOWNER_H */

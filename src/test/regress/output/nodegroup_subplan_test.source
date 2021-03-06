@@ -2788,7 +2788,7 @@ HINT:  Do analyze for them in order to generate optimized plan.
                                              Distribute Key: nodegroup_subplan_test.t_subplan1.a1, nodegroup_subplan_test.t_subplan1.b1
                                              ->  Vector Nest Loop Left Join
                                                    Output: nodegroup_subplan_test.t_subplan1.a1, nodegroup_subplan_test.t_subplan1.b1, nodegroup_subplan_test.t_subplan1.c1, nodegroup_subplan_test.t_subplan1.d1, t_subplan2.a2, t_subplan2.b2, ($0)
-                                                   Join Filter: (NULL::boolean AND (t_subplan2.b2 = nodegroup_subplan_test.t_subplan1.b1))
+                                                   Join Filter: false
                                                    ->  Vector Streaming(type: REDISTRIBUTE ng: ng0->group1)
                                                          Output: nodegroup_subplan_test.t_subplan1.a1, nodegroup_subplan_test.t_subplan1.b1, nodegroup_subplan_test.t_subplan1.c1, nodegroup_subplan_test.t_subplan1.d1
                                                          Distribute Key: nodegroup_subplan_test.t_subplan1.a1, nodegroup_subplan_test.t_subplan1.b1

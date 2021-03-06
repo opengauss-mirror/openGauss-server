@@ -728,7 +728,7 @@ static void LWThreadSuicide(PGPROC *proc, int extraWaits, LWLock *lock, LWLockMo
     while (extraWaits-- > 0) {
         PGSemaphoreUnlock(&proc->sem);
     }
-    statement_full_info_record(LWLOCK_WAIT_END);
+    instr_stmt_report_lock(LWLOCK_WAIT_END);
     LWLockReportWaitFailed(lock);
     ereport(FATAL, (errmsg("force thread %lu to exit because of lwlock deadlock", proc->pid),
                     errdetail("Lock Info: (%s), mode %d", T_NAME(lock), mode)));
@@ -1293,7 +1293,7 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
 #ifdef LWLOCK_STATS
         lwstats->block_count++;
 #endif
-        statement_full_info_record(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
+        instr_stmt_report_lock(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
         LWLockReportWaitStart(lock);
         TRACE_POSTGRESQL_LWLOCK_WAIT_START(T_NAME(lock), mode);
         for (;;) {
@@ -1320,10 +1320,9 @@ bool LWLockAcquire(LWLock *lock, LWLockMode mode, bool need_update_lockid)
             Assert(nwaiters < MAX_BACKENDS);
         }
 #endif
-        statement_full_info_record(LWLOCK_WAIT_END);
-
         TRACE_POSTGRESQL_LWLOCK_WAIT_DONE(T_NAME(lock), mode);
         LWLockReportWaitEnd();
+        instr_stmt_report_lock(LWLOCK_WAIT_END);
 
         LOG_LWDEBUG("LWLockAcquire", lock, "awakened");
 
@@ -1447,7 +1446,7 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
 #ifdef LWLOCK_STATS
             lwstats->block_count++;
 #endif
-            statement_full_info_record(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
+            instr_stmt_report_lock(LWLOCK_WAIT_START, mode, NULL, lock->tranche);
             LWLockReportWaitStart(lock);
             TRACE_POSTGRESQL_LWLOCK_WAIT_START(T_NAME(lock), mode);
 
@@ -1474,9 +1473,9 @@ bool LWLockAcquireOrWait(LWLock *lock, LWLockMode mode)
                 Assert(nwaiters < MAX_BACKENDS);
             }
 #endif
-            statement_full_info_record(LWLOCK_WAIT_END);
             TRACE_POSTGRESQL_LWLOCK_WAIT_DONE(T_NAME(lock), mode);
             LWLockReportWaitEnd();
+            instr_stmt_report_lock(LWLOCK_WAIT_END);
 
             LOG_LWDEBUG("LWLockAcquireOrWait", lock, "awakened");
         } else {

@@ -25,7 +25,9 @@
 #include "c.h"
 #include "funcapi.h"
 #include "gs_thread.h"
+#include "pgstat.h"
 
 extern void gs_stat_get_timeout_beentry(int timeout_threshold, Tuplestorestate* tupStore, TupleDesc tupDesc, 
     FuncType insert);
+extern bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* beentry);
 #endif

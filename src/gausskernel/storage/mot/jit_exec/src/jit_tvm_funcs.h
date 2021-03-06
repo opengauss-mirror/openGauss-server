@@ -2799,13 +2799,13 @@ inline tvm::Expression* AddReadDatumColumn(
     return new (std::nothrow) VarExpression(table, row_inst, table_colid, arg_pos);
 }
 
-inline tvm::Instruction* AddWriteDatumColumn(
+inline void AddWriteDatumColumn(
     JitTvmCodeGenContext* ctx, int table_colid, tvm::Instruction* row_inst, tvm::Instruction* sub_expr)
 {
     // make sure we have a column before issuing the call
     // we always write to a main table row (whether UPDATE or range UPDATE, so inner_scan value below is false)
     tvm::Instruction* column = AddGetColumnAt(ctx, table_colid, JIT_RANGE_SCAN_MAIN);
-    return ctx->_builder->addInstruction(new (std::nothrow) WriteDatumColumnInstruction(row_inst, column, sub_expr));
+    ctx->_builder->addInstruction(new (std::nothrow) WriteDatumColumnInstruction(row_inst, column, sub_expr));
 }
 
 inline void AddBuildDatumKey(JitTvmCodeGenContext* ctx, tvm::Instruction* column_inst, int index_colid,

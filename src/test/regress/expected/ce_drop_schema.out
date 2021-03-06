@@ -10,8 +10,8 @@ CREATE CLIENT MASTER KEY cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool
 CREATE COLUMN ENCRYPTION KEY cek1 WITH VALUES (CLIENT_MASTER_KEY = cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 DROP SCHEMA ce_drop_schema CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to global setting: cmk1
-drop cascades to column setting: cek1
+DETAIL:  drop cascades to client master key: cmk1
+drop cascades to column encryption key: cek1
 SHOW SEARCH_PATH;
   search_path   
 ----------------
@@ -19,7 +19,7 @@ SHOW SEARCH_PATH;
 (1 row)
 
 DROP CLIENT MASTER KEY cmk1 CASCADE;
-ERROR:  schema "ce_drop_schema" does not exist
+ERROR:  client master key "cmk1" does not exist
 RESET search_path;
 SHOW SEARCH_PATH;
   search_path   

@@ -5,14 +5,6 @@
 --------------------------------------------------------------------------------------------
 \c upsert;
 SET CURRENT_SCHEMA TO upsert_test_explain;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
- enable_upsert_to_merge 
-------------------------
- off
-(1 row)
-
 create temp table up_expl_temp(c1 int, c2 int, c3 int unique) ;
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "up_expl_temp_c3_key" for table "up_expl_temp"
 insert into up_expl_hash select a,a,a from generate_series(1,20) as a;

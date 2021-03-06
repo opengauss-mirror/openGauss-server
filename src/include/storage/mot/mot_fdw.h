@@ -60,13 +60,6 @@ extern void MOTBeginRedoRecovery();
 extern void MOTEndRedoRecovery();
 
 /**
- * @brief Performs a commit or abort on an in-process two-phase transaction. Invoked from gs_clean.
- * @param txid Transaction ID
- * @param isCommit Specifies to commit or abort the transaction.
- */
-extern void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit);
-
-/**
  * @brief Notification from thread pool that a session ended (only when thread pool is ENABLED).
  */
 extern void MOTOnSessionClose();

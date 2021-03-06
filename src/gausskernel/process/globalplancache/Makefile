@@ -29,6 +29,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= globalplancache.o globalpreparestmt.o globalplancache_view.o globalplancache_util.o globalplancache_inval.o
+OBJS= globalplancache.o globalplancache_view.o globalplancache_util.o globalplancache_inval.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

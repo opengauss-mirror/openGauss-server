@@ -140,8 +140,8 @@ def train():
         fname = str(dtObj.year) + '-' + str(dtObj.month) + '-' + str(dtObj.day) + '_' \
                 + str(dtObj.hour) + '-' + str(dtObj.minute) + '-' + str(dtObj.second) + '-' \
                 + secure_filename(f.filename)
-        file_path = os.path.join(
-            base_path, settings.PATH_UPLOAD, fname)
+        file_path = os.path.realpath(os.path.join(
+            base_path, settings.PATH_UPLOAD, fname))
         f.save(file_path)
         # trigger training
         try:
@@ -202,7 +202,7 @@ def track_process():
         if 'modelName' in arg_json:
             model_name = arg_json['modelName']
             base_path = os.path.dirname(__file__)
-            log_path = os.path.join(base_path, settings.PATH_LOG, model_name + '_log.json')
+            log_path = os.path.realpath(os.path.join(base_path, settings.PATH_LOG, model_name + '_log.json'))
             if not (os.path.exists(log_path) and os.path.getsize(log_path)):
                 return 'F'
             else:
@@ -288,8 +288,8 @@ def predict():
         fname = str(dtObj.year) + '-' + str(dtObj.month) + '-' + str(dtObj.day) + '_' \
                 + str(dtObj.hour) + '-' + str(dtObj.minute) + '-' + str(dtObj.second) + '-' \
                 + 'tmp.csv'
-        file_path = os.path.join(
-            base_path, settings.PATH_UPLOAD, fname)
+        file_path = os.path.realpath(os.path.join(
+            base_path, settings.PATH_UPLOAD, fname))
         f.save(file_path)
         # trigger prediction
         try:

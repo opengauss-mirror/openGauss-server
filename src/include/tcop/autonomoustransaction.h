@@ -81,22 +81,25 @@ class AutonomousSession : public BaseObject {
 public:
     AutonomousSession(ATManager* manager) : m_conn(NULL), m_manager(&g_atManager), m_res(NULL) {}
 
-    ~AutonomousSession(void)
-    {
-        CloseSession();  // RAII to ensure session closing.
-    }
-
     /* disallow copy */
     AutonomousSession(const AutonomousSession&);
     AutonomousSession& operator=(const AutonomousSession&);
 
 public:
+    void Init(ATManager* manager)
+    {
+        m_conn = NULL;
+        m_manager = manager;
+        m_res = NULL;
+        m_refcount = 0;
+    }
 
     ATResult ExecSimpleQuery(const char* query);
     ATResult ExecQueryWithParams(const char* query, PQ_ParamInfo* pinfo);
-
-    void PrepareQuery(void) {}
-    void ExecPreparedQuery(void) {}
+    // attach with a plpgsql block, call this before using AutonomousSession object.
+    void Attach(void);
+    // detach with a plpgsql block, call this before quiting block.
+    void Detach(void);
 
     void CloseSession(void);
 
@@ -109,15 +112,30 @@ private:
     PGconn* m_conn;
     ATManager* m_manager;
     PGresult* m_res;
+    uint32 m_refcount;
 };
 
 ATResult HandlePGResult(PGconn* conn, PGresult* pgresult);
 
+enum PLpgSQL_exectype {
+    STMT_SQL,
+    STMT_PERFORM,
+    STMT_DYNAMIC,
+    STMT_UNKNOW
+};
 struct PLpgSQL_execstate;
 struct PLpgSQL_stmt_block;
+struct PLpgSQL_expr;
+
+bool IsAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block);
 bool IsValidAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block);
+bool IsValidAutonomousTransactionQuery(PLpgSQL_exectype exectype, const PLpgSQL_expr* stmtexpr, bool isinto);
+
+void AttachToAutonomousSession(PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block);
+void DetachToAutonomousSession(const PLpgSQL_execstate* estate);
 
 void InitPQParamInfo(PQ_ParamInfo* pinfo, int n);
 void FreePQParamInfo(PQ_ParamInfo* pinfo);
+
 
 #endif /* AUTONOMOUSTRANSACTION_H */

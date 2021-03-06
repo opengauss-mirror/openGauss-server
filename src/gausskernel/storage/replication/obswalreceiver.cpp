@@ -33,6 +33,7 @@
 #include "storage/proc.h"
 #include "utils/guc.h"
 #include "pgxc/pgxc.h"
+#define CUR_OBS_FILE_VERSION 1
 
 #ifdef ENABLE_MULTIPLE_NODES
 static void convert_dn_barrierid_path(const char *dn_path, char *cn_path)
@@ -447,8 +448,9 @@ int obs_replication_archive(const ArchiveXlogMessage *xlogInfo)
     fileNamePrefix = obs_replication_get_xlog_prefix(xlogInfo->targetLsn, false);
     fileName = (char*)palloc0(MAX_PATH_LEN);
 
-    /* {xlog_name}_{sliece_num}_00000001{term}_00000001{subTerm} */
-    rc = sprintf_s(fileName, MAX_PATH_LEN, "%s_%08u_%08d", fileNamePrefix, xlogInfo->term, xlogInfo->sub_term);
+    /* {xlog_name}_{sliece_num}_01(version_num)_00000001{tli}_00000001{subTerm} */
+    rc = sprintf_s(fileName, MAX_PATH_LEN, "%s_%02d_%08u_%08u_%08d", fileNamePrefix, 
+        CUR_OBS_FILE_VERSION, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term);
     securec_check_ss(rc, "\0", "\0");
 
     /* Upload xlog slice file to OBS */
@@ -540,7 +542,7 @@ int obs_replication_get_last_xlog(ArchiveXlogMessage *xlogInfo)
     TimeLineID timeLine;
     int xlogSegId;
     int xlogSegOffset;
-
+    int version = 0;
     if (xlogInfo == NULL) {
         return -1;
     }
@@ -554,12 +556,12 @@ int obs_replication_get_last_xlog(ArchiveXlogMessage *xlogInfo)
     fileBaseName = basename(filePath);
     ereport(DEBUG1, (errmsg("The last xlog on OBS: %s", filePath)));
 
-    rc = sscanf_s(fileBaseName, "%8X%8X%8X_%2u_%8u_%8d", &timeLine, &xlogSegId,
-                  &xlogSegOffset, &xlogInfo->slice, &xlogInfo->term, &xlogInfo->sub_term);
+    rc = sscanf_s(fileBaseName, "%8X%8X%8X_%2u_%02d_%08u_%08u_%08d", &timeLine, &xlogSegId,
+                  &xlogSegOffset, &xlogInfo->slice, &version, &xlogInfo->term, &xlogInfo->tli, &xlogInfo->sub_term);
     securec_check_for_sscanf_s(rc, 6, "\0", "\0");
 
-    ereport(DEBUG1, (errmsg("Parse xlog filename is %8X%8X%8X_%2u_%8u_%8d", timeLine, xlogSegId,
-                            xlogSegOffset, xlogInfo->slice, xlogInfo->term, xlogInfo->sub_term)));
+    ereport(DEBUG1, (errmsg("Parse xlog filename is %8X%8X%8X_%2u_%02d_%08u_%08u_%08d", timeLine, xlogSegId,
+                            xlogSegOffset, xlogInfo->slice, version, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term)));
 
     XLogSegNoOffsetToRecPtr(xlogSegId * XLogSegmentsPerXLogId + xlogSegOffset, 0, xlogInfo->targetLsn);
 

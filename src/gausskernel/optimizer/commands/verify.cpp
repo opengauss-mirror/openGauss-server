@@ -533,7 +533,7 @@ void DoVerifyTableOtherNode(VacuumStmt* stmt, bool sentToRemote)
         } else if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
             relation_close(rel, AccessShareLock);
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
+                (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                     errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.", 
                        g_instance.attr.attr_common.PGXCNodeName)));

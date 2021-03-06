@@ -42,8 +42,8 @@ int EncryptionColumnHookExecutor::get_estimated_processed_data_size_impl(int dat
     return get_cipher_text_size(data_size);
 }
 
-int EncryptionColumnHookExecutor::process_data_impl(bool is_during_refresh_cache, const ICachedColumn *cached_column,
-    const unsigned char *data, int data_size, unsigned char *processed_data)
+int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_column, const unsigned char *data,
+    int data_size, unsigned char *processed_data)
 {
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
         dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
@@ -61,14 +61,14 @@ int EncryptionColumnHookExecutor::process_data_impl(bool is_during_refresh_cache
         return -1;
     }
     AeadAesHamcEncKey aesCbcEncryptionKey;
-    unsigned char decryptedKey[MAX_CEK_LENGTH];
-    errno_t rc = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+    unsigned char decrypted_key[MAX_CEK_LENGTH];
+    errno_t rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
     securec_check_c(rc, "\0", "\0");
-    size_t decryptedKeySize = 0;
+    size_t decrypted_key_size = 0;
     errno_t securec_rc = EOK;
     unsigned char *cek_keys = NULL;
     cek_keys = get_cek_keys();
-    decryptedKeySize = get_cek_size();
+    decrypted_key_size = get_cek_size();
 
     ColumnEncryptionAlgorithm column_encryption_algorithm = get_column_encryption_algorithm();
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
@@ -89,26 +89,25 @@ int EncryptionColumnHookExecutor::process_data_impl(bool is_during_refresh_cache
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
-    if (cek_keys != NULL && decryptedKeySize != 0) {
-        securec_rc = memcpy_s(decryptedKey, MAX_CEK_LENGTH, cek_keys, decryptedKeySize);
+    if (cek_keys != NULL && decrypted_key_size != 0) {
+        securec_rc = memcpy_s(decrypted_key, MAX_CEK_LENGTH, cek_keys, decrypted_key_size);
         securec_check_c(securec_rc, "", "");
     } else {
-        is_during_refresh_cache = true;
-        if (!deprocess_column_encryption_key(is_during_refresh_cache, encryption_global_hook_executor, decryptedKey,
-            &decryptedKeySize, encrypted_key_value, &encrypted_key_value_size)) {
+        if (!deprocess_column_encryption_key(encryption_global_hook_executor, decrypted_key,
+            &decrypted_key_size, encrypted_key_value, &encrypted_key_value_size)) {
             return -1;
         }
-        set_cek_keys((unsigned char *)decryptedKey, decryptedKeySize);
-        set_cek_size(decryptedKeySize);
+        set_cek_keys((unsigned char *)decrypted_key, decrypted_key_size);
+        set_cek_size(decrypted_key_size);
     }
 
     /* encryption key */
-    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decryptedKey, decryptedKeySize)) {
-        errno_t res = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decrypted_key, decrypted_key_size)) {
+        errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");
         return -1;
     }
-    errno_t res = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+    errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
     securec_check_c(res, "\0", "\0");
     Oid data_type = cached_column->get_data_type();
     EncryptionType encryption_type = EncryptionType::INVALID_TYPE;
@@ -122,32 +121,33 @@ int EncryptionColumnHookExecutor::process_data_impl(bool is_during_refresh_cache
     return encryptedSize;
 }
 
-int EncryptionColumnHookExecutor::deprocess_data_impl(bool is_during_refresh_cache, const unsigned char *dataProcessed,
-    int dataProcessedSize, unsigned char **data)
+DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned char *data_processed,
+    int data_proceeed_size, unsigned char **data, int *data_plain_size)
 {
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
         dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
     if (!encryption_global_hook_executor) {
-        return -1;
+        return CLIENT_HEAP_ERR;
     }
+
     /* get effective encrypted_key */
     size_t encrypted_key_value_size = 0;
     const char *encrypted_key_value = NULL;
     get_argument("encrypted_value", &encrypted_key_value, encrypted_key_value_size);
     if (encrypted_key_value == NULL) {
         printf("ERROR(CLIENT): failed to get key_value.\n");
-        return -1;
+        return DECRYPT_CEK_ERR;
     }
 
     AeadAesHamcEncKey aesCbcEncryptionKey;
-    unsigned char decryptedKey[MAX_CEK_LENGTH];
+    unsigned char decrypted_key[MAX_CEK_LENGTH];
     errno_t securec_rc = EOK;
-    securec_rc = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+    securec_rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
     securec_check_c(securec_rc, "\0", "\0");
-    size_t decryptedKeySize = 0;
+    size_t decrypted_key_size = 0;
     unsigned char *cek_keys = NULL;
     cek_keys = get_cek_keys();
-    decryptedKeySize = get_cek_size();
+    decrypted_key_size = get_cek_size();
     ColumnEncryptionAlgorithm column_encryption_algorithm = get_column_encryption_algorithm();
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
         size_t algorithm_str_size(0);
@@ -155,7 +155,7 @@ int EncryptionColumnHookExecutor::deprocess_data_impl(bool is_during_refresh_cac
         get_argument("algorithm", &algorithm_str, algorithm_str_size);
         if (algorithm_str == NULL) {
             printf("ERROR(CLIENT): failed to get column encryption algorithm.\n");
-            return -1;
+            return DECRYPT_CEK_ERR;
         } else if (strcasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256") == 0) {
             column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
         } else if (strcasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
@@ -163,55 +163,60 @@ int EncryptionColumnHookExecutor::deprocess_data_impl(bool is_during_refresh_cac
         }
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
-    if (cek_keys != NULL && decryptedKeySize != 0) {
-        securec_rc = memcpy_s(decryptedKey, MAX_CEK_LENGTH, cek_keys, decryptedKeySize);
+
+    if (cek_keys != NULL && decrypted_key_size != 0) {
+        securec_rc = memcpy_s(decrypted_key, MAX_CEK_LENGTH, cek_keys, decrypted_key_size);
         securec_check_c(securec_rc, "\0", "\0");
     } else {
-        if (!deprocess_column_encryption_key(is_during_refresh_cache, encryption_global_hook_executor, decryptedKey,
-            &decryptedKeySize, encrypted_key_value, &encrypted_key_value_size)) {
-            return -1;
+        if (!deprocess_column_encryption_key(encryption_global_hook_executor, decrypted_key, &decrypted_key_size,
+            encrypted_key_value, &encrypted_key_value_size)) {
+            return DECRYPT_CEK_ERR;
         }
-        set_cek_keys((unsigned char *)decryptedKey, decryptedKeySize);
-        set_cek_size(decryptedKeySize);
+
+        set_cek_keys((unsigned char *)decrypted_key, decrypted_key_size);
+        set_cek_size(decrypted_key_size);
     }
 
     /* encryption key */
-    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decryptedKey, decryptedKeySize)) {
-        errno_t res = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decrypted_key, decrypted_key_size)) {
+        errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");
-        return -1;
+        return DERIVE_CEK_ERR;
     }
-    errno_t res = memset_s(decryptedKey, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+
+    errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
     securec_check_c(res, "\0", "\0");
-    if (dataProcessedSize <= 0) {
-        printf("ERROR(CLIENT): data processed size(%d) is invalid.\n", dataProcessedSize);
-        return -1;
+    if (data_proceeed_size <= 0) {
+        printf("ERROR(CLIENT): data processed size(%d) is invalid.\n", data_proceeed_size);
+        return INVALID_DATA_LEN;
     }
-    *data = (unsigned char *)malloc(dataProcessedSize);
+    *data = (unsigned char *)malloc(data_proceeed_size);
     if (!(*data)) {
         printf("ERROR(CLIENT): allocation failure.\n");
-        return -1;
+        return CLIENT_HEAP_ERR;
     }
-    res = memset_s(*data, dataProcessedSize, 0, dataProcessedSize);
+    res = memset_s(*data, data_proceeed_size, 0, data_proceeed_size);
     securec_check_c(res, "\0", "\0");
     int plainTextSize =
-        decrypt_data(dataProcessed, dataProcessedSize, aesCbcEncryptionKey, *data, column_encryption_algorithm);
+        decrypt_data(data_processed, data_proceeed_size, aesCbcEncryptionKey, *data, column_encryption_algorithm);
     if (plainTextSize <= 0) {
         printf("ERROR(CLIENT): failed to decrypt data.\n");
         free(*data);
         *data = NULL;
-        return -1;
+        return DEC_DATA_ERR;
     }
 
-    res = memset_s((*data) + plainTextSize, dataProcessedSize - plainTextSize, '\0', dataProcessedSize - plainTextSize);
+    res = memset_s((*data) + plainTextSize, data_proceeed_size - plainTextSize, '\0',
+        data_proceeed_size - plainTextSize);
     securec_check_c(res, "\0", "\0");
-    return plainTextSize;
+    *data_plain_size = plainTextSize;
+    return DEC_DATA_SUCCEED;
 }
 
 /* decrypting cek when can not get decrypted cek from cache */
-bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_during_refresh_cache,
-    EncryptionGlobalHookExecutor *encryption_global_hook_executor, unsigned char *decryptedKey,
-    size_t *decryptedKeySize, const char *encrypted_key_value, const size_t *encrypted_key_value_size) const
+bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(
+    EncryptionGlobalHookExecutor *encryption_global_hook_executor, unsigned char *decrypted_key,
+    size_t *decrypted_key_size, const char *encrypted_key_value, const size_t *encrypted_key_value_size) const
 {
     size_t key_path_size(0);
     const char *key_path_str = NULL;
@@ -232,26 +237,21 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
     CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     /* read cmk plain from gs_ktool */
-    bool is_report_err = is_during_refresh_cache;
     unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
     unsigned int cmk_id = 0;
 
-    /* 
-     * to determine whether need to refresh cache and try PQexec(query) again :
-     * case 1 : report error directly
-     * case 2 : do not report error and try again
-     */
     if (keyStore == CmkKeyStore::GS_KTOOL) {
         if (!kt_atoi(key_path_str, &cmk_id)) {
             return false;
         }
 
-        if (!read_cmk_plain(cmk_id, cmk_plain, is_report_err)) {
+        /* read cmk plain from gs_ktool */
+        if (!read_cmk_plain(cmk_id, cmk_plain)) {
             return false;
         }
 
         if (!decrypt_cek_use_aes256((const unsigned char *)encrypted_key_value, *encrypted_key_value_size, cmk_plain,
-            decryptedKey, decryptedKeySize, is_report_err)) {
+            decrypted_key, decrypted_key_size)) {
             return false;
         }
     } else {
@@ -263,15 +263,15 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(bool is_durin
     KmsErrType err_type = SUCCEED;
 
     if (keyStore == CmkKeyStore::LOCALKMS) {
-        err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
-        if (err_type != KEY_FILES_EXIST) {
+        err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, READ_KEY_FILE);
+        if (err_type != SUCCEED) {
             handle_kms_err(err_type);
             return false;
         }
 
         if (decrypt_cek_use_rsa2048((const unsigned char *)encrypted_key_value, *encrypted_key_value_size,
             real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path),
-            decryptedKey, decryptedKeySize) != SUCCEED) {
+            decrypted_key, decrypted_key_size) != SUCCEED) {
             return false;
         }
     } else {
@@ -310,7 +310,6 @@ static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain
     unsigned char *cek_ciph, size_t &cek_ciph_len)
 {
     /* read cmk plain from gs_ktool */
-    bool is_report_err = true;
     unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
     unsigned int cmk_id = 0;
 
@@ -318,11 +317,11 @@ static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain
         return false;
     }
 
-    if (!read_cmk_plain(cmk_id, cmk_plain, is_report_err)) {
+    if (!read_cmk_plain(cmk_id, cmk_plain)) {
         return false;
     }
 
-    if (!encrypt_cek_use_aes256(cek_plain, cek_plain_size, cmk_plain, cek_ciph, cek_ciph_len, is_report_err)) {
+    if (!encrypt_cek_use_aes256(cek_plain, cek_plain_size, cmk_plain, cek_ciph, cek_ciph_len)) {
         return false;
     }
 
@@ -336,8 +335,8 @@ static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain
     RealCmkPath real_cmk_path = {0};
     KmsErrType err_type = SUCCEED;
 
-    err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
-    if (err_type != KEY_FILES_EXIST) {
+    err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, READ_KEY_FILE);
+    if (err_type != SUCCEED) {
         handle_kms_err(err_type);
         return false;
     }

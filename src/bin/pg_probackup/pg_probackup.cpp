@@ -73,6 +73,7 @@ char       *replication_slot = NULL;
 #endif
 bool        temp_slot = false;
 char       *password = NULL;
+int        rw_timeout = 0;
 
 /* backup options */
 bool         backup_logs = false;
@@ -190,6 +191,7 @@ static ConfigOption cmd_options[] =
     { 'b', 148, "compress",            &compress_shortcut,    SOURCE_CMD_STRICT },
     { 'B', 'w', "no-password",        &prompt_password,    SOURCE_CMD_STRICT },
     { 's', 'W', "password",            &password,            SOURCE_CMD_STRICT },
+    { 'u', 't', "rw-timeout",          &rw_timeout,           SOURCE_CMD_STRICT },
     { 's', 149, "instance",            &instance_name,        SOURCE_CMD_STRICT },
     { 's', 150, "wal-file-path",    &wal_file_path,        SOURCE_CMD_STRICT },
     { 's', 151, "wal-file-name",    &wal_file_name,        SOURCE_CMD_STRICT },
@@ -515,14 +517,16 @@ static void do_delete_operate()
 
 static int do_validate_operate()
 {
-    if (current.backup_id == 0 && target_time == 0 && target_xid == 0 && !target_lsn && !recovery_target_options->target_name)
+    if (current.backup_id == 0 && target_time == 0 && target_xid == 0 && !target_lsn &&
+        !recovery_target_options->target_name) {
         return do_validate_all();
-    else
+    } else {
         /* PITR validation and, optionally, partial validation */
         return do_restore_or_validate(current.backup_id,
                   recovery_target_options,
                   restore_params,
                   no_sync);
+    }
 }
 
 static int do_actual_operate()
@@ -693,7 +697,6 @@ int main(int argc, char *argv[])
 {
     char       *command = NULL,
                *command_name;
-    errno_t rc = 0;
 
     PROGRAM_NAME_FULL = argv[0];
 

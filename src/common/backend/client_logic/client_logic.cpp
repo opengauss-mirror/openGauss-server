@@ -23,13 +23,12 @@
 #include "pg_config.h"
 
 #include "client_logic/client_logic.h"
-#include "client_logic/client_logic_common.h"
+#include "client_logic/cstrings_map.h"
 #include "access/sysattr.h"
 #include "commands/dbcommands.h"
 #include "catalog/dependency.h"
 #include "catalog/pg_namespace.h"
 #include "client_logic/cache.h"
-#include "client_logic/client_logic_common.h"
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
 #include "utils/acl.h"
@@ -62,6 +61,8 @@
         securec_check(rc, "\0", "\0");                                                      \
     } while (0)
 
+const size_t ENCRYPTED_VALUE_MIN_LENGTH = 170;
+const size_t ENCRYPTED_VALUE_MAX_LENGTH = 1024;
 static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name);
 
 static Oid check_namespace(const List *key_name, Node * const stmt, char **keyname)
@@ -631,9 +632,18 @@ static int process_column_settings_args(CreateClientLogicColumn *parsetree, Oid 
                 string_args.set("ALGORITHM", columnParam->value);
                 break;
             }
-            case ClientLogicColumnProperty::CEK_EXPECTED_VALUE:
+            case ClientLogicColumnProperty::CEK_EXPECTED_VALUE: {
+                if (columnParam->value == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid encrypted value")));
+                }
+                size_t encrypted_value_size = strlen(columnParam->value);
+                if (encrypted_value_size < ENCRYPTED_VALUE_MIN_LENGTH || 
+                    encrypted_value_size > ENCRYPTED_VALUE_MAX_LENGTH) {
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid encrypted value")));
+                }
                 string_args.set("ENCRYPTED_VALUE", columnParam->value);
                 break;
+            }
             default:
                 break;
         }

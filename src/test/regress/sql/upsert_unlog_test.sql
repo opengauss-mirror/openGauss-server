@@ -1,8 +1,5 @@
 \c upsert
 SET CURRENT_SCHEMA TO upsert_test_unlog;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
 
 -- hash table
 -- unlogged table without primary key

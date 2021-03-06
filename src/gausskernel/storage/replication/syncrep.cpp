@@ -646,7 +646,7 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * or there are not enough synchronous standbys.
      * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
      * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
-    */
+     */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
         (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
         list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
@@ -1457,6 +1457,11 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
         securec_check(rc, "", "");
 
         *extra = (void *)pconf;
+        if (t_thrd.syncrepgram_cxt.syncrep_parse_result) {
+            pfree(t_thrd.syncrepgram_cxt.syncrep_parse_result);
+            t_thrd.syncrepgram_cxt.syncrep_parse_result = NULL;
+        }
+
         /*
          * We need not explicitly clean up syncrep_parse_result.  It, and any
          * other cruft generated during parsing, will be freed when the

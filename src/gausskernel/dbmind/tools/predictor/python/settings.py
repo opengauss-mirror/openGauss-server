@@ -38,4 +38,4 @@ GPU_CONFIG = '0,1'
 
 # Path for logs
 base_path = os.path.dirname(__file__)
-PATH_MODELS_INFO = os.path.join(base_path, PATH_MODELS)
+PATH_MODELS_INFO = os.path.realpath(os.path.join(base_path, PATH_MODELS))

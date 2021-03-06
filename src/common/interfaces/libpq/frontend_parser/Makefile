@@ -18,7 +18,7 @@ backenddir = $(top_builddir)/src/common/backend
 # shared library parameters
 NAME= parser_frontend
 
-override CPPFLAGS := -DFRONTEND_PARSER -DFRONTEND -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq -I$(top_builddir)/src/common/interfaces/libpq/frontend_parser $(CPPFLAGS)
+override CPPFLAGS := -DFRONTEND_PARSER -DFRONTEND -DPGXC -fstack-protector-all -I$(srcdir) -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq -I$(top_builddir)/src/common/interfaces/libpq/frontend_parser $(CPPFLAGS)
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
 #override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
 

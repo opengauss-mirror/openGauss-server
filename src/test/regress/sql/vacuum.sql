@@ -46,9 +46,11 @@ ALTER TABLE vaccluster CLUSTER ON vaccluster_pkey;
 INSERT INTO vaccluster SELECT * FROM vactst;
 CLUSTER vaccluster;
 
+set xc_maintenance_mode = on;
 VACUUM FULL pg_am;
 VACUUM FULL pg_class;
 VACUUM FULL pg_database;
+set xc_maintenance_mode = off;
 VACUUM FULL vaccluster;
 VACUUM FULL vactst;
 

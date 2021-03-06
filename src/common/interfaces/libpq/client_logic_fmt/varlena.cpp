@@ -141,9 +141,9 @@ unsigned char *byteain(const char *inputText, size_t *binary_size, char *err_msg
         } else {
             /* We should never get here. The first pass should not allow it. */
             check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, " invalid input syntax for type bytea\n"));
-            if (rp != NULL) {
-                free(rp);
-                rp = NULL;
+            if (binary != NULL) {
+                free(binary);
+                binary = NULL;
             }
             return NULL;
         }

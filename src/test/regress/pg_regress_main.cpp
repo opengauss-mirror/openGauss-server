@@ -79,7 +79,7 @@ static PID_TYPE psql_start_test(
     int port = test_single_node ? myinfo.dn_port[0] : myinfo.co_port[0];
     (void)snprintf(psql_cmd + offset,
         sizeof(psql_cmd) - offset,
-        SYSTEMQUOTE "\"%s%sgsql\" -X -p %d -a %s %s -q -d \"%s\" "
+        SYSTEMQUOTE "\"%s%sgsql\" -X -p %d -a %s %s -q -d \"%s\" -C"
                     "< \"%s\" > \"%s\" 2>&1" SYSTEMQUOTE,
         psqldir ? psqldir : "",
         psqldir ? "/" : "",

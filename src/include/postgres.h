@@ -921,6 +921,8 @@ extern void RemoveTempNamespace();
 
 extern int errdetail_abort(void);
 
+void log_disconnections(int code, Datum arg);
+
 #define MSG_A_REPEAT_NUM_MAX 1024
 #define OVERRIDE_STACK_LENGTH_MAX 1024
 #endif /* POSTGRES_H */

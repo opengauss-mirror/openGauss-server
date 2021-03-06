@@ -4,8 +4,6 @@
 -- initial
 CREATE SCHEMA test_insert_update_008;
 SET current_schema = test_insert_update_008;
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
 CREATE TABLE products_base
 (
 product_id INTEGER DEFAULT 0,

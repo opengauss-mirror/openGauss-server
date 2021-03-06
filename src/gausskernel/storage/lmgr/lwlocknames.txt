@@ -105,3 +105,4 @@ PartOidCacheLock 97
 DeleteCompactionLock 98
 DeleteConsumerLock 99
 ConsumerStateLock 100
+HypoIndexLock 101

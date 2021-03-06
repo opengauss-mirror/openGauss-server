@@ -42,4 +42,11 @@ extern void getAZDyanmicStatus(
     int azCount, int* statusOnline, int* statusPrimary, int* statusFail, int* statusDnFail, char azArray[][CM_AZ_NAME]);
 
 extern void* AZStatusCheckAndArbitrate(void* arg);
+extern void *DnGroupStatusCheckAndArbitrateMain(void *arg);
+extern bool CompareCurWithExceptSyncList(uint32 groupIndex);
+extern void GetSyncListString(DatanodeSyncList syncList, char *syncListString, size_t len);
+extern bool IsInstanceIdInSyncList(uint32 instanceId, const DatanodeSyncList *syncList);
+extern int getDnCountOfAZ(int* azDnCount, bool inCurSyncList);
+extern int GetAzDeploymentType();
+extern bool IsDnSyncListVaild(uint32 groupIndex, uint32 *instanceId);
 #endif

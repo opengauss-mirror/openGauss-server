@@ -572,7 +572,7 @@ static inline void set_cursor_stmt_as_masked(const char* name, const masking_res
     (*masked_cursor_stmts)[name] = (*result);
 }
 
-void set_result_set_function(const PolicyLabelItem func)
+void set_result_set_function(const PolicyLabelItem &func)
 {
     if (result_set_functions == NULL) {
         result_set_functions = new gs_policy_label_set;

@@ -275,6 +275,8 @@ elog_internal(int elevel, bool file_only, const char *message)
     pthread_mutex_unlock(&log_file_mutex);
 }
 
+static void
+elog_stderr(int elevel, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
 /*
  * Log only to stderr. It is called only within elog_internal() when another
  * logging already was started.
@@ -571,7 +573,7 @@ open_logfile(FILE **file, const char *filename_format)
     char       *filename;
     char        control[MAXPGPATH];
     struct stat    st;
-    FILE       *control_file;
+    FILE       *control_file = NULL;
     time_t        cur_time = time(NULL);
     bool        rotation_requested = false,
                 logfile_exists = false,
@@ -626,7 +628,7 @@ open_logfile(FILE **file, const char *filename_format)
 
         /* Check for rotation by size */
         if (!rotation_requested && logger_config.log_rotation_size > 0)
-            rotation_requested = st.st_size >=
+            rotation_requested = (uint64)st.st_size >=
                 /* convert to bytes */
                 logger_config.log_rotation_size * 1024L;
     }
@@ -698,7 +700,7 @@ static void open_rotationfile(char *control,
             /* Parsed creation time */
             rotation_requested = (cur_time - creation_time) >
                 /* convert to seconds from milliseconds */
-                logger_config.log_rotation_age / 1000;
+                (long)(logger_config.log_rotation_age / 1000);
     }
     else
     {

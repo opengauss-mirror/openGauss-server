@@ -1,13 +1,5 @@
 \c upsert
 SET CURRENT_SCHEMA TO upsert_test_unlog;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
- enable_upsert_to_merge
-------------------------
- off
-(1 row)
-
 -- hash table
 -- unlogged table without primary key
 INSERT INTO t_hash_unlog_0 VALUES(1, 1, 'C3', '{1,2,3}', '{10,20,30,40,50}', ROW(10,20), ROW(100, ROW(10,20), '{100,200}')),

@@ -98,21 +98,6 @@ public:
         uint32_t tid, SurrogateState& sState, RC& status, bool& wasCommit);
 
     /**
-     * @brief attempts to recover a 2pc operation.
-     * @param transaction manager object.
-     * @param state the state of the operation.
-     * @param data buffer to operate on.
-     * @param csn the operation's csn.
-     * @param transactionId the transaction's id.
-     * @param tid the thread id of the recovering thread.
-     * @param sState the returned surrugate state.
-     * @param status the returned status of the operation.
-     * @return Int value denoting the number of bytes recovered.
-     */
-    static uint32_t TwoPhaseRecoverOp(TxnManager* txn, RecoveryOpState state, uint8_t* data, uint64_t csn,
-        uint64_t transactionId, uint32_t tid, SurrogateState& sState, RC& status);
-
-    /**
      * @brief Starts a new transaction for recovery operations.
      * @param transaction manager object.
      * @param replayLsn the redo LSN for this transaction during replay.
@@ -346,64 +331,6 @@ private:
      * @param transaction manager object.
      */
     static void RollbackTransaction(TxnManager* txn);
-
-    /**
-     * @brief attempts to apply a 2pc operation.
-     * @param transaction manager object.
-     * @param transaction manager object.
-     * @param opCode the operation code.
-     * @param tableId the table id that the recovered op belongs to.
-     * @param exId the external table id that the recovered op belongs to.
-     * @param csn the operation's csn.
-     * @param keyData key's data buffer.
-     * @param keyLen key's data buffer len.
-     * @param rowData row's data buffer.
-     * @param rowLen row's data buffer len.
-     * @param transactionId the transaction's id.
-     * @param tid the thread id of the recovering thread.
-     * @param row a row pointer (if exists).
-     * @param rowId the row id.
-     * @param sState the returned surrugate state.
-     * @param status the returned status of the operation.
-     */
-    static void RecoverTwoPhaseApply(TxnManager* txn, OperationCode opCode, uint64_t tableId, uint64_t exId,
-        uint64_t csn, uint8_t* keyData, uint64_t keyLength, uint8_t* rowData, uint64_t rowLength,
-        uint64_t transactionId, uint32_t tid, Row* row, uint64_t rowId, SurrogateState& sState, RC& status);
-
-    /**
-     * @brief attempts to commit a 2pc operation
-     * @param table a pointer to the table object that the op belongs to.
-     * @param opCode the operation code.
-     * @param csn the operation's csn.
-     * @param rowData row's data buffer.
-     * @param rowLen row's data buffer len.
-     * @param transactionId the transaction's id
-     * @param tid the thread id of the recovering thread.
-     * @param row a row pointer (if exists)
-     * @param status the returned status of the operation
-     */
-    static void RecoverTwoPhaseCommit(Table* table, OperationCode opCode, uint64_t csn, uint8_t* rowData,
-        uint64_t rowLength, uint64_t transactionId, uint32_t tid, Row* row, RC& status);
-
-    /**
-     * @brief attempts to abort a 2pc operation
-     * @param table a pointer to the table object that the op belongs to.
-     * @param opCode the operation code.
-     * @param csn the operation's csn.
-     * @param transactionId the transaction's id.
-     * @param tid the thread id of the recovering thread.
-     * @param row a row pointer (if exists)
-     * @param status the returned status of the operation
-     */
-    static void RecoverTwoPhaseAbort(
-        Table* table, OperationCode opCode, uint64_t csn, uint64_t transactionId, uint32_t tid, Row* row, RC& status);
-
-    /**
-     * @brief checks if an operation is supported by the recovery.
-     * @param op the operation code to check.
-     * @return Boolean value denoting if the op is supported.
-     */
-    static bool IsSupportedOp(OperationCode op);
 };  // class RecoveryOps
 }  // namespace MOT
 

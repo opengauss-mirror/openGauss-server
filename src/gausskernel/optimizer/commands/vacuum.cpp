@@ -1723,6 +1723,19 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
                     return false;
                 }
             }
+
+            /* VACUUM FULL on hard-coded catalogs are only executed under maintenance mode */
+            if (rel != NULL && relid < FirstBootstrapObjectId &&
+                !u_sess->attr.attr_common.xc_maintenance_mode && !IsInitdb) {
+                ereport(NOTICE,
+                        (errcode(ERRCODE_E_R_E_MODIFYING_SQL_DATA_NOT_PERMITTED),
+                         errmsg("skipping \"%s\" --- use xc_maintenance_mode to VACUUM FULL it",
+                             RelationGetRelationName(rel))));
+                relation_close(rel, AccessShareLock);
+                proc_snapshot_and_transaction();
+                return false;
+            }
+
             if (rel != NULL)
                 relation_close(rel, AccessShareLock);
         }
@@ -1740,7 +1753,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(onerel->rd_rel->relnamespace)) {
             relation_close(onerel, lmode);
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
+                (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                     errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.", 
                        g_instance.attr.attr_common.PGXCNodeName)));

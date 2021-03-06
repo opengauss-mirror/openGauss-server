@@ -31,4 +31,4 @@ show enable_resource_track;
 --restart database
 \! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
 --show new value of the parameter with postmaster level
-\! @abs_bindir@/gsql -d postgres -p 54323 -c 'show memorypool_size'
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c 'show memorypool_size'

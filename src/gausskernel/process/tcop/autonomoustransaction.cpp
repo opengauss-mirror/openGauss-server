@@ -41,6 +41,7 @@ bool ATManager::AddSession()
     SpinLockAcquire(&m_lock);
     if (m_sessioncnt < (uint32)g_instance.attr.attr_storage.max_concurrent_autonomous_transactions) {
         ++m_sessioncnt;
+        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc session : %d", m_sessioncnt)));
         bok = true;
     }
     SpinLockRelease(&m_lock);
@@ -53,6 +54,7 @@ void ATManager::RemoveSession()
     SpinLockAcquire(&m_lock);
     if (m_sessioncnt > 0) {
         --m_sessioncnt;
+        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction dec session : %d", m_sessioncnt)));
     }
     SpinLockRelease(&m_lock);
 }
@@ -112,7 +114,9 @@ void AutonomousSession::CloseSession(void)
     }
 
     m_manager->RemoveSession();
-    PQfinish(m_conn);
+    PGconn* conn = m_conn;
+    m_conn = NULL;
+    PQfinish(conn);
 
     if (m_res != NULL) {
         PQclear(m_res);
@@ -168,6 +172,27 @@ void AutonomousSession::CreateSession(const char* conninfo)
 
     ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction create session : %s", conninfo)));
 }
+
+void AutonomousSession::Attach(void)
+{
+    ++m_refcount;
+    ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc ref : %d", m_refcount)));
+}
+
+void AutonomousSession::Detach(void)
+{
+    if (m_refcount > 0) {
+        --m_refcount;
+        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction dec ref : %d", m_refcount)));
+    } else {
+        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction invalid dec ref")));
+    }
+
+    if (m_refcount == 0) {
+        CloseSession();
+    }
+}
+
 
 ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
 {
@@ -233,23 +258,6 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
     return res;
 }
 
-bool IsValidAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
-{
-    if (unlikely(estate == NULL || block == NULL)) {
-        return false;
-    }
-    if (block->exceptions != NULL) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Autonomous transaction don't support exception")));
-    }
-    if (estate->func->fn_is_trigger) { 
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Trigger don't support autonomous transaction")));
-    } 
-
-    return true;
-}
-
 void InitPQParamInfo(PQ_ParamInfo* pinfo, int n)
 {
     if (pinfo == NULL) {
@@ -289,6 +297,86 @@ void FreePQParamInfo(PQ_ParamInfo* pinfo)
     }
 
     pfree(pinfo);
+}
+
+bool IsValidAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
+{
+    if (unlikely(estate == NULL || block == NULL)) {
+        return false;
+    }
+    if (block->exceptions != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature : Autonomous transaction don't support exception")));
+    }
+    if (estate->func->fn_is_trigger) { 
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature : Trigger don't support autonomous transaction")));
+    } 
+
+    return true;
+}
+
+bool IsAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
+{
+    /* 
+     * in outer block of plpgsql using block->autonomous to identify autonomus,
+     * in subblock of plpgsql using estate->autonomous_session.
+     * ----------------------------------------------------
+      CREATE FUNCTION ff_subblock() RETURNS void AS $$
+      DECLARE
+      PRAGMA AUTONOMOUS_TRANSACTION;
+      BEGIN <<outer block>>
+           BEGIN <<subblock>>
+               insert into tt01 values(1);
+           END;
+           BEGIN <<subblock>>
+                insert into tt01 values(2);
+           END;
+      END;
+      $$ LANGUAGE plpgsql;
+     * ----------------------------------------------------
+     */
+    return (block->autonomous || estate->autonomous_session);
+}
+
+bool IsValidAutonomousTransactionQuery(PLpgSQL_exectype exectype, const PLpgSQL_expr* stmtexpr, bool isinto)
+{
+    if (exectype == STMT_UNKNOW) {
+        return false;
+    }
+    if (unlikely(stmtexpr == NULL)) {
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("null stmt expr in autonomous transactions")));
+    }
+    if (isinto) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature : Autonomous transaction don't support 'into' clause"),
+                        errdetail("%s", stmtexpr->query)));
+    }
+    if (stmtexpr->paramnos != NULL && exectype != STMT_DYNAMIC) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Un-support feature : Autonomous transaction don't support sql command with parameter"),
+                        errdetail("%s", stmtexpr->query)));
+    }
+
+    return true;
+}
+
+void AttachToAutonomousSession(PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
+{
+    if (IsValidAutonomousTransaction(estate, block)) {
+        if (estate->autonomous_session == NULL) {
+            estate->autonomous_session = (AutonomousSession*)palloc(sizeof(AutonomousSession));
+            estate->autonomous_session->Init(&g_atManager);
+        }
+        estate->autonomous_session->Attach();
+    }
+}
+
+void DetachToAutonomousSession(const PLpgSQL_execstate* estate)
+{
+    if (estate->autonomous_session) {
+        estate->autonomous_session->Detach();
+    }
 }
 
 /* end of file */

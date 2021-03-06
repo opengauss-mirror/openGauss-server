@@ -171,6 +171,7 @@ Datum encode_plan_node(PG_FUNCTION_ARGS)
     pfree(strategy);
     pfree(options);
     pfree(quals);
+    pfree(projection);
 
     text* res = cstring_to_text(code->data);
     pfree(code->data);
@@ -214,7 +215,7 @@ void SaveDataToFile(const char* filename)
     }
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         ret = memset_s(buf, sizeof(buf), 0, sizeof(buf));
-        securec_check_ss(ret, "\0", "\0");
+        securec_check(ret, "\0", "\0");
         enc = (TreeEncPtr)GETSTRUCT(tuple);
         str = (char*)(text_to_cstring(enc->encode));
         ret = sprintf_s(buf,
@@ -497,7 +498,7 @@ static inline bool IsScan(Plan* plan)
            IsA(plan, IndexOnlyScan) || IsA(plan, BitmapIndexScan) || IsA(plan, VecSubqueryScan) ||
            IsA(plan, BitmapHeapScan) || IsA(plan, TidScan) || IsA(plan, CStoreScan) || IsA(plan, VecForeignScan) ||
            IsA(plan, CStoreIndexScan) || IsA(plan, CStoreIndexCtidScan) || IsA(plan, CStoreIndexHeapScan) ||
-           IsA(plan, FunctionScan) || IsA(plan, VecSubqueryScan) || IsA(plan, ValuesScan) || IsA(plan, CteScan) ||
+           IsA(plan, FunctionScan) || IsA(plan, ValuesScan) || IsA(plan, CteScan) ||
            IsA(plan, WorkTableScan) || IsA(plan, ForeignScan) || IsA(plan, VecScan) || IsA(plan, DfsScan) ||
            IsA(plan, VecIndexScan) || IsA(plan, VecIndexOnlyScan) || IsA(plan, VecBitmapIndexScan) ||
            IsA(plan, VecBitmapHeapScan);

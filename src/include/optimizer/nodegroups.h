@@ -281,6 +281,8 @@ extern void ngroup_info_hash_create();
 extern Bitmapset*  ngroup_info_hash_search(Oid ngroup_oid);
 extern void  ngroup_info_hash_insert(Oid ngroup_oid, Bitmapset * bms_node_ids);
 extern void ngroup_info_hash_delete(Oid ngroup_oid);
+extern void ngroup_info_hash_destory(void);
+
 
 /*
  * Other functions

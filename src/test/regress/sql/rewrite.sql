@@ -21,6 +21,7 @@ ALTER TABLE replication_example ADD COLUMN testcolumn2 int;
 INSERT INTO replication_example(somedata, testcolumn1, testcolumn2) VALUES (4,  2, 1);
 COMMIT;
 
+set xc_maintenance_mode = on;
 VACUUM FULL pg_am;
 VACUUM FULL pg_amop;
 VACUUM FULL pg_proc;
@@ -38,6 +39,7 @@ CLUSTER pg_class USING pg_class_oid_index;
  -- repeated rewrites in different transactions
 VACUUM FULL pg_class;
 VACUUM FULL pg_class;
+set xc_maintenance_mode = off;
 
 INSERT INTO replication_example(somedata, testcolumn1) VALUES (5, 3);
 

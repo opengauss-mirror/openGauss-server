@@ -121,6 +121,7 @@ typedef struct FuncExprInfo {
     AttrNumber resno;
     Oid funcid;
     List* args;
+    char* resname;
 } FuncExprInfo;
 
 const int OPFUSION_FUNCTION_ID_MAX_HASH_SIZE = 200;

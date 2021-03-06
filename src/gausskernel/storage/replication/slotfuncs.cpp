@@ -203,6 +203,8 @@ Datum pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
     HeapTuple tuple;
     Datum result;
 
+    ValidateName(NameStr(*name));
+
     check_permissions();
 
     CheckSlotRequirements();
@@ -333,6 +335,11 @@ void create_logical_replication_slot(const Name name, Name plugin, bool isDummyS
                         (uint32)(t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush >> 32),
                         (uint32)t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush);
         securec_check_ss(rc, "", "");
+    }
+
+    if (t_thrd.logical_cxt.sendFd >= 0) {
+        (void)close(t_thrd.logical_cxt.sendFd);
+        t_thrd.logical_cxt.sendFd = -1;
     }
 
     /* don't need the decoding context anymore */
@@ -788,9 +795,12 @@ Datum pg_replication_slot_advance(PG_FUNCTION_ARGS)
     Datum result;
     NameData database;
     char EndLsn[NAMEDATALEN];
-    bool for_backup = (strncmp(NameStr(*slotname), "gs_roach", strlen("gs_roach")) == 0);
+    bool for_backup = false;
 
     ValidateName(NameStr(*slotname));
+
+    for_backup = (strncmp(NameStr(*slotname), "gs_roach", strlen("gs_roach")) == 0);
+
     if (RecoveryInProgress()) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("couldn't advance in recovery")));
     }

@@ -25,9 +25,6 @@
 --------------------------------------------------------------------------------------------
 \c upsert
 SET CURRENT_SCHEMA TO upsert_test_etc;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
 
 insert into up_neg_04 select a,a,a from generate_series(1,20) as a;
 insert into up_neg_05 select a,a,a,a,a from generate_series(1,20) as a;
@@ -167,4 +164,4 @@ insert into fkt values(1,1,1),(2,2,2),(3,3,3);
 
 insert into fkt values(1,1,1),(2,2,2),(3,3,3) on duplicate key update b=excluded.b+1, c=0;
 insert into fkt values(1,1,1),(2,2,2),(3,3,3) on duplicate key update b=excluded.b+3, c=-1;
-
+insert into fkt values(1,8,1),(2,9,2),(3,3,3),(4,9,4) on duplicate key update b=excluded.b+3, c=-1;

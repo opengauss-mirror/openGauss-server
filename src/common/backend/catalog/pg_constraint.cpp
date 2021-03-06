@@ -974,6 +974,7 @@ int pgxc_find_primarykey(Oid relid, int16** indexed_col, bool check_is_immediate
          * two or more row updated/deleted, that is not allow in not-stream plan, may be lead to system crash.
          */
         if (check_is_immediate && !indexStruct->indimmediate) {
+            ReleaseSysCache(indexTuple);
             continue;
         }
 

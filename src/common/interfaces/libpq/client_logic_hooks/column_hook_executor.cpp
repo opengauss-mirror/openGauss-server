@@ -22,9 +22,9 @@
  */
 
 #include <string.h>
+#include <iostream>
 #include "column_hook_executor.h"
 #include "global_hook_executor.h"
-#include <iostream>
 
 ColumnHookExecutor::ColumnHookExecutor(GlobalHookExecutor *global_hook_executor, Oid oid, const char *function_name)
     : AbstractHookExecutor(function_name)
@@ -61,28 +61,28 @@ int ColumnHookExecutor::get_estimated_processed_data_size(int data_size) const
     return sizeof(Oid) + get_estimated_processed_data_size_impl(data_size);
 }
 
-int ColumnHookExecutor::process_data(bool is_during_refresh_cache, const ICachedColumn *cached_column,
+int ColumnHookExecutor::process_data(const ICachedColumn *cached_column,
     const unsigned char *data, int data_size, unsigned char *processed_data)
 {
     if (!m_global_hook_executor->process(this)) {
         fprintf(stderr, "global executor failed to process column excecutor\n");
-        return 0;
+        return -1;
     }
 
     errno_t rc = EOK;
     rc = memcpy_s(processed_data, sizeof(Oid), &m_oid, sizeof(Oid));
     securec_check_c(rc, "\0", "\0");
-    return process_data_impl(is_during_refresh_cache, cached_column, data, data_size, processed_data + sizeof(Oid));
+    return process_data_impl(cached_column, data, data_size, processed_data + sizeof(Oid));
 }
 
-int ColumnHookExecutor::deprocess_data(bool is_during_refresh_cache, const unsigned char *processed_data,
-    int processed_data_size, unsigned char **data)
+DecryptDataRes ColumnHookExecutor::deprocess_data(const unsigned char *processed_data, int processed_data_size,
+    unsigned char **data, int *data_plain_size)
 {
     if (!m_global_hook_executor->process(this)) {
         fprintf(stderr, "global executor failed to deprocess column excecutor\n");
-        return 0;
+        return DECRYPT_CEK_ERR;
     }
-    return deprocess_data_impl(is_during_refresh_cache, processed_data, processed_data_size, data);
+    return deprocess_data_impl(processed_data, processed_data_size, data, data_plain_size);
 }
 
 

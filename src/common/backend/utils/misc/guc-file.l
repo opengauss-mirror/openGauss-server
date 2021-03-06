@@ -662,11 +662,29 @@ ParseConfigFp(FILE *fp, const char *config_file, int depth, int elevel,
 			item->filename = pstrdup(config_file);
 			item->sourceline = t_thrd.utils_cxt.ConfigFileLineno-1;
 			item->next = NULL;
-			if (*head_p == NULL)
-				*head_p = item;
+			if (guc_name_compare(opt_name,"upgrade_mode") == 0)
+			{
+				if (*head_p == NULL)
+				{
+					*head_p = item;
+					*tail_p = item;
+				}
+				else
+				{
+					ConfigVariable *prev_head = *head_p;
+					*head_p = item;
+					item->next = prev_head;
+				}
+			}
 			else
-				(*tail_p)->next = item;
-			*tail_p = item;
+			{
+				if (*head_p == NULL)
+					*head_p = item;
+				else
+					(*tail_p)->next = item;
+
+				*tail_p = item;
+			}
 		}
 
 		/* break out of loop if read EOF, else loop for next line */

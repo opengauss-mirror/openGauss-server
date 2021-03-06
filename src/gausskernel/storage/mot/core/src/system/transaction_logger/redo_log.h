@@ -165,18 +165,6 @@ public:
      */
     void WriteToLog();
 
-    /**
-     * @brief Writes buffer data to the in-process txns map
-     */
-    void WriteToInProcessTxns();
-
-    /**
-     * @brief Serializes the transaction, appends a prepare op to it
-     * and adds it to the in process txns map
-     * @return The status of the operation.
-     */
-    RC PrepareToInProcessTxns();
-
     inline RedoLogBuffer& GetBuffer()
     {
         return *m_redoBuffer;
@@ -201,7 +189,7 @@ private:
      * @param[out] idxDDLMap Map of Index ID to DDLAccess.
      * @return The status of the operation.
      */
-    RC SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap);
+    RC SerializeDDLs(IdxDDLAccessMap& idxDDLMap);
 
     RC SerializeDropIndex(TxnDDLAccess::DDLAccess* ddlAccess, bool hasDML, IdxDDLAccessMap& idxDDLMap);
 
@@ -209,7 +197,7 @@ private:
      * @brief Writes the whole transaction's DMLs into the redo buffer
      * @return The status of the operation.
      */
-    RC SerializeTransactionDMLs();
+    RC SerializeDMLs();
 
     /* Member variables */
     RedoLogHandler* m_redoLogHandler;

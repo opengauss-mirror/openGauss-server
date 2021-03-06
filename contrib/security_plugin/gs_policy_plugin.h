@@ -46,7 +46,7 @@ void get_remote_addr(IPV6 *ip);
 const char* get_session_app_name();
 const char* GetUserName(char* user_name, size_t user_name_size);
 bool get_ipaddress(gs_stl::gs_string& ipaddress);
-void set_result_set_function(const PolicyLabelItem func);
+void set_result_set_function(const PolicyLabelItem &func);
 void get_name_range_var(const RangeVar *rangevar, gs_stl::gs_string *buffer, bool enforce = true);
 CmdType get_rte_commandtype(RangeTblEntry *rte);
 extern void load_database_policy_info();

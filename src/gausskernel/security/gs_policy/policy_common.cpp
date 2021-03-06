@@ -282,18 +282,22 @@ static bool verify_column_name(Oid relid, const char *colname)
  * 
  * walk through all the rules for relid to check whether contain relname 
  */
-static void verify_temp_table(Oid relid, const char *relname)
+static void verify_temp_table(Oid relid, const char *relname, Relation relation, bool ignore = false)
 {
     HeapTuple tuple = SearchSysCache1(RELOID, relid);
     if (!HeapTupleIsValid(tuple)) {
+        heap_close(relation, RowExclusiveLock);
         ereport(ERROR,
                 (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                  errmsg("Cache lookup failed for relation %u", relid)));
     }
     Form_pg_class reltup = (Form_pg_class) GETSTRUCT(tuple);
-    /* Current object must be a normal table */
-    if (reltup->relkind != RELKIND_RELATION) {
+    /* Current object must be a normal table.
+     * 'ignore' means whether report error when resource type is not TABLE.
+     */
+    if (reltup->relkind != RELKIND_RELATION && !ignore) {
         ReleaseSysCache(tuple);
+        heap_close(relation, RowExclusiveLock);
         ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                  errmsg("\"%s\" is not a normal table", relname)));
@@ -302,6 +306,7 @@ static void verify_temp_table(Oid relid, const char *relname)
     /* Check temp table or not */
     if (reltup->relpersistence == RELPERSISTENCE_TEMP) {
         ReleaseSysCache(tuple);
+        heap_close(relation, RowExclusiveLock);
         ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                  errmsg("Do not support policy label on temp table \"%s\"", relname)));
@@ -362,7 +367,7 @@ static void check_table_type_exists(RangeVar *rel, Relation relation)
                      errmsg("[%s.%s] no such relation found", schemaname, rel->relname)));
         }
     } else {
-        verify_temp_table(relid, rel->relname);
+        verify_temp_table(relid, rel->relname, relation);
     }
 }
 
@@ -382,6 +387,11 @@ static void check_view_type_exists(RangeVar *rel, Relation relation)
 static void check_column_type_exists(RangeVar *rel, Relation relation)
 {
     Oid relid = get_relation_id(rel, true);
+    /* Create resource label on temp table is not allowed. */
+    if (g_instance.role != VDATANODE) {
+        verify_temp_table(relid, rel->schemaname, relation, true);
+    }
+
     if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && !OidIsValid(relid)) {
         /* return error */
         heap_close(relation, RowExclusiveLock);

@@ -1827,7 +1827,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
      * ignore this check.
      */
     if (parameterCount == 1 && func->proallargtypes != NULL && OidIsValid(func->proallargtypes->values[0]) &&
-        !IsBootstrapProcessingMode() && (relid = typeidTypeRelid((func->proallargtypes->values)[0]) != InvalidOid) &&
+        !IsBootstrapProcessingMode() && ((relid = typeidTypeRelid((func->proallargtypes->values)[0])) != InvalidOid) &&
         get_attnum(relid, func->prosrc) != InvalidAttrNumber) {
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_COLUMN),

@@ -2438,7 +2438,7 @@ void HeapInsertTsStore(Relation relation, ResultRelInfo *resultRelInfo, HeapTupl
     bool *null = (bool *)palloc(sizeof(bool) * tupDesc->natts);
     heap_deform_tuple(tup, tupDesc, val, null);
 
-    tsstoreInsert->batch_insert(val, null, option);
+    tsstoreInsert->batch_insert(val, null, option, true);
     tsstoreInsert->end_batch_insert();
 
     pfree(val);
@@ -6313,12 +6313,6 @@ static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, const ItemPointe
                             ItemPointerGetBlockNumber(&newtup->t_self), ItemPointerGetOffsetNumber(&newtup->t_self),
                             xlhdr.t_infomask2, xlhdr.t_infomask, xlhdr.t_hoff, xlrec.flags, bufflags, newtup->t_len)));
 
-    if (old_key_tuple != NULL) {
-        ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                         errmsg("[REDO_LOG_TRACE]log_heap_update: oldBlkNum:%u, oldOffsetNum:%hu",
-                                ItemPointerGetBlockNumber(&old_key_tuple->t_self),
-                                ItemPointerGetOffsetNumber(&old_key_tuple->t_self))));
-    }
     return recptr;
 }
 

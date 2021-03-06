@@ -1,4 +1,26 @@
-#!/bin/bash -e
+#!/bin/bash
+# Build docker image
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2028. All rights reserved.
+#
+#openGauss is licensed under Mulan PSL v2.
+#You can use this software according to the terms and conditions of the Mulan PSL v2.
+#You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+#-------------------------------------------------------------------------
+#
+# buildDockerImage.sh
+#    Build docker image
+#
+# IDENTIFICATION
+#    GaussDBKernel/server/docker/dockerfiles/buildDockerImage.sh
+#
+#-------------------------------------------------------------------------
 
 usage() {
   cat << EOF
@@ -19,8 +41,8 @@ EOF
 }
 
 # Validate packages
-checksumPackages() {
-if [ $arch = "amd64" ]; then
+checksum_packages() {
+if [ "${arch}" = "amd64" ]; then
     md5_file="md5_file_amd64"
     else
     md5_file="md5_file_arm64"
@@ -40,7 +62,7 @@ fi
 
 
 # Check Docker version
-checkDockerVersion() {
+check_docker_version() {
   # Get Docker Server version
   echo "Checking Docker version."
   DOCKER_VERSION=$(docker version --format '{{.Server.Version | printf "%.5s" }}'|| exit 0)
@@ -66,8 +88,8 @@ VERSION="1.0.0"
 SKIPMD5=0
 DOCKEROPS=""
 MIN_DOCKER_VERSION="17.09"
-arch=`case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac`
-if [ $arch = "amd64" ]; then
+arch=$(case $(uname -m) in i386)   echo "386" ;; i686)   echo "386" ;; x86_64) echo "amd64";; aarch64)echo "arm64";; esac)
+if [ "${arch}" = "amd64" ]; then
     DOCKERFILE="dockerfile_amd"
     else
     DOCKERFILE="dockerfile_arm"
@@ -104,7 +126,7 @@ while getopts "hesxiv:o:" optname; do
   esac
 done
 
-checkDockerVersion
+check_docker_version
 
 
 
@@ -123,7 +145,7 @@ cd "$VERSION" || {
 }
 
 if [ ! "$SKIPMD5" -eq 1 ]; then
-  checksumPackages
+  checksum_packages
 else
   echo "Ignored MD5 checksum."
 fi
@@ -174,7 +196,7 @@ docker build --force-rm=true --no-cache=true \
 yes | docker image prune > /dev/null
 
 BUILD_END=$(date '+%s')
-BUILD_ELAPSED=`expr $BUILD_END - $BUILD_START`
+BUILD_ELAPSED=$(expr $BUILD_END - $BUILD_START)
 
 echo ""
 echo ""

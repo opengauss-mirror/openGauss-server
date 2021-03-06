@@ -20,7 +20,7 @@ SELECT COUNT(*) FROM gs_column_keys;
 (1 row)
 
 DROP COLUMN ENCRYPTION KEY test_drop_cek2;
-ERROR:  column setting "test_drop_cek2" does not exist
+ERROR:  column encryption key "test_drop_cek2" does not exist
 SELECT COUNT(*) FROM gs_column_keys;
  count 
 -------
@@ -42,7 +42,7 @@ SELECT COUNT(*) FROM gs_client_global_keys;
 (1 row)
 
 DROP CLIENT MASTER KEY test_drop_cmk2;
-ERROR:  global setting "test_drop_cmk2" does not exist
+ERROR:  client master key "test_drop_cmk2" does not exist
 SELECT COUNT(*) FROM gs_client_global_keys;
  count 
 -------

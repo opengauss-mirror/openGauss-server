@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS MyCMK1 CASCADE;
-NOTICE:  global setting "mycmk1" does not exist
+NOTICE:  client master key "mycmk1" does not exist
 -- create another user
 DROP ROLE IF EXISTS newuser;
 ERROR:  role "newuser" cannot be dropped because some objects depend on it

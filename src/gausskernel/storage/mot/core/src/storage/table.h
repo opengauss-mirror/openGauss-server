@@ -1003,7 +1003,7 @@ public:
      * @param meta the metadata struct to fill.
      * @return Char* the buffer pointer.
      */
-    char* DesrializeMeta(char* dataIn, CommonColumnMeta& meta);
+    char* DeserializeMeta(char* dataIn, CommonColumnMeta& meta);
 
     /**
      * @brief returns the serialized size of an index
@@ -1026,7 +1026,7 @@ public:
      * @param meta the metadata struct to fill.
      * @return Char* the buffer pointer.
      */
-    char* DesrializeMeta(char* dataIn, CommonIndexMeta& meta);
+    char* DeserializeMeta(char* dataIn, CommonIndexMeta& meta);
 
     /**
      * @brief creates and index from a metadata struct
@@ -1066,6 +1066,19 @@ public:
      */
     static void DeserializeNameAndIds(
         const char* dataIn, uint32_t& intId, uint64_t& extId, string& name, string& longName);
+
+    /**
+     * @brief Gets the serialized size of a table excluding the indexes.
+     * @return Serialized size.
+     */
+    size_t SerializeRedoSize();
+
+    /**
+     * @brief Serializes a table into a buffer for redo.
+     *        Indexes are excluded, i.e., m_numIndexes will be 0.
+     * @param dataOut The output buffer
+     */
+    void SerializeRedo(char* dataOut);
 };
 
 /** @typedef internal table identifier. */

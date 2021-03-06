@@ -340,6 +340,10 @@ static void help(const char* progname)
     printf(_("  -W, --password            force password prompt\n"));
     printf(_("  --maintenance-db=DBNAME   alternate maintenance database\n"));
     printf(_("\nRead the description of the SQL command VACUUM for details.\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to openGauss community by raising an issue.\n"));
+#endif
 }
 

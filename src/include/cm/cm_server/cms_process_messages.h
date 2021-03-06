@@ -94,5 +94,6 @@ void process_ctl_to_cm_query_global_barrier_msg(CM_Connection* con);
 void process_ctl_to_cm_query_barrier_msg(CM_Connection* con,
     ctl_to_cm_global_barrier_query* ctl_to_cm_global_barrier_query_ptr);
 void process_ctl_to_cm_one_instance_barrier_query_msg(CM_Connection* con, uint32 node, uint32 instanceId, int instanceType);
+void ProcessGetDnSyncListMsg(CM_Connection *con, AgentToCmserverDnSyncList *agentToCmserverDnSyncList);
 
 #endif

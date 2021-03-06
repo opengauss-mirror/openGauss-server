@@ -1217,7 +1217,6 @@ DH* genDHKeyPair(DHKeyLength dhType)
     unsigned char GENERATOR_2[] = {DH_GENERATOR_2};
     BIGNUM* bn_genenrator_2 = BN_bin2bn(GENERATOR_2, sizeof(GENERATOR_2), NULL);
     if (bn_genenrator_2 == NULL) {
-        BN_free(bn_genenrator_2);
         return NULL;
     }
 
@@ -1264,12 +1263,16 @@ DH* genDHKeyPair(DHKeyLength dhType)
 
     ret = DH_set0_pqg(dh, bn_prime, NULL, bn_genenrator_2);
     if (!ret) {
+        BN_free(bn_prime);
+        BN_free(bn_genenrator_2);
         DH_free(dh);
         return NULL;
     }
 
     ret = DH_generate_key(dh);
     if (!ret) {
+        BN_free(bn_prime);
+        BN_free(bn_genenrator_2);
         DH_free(dh);
         return NULL;
     }

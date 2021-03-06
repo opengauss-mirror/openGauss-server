@@ -31,7 +31,10 @@
 {                                       \
     if (!ENABLE_STATEMENT_TRACK) {      \
         return;                         \
-    }                                   \
+    } else if (u_sess->statement_cxt.statement_level[0] == STMT_TRACK_OFF &&    \
+        u_sess->statement_cxt.statement_level[1] == STMT_TRACK_OFF) {   \
+        return;                         \
+    }   \
 }
 
 /* reset the reused handle from freelist */

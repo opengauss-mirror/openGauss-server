@@ -150,6 +150,7 @@ def get_config(filepath):
     # Check configs.
     null_error_msg = 'The configuration option %s is null. Please set a specific value.'
     invalid_opt_msg = 'The configuration option %s is invalid. Please set one of %s.'
+    positive_integer_msg = 'The configuration option %s must be a positive integer greater than 0.'
 
     # Section Master:
     for name in ('logfile', 'recorder_file', 'tune_strategy'):
@@ -185,6 +186,11 @@ def get_config(filepath):
         raise OptionError(invalid_opt_msg % ('scenario', scenario_opts))
 
     # Section RL and GOP
+    def check_positive_integer(*opts):
+        for opt in opts:
+            if config[opt] <= 0:
+                raise OptionError(positive_integer_msg % opt)
+
     if tune_strategy in ('auto', 'rl'):
         for name in cp['Reinforcement Learning']:
             if name.strip() == '':
@@ -195,6 +201,7 @@ def get_config(filepath):
         config['rl_steps'] = cp['Reinforcement Learning'].getint('rl_steps')
         config['max_episode_steps'] = cp['Reinforcement Learning'].getint('max_episode_steps')
         config['test_episode'] = cp['Reinforcement Learning'].getint('test_episode')
+        check_positive_integer('rl_steps', 'max_episode_steps', 'test_episode')
 
     if tune_strategy in ('auto', 'gop'):
         for name in cp['Gloabal Optimization Algorithm']:
@@ -207,6 +214,7 @@ def get_config(filepath):
 
         config['max_iterations'] = cp['Gloabal Optimization Algorithm'].getint('max_iterations')
         config['particle_nums'] = cp['Gloabal Optimization Algorithm'].getint('particle_nums')
+        check_positive_integer('max_iterations', 'particle_nums')
 
     return config
 

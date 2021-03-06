@@ -40,6 +40,10 @@ public:
     bool reset(const char *filename);
     bool is_same_file(const char *filename);
     bool resolve_addr(uintptr_t addr, char *buf, size_t len, uint *offset);
+    inline bool isdyn()
+    {
+        return dyn;
+    }
 
 private:
     const char *fname;  /* file name */
@@ -47,6 +51,7 @@ private:
     Elf64_Ehdr ehdr;    /* elf header */
     Elf64_Shdr symhdr[SYMHDR_NUM];  /* there are at most two symbol tables in an elf file */
     int sym_count;      /* number of symbol tables found */
+    bool dyn;           /* wether a shared object file is opened */
 
     void init();
     bool load(const char *name);

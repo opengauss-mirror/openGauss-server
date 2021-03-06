@@ -326,10 +326,10 @@ DIR* fio_opendir(char const* path, fio_location location)
 
         mask = fio_fdset;
         for (i = 0; (mask & 1) != 0; i++, mask >>= 1);
-            if (i == FIO_FDMAX) {
+        if (i == FIO_FDMAX) {
                 elog(ERROR, "Descriptor pool for remote files is exhausted, "
                     "probably too many remote directories are opened");
-            }
+        }
         hdr.cop = FIO_OPENDIR;
         hdr.handle = i;
         hdr.size = strlen(path) + 1;
@@ -415,8 +415,8 @@ int fio_open(char const* path, int mode, fio_location location)
 
         mask = fio_fdset;
         for (i = 0; (mask & 1) != 0; i++, mask >>= 1);
-            if (i == FIO_FDMAX)
-                elog(ERROR, "Descriptor pool for remote files is exhausted, "
+        if (i == FIO_FDMAX)
+            elog(ERROR, "Descriptor pool for remote files is exhausted, "
                 "probably too many remote files are opened");
 
         hdr.cop = FIO_OPEN;
@@ -512,6 +512,7 @@ FILE* fio_fopen(char const* path, char const* mode, fio_location location)
     return f;
 }
 
+int fio_fprintf(FILE* f, char const* format, ...) __attribute__ ((format (printf, 2, 3)));
 /* Format output to file stream */
 int fio_fprintf(FILE* f, char const* format, ...)
 {
@@ -636,7 +637,7 @@ int fio_pread(FILE* f, void* buf, off_t offs)
 
         IO_CHECK(fio_read_all(fio_stdin, &hdr, sizeof(hdr)), sizeof(hdr));
         Assert(hdr.cop == FIO_SEND);
-        if (hdr.size != 0)
+        if (hdr.size != 0 && hdr.size <= BLCKSZ)
         IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
 
         /* TODO: error handling */
@@ -800,6 +801,7 @@ ssize_t fio_read(int fd, void* buf, size_t size)
 
         IO_CHECK(fio_read_all(fio_stdin, &hdr, sizeof(hdr)), sizeof(hdr));
         Assert(hdr.cop == FIO_SEND);
+        if (hdr.size > 0 && hdr.size <= size)
         IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
 
         return hdr.size;
@@ -1208,8 +1210,9 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
 
         if (hdr.cop == FIO_ERROR)
         {
+            bool valid = hdr.size > 0 && hdr.size <= sizeof(buf);
             /* FILE_MISSING, OPEN_FAILED and READ_FAILED */
-            if (hdr.size > 0)
+            if (valid)
             {
                 IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
                 *errormsg = (char *)pgut_malloc(hdr.size);
@@ -1222,8 +1225,8 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
         else if (hdr.cop == FIO_SEND_FILE_CORRUPTION)
         {
             *err_blknum = hdr.arg;
-
-            if (hdr.size > 0)
+            bool valid = hdr.size > 0 && hdr.size <= sizeof(buf);
+            if (valid)
             {
                 IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
                 *errormsg = (char *)pgut_malloc(hdr.size);
@@ -1252,6 +1255,9 @@ int fio_send_pages(const char *to_fullpath, const char *from_fullpath, pgFile *f
             blknum = hdr.arg;
 
             Assert(hdr.size <= sizeof(buf));
+            if (hdr.size > sizeof(buf)) {
+                hdr.size = sizeof(buf);
+            }
             IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
 
             COMP_FILE_CRC32(true, file->crc, buf, hdr.size);
@@ -1383,7 +1389,7 @@ static void fio_send_pages_impl(int out, char* buf)
             * Optimize stdio buffer usage, fseek only when current position
             * does not match the position of requested block.
             */
-            if (current_pos != blknum*BLCKSZ)
+            if (current_pos != (int)(blknum*BLCKSZ))
             {
                 current_pos = blknum*BLCKSZ;
                 if (fseek(in, current_pos, SEEK_SET) != 0)
@@ -1599,7 +1605,7 @@ int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
         else if (hdr.cop == FIO_ERROR)
         {
             /* handle error, reported by the agent */
-            if (hdr.size > 0)
+            if (hdr.size > 0 && hdr.size <= CHUNK_SIZE)
             {
                 IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
                 *errormsg = (char *)pgut_malloc(hdr.size);
@@ -1612,6 +1618,9 @@ int fio_send_file(const char *from_fullpath, const char *to_fullpath, FILE* out,
         else if (hdr.cop == FIO_PAGE)
         {
             Assert(hdr.size <= CHUNK_SIZE);
+            if (hdr.size > CHUNK_SIZE) {
+                hdr.size = CHUNK_SIZE;
+            }
             IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
 
             /* We have received a chunk of data data, lets write it out */
@@ -1787,6 +1796,9 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
             pgFile *file = NULL;
             fio_pgFile  fio_file;
 
+            if (hdr.size > CHUNK_SIZE) {
+                hdr.size = CHUNK_SIZE;
+            }
             /* receive rel_path */
             IO_CHECK(fio_read_all(fio_stdin, buf, hdr.size), hdr.size);
             file = pgFileInit(buf);
@@ -1808,6 +1820,9 @@ void fio_list_dir(parray *files, const char *root, bool exclude,
 
             if (fio_file.linked_len > 0)
             {
+                if (fio_file.linked_len > CHUNK_SIZE) {
+                    fio_file.linked_len = CHUNK_SIZE;
+                }
                 IO_CHECK(fio_read_all(fio_stdin, buf, fio_file.linked_len), fio_file.linked_len);
 
                 file->linked = (char *)pgut_malloc(fio_file.linked_len);
@@ -1862,7 +1877,7 @@ static void fio_list_dir_impl(int out, char* buf)
                         req->external_dir_num, FIO_LOCAL_HOST);
 
     /* send information about files to the main process */
-    for (i = 0; i < parray_num(file_files); i++)
+    for (i = 0; i < (int)parray_num(file_files); i++)
     {
         fio_pgFile  fio_file;
         pgFile  *file = (pgFile *) parray_get(file_files, i);
@@ -1939,6 +1954,9 @@ fio_get_checksum_map(const char *fullpath, uint32 checksum_version, int n_blocks
             checksum_map = (PageState *)pgut_malloc(n_blocks * sizeof(PageState));
             rc = memset_s(checksum_map, n_blocks * sizeof(PageState), 0, n_blocks * sizeof(PageState));
             securec_check(rc, "\0", "\0");
+            if (hdr.size > (unsigned)n_blocks) {
+                hdr.size = (unsigned)n_blocks;
+            }
             IO_CHECK(fio_read_all(fio_stdin, checksum_map, hdr.size * sizeof(PageState)), hdr.size * sizeof(PageState));
         }
 

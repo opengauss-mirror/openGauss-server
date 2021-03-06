@@ -955,6 +955,14 @@ void ShutdownPostgres(int code, Datum arg)
      * them explicitly.
      */
     LockReleaseAll(USER_LOCKMETHOD, true);
+
+    /*
+     * If barrier exec not end,release curr barrier lock
+     */
+    if (LWLockHeldByMe(BarrierLock)) {
+        ereport(WARNING, (errmsg("Barrier exec not end, release BarrierLock.")));
+        LWLockRelease(BarrierLock);
+    }
 }
 
 /*

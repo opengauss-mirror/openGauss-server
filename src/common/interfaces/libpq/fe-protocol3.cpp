@@ -788,9 +788,6 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
         if (pqGets(&workBuf, conn))
             goto fail;
 #ifdef HAVE_CE
-        if (strcmp(workBuf.data, ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA)==0) { 
-            conn->client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
-        }
         pqSaveMessageField(res, id, workBuf.data, conn);
 #else
         pqSaveMessageField(res, id, workBuf.data);

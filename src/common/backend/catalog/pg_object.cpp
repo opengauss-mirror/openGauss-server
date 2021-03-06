@@ -193,6 +193,7 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         return;
     }
 
+    relation = heap_open(PgObjectRelationId, RowExclusiveLock);
     tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tup)) {
         CreatePgObject(objectOid, objectType, InvalidOid, false, true);
@@ -210,14 +211,13 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         replaces[Anum_pg_object_mtime - 1] = true;
         values[Anum_pg_object_mtime - 1] = nowtime;
 
-        relation = heap_open(PgObjectRelationId, RowExclusiveLock);
         HeapTuple newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
         simple_heap_update(relation, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(relation, newtuple);
         ReleaseSysCache(tup);
         heap_freetuple_ext(newtuple);
-        heap_close(relation, RowExclusiveLock);
     }
+    heap_close(relation, RowExclusiveLock);
 }
 
 /*

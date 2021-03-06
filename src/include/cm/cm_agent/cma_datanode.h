@@ -13,9 +13,9 @@
 #define CMA_DATANODE_H
 
 #include "cma_main.h"
-
+#ifdef ENABLE_MULTIPLE_NODES
 void* DNStorageScalingCheckMain(void * const arg);
-
+#endif
 bool is_process_alive(pgpid_t pid);
 
 pgpid_t get_pgpid(char* pid_path);

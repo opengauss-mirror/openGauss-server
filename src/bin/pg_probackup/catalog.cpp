@@ -73,7 +73,7 @@ unlink_lock_atexit(void)
     if (lock_files == NULL)
     return;
 
-    for (i = 0; i < parray_num(lock_files); i++)
+    for (i = 0; i < (int)parray_num(lock_files); i++)
     {
         char    *lock_file = (char *) parray_get(lock_files, i);
         int res;
@@ -136,7 +136,7 @@ write_backup_status(pgBackup *backup, BackupStatus status,
 bool fill_file(char *buffer, char *lock_file, int fd, bool strict)
 {
     errno = 0;
-    if (fio_write(fd, buffer, strlen(buffer)) != strlen(buffer))
+    if (fio_write(fd, buffer, strlen(buffer)) != (int)strlen(buffer))
     {
         int     save_errno = errno;
 
@@ -529,7 +529,7 @@ catalog_get_backup_list(const char *instance_name, time_t requested_backup_id)
     parray_qsort(backups, pgBackupCompareIdDesc);
 
     /* Link incremental backups with their ancestors.*/
-    for (i = 0; i < parray_num(backups); i++)
+    for (i = 0; i < (int)parray_num(backups); i++)
     {
         pgBackup   *curr = (pgBackup  *)parray_get(backups, i);
         pgBackup  **ancestor;
@@ -552,7 +552,7 @@ err_proc:
         fio_closedir(data_dir);
     if (backups)
         parray_walk(backups, pgBackupFree);
-        parray_free(backups);
+    parray_free(backups);
 
     elog(ERROR, "Failed to get backup list");
 
@@ -618,7 +618,7 @@ catalog_get_last_data_backup(parray *backup_list, TimeLineID tli, time_t current
     char    *invalid_backup_id;
 
     /* backup_list is sorted in order of descending ID */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; i < (int)parray_num(backup_list); i++)
     {
         pgBackup *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -639,7 +639,7 @@ catalog_get_last_data_backup(parray *backup_list, TimeLineID tli, time_t current
         base36enc(full_backup->start_time));
 
     /* FULL backup is found, lets find his latest child */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; i < (int)parray_num(backup_list); i++)
     {
         pgBackup *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -695,7 +695,7 @@ void get_ancestor_backup(timelineInfo *tmp_tlinfo, pgBackup **ancestor_backup)
 {
     if (tmp_tlinfo->parent_link->backups)
     {
-        for (int i = 0; i < parray_num(tmp_tlinfo->parent_link->backups); i++)
+        for (int i = 0; i < (int)parray_num(tmp_tlinfo->parent_link->backups); i++)
         {
             pgBackup *backup = (pgBackup *) parray_get(tmp_tlinfo->parent_link->backups, i);
 
@@ -730,7 +730,7 @@ get_multi_timeline_parent(parray *backup_list, parray *tli_list,
     return NULL;
 
     /* look for current timelineInfo */
-    for (i = 0; i < parray_num(tli_list); i++)
+    for (i = 0; i < (int)parray_num(tli_list); i++)
     {
     timelineInfo  *tlinfo = (timelineInfo  *) parray_get(tli_list, i);
 
@@ -796,7 +796,7 @@ get_multi_timeline_parent(parray *backup_list, parray *tli_list,
     if (my_tlinfo->backups)
     {
         /* backups are sorted in descending order and we need latest valid */
-        for (i = 0; i < parray_num(my_tlinfo->backups); i++)
+        for (i = 0; i < (int)parray_num(my_tlinfo->backups); i++)
         {
             pgBackup *tmp_backup = NULL;
             pgBackup *backup = (pgBackup *) parray_get(my_tlinfo->backups, i);
@@ -816,7 +816,7 @@ get_multi_timeline_parent(parray *backup_list, parray *tli_list,
         /* if timeline has backups, iterate over them */
         if (tmp_tlinfo->parent_link->backups)
         {
-            for (i = 0; i < parray_num(tmp_tlinfo->parent_link->backups); i++)
+            for (i = 0; i < (int)parray_num(tmp_tlinfo->parent_link->backups); i++)
             {
                 pgBackup *tmp_backup = NULL;
                 pgBackup *backup = (pgBackup *) parray_get(tmp_tlinfo->parent_link->backups, i);
@@ -856,7 +856,7 @@ pgBackupCreateDir(pgBackup *backup)
 
         external_list = make_external_directory_list(backup->external_dir_str,
                                                                                  false);
-        for (i = 0; i < parray_num(external_list); i++)
+        for (i = 0; i < (int)parray_num(external_list); i++)
         {
             char    temp[MAXPGPATH];
             /* Numeration of externaldirs starts with 1 */
@@ -881,7 +881,7 @@ pgBackupCreateDir(pgBackup *backup)
     init_header_map(backup);
 
     /* create directories for actual backup files */
-    for (i = 0; i < parray_num(subdirs); i++)
+    for (i = 0; i < (int)parray_num(subdirs); i++)
     {
         join_path_components(path, backup->root_dir, (const char *)parray_get(subdirs, i));
         fio_mkdir(path, DIR_PERMISSION, FIO_BACKUP_HOST);
@@ -902,10 +902,10 @@ void save_backupinfo_belong_timelines(InstanceConfig *instance, parray *timeline
     
     backups = catalog_get_backup_list(instance->name, INVALID_BACKUP_ID);
 
-    for (i = 0; i < parray_num(timelineinfos); i++)
+    for (i = 0; i < (int)parray_num(timelineinfos); i++)
     {
         timelineInfo *tlinfo = (timelineInfo *)parray_get(timelineinfos, i);
-        for (j = 0; j < parray_num(backups); j++)
+        for (j = 0; j < (int)parray_num(backups); j++)
         {
             pgBackup *backup = (pgBackup  *)parray_get(backups, j);
             if (tlinfo->tli == backup->tli)
@@ -919,7 +919,7 @@ void save_backupinfo_belong_timelines(InstanceConfig *instance, parray *timeline
     }
 
     /* determine oldest backup and closest backup for every timeline */
-    for (i = 0; i < parray_num(timelineinfos); i++)
+    for (i = 0; i < (int)parray_num(timelineinfos); i++)
     {
         timelineInfo *tlinfo = (timelineInfo *)parray_get(timelineinfos, i);
 
@@ -989,7 +989,7 @@ void get_tlinfo(timelineInfo **tl_info, TimeLineID tli, XLogSegNo segno, parray 
 parray *
 walk_files_collect_timelines(InstanceConfig *instance)
 {
-    int i,j;
+    int i;
     parray *xlog_files_list = parray_new();
     parray *timelineinfos;
     timelineInfo *tlinfo = nullptr;
@@ -1008,11 +1008,10 @@ walk_files_collect_timelines(InstanceConfig *instance)
     timelineinfos = parray_new();
 
     /* walk through files and collect info about timelines */
-    for (i = 0; i < parray_num(xlog_files_list); i++)
+    for (i = 0; i < (int)parray_num(xlog_files_list); i++)
     {
         pgFile *file = (pgFile *) parray_get(xlog_files_list, i);
         TimeLineID tli;
-        parray *timelines;
         xlogFile *wal_file = NULL;
 
         /*
@@ -1193,7 +1192,7 @@ walk_files_collect_timelines(InstanceConfig *instance)
 
 void get_anchor_backup(timelineInfo *tlinfo, int *count, InstanceConfig *instance)
 {
-    for (int j = 0; j < parray_num(tlinfo->backups); j++)
+    for (int j = 0; j < (int)parray_num(tlinfo->backups); j++)
     {
         pgBackup *backup = (pgBackup *)parray_get(tlinfo->backups, j);
 
@@ -1220,9 +1219,9 @@ void get_anchor_backup(timelineInfo *tlinfo, int *count, InstanceConfig *instanc
             continue;
         }
 
-        *count++;
+        (*count)++;
 
-        if (*count == instance->wal_depth)
+        if (*count == (int)instance->wal_depth)
         {
             elog(LOG, "On timeline %i WAL is protected from purge at %X/%X",
                 tlinfo->tli,
@@ -1242,7 +1241,6 @@ void get_anchor_backup(timelineInfo *tlinfo, int *count, InstanceConfig *instanc
 void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timelineinfos)
 {
     int i,j;
-    timelineInfo *tlinfo;
 
     /* for fancy reporting */
     char begin_segno_str[MAXFNAMELEN];
@@ -1308,7 +1306,7 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
     */
 
     /* determine anchor_lsn and keep_segments for every timeline */
-    for (i = 0; i < parray_num(timelineinfos); i++)
+    for (i = 0; i < (int)parray_num(timelineinfos); i++)
     {
         int count = 0;
         timelineInfo *tlinfo = (timelineInfo *)parray_get(timelineinfos, i);
@@ -1444,7 +1442,7 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
         }
 
         /* Iterate over backups left */
-        for (j = count; tlinfo->backups && (j < parray_num(tlinfo->backups)); j++)
+        for (j = count; tlinfo->backups && (j < (int)parray_num(tlinfo->backups)); j++)
         {
             XLogSegNo   segno = 0;
             xlogInterval *interval = NULL;
@@ -1474,14 +1472,7 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
             interval->begin_segno = segno;
             GetXLogSegNo(backup->stop_lsn, segno, instance->xlog_seg_size);
 
-            /*
-             * On replica it is possible to get STOP_LSN pointing to contrecord,
-             * so set end_segno to the next segment after STOP_LSN just to be safe.
-             */
-            if (backup->from_replica)
-                interval->end_segno = segno + 1;
-            else
-                interval->end_segno = segno;
+            interval->end_segno = segno;
 
             GetXLogFileName(begin_segno_str, tlinfo->tli, interval->begin_segno, instance->xlog_seg_size);
             GetXLogFileName(end_segno_str, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
@@ -1514,7 +1505,7 @@ void protect_wal_segments(InstanceConfig *instance, parray *timelineinfos)
      * We must keep all WAL segments after anchor_lsn (including), and also segments
      * required by ARCHIVE backups for consistency - WAL between [start_lsn, stop_lsn].
      */
-    for (i = 0; i < parray_num(timelineinfos); i++)
+    for (i = 0; i < (int)parray_num(timelineinfos); i++)
     {
         XLogSegNo   anchor_segno = 0;
         timelineInfo *tlinfo = (timelineInfo *)parray_get(timelineinfos, i);
@@ -1535,7 +1526,7 @@ void protect_wal_segments(InstanceConfig *instance, parray *timelineinfos)
 
         GetXLogSegNo(tlinfo->anchor_lsn, anchor_segno, instance->xlog_seg_size);
 
-        for (j = 0; j < parray_num(tlinfo->xlog_filelist); j++)
+        for (j = 0; j < (int)parray_num(tlinfo->xlog_filelist); j++)
         {
             xlogFile *wal_file = (xlogFile *) parray_get(tlinfo->xlog_filelist, j);
 
@@ -1550,7 +1541,7 @@ void protect_wal_segments(InstanceConfig *instance, parray *timelineinfos)
                 continue;
 
         /* Protect segments belonging to one of the keep invervals */
-            for (k = 0; k < parray_num(tlinfo->keep_segments); k++)
+            for (k = 0; k < (int)parray_num(tlinfo->keep_segments); k++)
             {
                 xlogInterval *keep_segments = (xlogInterval *) parray_get(tlinfo->keep_segments, k);
 
@@ -1616,7 +1607,7 @@ get_closest_backup(timelineInfo *tlinfo)
         parray *backup_list = tlinfo->parent_link->backups;
         if (backup_list != NULL)
         {
-            for (i = 0; i < parray_num(backup_list); i++)
+            for (i = 0; i < (int)parray_num(backup_list); i++)
             {
                 pgBackup   *backup = (pgBackup *)parray_get(backup_list, i);
 
@@ -1661,7 +1652,7 @@ get_oldest_backup(timelineInfo *tlinfo)
 
     if (backup_list != NULL)
     {
-        for (i = 0; i < parray_num(backup_list); i++)
+        for (i = 0; i < (int)parray_num(backup_list); i++)
         {
             pgBackup   *backup = (pgBackup *)parray_get(backup_list, i);
 
@@ -1817,7 +1808,6 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
     fio_fprintf(out, "compress-alg = %s\n",
         deparse_compress_alg(backup->compress_alg));
     fio_fprintf(out, "compress-level = %d\n", backup->compress_level);
-    fio_fprintf(out, "from-replica = %s\n", backup->from_replica ? "true" : "false");
 
     fio_fprintf(out, "\n#Compatibility\n");
     fio_fprintf(out, "block-size = %u\n", backup->block_size);
@@ -2065,12 +2055,14 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
             len += nRet;
         }
 
+
         if (file->linked)
         {
             nRet = snprintf_s(line+len, remainLen - len,remainLen - len - 1,",\"linked\":\"%s\"", file->linked);
             securec_check_ss_c(nRet, "\0", "\0");
             len += nRet;
         }
+
 
         if (file->n_blocks > 0)
         {
@@ -2097,7 +2089,6 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
 
         nRet =  snprintf_s(line+len,remainLen - len,remainLen - len - 1, "}\n");
         securec_check_ss_c(nRet, "\0", "\0");
-        len += nRet;
 
         if (sync)
             COMP_FILE_CRC32(true, backup->content_crc, line, strlen(line));
@@ -2200,7 +2191,6 @@ readBackupControlFile(const char *path)
         {'s', 0, "merge-dest-id",		&merge_dest_backup, SOURCE_FILE_STRICT},
         {'s', 0, "compress-alg",		&compress_alg, SOURCE_FILE_STRICT},
         {'u', 0, "compress-level",		&backup->compress_level, SOURCE_FILE_STRICT},
-        {'b', 0, "from-replica",		&backup->from_replica, SOURCE_FILE_STRICT},
         {'s', 0, "external-dirs",		&backup->external_dir_str, SOURCE_FILE_STRICT},
         {'s', 0, "note",				&backup->note, SOURCE_FILE_STRICT},
         {'s', 0, "recovery-name",		&recovery_name, SOURCE_FILE_STRICT},
@@ -2434,7 +2424,6 @@ pgBackupInit(pgBackup *backup)
     backup->checksum_version = 0;
 
     backup->stream = false;
-    backup->from_replica = false;
     backup->parent_backup = INVALID_BACKUP_ID;
     backup->merge_dest_backup = INVALID_BACKUP_ID;
     backup->parent_backup_link = NULL;
@@ -2566,7 +2555,7 @@ is_prolific(parray *backup_list, pgBackup *target_backup)
     int i;
     int child_counter = 0;
 
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; i < (int)parray_num(backup_list); i++)
     {
         pgBackup   *tmp_backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -2714,7 +2703,7 @@ get_backup_index_number(parray *backup_list, pgBackup *backup)
 {
     int i;
 
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; i < (int)parray_num(backup_list); i++)
     {
         pgBackup   *tmp_backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -2731,7 +2720,7 @@ append_children(parray *backup_list, pgBackup *target_backup, parray *append_lis
 {
     int i;
 
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; i < (int)parray_num(backup_list); i++)
     {
         pgBackup *backup = (pgBackup *) parray_get(backup_list, i);
 
@@ -2752,7 +2741,6 @@ append_children(parray *backup_list, pgBackup *target_backup, parray *append_lis
  *     */
 char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
 {
-    int pathlen;
     char* path = NULL;
 
     return path;

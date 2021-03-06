@@ -172,7 +172,7 @@ parray_remove(parray *array, size_t index)
 bool
 parray_rm(parray *array, const void *key, int(*compare)(const void *, const void *))
 {
-    int i;
+    size_t i;
 
     for (i = 0; i < array->used; i++)
     {
@@ -200,7 +200,7 @@ parray_qsort(parray *array, int(*compare)(const void *, const void *))
 void
 parray_walk(parray *array, void (*action)(void *))
 {
-    int i;
+    size_t i;
     if (array == nullptr) {
         return;
     }
@@ -220,7 +220,7 @@ bool parray_contains(parray *array, const void *elem)
 {
     int i;
 
-    for (i = 0; i < parray_num(array); i++)
+    for (i = 0; i < (int)parray_num(array); i++)
     {
         if (parray_get(array, i) == elem)
             return true;

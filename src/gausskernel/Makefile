@@ -87,12 +87,16 @@ ifeq ($(enable_gstrace), yes)
    OBJS += $(top_builddir)/src/lib/gstrace/common/gstrace_infra.o
 endif
 
-ifeq ($(enable_multiple_nodes), yes)
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
    OBJS += $(top_builddir)/src/distribute/lib/hotpatch/hotpatch.o \
-        $(top_builddir)/src/distribute/gtm/client/libgtmclient.a \
-        $(top_builddir)/src/distribute/gtm/common/libgtmcommon.a \
         $(top_builddir)/src/distribute/lib/hotpatch/common/libhotpatchcommon.a 
 endif
+
+ifeq ($(enable_multiple_nodes), yes)
+   OBJS += $(top_builddir)/src/distribute/gtm/client/libgtmclient.a \
+        $(top_builddir)/src/distribute/gtm/common/libgtmcommon.a
+endif
+
 OBJS += $(top_builddir)/src/lib/hotpatch/client/libhotpatchclient.a
 
 # We put libpgport into OBJS, so remove it from LIBS; also add libldap
@@ -451,7 +455,7 @@ submake-libplpgsql: | submake-fmgroids
 $(top_builddir)/src/common/interfaces/libpq/libpq.a:
 	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq
 
-ifeq ($(enable_multiple_nodes), yes)
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 $(top_builddir)/src/distribute/gtm/common/libgtmcommon.a:
 	$(MAKE) -C $(top_builddir)/src/distribute/gtm/common libgtmcommon.a
 
@@ -658,7 +662,6 @@ ifeq ($(enable_thread_check), yes)
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
 	cp $(top_builddir)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
-	cp $(top_builddir)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 else
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libstdc++.so.6 '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libgcc_s.so.1 '$(DESTDIR)$(libdir)/'
@@ -670,9 +673,8 @@ ifeq ($(enable_thread_check), yes)
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0 '$(DESTDIR)$(libdir)/'
 	cp $(with_3rd)/$(BUILD_TOOLS_PATH)/gcc$(subst .0,,$(CC_VERSION))/gcc/lib64/libtsan.so.0.0.0 '$(DESTDIR)$(libdir)/'
 endif
-	cp $(with_3rd)/buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 endif
-	cp -r $(with_3rd)/platform/$(PLAT_FORM_STR)/openjdk8/jdk1.8.0_222/jre/* '$(DESTDIR)$(bindir)/../jre/'
+	cp -r $(with_jdk)/jre/* '$(DESTDIR)$(bindir)/../jre/'
 
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
