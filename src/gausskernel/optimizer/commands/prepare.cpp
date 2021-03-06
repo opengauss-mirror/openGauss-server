@@ -38,7 +38,6 @@
 #include "utils/dynahash.h"
 #include "utils/globalplancache.h"
 #include "utils/globalplancore.h"
-#include "utils/globalpreparestmt.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
 #ifdef PGXC
@@ -199,6 +198,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
 {
     PreparedStatement *entry = NULL;
     CachedPlan* cplan = NULL;
+    MemoryContext tmpCxt = NULL;
     List* plan_list = NIL;
     ParamListInfo paramLI = NULL;
     EState* estate = NULL;
@@ -242,7 +242,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
             setCachedPlanBucketId(cps->gplan, paramLI);
         }
 
-        if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false)) {
+        if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
             return;
         }
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Bypass process Failed")));
@@ -269,8 +269,9 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
 
     /* incase change shared plan in execute stage */
-    if (ENABLE_GPC) {
-        plan_list = CopyLocalStmt(portal->cplan->stmt_list);
+    bool needCopy = ENABLE_GPC && entry->plansource->gplan;
+    if (needCopy) {
+        plan_list = CopyLocalStmt(portal->cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
         portal->stmts = plan_list;
     }
 
@@ -319,7 +320,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramLI);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, false, NULL)) {
                 return;
             }
             Assert(0);
@@ -543,8 +544,6 @@ int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oi
                 entry->current_nodes_number = 0;
                 entry->dns_node_indices = (int*)MemoryContextAllocZero(
                     u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(int));
-                entry->last_used_time = (instr_time*)MemoryContextAllocZero(
-                    u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(instr_time));
                 entry->max_nodes_number = u_sess->pgxc_cxt.NumDataNodes;
             }
             if (!is_plan_shared) {
@@ -581,7 +580,8 @@ int SetRemoteStatementName(Plan* plan, const char* stmt_name, int num_params, Oi
         ListCell* l = NULL;
         foreach (l, mt_plan->plans) {
             Plan* temp_plan = (Plan*)lfirst(l);
-            n = SetRemoteStatementName(temp_plan, stmt_name, num_params, param_types, n, isBuildingCustomPlan);
+            n = SetRemoteStatementName(temp_plan, stmt_name, num_params, param_types, n,
+                                       isBuildingCustomPlan, is_plan_shared);
         }
     }
 
@@ -615,8 +615,6 @@ DatanodeStatement* light_set_datanode_queries(const char* stmt_name)
         entry->current_nodes_number = 0;
         entry->dns_node_indices = (int*)MemoryContextAllocZero(
             u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(int));
-        entry->last_used_time = (instr_time*)MemoryContextAllocZero(
-            u_sess->pcache_cxt.datanode_queries->hcxt, u_sess->pgxc_cxt.NumDataNodes * sizeof(instr_time));
         entry->max_nodes_number = u_sess->pgxc_cxt.NumDataNodes;
     }
 
@@ -673,7 +671,12 @@ void StorePreparedStatementCNGPC(const char *stmt_name, CachedPlanSource *planso
 void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource, bool from_sql)
 {
     if (ENABLE_DN_GPC) {
-        g_instance.prepare_cache->Store(stmt_name, plansource, from_sql, false);
+        if (unlikely(plansource->gpc.status.InShareTable()))
+            elog(PANIC, "should get shared plan in gpc when StorePreparedStatement");
+        /* dn gpc don't save prepare statement on dn */
+        u_sess->pcache_cxt.cur_stmt_psrc = plansource;
+        plansource->gpc.status.SetLoc(GPC_SHARE_IN_LOCAL_SAVE_PLAN_LIST);
+        SaveCachedPlan(plansource);
         return;
     }
     if (ENABLE_CN_GPC) {
@@ -709,9 +712,9 @@ static void FetchPreparedStatementCNGPC(PreparedStatement* entry, const char* st
 {
     Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
     /* check if need recreate */
-    if (g_instance.plan_cache->CheckRecreateCachePlan(entry)) {
+    if (g_instance.plan_cache->CheckRecreateCachePlan(entry->plansource)) {
         entry->has_prepare_dn_stmt = false;
-        g_instance.plan_cache->RecreateCachePlan(entry, stmt_name);
+        g_instance.plan_cache->RecreateCachePlan(entry->plansource, entry->stmt_name, entry, NULL, NULL);
     }
 #ifdef ENABLE_MULTIPLE_NODES
     Assert (entry->plansource->lightProxyObj == NULL);
@@ -755,18 +758,11 @@ static void FetchPreparedStatementCNGPC(PreparedStatement* entry, const char* st
 PreparedStatement* FetchPreparedStatement(const char* stmt_name, bool throwError, bool need_valid)
 {
     if (ENABLE_DN_GPC) {
-        PreparedStatement *entry = g_instance.prepare_cache->Fetch(stmt_name, throwError);
-        if (entry == NULL && throwError) {
+        if (throwError)
             ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
-                     errmsg("prepared statement \"%s\" does not exist",
-                            stmt_name)));
-        }
-        if (g_instance.plan_cache->CheckRecreateCachePlan(entry)) {
-        	g_instance.plan_cache->RecreateCachePlan(entry, stmt_name);
-        }
-
-        return entry;
+                     errmsg("prepared statement \"%s\" does not exist on DN with GPC", stmt_name)));
+        return NULL;
     }
 
     PreparedStatement *entry = NULL;
@@ -864,7 +860,7 @@ void DeallocateQuery(DeallocateStmt* stmt)
 void DropPreparedStatement(const char* stmt_name, bool showError)
 {
     if (ENABLE_DN_GPC) {
-        g_instance.prepare_cache->Drop(stmt_name, showError);
+        /* no prepare statement on dn gpc */
         return ;
     }
 
@@ -929,6 +925,7 @@ void DropAllPreparedStatements(void)
 
     if (ENABLE_DN_GPC) {
         Assert (u_sess->pcache_cxt.prepared_queries == NULL);
+        CleanSessGPCPtr(u_sess);
         return;
     }
 
@@ -1034,14 +1031,10 @@ void HandlePreparedStatementsForReload(void)
         return;
 
     if (ENABLE_CN_GPC) {
-        u_sess->cn_session_abort_count++;
-        if (unlikely(u_sess->cn_session_abort_count >= PG_UINT16_MAX)) {
-            ereport(WARNING, (errmodule(MOD_GPC), errcode(ERRCODE_LOG), errmsg("GPC's cn abort count overflow and reset to 0")));
-            u_sess->cn_session_abort_count = 0;
-        }
+        CN_GPC_LOG("Invalid all prepared statements for pool reload", 0, 0);
     }
-    GPC_LOG("pool reload", 0, 0);
     MemoryContext oldcontext = CurrentMemoryContext;
+    bool has_error = false;
     /* walk over cache */
     hash_seq_init(&seq, u_sess->pcache_cxt.prepared_queries);
     while ((entry = (PreparedStatement*)hash_seq_search(&seq)) != NULL) {
@@ -1052,7 +1045,7 @@ void HandlePreparedStatementsForReload(void)
         {
             /* clean CachedPlanSource */
             if (entry->plansource->gpc.status.IsSharePlan()) {
-                g_instance.plan_cache->InvalidPlanSourceForReload(entry->plansource, entry->stmt_name);
+                g_instance.plan_cache->RemovePlanSource<ACTION_RELOAD>(entry->plansource, entry->stmt_name);
             } else {
                 DropCachedPlanInternal(entry->plansource);
             }
@@ -1070,6 +1063,7 @@ void HandlePreparedStatementsForReload(void)
                     errmsg("failed to drop internal cached plan when reload prepared statements: %s", edata->message)));
             FreeErrorData(edata);
             entry->has_prepare_dn_stmt = false;
+            has_error = true;
         }
         PG_END_TRY();
     }
@@ -1079,6 +1073,14 @@ void HandlePreparedStatementsForReload(void)
 
     /* invalid all cached plans */
     ResetPlanCache();
+
+    /* if error occurrs, report error to log jmp and destory handles */
+    if (has_error) {
+        ereport(ERROR,
+            (errmodule(MOD_EXECUTOR),
+                errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("failed to drop internal cached plan when reload prepared statements")));
+    }
 }
 
 /*
@@ -1104,12 +1106,13 @@ void HandlePreparedStatementsForRetry(void)
 
     if (ENABLE_CN_GPC) {
         /* set plansource to invalid like ungpc */
+        CN_GPC_LOG("Invalid all prepared statements for retry", 0, 0);
         HASH_SEQ_STATUS seq;
         PreparedStatement* entry = NULL;
         hash_seq_init(&seq, u_sess->pcache_cxt.prepared_queries);
         while ((entry = (PreparedStatement*)hash_seq_search(&seq)) != NULL) {
             if (entry->plansource->gpc.status.IsSharePlan())
-                g_instance.plan_cache->InvalidPlanSourceForCNretry(entry->plansource);
+                g_instance.plan_cache->RemovePlanSource<ACTION_CN_RETRY>(entry->plansource, entry->stmt_name);
         }
     }
 
@@ -1131,6 +1134,7 @@ void ExplainExecuteQuery(
     PreparedStatement *entry = NULL;
     const char* query_string = NULL;
     CachedPlan* cplan = NULL;
+    MemoryContext tmpCxt = NULL;
     List* plan_list = NIL;
     ListCell* p = NULL;
     ParamListInfo paramLI = NULL;
@@ -1176,8 +1180,8 @@ void ExplainExecuteQuery(
 
     u_sess->attr.attr_sql.explain_allow_multinode = false;
 
-    if (ENABLE_GPC) {
-        plan_list = CopyLocalStmt(cplan->stmt_list);
+    if (ENABLE_GPC && entry->plansource->gplan) {
+        plan_list = CopyLocalStmt(cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
     } else {
         plan_list = cplan->stmt_list;
     }
@@ -1359,15 +1363,15 @@ void DropDatanodeStatement(const char* stmt_name)
             nodelist = lappend_int(nodelist, entry->dns_node_indices[i]);
 
         CN_GPC_LOG("drop datanode statment", NULL, entry->stmt_name);
-        /* Okay to remove it */
-        (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
 
         entry->current_nodes_number = 0;
         entry->max_nodes_number = 0;
         pfree_ext(entry->dns_node_indices);
-        pfree_ext(entry->last_used_time);
 
-        ExecCloseRemoteStatement(stmt_name, nodelist);
+        /* Okay to remove it */
+        (void*)hash_search(u_sess->pcache_cxt.datanode_queries, entry->stmt_name, HASH_REMOVE, NULL);
+        if (!ENABLE_CN_GPC)
+            ExecCloseRemoteStatement(stmt_name, nodelist);
     }
 }
 
@@ -1395,16 +1399,6 @@ void DeActiveAllDataNodeStatements(void)
             Assert(tmp_num <= u_sess->pgxc_cxt.NumDataNodes);
             errorno = memset_s(entry->dns_node_indices, tmp_num * sizeof(int), 0, tmp_num * sizeof(int));
             securec_check_c(errorno, "\0", "\0");
-            errorno = memset_s(entry->last_used_time, tmp_num * sizeof(instr_time), 0, tmp_num * sizeof(instr_time));
-            securec_check_c(errorno, "\0", "\0");
-        }
-    }
-    /* count datanode_queries release times for GPC, as part of cn session message for send to DN later */
-    if (ENABLE_CN_GPC) {
-        u_sess->cn_session_abort_count++;
-        if (unlikely(u_sess->cn_session_abort_count >= PG_UINT16_MAX)) {
-            ereport(WARNING, (errmodule(MOD_GPC), errcode(ERRCODE_LOG), errmsg("GPC's cn abort count overflow and reset to 0")));
-            u_sess->cn_session_abort_count = 0;
         }
     }
 }
@@ -1448,27 +1442,11 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
 
     /* find the statement in cache */
     entry = FetchDatanodeStatement(stmt_name, true);
-    instr_time cur_time;
-    INSTR_TIME_SET_CURRENT(cur_time);
 
-    if (ENABLE_CN_GPC) {
-        /* see if statement already active on the node, update used time for using statement */
-        for (i = 0; i < entry->current_nodes_number; i++) {
-            if (entry->dns_node_indices[i] == noid) {
-                if (NEED_SEND_PARSE_AGAIN(entry->last_used_time[i], cur_time)) {
-                    entry->last_used_time[i] = cur_time;
-                    return false;
-                }
-                entry->last_used_time[i] = cur_time;
-                return true;
-            }
-        }
-    } else {
-        /* see if statement already active on the node */
-        for (i = 0; i < entry->current_nodes_number; i++) {
-            if (entry->dns_node_indices[i] == noid)
-                return true;
-        }
+    /* see if statement already active on the node */
+    for (i = 0; i < entry->current_nodes_number; i++) {
+        if (entry->dns_node_indices[i] == noid)
+            return true;
     }
 
     /* After cluster expansion, must expand entry->dns_node_indices array too */
@@ -1483,15 +1461,6 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
         securec_check(errorno, "\0", "\0");
         pfree_ext(entry->dns_node_indices);
         entry->dns_node_indices = new_dns_node_indices;
-        instr_time* new_last_used_time = (instr_time*)MemoryContextAllocZero(
-            u_sess->pcache_cxt.datanode_queries->hcxt, entry->max_nodes_number * 2 * sizeof(instr_time));
-        errorno = memcpy_s(new_last_used_time,
-            entry->max_nodes_number * 2 * sizeof(instr_time),
-            entry->last_used_time,
-            entry->max_nodes_number * sizeof(instr_time));
-        securec_check(errorno, "\0", "\0");
-        pfree_ext(entry->last_used_time);
-        entry->last_used_time = new_last_used_time;
         entry->max_nodes_number = entry->max_nodes_number * 2;
         elog(LOG,
             "expand node ids array for active datanode statements "
@@ -1500,8 +1469,7 @@ bool ActivateDatanodeStatementOnNode(const char* stmt_name, int noid)
     }
 
     /* statement is not active on the specified node append item to the list */
-    entry->dns_node_indices[entry->current_nodes_number] = noid;
-    entry->last_used_time[entry->current_nodes_number++] = cur_time;
+    entry->dns_node_indices[entry->current_nodes_number++] = noid;
 
     return false;
 }

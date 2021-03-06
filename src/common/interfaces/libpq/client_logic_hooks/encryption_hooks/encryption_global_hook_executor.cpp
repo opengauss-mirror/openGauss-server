@@ -43,8 +43,8 @@ static bool create_cmk(const char *key_path_str)
     KmsErrType err_type = SUCCEED;
     RsaKeyStr *rsa_key_str = NULL;
 
-    err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
-    if (err_type != KEY_FILES_NONEXIST) {
+    err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, CREATE_KEY_FILE);
+    if (err_type != SUCCEED) {
         handle_kms_err(err_type);
         return false;
     }
@@ -74,6 +74,7 @@ static bool create_cmk(const char *key_path_str)
     free_rsa_str(rsa_key_str);
     return true;
 }
+
 #endif
 
 bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
@@ -166,32 +167,21 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
 }
 
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool EncryptionGlobalHookExecutor::delete_localkms_file()
+bool EncryptionGlobalHookExecutor::get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len)
 {
-    const char *key_store_str = NULL;
     const char *key_path_str = NULL;
-    size_t key_store_size = 0;
     size_t key_path_size = 0;
-    get_argument("key_store", &key_store_str, key_store_size);
-    get_argument("key_path", &key_path_str, key_path_size);
-    CmkKeyStore key_store = get_key_store_from_string(key_store_str);
-    RealCmkPath real_cmk_path = {0};
-    KmsErrType err_type = SUCCEED;
-    if (key_store == CmkKeyStore::LOCALKMS) {
-        err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
-        if (err_type != KEY_FILES_EXIST) {
-            handle_kms_err(err_type);
-            return false;
-        }
+    error_t rc = 0;
 
-        if (!rm_cmk_store_file(real_cmk_path)) {
-            return false;
-        }
-    } else {
+    get_argument("key_path", &key_path_str, key_path_size);
+    if (strlen(key_path_str) > buf_len) {
+        printf("ERROR(CLIENT): key path value is too long.\n");
         return false;
-        /* remain */
     }
-    
+
+    rc = strcpy_s(key_path_buf, buf_len, key_path_str);
+    securec_check_c(rc, "", "");
+
     return true;
 }
 #endif

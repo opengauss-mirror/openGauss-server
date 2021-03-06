@@ -2265,11 +2265,7 @@ Instrumentation* StreamInstrumentation::getInstrSlot(int idx, int plan_node_id)
     Instrumentation* instr = NULL;
 
     ThreadInstrumentation* thread_instr =
-#ifdef ENABLE_MULTIPLE_NODES
-        getThreadInstrumentationCN(idx, plan_node_id, 0);
-#else
-        getThreadInstrumentationDN(plan_node_id, 0);
-#endif
+        getThreadInstrumentation(idx, plan_node_id, 0);
 
     /* if threadinstr is not execute ,return NULL */
     if (thread_instr == NULL)
@@ -2297,11 +2293,7 @@ Instrumentation* StreamInstrumentation::getInstrSlot(int idx, int plan_node_id, 
     Instrumentation* instr = NULL;
 
     ThreadInstrumentation* thread_instr =
-#ifdef ENABLE_MULTIPLE_NODES
-        getThreadInstrumentationCN(idx, plan_node_id, smp_id);
-#else
-        getThreadInstrumentationDN(plan_node_id, smp_id);
-#endif
+        getThreadInstrumentation(idx, plan_node_id, smp_id);
 
     /* if threadinstr is not execute ,return NULL */
     if (thread_instr == NULL)
@@ -2534,18 +2526,16 @@ void StreamInstrumentation::SetStreamSend(int plan_node_id, bool send)
  * @in smp_id - current smp index
  * @return - is data send CN
  */
-bool StreamInstrumentation::IsSend(int idx, int plan_id, int smp_id)
+bool StreamInstrumentation::IsSend(int idx, int planId, int smpId)
 {
-    /* plannode offset in m_threadInstrArray of CN */
-    int offset = m_planIdOffsetArray[plan_id - 1] == 0 ? -1 : (m_planIdOffsetArray[plan_id - 1] - 1) * m_query_dop;
-    int dn_num_streams = DN_NUM_STREAMS_IN_CN(m_num_streams, m_gather_count, m_query_dop);
-    ThreadInstrumentation* thread_instr = m_threadInstrArray[1 + idx * dn_num_streams + offset + smp_id];
-
-    if (thread_instr == NULL)
+    ThreadInstrumentation* thread_instr = getThreadInstrumentation(idx, planId, smpId);
+    if (thread_instr == NULL) {
         return false;
+    }
+
     int* m_instr_array_map = thread_instr->m_instrArrayMap;
 
-    InstrStreamPlanData* instr = &thread_instr->m_instrArray[m_instr_array_map[plan_id - 1]].instr;
+    InstrStreamPlanData* instr = &thread_instr->m_instrArray[m_instr_array_map[planId - 1]].instr;
 
     return instr->isSend;
 }

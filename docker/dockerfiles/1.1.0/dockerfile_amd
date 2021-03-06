@@ -18,7 +18,7 @@ RUN set -eux; \
     mkdir /docker-entrypoint-initdb.d && \
     cp /tmp/wal2json.so /usr/local/opengauss && \
     tar -jxf openGauss-1.1.0-CentOS-64bit.tar.bz2 -C /usr/local/opengauss && \
-    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \ 
+    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
     rm -rf openGauss-1.1.0-CentOS-64bit.tar.bz2 && yum clean all
 
@@ -39,5 +39,5 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / 
 
 ENTRYPOINT ["entrypoint.sh"]
 
-EXPOSE 5432 
+EXPOSE 5432
 CMD ["gaussdb"]

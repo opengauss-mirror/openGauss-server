@@ -581,6 +581,7 @@ void CheckpointerMain(void)
          */
         now = (pg_time_t)time(NULL);
         elapsed_secs = now - t_thrd.checkpoint_cxt.last_checkpoint_time;
+
         if (elapsed_secs < 0) {
             elapsed_secs = 0;
         }
@@ -955,6 +956,17 @@ void set_flag_checkpoint_file_sync(int flags, volatile CheckpointerShmemStruct* 
     }
 }
 
+/*
+ * Check wheter checkpoint proc is running while waiting request checkpoint to finish.
+ */
+static void CheckPointProcRunning(void)
+{
+    if (g_instance.pid_cxt.CheckpointerPID == 0) {
+        ereport(FATAL,
+            (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
+                errmsg("could not request checkpoint because checkpointer not running")));
+    }
+}
 
 /*
  * RequestCheckpoint
@@ -1071,6 +1083,7 @@ void RequestCheckpoint(int flags)
             }
 
             CHECK_FOR_INTERRUPTS();
+            CheckPointProcRunning();
             pg_usleep(100000L);
         }
 
@@ -1090,6 +1103,7 @@ void RequestCheckpoint(int flags)
             }
 
             CHECK_FOR_INTERRUPTS();
+            CheckPointProcRunning();
             pg_usleep(100000L);
         }
 

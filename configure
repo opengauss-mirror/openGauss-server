@@ -788,6 +788,7 @@ docdir
 oldincludedir
 includedir
 with_3rdpartydir
+with_jdk
 localstatedir
 sharedstatedir
 sysconfdir
@@ -867,6 +868,7 @@ with_libxslt
 with_system_tzdata
 with_zlib
 with_gnu_ld
+with_jdk
 enable_largefile
 enable_float4_byval
 enable_float8_byval
@@ -6485,6 +6487,39 @@ $as_echo "$as_me: error: argument required for --with-system-tzdata option" >&2;
 fi
 
 
+
+#
+# JDK
+#
+with_jdk=''
+if [ ! -z "${with_3rdpartydir}" ]; then
+    platstr=$(sh src/get_PlatForm_str.sh)
+    for d in "openjdk8" "huaweijdk8"; do
+        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/platform/${platstr}/${d}" >&5
+        if [ ! -d "${with_3rdpartydir}/platform/${platstr}/${d}" ]; then
+            $as_echo "$as_me:$LINENO: result: no" >&5
+            continue
+        fi
+
+        for d2 in $(ls "${with_3rdpartydir}/platform/${platstr}/${d}" | sort -r  2>/dev/null); do
+            if [ -f "${with_3rdpartydir}/platform/${platstr}/${d}/${d2}/jre/bin/java" ]; then
+                with_jdk="${with_3rdpartydir}/platform/${platstr}/${d}/${d2}"
+                break;
+            fi
+        done
+
+        if [ ! -z "$with_jdk" ]; then
+            $as_echo "$as_me:$LINENO: result: yes" >&5
+            break;
+        fi
+    done
+
+    if [ -z "$with_jdk" ]; then
+        $as_echo "$as_me:$LINENO: error: there is no jdk (containing jre) found in 3rd party repo" >&5
+        $as_echo "$as_me: error: there is no jdk (containing jre) found in 3rd party repo" >&2
+        exit 1
+    fi
+fi
 
 
 #

@@ -261,6 +261,8 @@ void gs_set_reply_sock(int node_idx)
             g_instance.comm_cxt.g_r_node_sock[recv_idx].lock();
             g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock =
                 g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket;
+            g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock_id =
+                g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket_id;
             g_instance.comm_cxt.g_r_node_sock[recv_idx].unlock();
             break;
         }
@@ -2443,6 +2445,10 @@ bool get_next_comm_delay_info(CommDelayInfo* delay_info)
     uint32 delay_max = 0;
     uint32 delay_sum = 0;
 
+    if (g_instance.comm_cxt.g_delay_survey_switch == false) {
+        g_instance.comm_cxt.g_delay_survey_start_time = mc_timers_ms();
+        LIBCOMM_ELOG(LOG, "delay survey switch is open");
+    }
     g_instance.comm_cxt.g_delay_survey_switch = true;
 
     /* if node index is invalid, return false */

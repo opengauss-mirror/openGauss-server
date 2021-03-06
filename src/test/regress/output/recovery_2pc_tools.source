@@ -98,7 +98,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  cn_send_buffer_size               | integer | kB   | 8       | 128
  codegen_cost_threshold            | integer |      | 0       | 2147483647
  codegen_strategy                  | enum    |      |         | 
- comm_ackchk_time                  | integer |      | 0       | 20000
+ comm_ackchk_time                  | integer | ms   | 0       | 20000
  comm_control_port                 | integer |      | 0       | 65535
  comm_debug_mode                   | bool    |      |         | 
  commit_delay                      | integer |      | 0       | 100000
@@ -166,6 +166,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_backend_control            | bool    |      |         | 
  enable_bbox_dump                  | bool    |      |         | 
  enable_beta_features              | bool    |      |         | 
+ enable_beta_opfusion              | bool    |      |         | 
  enable_bitmapscan                 | bool    |      |         | 
  enable_bloom_filter               | bool    |      |         | 
  enable_broadcast                  | bool    |      |         | 

@@ -415,8 +415,8 @@ DROP TABLE basket_c;
 DROP TABLE basket_d;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to column setting: mycek
-drop cascades to column setting: mycek1
+DETAIL:  drop cascades to column encryption key: mycek
+drop cascades to column encryption key: mycek1
 \! gs_ktool -d all
 DELETE ALL
  1

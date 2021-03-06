@@ -2809,3 +2809,16 @@ void ngroup_info_hash_delete(Oid ngroup_oid)
         pfree(bms_ptr);
 }
 
+void ngroup_info_hash_destory(void)
+{
+    HASH_SEQ_STATUS hash_seq;
+    NGroupInfo* entry = NULL;
+
+    hash_seq_init(&hash_seq, g_instance.ngroup_hash_table);
+    while ((entry = (NGroupInfo*)hash_seq_search(&hash_seq)) != NULL) {
+        ereport(LOG, (errmsg(" ngroup_info_hash_print ngroup_info_hash__delete_all entry->oid: %d ", entry->oid)));
+        ngroup_info_hash_delete(entry->oid);
+    }
+}
+
+

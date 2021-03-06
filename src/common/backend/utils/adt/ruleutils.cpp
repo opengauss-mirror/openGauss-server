@@ -70,6 +70,7 @@
 #include "parser/parse_type.h"
 #include "parser/parser.h"
 #include "parser/parsetree.h"
+#include "parser/parse_expr.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "optimizer/pgxcplan.h"
@@ -2049,9 +2050,8 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 
     Datum reloptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isnull);
     if (isnull == false) {
-        Datum sep, txt;
-        sep = CStringGetTextDatum(", ");
-        txt = OidFunctionCall2(F_ARRAY_TO_TEXT, reloptions, sep);
+        Datum sep = CStringGetTextDatum(", ");
+        Datum txt = OidFunctionCall2(F_ARRAY_TO_TEXT, reloptions, sep);
         tableinfo.reloptions = TextDatumGetCString(txt);
 
         /*
@@ -2119,9 +2119,6 @@ static char* pg_get_tabledef_worker(Oid tableoid)
         }
 
         if ((ftoptions != NULL && ftoptions[0]) && (NULL != strstr(ftoptions, "formatter"))) {
-            int i_formatter;
-            char* temp_iter = NULL;
-            int iterf;
             resetStringInfo(&query);
             appendStringInfo(&query,
                 "WITH ft_options AS "
@@ -2135,10 +2132,10 @@ static char* pg_get_tabledef_worker(Oid tableoid)
             spirc = SPI_execute(query.data, true, INT_MAX);
             proc = SPI_processed;
 
-            i_formatter = SPI_fnumber(SPI_tuptable->tupdesc, "option_value");
+            int i_formatter = SPI_fnumber(SPI_tuptable->tupdesc, "option_value");
             formatter = pstrdup(SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, i_formatter));
 
-            temp_iter = formatter;
+            char* temp_iter = formatter;
             cnt_ft_frmt_clmns = 1;
             while (*temp_iter != '\0') {
                 if ('.' == *temp_iter)
@@ -2147,7 +2144,7 @@ static char* pg_get_tabledef_worker(Oid tableoid)
             }
 
             ft_frmt_clmn = (char**)pg_malloc(cnt_ft_frmt_clmns * sizeof(char*));
-            iterf = 0;
+            int iterf = 0;
             temp_iter = formatter;
             while (*temp_iter != '\0') {
                 ft_frmt_clmn[iterf] = temp_iter;
@@ -2171,12 +2168,12 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 
     appendStringInfo(&buf, "SET search_path = %s;", quote_identifier(get_namespace_name(tableinfo.spcid)));
 
-    appendStringInfo(&buf,
-        "\nCREATE %s%s %s",
-        (tableinfo.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
-            ((tableinfo.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
-        reltypename,
-        relname);
+    appendStringInfo(&buf, "\nCREATE %s%s %s",
+        (tableinfo.relpersistence == RELPERSISTENCE_UNLOGGED) ?
+        "UNLOGGED " :
+        ((tableinfo.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
+        reltypename, relname);
+
 
     // get attribute info
     actual_atts = get_table_attribute(tableoid, &buf, formatter, ft_frmt_clmn, cnt_ft_frmt_clmns);
@@ -4226,15 +4223,7 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
          * reference sourceTargetList, which comes from outer plan of the join (source table)
          */
         if (mps->operation == CMD_MERGE) {
-            PlanState* jplanstate = dpns->outer_planstate;
-            if (IsA(jplanstate, StreamState) || IsA(jplanstate, VecStreamState))
-                jplanstate = jplanstate->lefttree;
-            if (jplanstate->plan != NULL && IsJoinPlan((Node*)jplanstate->plan) &&
-                ((Join*)jplanstate->plan)->jointype == JOIN_RIGHT) {
-                dpns->inner_planstate = innerPlanState(jplanstate);
-            } else {
-                dpns->inner_planstate = outerPlanState(jplanstate);
-            }
+            dpns->inner_planstate = dpns->outer_planstate->lefttree;
         }
     } else
         dpns->inner_planstate = innerPlanState(ps);
@@ -5071,7 +5060,9 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
     }
 
     /* Add the LIMIT clause if given */
-    if (query->limitOffset != NULL) {
+    if (query->limitOffset != NULL &&
+        !(IsA(query->limitOffset, Const) && ((Const*)(query->limitOffset))->ismaxvalue)) {
+
         appendContextKeyword(context, " OFFSET ", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
         get_rule_expr(query->limitOffset, context, false);
     }
@@ -6577,6 +6568,271 @@ void get_utility_stmt_def(AlterTableStmt* stmt, StringInfo buf)
 
 }
 
+static void AppendDistributeByColDef(StringInfo buf, CreateStmt* stmt) 
+{
+    int i = 0;
+    ListCell *cell = NULL;
+    appendStringInfo(buf, "(");
+    foreach (cell, stmt->distributeby->colname) {
+        if (i == 0) {
+            appendStringInfo(buf, "%s", strVal(lfirst(cell)));
+        } else {
+            appendStringInfo(buf, ", %s", strVal(lfirst(cell)));
+        }
+        i++;
+    }
+    appendStringInfo(buf, ")");
+}
+
+static bool IsDefaultSlice(StringInfo buf, RangePartitionDefState* sliceDef)
+{
+    ParseState* pstate = make_parsestate(NULL);
+    Node* valueNode = (Node *)list_nth(sliceDef->boundary, 0);
+    Const* valueConst = (Const *)transformExpr(pstate, valueNode);
+
+    if (valueConst->ismaxvalue) {
+        appendStringInfo(buf, "DEFAULT");
+        free_parsestate(pstate);
+        return true;
+    } else {
+        free_parsestate(pstate);
+        return false;
+    }
+}
+
+static char* EscapeQuotes(const char* src)
+{
+    int len = strlen(src), i, j;
+    char* result = (char*)palloc(len * 2 + 1);
+
+    for (i = 0, j = 0; i < len; i++) {
+        /* backslash is already escaped */
+        if (SQL_STR_DOUBLE(src[i], false)) {
+            result[j++] = src[i];
+        }
+        result[j++] = src[i];
+    }
+    result[j] = '\0';
+    return result;
+}
+
+static void AppendSliceItemDDL(StringInfo buf, RangePartitionDefState* sliceDef, CreateStmt* stmt, bool parentheses) 
+{
+    Oid typoutput;
+    bool typIsVarlena = false;
+    ParseState* pstate = make_parsestate(NULL);
+    Const* valueConst = NULL;
+    Node* valueNode = NULL;
+    const char* valueString = NULL;
+    char* escapedString = NULL;
+    ListCell* cell = NULL;
+    ListCell* cell2 = NULL;
+    int i = 0;
+
+    if (parentheses) {
+        appendStringInfo(buf, "(");
+    }
+
+    forboth(cell, sliceDef->boundary, cell2, stmt->tableElts) {
+        if (i > 0) {
+            appendStringInfo(buf, ", ");
+        }
+        valueNode = (Node *)lfirst(cell);
+        valueConst = (Const *)transformExpr(pstate, valueNode);
+
+        if (valueConst->ismaxvalue) {
+            /* already took care of DEFAULT slice for LIST tables in IsDefaultSlice */
+            appendStringInfo(buf, "MAXVALUE");
+        } else {
+            getTypeOutputInfo(valueConst->consttype, &typoutput, &typIsVarlena);
+            valueString = OidOutputFunctionCall(typoutput, valueConst->constvalue);
+            escapedString = EscapeQuotes(valueString);
+            appendStringInfo(buf, "'%s'", escapedString);
+        }
+        i++;
+    }
+
+    if (parentheses) {
+        appendStringInfo(buf, ")");
+    }
+
+    pfree_ext(escapedString);
+    return;    
+}
+
+static void AppendSliceDN(StringInfo buf, Node* n)
+{
+    char* dnName = NULL;
+    switch (n->type) {
+        case T_RangePartitionDefState: {
+            RangePartitionDefState *sliceDef = (RangePartitionDefState *)n;
+            dnName = sliceDef->tablespacename;
+            break; 
+        }
+        case T_RangePartitionStartEndDefState: {
+            RangePartitionStartEndDefState *sliceDef = (RangePartitionStartEndDefState *)n;
+            dnName = sliceDef->tableSpaceName;
+            break; 
+        }
+        case T_ListSliceDefState: {
+            ListSliceDefState *sliceDef = (ListSliceDefState *)n;
+            dnName = sliceDef->datanode_name;
+            break;
+        }
+        default:
+            break;
+    }
+    if (dnName == NULL) {
+        return;
+    }
+    appendStringInfo(buf, " DATANODE %s", dnName);
+}
+
+static void AppendStartEndElement(StringInfo buf, List* valueList, CreateStmt* stmt)
+{
+    Oid typoutput;
+    bool typIsVarlena = false;
+    Node* valueNode = NULL;
+    Const* valueConst = NULL;
+    const char* valueString = NULL;
+    ParseState* pstate = NULL;
+    char* escapedString = NULL;
+
+    if (list_length(valueList) != 1) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("distributed table has too many distribution keys."),
+                    errhint("start/end syntax requires a distributed table with only one distribution key.")));
+    }
+
+    pstate = make_parsestate(NULL);
+    valueNode = (Node *)list_nth(valueList, 0);
+    valueConst = (Const *)transformExpr(pstate, valueNode);
+    if (valueConst->ismaxvalue) {
+        appendStringInfo(buf, "MAXVALUE");
+    } else {
+        getTypeOutputInfo(valueConst->consttype, &typoutput, &typIsVarlena);
+        valueString = OidOutputFunctionCall(typoutput, valueConst->constvalue);
+        escapedString = EscapeQuotes(valueString);
+        appendStringInfo(buf, "'%s'", escapedString);
+    }
+    pfree_ext(escapedString);
+    free_parsestate(pstate);
+}
+
+static void AppendStartEndDDL(StringInfo buf, RangePartitionStartEndDefState* sliceDef, CreateStmt* stmt)
+{
+    List* startValue = sliceDef->startValue;
+    List* endValue = sliceDef->endValue;
+    List* everyValue = sliceDef->everyValue;
+
+    appendStringInfo(buf, "SLICE %s ", sliceDef->partitionName);
+    if (startValue != NIL) {
+        appendStringInfo(buf, "START(");
+        AppendStartEndElement(buf, startValue, stmt);
+        appendStringInfo(buf, ") ");
+    }
+    if (endValue != NIL) {
+        appendStringInfo(buf, "END(");
+        AppendStartEndElement(buf, endValue, stmt);
+        appendStringInfo(buf, ") ");
+    }
+    if (everyValue != NIL) {
+        appendStringInfo(buf, "EVERY(");
+        AppendStartEndElement(buf, everyValue, stmt);
+        appendStringInfo(buf, ") ");
+    }
+}
+
+static void AppendValuesLessThanDDL(StringInfo buf, Node* node, CreateStmt* stmt)
+{
+    RangePartitionDefState *sliceDef = (RangePartitionDefState *)node;
+    appendStringInfo(buf, "SLICE %s VALUES LESS THAN (", sliceDef->partitionName);
+    AppendSliceItemDDL(buf, sliceDef, stmt, false);
+    appendStringInfo(buf, ")");
+    AppendSliceDN(buf, node);
+    pfree(sliceDef);
+}
+
+static void AppendListDDL(StringInfo buf, Node* node, CreateStmt* stmt, int keyNum)
+{
+    int listIdx = 0;
+    ListSliceDefState *listSlice = (ListSliceDefState *)node;
+    RangePartitionDefState *sliceDef = makeNode(RangePartitionDefState);
+    ListCell *cell = NULL;
+    bool parentheses = keyNum > 1;
+    
+    /* wrap every list boundary to RangePartitionDefState, then append to the buffer */
+    appendStringInfo(buf, "SLICE %s VALUES (", listSlice->name);
+    foreach (cell, listSlice->boundaries) {
+        sliceDef->partitionName = listSlice->name;
+        sliceDef->boundary = (List *)lfirst(cell);
+        if (listIdx > 0) {
+            appendStringInfo(buf, ", ");
+        }
+        if (IsDefaultSlice(buf, sliceDef)) {
+            break;
+        } else {
+            AppendSliceItemDDL(buf, sliceDef, stmt, parentheses);
+        }
+        listIdx++;
+    }
+    appendStringInfo(buf, ")");
+    AppendSliceDN(buf, node);
+    pfree(sliceDef);
+}
+
+static void AppendSliceDDL(StringInfo buf, CreateStmt* stmt) 
+{
+    if (stmt->distributeby->distState == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), 
+            errmsg("Distribution Info is not defined.")));
+    }
+
+    int idx = 0;
+    DistributeBy* distributeby = stmt->distributeby;
+    ListCell *cell = NULL;
+    DistState *distState = distributeby->distState;
+    int keyNum = list_length(distributeby->colname);
+
+    /* Slice References case, needs to append slice definitions of the base table! */
+    if (distributeby->distState->refTableName != NULL) {
+        appendStringInfo(buf, " SLICE REFERENCES %s ", distributeby->distState->refTableName);
+        return;
+    }
+
+    appendStringInfo(buf, "(");
+    foreach (cell, distState->sliceList) {
+        Node *node = (Node *)lfirst(cell);
+        if (idx > 0) {
+            appendStringInfo(buf, ", ");
+        }
+        switch (node->type) {
+            case T_RangePartitionDefState: {
+                AppendValuesLessThanDDL(buf, node, stmt);
+                break;
+            }
+            case T_ListSliceDefState: {
+                AppendListDDL(buf, node, stmt, keyNum);
+                break;
+            }
+            case T_RangePartitionStartEndDefState: {
+                /* no transformation to less-than struct; deparse back to DDL as-is */
+                RangePartitionStartEndDefState* sliceDef = (RangePartitionStartEndDefState *)node;
+                AppendStartEndDDL(buf, sliceDef, stmt);
+                break;
+            }
+            default: {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), 
+                    errmsg("Unrecognized distribution specification.")));
+                break;
+            }
+        }
+        idx++;
+    }
+    appendStringInfo(buf, ")"); /* end parentheses for whole range/list distribution */
+}
+
 /* ----------
  * get_utility_query_def			- Parse back a UTILITY parsetree
  * ----------
@@ -6762,6 +7018,20 @@ static void get_utility_query_def(Query* query, deparse_context* context)
                     }
                     appendStringInfo(buf, ")");
                     break;
+
+                case DISTTYPE_RANGE: {
+                    appendStringInfo(buf, " DISTRIBUTE BY RANGE");
+                    AppendDistributeByColDef(buf, stmt);
+                    AppendSliceDDL(buf, stmt);
+                    break;
+                }
+
+                case DISTTYPE_LIST: {
+                    appendStringInfo(buf, " DISTRIBUTE BY LIST");
+                    AppendDistributeByColDef(buf, stmt);
+                    AppendSliceDDL(buf, stmt);
+                    break;
+                }
 
                 default:
                     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid distribution type")));
@@ -9419,6 +9689,13 @@ static void get_coercion_expr(Node* arg, deparse_context* context, Oid resulttyp
         if (!PRETTY_PAREN(context))
             appendStringInfoChar(buf, ')');
     }
+    /*
+     * Never emit resulttype(arg) functional notation. A pg_proc entry could
+     * take precedence, and a resulttype in pg_temp would require schema
+     * qualification that format_type_with_typemod() would usually omit. We've
+     * standardized on arg::resulttype, but CAST(arg AS resulttype) notation
+     * would work fine.
+     */
     appendStringInfo(buf, "::%s", format_type_with_typemod(resulttype, resulttypmod));
 }
 

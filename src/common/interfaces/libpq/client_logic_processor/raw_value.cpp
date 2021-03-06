@@ -77,15 +77,12 @@ void RawValue::set_data(const unsigned char *data, size_t data_size)
     m_data_value_size = m_data_size;
 }
 
-bool RawValue::process(bool is_during_refresh_cache, const ICachedColumn *cached_column, char *err_msg)
+bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
 {
     free_processed_data();
 
     /* no need to process */
-    if (!m_data_value) {
-        return true;
-    }
-    if (!m_data_size) {
+    if (!m_data_value || !m_data_size) {
         return true;
     }
     /* fromat different datatype to binary */
@@ -154,8 +151,8 @@ bool RawValue::process(bool is_during_refresh_cache, const ICachedColumn *cached
         sizeof(Oid),
         sizeof(unsigned char));
     RETURN_IF(m_processed_data);
-    int processed_size = HooksManager::process_data(is_during_refresh_cache, cached_column,
-        cached_column->get_column_hook_executors(), binary, binary_size, m_processed_data);
+    int processed_size = HooksManager::process_data(cached_column, cached_column->get_column_hook_executors(), binary,
+        binary_size, m_processed_data);
     if (processed_size <= 0) {
         if (strlen(err_msg) == 0) {
             check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, "failed to process data"));

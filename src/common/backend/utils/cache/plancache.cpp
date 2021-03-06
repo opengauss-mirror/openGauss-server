@@ -115,6 +115,15 @@ static bool check_stream_plan(Plan* plan);
 static bool is_upsert_query_with_update_param(Node* raw_parse_tree);
 static void GPCFillPlanCache(CachedPlanSource* plansource, bool isBuildingCustomPlan);
 
+bool IsStreamSupport()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return u_sess->attr.attr_sql.enable_stream_operator;
+#else
+    return u_sess->opt_cxt.query_dop > 1;
+#endif
+}
+
 /*
  * InitPlanCache: initialize module during InitPostgres.
  *
@@ -174,33 +183,36 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
         enable_pbe_gpc = ENABLE_GPC && raw_parse_tree && !IsA(raw_parse_tree, TransactionStmt);
 #endif
     }
-    if (enable_pbe_gpc) {
-    	source_context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
-        									   "GPCCachedPlanSource",
-        									   ALLOCSET_SMALL_MINSIZE,
-        									   ALLOCSET_SMALL_INITSIZE,
-        									   ALLOCSET_DEFAULT_MAXSIZE,
-        									   SHARED_CONTEXT);
-    } else if (ENABLE_CN_GPC && enable_spi_gpc) {
-        source_context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
-                                               "SPI_GPCCachedPlanSource",
+
+    if(!enable_pbe_gpc && !(ENABLE_CN_GPC && enable_spi_gpc)) {
+       /*
+        * Make a dedicated memory context for the CachedPlanSource and its
+        * permanent subsidiary data.  It's probably not going to be large, but
+        * just in case, use the default maxsize parameter.  Initially it's a
+        * child of the caller's context (which we assume to be transient), so
+        * that it will be cleaned up on error.
+        */
+        source_context = AllocSetContextCreate(CurrentMemoryContext,
+                                            "CachedPlanSource",
+                                            ALLOCSET_SMALL_MINSIZE,
+                                            ALLOCSET_SMALL_INITSIZE,
+                                            ALLOCSET_DEFAULT_MAXSIZE);
+    } else {
+        char *contextName = NULL;
+        if (enable_pbe_gpc) {
+            contextName =  "GPCCachedPlanSource";
+        }
+        if (ENABLE_CN_GPC && enable_spi_gpc) {
+            contextName =  "SPI_GPCCachedPlanSource";
+        }
+        source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
+                                               contextName,
                                                ALLOCSET_SMALL_MINSIZE,
                                                ALLOCSET_SMALL_INITSIZE,
                                                ALLOCSET_DEFAULT_MAXSIZE,
                                                SHARED_CONTEXT);
-    } else {
-    	/*
-    	 * Make a dedicated memory context for the CachedPlanSource and its
-    	 * permanent subsidiary data.  It's probably not going to be large, but
-    	 * just in case, use the default maxsize parameter.  Initially it's a
-    	 * child of the caller's context (which we assume to be transient), so
-    	 * that it will be cleaned up on error.
-    	 */
-    	source_context = AllocSetContextCreate(CurrentMemoryContext,
-    										   "CachedPlanSource",
-    										   ALLOCSET_SMALL_MINSIZE,
-    										   ALLOCSET_SMALL_INITSIZE,
-    										   ALLOCSET_DEFAULT_MAXSIZE);
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
+        ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     }
 
     /*
@@ -227,7 +239,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->context = source_context;
 #ifdef PGXC
     plansource->stmt_name = (stmt_name ? pstrdup(stmt_name) : NULL);
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -343,7 +355,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
 #endif
 
 #ifdef PGXC
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -546,6 +558,8 @@ void SaveCachedPlan(CachedPlanSource* plansource)
         MemoryContextSetParent(plansource->context, u_sess->cache_mem_cxt);
     }
 
+    START_CRIT_SECTION();
+    ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plansource->context);
     /*
      * Add the entry to the session's global list of cached plans.
      */
@@ -553,6 +567,8 @@ void SaveCachedPlan(CachedPlanSource* plansource)
     u_sess->pcache_cxt.first_saved_plan = plansource;
 
     plansource->is_saved = true;
+    END_CRIT_SECTION();
+    
 }
 
 /*
@@ -566,6 +582,8 @@ void SaveCachedPlan(CachedPlanSource* plansource)
 void DropCachedPlan(CachedPlanSource* plansource)
 {
     Assert(plansource->magic == CACHEDPLANSOURCE_MAGIC);
+    if (ENABLE_GPC && plansource->gpc.status.InShareTable())
+        elog(PANIC, "should not drop shared plan");
 
     /* If it's been saved, remove it from the list */
     if (plansource->is_saved) {
@@ -594,11 +612,8 @@ void DropCachedPlan(CachedPlanSource* plansource)
                 }
             }
         }
-        if (ENABLE_DN_GPC && plansource->stmt_name != NULL) {
+        if (ENABLE_GPC)
             GPC_LOG("BEFORE DROP CACHE PLAN", plansource, plansource->stmt_name);
-        }
-        if (ENABLE_CN_GPC)
-            CN_GPC_LOG("BEFORE DROP CACHE PLAN", plansource, plansource->stmt_name);
         plansource->is_saved = false;
     }
     plansource->next_saved = NULL;
@@ -691,11 +706,16 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
      * assumed the query is parsed, planned, and executed in one transaction,
      * so that no lock re-acquisition is necessary.
      */
-    if (plansource->is_oneshot || IsTransactionStmtPlan(plansource) || plansource->gpc.status.InShareTable()) {
+    if (plansource->is_oneshot || IsTransactionStmtPlan(plansource)) {
         Assert(plansource->is_valid);
         return NIL;
     }
-
+    /* if is shared plan, we should acquire plan lock for this transaction */
+    if (plansource->gpc.status.InShareTable()) {
+        Assert(plansource->is_valid);
+        AcquirePlannerLocks(plansource->query_list, true);
+        return NIL;
+    }
     /*
      * If there were no parsetrees, we don't need to check the the plan is whether invalid or not cause we do nothing but call
      *  NullCommand() in the execute stage.
@@ -947,6 +967,7 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
      */
 
     plansource->is_valid = true;
+    plansource->gpc.status.SetStatus(GPC_VALID);
 
     /* Return transient copy of querytrees for possible use in planning */
     return tlist;
@@ -971,14 +992,13 @@ static bool CheckCachedPlan(CachedPlanSource* plansource)
     /* If there's no generic plan, just say "false" */
     if (plan == NULL) {
         if (plansource->gpc.status.InShareTable()) {
-            elog(PANIC, "CheckCachedPlan no gplan for sharedplan %s, global session id :%lu session_id:%lu ",
-                plansource->stmt_name, u_sess->sess_ident.cn_sessid, u_sess->session_id);
+            elog(PANIC, "CheckCachedPlan no gplan for sharedplan %s", plansource->stmt_name);
         }
         return false;
     }
 
     /* If stream_operator alreadly change, need build plan again.*/
-    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != u_sess->attr.attr_sql.enable_stream_operator) {
+    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != IsStreamSupport()) {
         return false;
     }
 
@@ -1069,7 +1089,6 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     bool spi_pushed = false;
     MemoryContext plan_context;
     MemoryContext oldcxt = CurrentMemoryContext;
-    bool save_trigger_shipping_flag = u_sess->attr.attr_sql.enable_trigger_shipping;
     ListCell* lc = NULL;
     bool is_transient = false;
     PLpgSQL_execstate *saved_estate = plpgsql_estate;
@@ -1132,8 +1151,6 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
      */
     PG_TRY();
     {
-        /* Temporarily close u_sess->attr.attr_sql.enable_trigger_shipping for cached plan condition. */
-        u_sess->attr.attr_sql.enable_trigger_shipping = false;
         /* Save stream supported info since it will be reset when generate the plan. */
         outer_is_stream = u_sess->opt_cxt.is_stream;
         outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
@@ -1145,13 +1162,10 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     }
     PG_CATCH();
     {
-        /* Reset the flag after cached plan have been got. */
-        u_sess->attr.attr_sql.enable_trigger_shipping = save_trigger_shipping_flag;
         ResetStream(outer_is_stream, outer_is_stream_support);
         PG_RE_THROW();
     }
     PG_END_TRY();
-    u_sess->attr.attr_sql.enable_trigger_shipping = save_trigger_shipping_flag;
     u_sess->pcache_cxt.query_has_params = false;
 
     ResetStream(outer_is_stream, outer_is_stream_support);
@@ -1172,7 +1186,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
      */
     if (!plansource->is_oneshot) {
         if (!plansource->gpc.status.IsPrivatePlan()) {
-            plan_context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
+            plan_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
     											 "GPCCachedPlan",
     											 ALLOCSET_SMALL_MINSIZE,
     											 ALLOCSET_SMALL_INITSIZE,
@@ -1186,6 +1200,10 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     											 ALLOCSET_DEFAULT_MAXSIZE);
         }
 
+        /* We must track shared memory context for handling exception */
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
+        ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan_context);
+        
         /*
          * Copy plan into the new context.
          */
@@ -1273,7 +1291,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     MemoryContextSwitchTo(oldcxt);
 
     /* Set plan real u_sess->attr.attr_sql.enable_stream_operator.*/
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();
     //in shared hash table, we can not share the plan, we should throw error before this logic.
 
     plan->is_share = false;
@@ -1350,7 +1368,7 @@ static bool check_stream_plan(Plan* plan)
     if (plan == NULL)
         return false;
 
-    if (IsA(plan, RemoteQuery)) {
+    if (IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery)) {
         RemoteQuery* remote_query = (RemoteQuery*)plan;
         if (remote_query->is_simple)
             return true;
@@ -1474,10 +1492,6 @@ static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundPa
         return true;
     }
 
-    /* Only use generic plan when trigger shipping is off */
-    if (!u_sess->attr.attr_sql.enable_trigger_shipping)
-        return false;
-
     /* Don't choose custom plan if using pbe optimization */
     if (u_sess->attr.attr_sql.enable_pbe_optimization && plansource->gplan_is_fqs)
         return false;
@@ -1582,13 +1596,6 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
             UniqueSQLStatCountSoftParse(1);
         } else {
             /* Whenever plan is rebuild, we need to drop the old one */
-
-            if(unlikely(plansource->gpc.status.InShareTable()))
-                ereport(PANIC,
-                    (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
-                     errmsg("global plan can't be rebuild in share status stmt name %s :global session id :%lu session_id:%lu",
-                            plansource->stmt_name, u_sess->sess_ident.cn_sessid, u_sess->session_id)));
-
             ReleaseGenericPlan(plansource);
             /* Build a new generic plan */
             plan = BuildCachedPlan(plansource, qlist, NULL, customplan);
@@ -1598,6 +1605,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
             /* Link the new generic plan into the plansource */
             plansource->gplan = plan;
             plan->refcount++;
+            ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan->context);
             /* Immediately reparent into appropriate context */
             if (plansource->is_saved) {
                 if (plansource->gpc.status.IsPrivatePlan()) {
@@ -1676,6 +1684,7 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
             tmp_cplan->magic = 0;
             /* One-shot plans do not own their context, so we can't free them */
             if (!tmp_cplan->is_oneshot) {
+                ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
                 MemoryContextDelete(tmp_cplan->context);
             }
         } else {
@@ -1683,8 +1692,10 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
             CachedPlanSource* tmp_psrc = CopyCachedPlan(plansource, false);
             CachedPlan* tmp_cplan = BuildCachedPlan(tmp_psrc, NIL, boundParams, customplan);
             tmp_cplan->magic = 0;
+            ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_cplan->context);
             MemoryContextDelete(tmp_cplan->context);
             tmp_psrc->magic = 0;
+            ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, tmp_psrc->context);
             MemoryContextDelete(tmp_psrc->context);
         }
     }
@@ -1698,7 +1709,8 @@ CachedPlan* GetCachedPlan(CachedPlanSource* plansource, ParamListInfo boundParam
         /* Link the new custome plan into the plansource */
         plansource->cplan = plan;
         plan->refcount++;
-
+        ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan->context);
+        
         if (plansource->is_saved) {
             if (plansource->gpc.status.IsPrivatePlan()) {
                 /* saved plans all live under CacheMemoryContext */
@@ -1812,6 +1824,9 @@ void ReleaseSharedCachedPlan(CachedPlan* plan, bool useResOwner)
     Assert(plan->global_refcount > 0);
     /* we only delete the plan's context when global plancache is off or the plancache is private */
     if (pg_atomic_sub_fetch_u32((volatile uint32*)&plan->global_refcount, 1) == 0) {
+        /* TopTransactionResourceOwner is NULL when thread exit */
+        if (t_thrd.utils_cxt.TopTransactionResourceOwner)
+            ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan->context);
         /* Mark it no longer valid */
         plan->magic = 0;
         MemoryContextUnSeal(plan->context);
@@ -1852,6 +1867,9 @@ void ReleaseCachedPlan(CachedPlan* plan, bool useResOwner)
         /* One-shot plans do not own their context, so we can't free them */
         if (!plan->is_oneshot) {
             Assert (!plan->isShared());
+            /* TopTransactionResourceOwner is NULL when thread exit */
+            if (t_thrd.utils_cxt.TopTransactionResourceOwner)
+                ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, plan->context);
             MemoryContextDelete(plan->context);
         }
     }
@@ -1929,7 +1947,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot copy a one-shot cached plan")));
 
     if (ENABLE_GPC && is_share == true) {
-    	source_context = AllocSetContextCreate(g_instance.cache_cxt.global_cache_mem,
+    	source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
     										   "GPCCachedPlanSource",
     										   ALLOCSET_SMALL_MINSIZE,
     										   ALLOCSET_SMALL_INITSIZE,
@@ -2029,6 +2047,8 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
 #endif
 
     MemoryContextSwitchTo(oldcxt);
+    if (ENABLE_GPC && is_share)
+        GPC_LOG("copy plan when recreate", newsource, 0);
 
     return newsource;
 }

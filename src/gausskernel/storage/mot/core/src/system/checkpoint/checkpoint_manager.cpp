@@ -822,12 +822,14 @@ bool CheckpointManager::CreateTpcRecoveryFile()
         // checkpoint. It prevents gs_clean removing entries from the in-process map
         // while they are serialized
         MOTEngine::GetInstance()->GetInProcessTransactions().Lock();
+
         CheckpointUtils::TpcFileHeader tpcFileHeader;
         tpcFileHeader.m_magic = CP_MGR_MAGIC;
         tpcFileHeader.m_numEntries = MOTEngine::GetInstance()->GetInProcessTransactions().GetNumTxns();
 
         size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&tpcFileHeader, sizeof(CheckpointUtils::TpcFileHeader));
         if (wrStat != sizeof(CheckpointUtils::TpcFileHeader)) {
+            MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to write 2pc file's header (%d) [%d %s]",
                 wrStat,
                 errno,
@@ -836,22 +838,26 @@ bool CheckpointManager::CreateTpcRecoveryFile()
         }
 
         if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) != RC_OK) {
+            MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
             break;
         }
 
         if (CheckpointUtils::FlushFile(fd)) {
+            MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to flush map file");
             break;
         }
 
         if (CheckpointUtils::CloseFile(fd)) {
+            MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to close map file");
             break;
         }
+
+        MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
         ret = true;
     } while (0);
-    MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
     return ret;
 }
 
@@ -928,7 +934,7 @@ RC CheckpointManager::SerializeInProcessTxns(int fd)
         return RC_OK;
     };
 
-    return MOTEngine::GetInstance()->GetInProcessTransactions().ForEachTransaction(serializeLambda, false);
+    return MOTEngine::GetInstance()->GetInProcessTransactions().ForEachTransactionNoLock(serializeLambda);
 }
 
 bool CheckpointManager::CreateEndFile()

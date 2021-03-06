@@ -346,9 +346,7 @@ StreamNodeGroup::StreamNodeGroup()
     pthread_mutex_init(&m_mutex, NULL);
     pthread_mutex_init(&m_recursiveMutex, NULL);
     pthread_cond_init(&m_cond, NULL);
-
     m_pid = gs_thread_self();
-
     m_streamPairList = NULL;
     m_streamConsumerList = NULL;
     m_streamProducerList = NULL;
@@ -358,6 +356,9 @@ StreamNodeGroup::StreamNodeGroup()
     m_quitWaitCond = 0;
     m_edataWriteProtect = EDATA_WRITE_ENABLE;
     m_producerEdata = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    m_portal = NULL;
+#endif
 }
 
 StreamNodeGroup::~StreamNodeGroup()
@@ -371,8 +372,6 @@ StreamNodeGroup::~StreamNodeGroup()
  */
 void StreamNodeGroup::Init(int threadNum)
 {
-    bool found = false;
-    AutoMutexLock streamLock(&m_streamNodeGroupLock);
     m_size = threadNum + 1; /* all stream thead + top consumer thread */
     m_streamArray = (StreamNode*)palloc0(sizeof(StreamNode) * m_size);
     for (int i = 0; i < m_size; i++)
@@ -380,7 +379,9 @@ void StreamNodeGroup::Init(int threadNum)
 
     /* all stream thead + top consumer thread. */
     m_quitWaitCond = m_size;
-
+#ifdef ENABLE_MULTIPLE_NODES
+    bool found = false;
+    AutoMutexLock streamLock(&m_streamNodeGroupLock);
     /* register the node group now */
     streamLock.lock();
     StreamNodeElement* element = (StreamNodeElement*)hash_search(m_streamNodeGroupTbl, &m_pid, HASH_ENTER, &found);
@@ -391,6 +392,7 @@ void StreamNodeGroup::Init(int threadNum)
     element->value = this;
     element->key = gs_thread_self();
     streamLock.unLock();
+#endif
 }
 
 /*
@@ -417,10 +419,10 @@ void StreamNodeGroup::StartUp()
     nodectl.entrysize = sizeof(StreamNodeElement);
     nodectl.hash = tag_hash;
     nodectl.hcxt = m_memoryGlobalCxt;
-
+#ifdef ENABLE_MULTIPLE_NODES
     m_streamNodeGroupTbl =
         hash_create("stream node group lookup hash", 256, &nodectl, HASH_ELEM | HASH_FUNCTION | HASH_SHRCTX);
-
+#endif
     pthread_mutex_init(&m_streamNodeGroupLock, NULL);
 
     /* init the stream connect sync table ctl */
@@ -458,7 +460,7 @@ int StreamNodeGroup::registerStream(StreamObj* obj)
         Assert(m_streamNum <= m_size);
         return streamIdx;
     } else {
-        AutoContextSwitch streamContext(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+        AutoContextSwitch streamContext(u_sess->stream_cxt.stream_runtime_mem_cxt);
         m_streamArray[0].stopFlag = &u_sess->exec_cxt.executor_stop_flag;
         m_streamArray[0].consumerList = lcons(obj, m_streamArray[0].consumerList);
         m_streamArray[0].status = STREAM_INPROGRESS;
@@ -881,6 +883,11 @@ void StreamNodeGroup::destroy(StreamObjStatus status)
 
     /* Destroy the stream node group. */
     if (u_sess->stream_cxt.global_obj != NULL) {
+#ifndef ENABLE_MULTIPLE_NODES
+        if (u_sess->stream_cxt.global_obj->m_portal != NULL) {
+            u_sess->stream_cxt.global_obj->m_portal->streamInfo.streamGroup = NULL;
+        }
+#endif
         u_sess->stream_cxt.global_obj->deInit(status);
         delete u_sess->stream_cxt.global_obj;
         u_sess->stream_cxt.global_obj = NULL;
@@ -1035,14 +1042,14 @@ void StreamNodeGroup::deInit(StreamObjStatus status)
      */
     if ((list_length(m_streamPairList) != m_size) || m_needClean)
         StreamObj::releaseNetPortInHashTable();
-
+#ifdef ENABLE_MULTIPLE_NODES
     ThreadId pid = gs_thread_self();
     AutoMutexLock streamLock2(&m_streamNodeGroupLock);
 
     streamLock2.lock();
     (StreamNodeElement*)hash_search(m_streamNodeGroupTbl, &pid, HASH_REMOVE, NULL);
     streamLock2.unLock();
-
+#endif
     pthread_cond_destroy(&m_cond);
     pthread_mutex_destroy(&m_mutex);
     pthread_mutex_destroy(&m_recursiveMutex);
@@ -1795,7 +1802,7 @@ void StreamNodeGroup::MarkRecursiveVfdInvalid()
 bool InitStreamObject(PlannedStmt* planStmt)
 {
     /* if plan contains stream node, shoule initial some object */
-    if (planStmt->num_streams > 0 && !StreamTopConsumerAmI()) {
+    if (planStmt->num_streams > 0 && !StreamTopConsumerAmI() && !StreamThreadAmI()) {
         /* Set top consumer at the very beginning. */
         StreamTopConsumerIam();
         /* Build stream context for stream plan. */

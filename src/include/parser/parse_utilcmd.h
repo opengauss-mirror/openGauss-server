@@ -45,5 +45,6 @@ extern List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionL
 	bool isPartition = true);
 extern bool check_contains_tbllike_in_multi_nodegroup(CreateStmt* stmt);
 extern bool is_multi_nodegroup_createtbllike(PGXCSubCluster* subcluster, Oid oid);
+extern char* getTmptableIndexName(const char* srcSchema, const char* srcIndex);
 
 #endif /* PARSE_UTILCMD_H */

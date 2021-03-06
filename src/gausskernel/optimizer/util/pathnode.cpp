@@ -2886,7 +2886,11 @@ Plan* create_paritial_push_plan(PlannerInfo* root, RelOptInfo* rel)
             simple_sort->nullsFirst = ((Sort *) rel->subplan)->nullsFirst;
             simple_sort->sortToStore = false;
             simple_sort->sortCollations = ((Sort *) rel->subplan)->collations;
-            ((RemoteQuery *)remote_query)->sort = simple_sort;
+            if (IsA(remote_query, RemoteQuery))
+                ((RemoteQuery*)remote_query)->sort = simple_sort;
+            else if (IsA(remote_query, Stream)) {
+                ((Stream*)remote_query)->sort = simple_sort;
+            }
         }
         rel->subplan = remote_query;
         return rel->subplan;
@@ -2961,7 +2965,6 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
             pathnode->dop = 1;
 
         if (is_execute_on_datanodes(subplan)) {
-#ifdef ENABLE_MULTIPLE_NODES
             if (is_replicated_plan(subplan)) {
                 rel->distribute_keys = NULL;
                 rel->locator_type = LOCATOR_TYPE_REPLICATED;
@@ -3011,10 +3014,6 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
                 }
                 rel->locator_type = get_locator_type(subplan);
             }
-#else
-            rel->distribute_keys = subplan->distributed_keys;
-            rel->locator_type = get_locator_type(subplan);
-#endif
         } else {
             rel->distribute_keys = NIL;
             rel->locator_type = LOCATOR_TYPE_REPLICATED;
@@ -3489,9 +3488,13 @@ void debug3_print_two_relids(Relids first_relids, Relids second_relids, PlannerI
     initStringInfo(buf);
 
     if (root != NULL && root->parse != NULL) {
-        appendStringInfoString(buf, debug1_print_relids(first_relids, root->parse->rtable));
+        char* relidStr = debug1_print_relids(first_relids, root->parse->rtable);
+        appendStringInfoString(buf, relidStr);
+        pfree_ext(relidStr);
         appendStringInfoString(buf, " || ");
-        appendStringInfoString(buf, debug1_print_relids(second_relids, root->parse->rtable));
+        relidStr = debug1_print_relids(second_relids, root->parse->rtable);
+        appendStringInfoString(buf, relidStr);
+        pfree_ext(relidStr);
     }
     return;
 }

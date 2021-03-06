@@ -186,7 +186,8 @@ int main(int argc, char* argv[])
 
     /* maintance mode is off on default */
     pset.maintance = false;
-
+    /* client encryption is off on default */
+    pset.enable_client_encryption = false;
     /* We must get COLUMNS here before readline() sets it */
     char* columnsEnvStr = GetEnvStr("COLUMNS");
     pset.popt.topt.env_columns = columnsEnvStr != NULL ? atoi(columnsEnvStr) : 0;
@@ -583,7 +584,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"port", required_argument, NULL, 'p'},
         {"pset", required_argument, NULL, 'P'},
         {"quiet", no_argument, NULL, 'q'},
-        {"disable-client-logic", no_argument, NULL, 'C'},
+        {"enable-client-encryption", no_argument, NULL, 'C'},
         {"record-separator", required_argument, NULL, 'R'},
         {"record-separator-zero", no_argument, NULL, '0'},
         {"single-step", no_argument, NULL, 's'},

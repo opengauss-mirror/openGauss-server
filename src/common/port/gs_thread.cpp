@@ -466,7 +466,7 @@ void gs_thread_exit(int code)
     (void)gs_signal_deletetimer();
 
     /* free the locale cache */
-    freeLocaleCacheAtThreadExit();
+    freeLocaleCache(true);
 
     /* release llvm context memory */
     CodeGenThreadTearDown();

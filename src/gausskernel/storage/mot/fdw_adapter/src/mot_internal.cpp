@@ -624,14 +624,6 @@ void MOTAdaptor::RollbackPrepared()
     }
 }
 
-MOT::RC MOTAdaptor::FailedCommitPrepared(uint64_t csn)
-{
-    EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-    txn->SetCommitSequenceNumber(csn);
-    return txn->FailedCommitPrepared();
-}
-
 MOT::RC MOTAdaptor::InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
 {
     EnsureSafeThreadAccessInline();
@@ -1398,8 +1390,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId ti
             res,
             nullptr);
         if (res != MOT::RC_OK) {
-            delete table;
-            table = nullptr;
+            txn->DropTable(table);
             report_pg_error(res);
             break;
         }

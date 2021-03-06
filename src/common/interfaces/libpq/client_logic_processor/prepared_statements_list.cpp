@@ -41,7 +41,15 @@ PreparedStatement *PreparedStatementsList::create(const char *statement_name)
     }
 
     /* initialize array item */
-    m_prepared_statements[m_prepared_statements_size] = new PreparedStatementItem;
+    m_prepared_statements[m_prepared_statements_size] = new (std::nothrow) PreparedStatementItem;
+    if (m_prepared_statements[m_prepared_statements_size] == NULL) {
+        fprintf(stderr, "failed to new PreparedStatementItem object\n");
+        if (m_prepared_statements) {
+            free(m_prepared_statements);
+            m_prepared_statements = NULL;
+        }
+        exit(EXIT_FAILURE);
+    }
 
     if (statement_name && statement_name[0] != '\0') {
         check_strncpy_s(strncpy_s(m_prepared_statements[m_prepared_statements_size]->m_statement_name,

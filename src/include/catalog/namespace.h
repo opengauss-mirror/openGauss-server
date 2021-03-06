@@ -114,6 +114,7 @@ extern char* RelnameGetRelidExtended(const char *relname, Oid *relOid, Oid *refS
 extern bool RelationIsVisible(Oid relid);
 
 extern Oid	TypenameGetTypid(const char *typname);
+extern Oid  TypenameGetTypidExtended(const char *typname, bool temp_ok);
 extern bool TypeIsVisible(Oid typid);
 
 extern void SetTempFromSearchPath(List* namelist);

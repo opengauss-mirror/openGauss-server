@@ -513,113 +513,114 @@ int read_config_file(const char* file_path, int* err_no)
         /* read DNs info */
         FREAD(&g_node[ii].datanodeCount, 1, sizeof(uint32), fd);
         /* check datacodeCount not overflow */
-        if (g_node[ii].datanodeCount < CM_MAX_DATANODE_PER_NODE) {
-            for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
-                uint32 nn = 0;
+        if (g_node[ii].datanodeCount > CM_MAX_DATANODE_PER_NODE) {
+            goto read_failed;
+        }
+        for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
+            uint32 nn = 0;
 
-                /* calculate datanode group number */
-                if (g_node[ii].datanode[kk].datanodeRole == PRIMARY_DN) {
-                        g_cluster_total_instance_group_num++;
-                }
+            /* calculate datanode group number */
+            if (g_node[ii].datanode[kk].datanodeRole == PRIMARY_DN) {
+                    g_cluster_total_instance_group_num++;
+            }
 
-                FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
-                if (!datanodeMirrorIDInit) {
-                    datanodeMirrorIDInit = true;
-                    datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
-                    g_dn_replication_num++;
-                } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
-                    g_dn_replication_num++;
-                }
-                FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
+            FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
+            if (!datanodeMirrorIDInit) {
+                datanodeMirrorIDInit = true;
+                datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
+                g_dn_replication_num++;
+            } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
+                g_dn_replication_num++;
+            }
+            FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
 
-                FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
+            FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
 
-                FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
+            FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
 
-                max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
-                                    ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
-                                    : max_datapath_len;
+            max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
+                                ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
+                                : max_datapath_len;
 
-                FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
-                if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
-                    goto read_failed;
-                }
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
-                }
-                FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
-                if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
-                    goto read_failed;
-                }
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
-                }
-                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
-                if (g_multi_az_cluster) {
-                    for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
-                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
+            FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
+                goto read_failed;
+            }
+            for (nn = 0; nn < CM_IP_NUM; nn++) {
+                FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
+            }
+            FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
+                goto read_failed;
+            }
+            for (nn = 0; nn < CM_IP_NUM; nn++) {
+                FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
+            }
+            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
+            if (g_multi_az_cluster) {
+                for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
+                    FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                    g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
 
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount,
-                            1, sizeof(uint32), fd);
-                        if (g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount > CM_IP_NUM) {
-                            goto read_failed;
-                        }
-                        for (nn = 0; nn < CM_IP_NUM; nn++) {
-                            FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                            g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                            check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
-                        }
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
-                    }
-                } else {
-                    /* former cluster: single primary, single standby and single dummy standby */
-                    FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
-
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
-                    if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
-                            goto read_failed;
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount,
+                        1, sizeof(uint32), fd);
+                    if (g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount > CM_IP_NUM) {
+                        goto read_failed;
                     }
                     for (nn = 0; nn < CM_IP_NUM; nn++) {
-                        FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                        g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
+                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
                     }
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
-                    FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
-
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
-                    if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
-                            goto read_failed;
-                    }
-                    for (nn = 0; nn < CM_IP_NUM; nn++) {
-                        FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
-                        g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
-                    }
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
                 }
+            } else {
+                /* former cluster: single primary, single standby and single dummy standby */
+                FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
+
+                FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
+                        goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
+                FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
+
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
+                        goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
             }
         }
         FREAD(&g_node[ii].etcd, 1, sizeof(uint32), fd);

@@ -33,8 +33,6 @@
 typedef std::pair<gs_stl::gs_string, gs_stl::gs_string> names_pair;
 void acl_audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids,
     const names_pair names, int priv_type, const char *priv_name, int objtype);
-void extracted(policy_simple_set& policy_result, bool ignore_db, const char* priv_name, const PolicyLabelItem* item,
-    const gs_stl::gs_string& obj_value);
 bool internal_audit_object_str(const policy_set* security_policy_ids, const policy_set* policy_ids,
     const PolicyLabelItem* item, int priv_type, const char* priv_name, const char* objname = "",
     bool ignore_db = false);

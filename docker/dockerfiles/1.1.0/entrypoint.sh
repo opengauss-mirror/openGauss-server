@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeo pipefail 
+set -Eeo pipefail
 
 # usage: file_env VAR [DEFAULT]
 #    ie: file_env 'XYZ_DB_PASSWORD' 'example'
@@ -86,7 +86,7 @@ docker_init_database_dir() {
         else
 #                eval 'gs_initdb --pwfile=<(echo "$GS_PASSWORD") --nodename=gaussdb '"$POSTGRES_INITDB_ARGS"' "$@"'
                 eval 'gs_initdb --pwfile=<(echo "$GS_PASSWORD") --nodename=gaussdb -D $PGDATA'
-        fi        
+        fi
         # unset/cleanup "nss_wrapper" bits
         if [ "${LD_PRELOAD:-}" = '/usr/lib/libnss_wrapper.so' ]; then
                 rm -f "$NSS_WRAPPER_PASSWD" "$NSS_WRAPPER_GROUP"
@@ -183,7 +183,7 @@ docker_process_sql() {
         if [ -n "$GS_DB" ]; then
                 query_runner+=( --dbname "$GS_DB" )
         fi
-        
+
         echo "Execute SQL: ${query_runner[@]} $@"
         "${query_runner[@]}" "$@"
 }
@@ -208,7 +208,7 @@ docker_setup_user() {
                 GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set user="$GS_USERNAME" <<-'EOSQL'
                         create user :"user" with login password :"passwd" ;
 EOSQL
-        else           
+        else
                 echo " default user is gaussdb"
         fi
 }
@@ -219,7 +219,7 @@ docker_setup_rep_user() {
                 GS_DB= docker_process_sql --dbname postgres --set passwd="RepUser@2020" --set user="repuser" <<-'EOSQL'
                         create user :"user" SYSADMIN REPLICATION password :"passwd" ;
 EOSQL
-        else           
+        else
                 echo " default no repuser created"
         fi
 }
@@ -271,7 +271,7 @@ opengauss_setup_postgresql_conf() {
                     echo "password_encryption_type = 0"
                     echo "wal_level = logical"
                 fi
-                
+
                 if [ -n "$SERVER_MODE" ]; then
                     echo "listen_addresses = '0.0.0.0'"
                     echo "most_available_sync = on"
@@ -293,7 +293,7 @@ opengauss_setup_postgresql_conf() {
 
                 if [ -n "$OTHER_PG_CONF" ]; then
                     echo -e "$OTHER_PG_CONF"
-                fi 
+                fi
         } >> "$PGDATA/postgresql.conf"
 }
 
@@ -335,9 +335,9 @@ cp /usr/local/opengauss/wal2json.so /usr/local/opengauss/lib/postgresql
                 GS_DB= docker_process_sql --dbname postgres --set db="$GS_DB" --set passwd="$GS_PASSWORD" --set user="$GS_USERNAME" <<-'EOSQL'
                         select * from pg_create_logical_replication_slot('wal2json', 'wal2json');
                         create table gaussdb.test (id int primary key, name varchar2(20));
-                        insert into gaussdb.test values(1,'yun');  
-                        insert into gaussdb.test values(2,'he');  
-                        insert into gaussdb.test values(3,'enmo');  
+                        insert into gaussdb.test values(1,'yun');
+                        insert into gaussdb.test values(2,'he');
+                        insert into gaussdb.test values(3,'enmo');
                         ALTER TABLE gaussdb.test REPLICA IDENTITY FULL;
 EOSQL
 }

@@ -8,7 +8,7 @@ extern char* dbhost;
 extern char* dbuser;
 extern char* dbport;
 extern char* dbname;
-extern char* baseBackupTimeout;
+extern int   rwtimeout;
 extern int dbgetpassword;
 extern char* replication_slot;
 extern int standby_message_timeout;

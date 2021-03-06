@@ -317,7 +317,7 @@ start_logical_replication:
 				}
 			;
 	
-/* ADVANCE_REPLICATION SLOT slot LOGICAL %X/%X */
+/* ADVANCE_REPLICATION SLOT slot LOGICAL %X/%X options */
 advance_logical_replication:
             K_ADVANCE_REPLICATION K_SLOT IDENT K_LOGICAL RECPTR
 				{
@@ -419,4 +419,4 @@ replication_yylex(YYSTYPE *lvalp, YYLTYPE *llocp,
 	return replication_scanner_yylex(&(lvalp->yy_core), llocp, yyscanner);
 }
 
-#include "repl_scanner.cpp"
+#include "repl_scanner.inc"

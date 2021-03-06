@@ -145,7 +145,6 @@ static const char* default_text_search_config = "";
 static char* username = "";
 static bool pwprompt = false;
 static char* pwfilename = NULL;
-static char* enpwdfiledir = NULL;
 static const char* authmethodhost = "";
 static const char* authmethodlocal = "";
 static bool debug = false;
@@ -228,7 +227,7 @@ static const char* backend_options = "--single "
 
 #define FREE_AND_RESET(ptr)  \
     do {                     \
-        if (NULL != (ptr) && (char*)(ptr) != (char*)"") { \
+        if (NULL != (ptr) && reinterpret_cast<char*>(ptr) != static_cast<char*>("")) { \
             free(ptr);       \
             (ptr) = NULL;    \
         }                    \
@@ -1543,58 +1542,54 @@ static void get_set_pwd(void)
 
         pwd1 = xstrdup(pwdbuf);
 
-    }
-    /* Database Security: Support password complexity */
-    else {
-        if (pwprompt) {
-            /* if pwpasswd is not NULL, use it as password for the new superuser */
-            if (pwpasswd != NULL) {
-                pwd1 = pwpasswd;
-                if (!CheckInitialPasswd(username, pwd1)) {
-                    exit_nicely();
-                }
+    } else if (pwprompt) {
+        /* else get password from readline */
+        for (i = 0; i < 3; i++) {
+            pwd1 = simple_prompt("Enter new system admin password: ", 1024, false);
+            pwd2 = simple_prompt("Enter it again: ", 1024, false);
+
+            /* if pwd1 not equal to pwd2, try new password again */
+            if (pwd1 != NULL && pwd2 != NULL && strcmp(pwd1, pwd2) != 0) {
+                write_stderr(_("Passwords didn't match.\n"));
+                write_stderr(_("Please try new password again.\n"));
+
+                rc = memset_s(pwd1, strlen(pwd1), 0, strlen(pwd1));
+                securec_check_c(rc, "\0", "\0");
+                FREE_AND_RESET(pwd1);
+
+                rc = memset_s(pwd2, strlen(pwd2), 0, strlen(pwd2));
+                securec_check_c(rc, "\0", "\0");
+                FREE_AND_RESET(pwd2);
+
+                continue;
             }
-            /* else get password from readline */
-            else {
-                for (i = 0; i != 3; ++i) {
-                    pwd1 = simple_prompt("Enter new system admin password: ", 1024, false);
-                    pwd2 = simple_prompt("Enter it again: ", 1024, false);
 
-                    /* if pwd1 not equal to pwd2, try new password again */
-                    if (NULL != pwd1 && NULL != pwd2 && strcmp(pwd1, pwd2) != 0) {
-                        write_stderr(_("Passwords didn't match.\n"));
-                        write_stderr(_("Please try new password again.\n"));
+            /* Clear password related memory to avoid leaks when core. */
+            if (pwd2 != NULL) {
+                rc = memset_s(pwd2, strlen(pwd2), 0, strlen(pwd2));
+                securec_check_c(rc, "\0", "\0");
+                FREE_AND_RESET(pwd2);
+            }
 
-                        rc = memset_s(pwd1, strlen(pwd1), 0, strlen(pwd1));
-                        securec_check_c(rc, "\0", "\0");
-                        FREE_AND_RESET(pwd1);
-
-                        rc = memset_s(pwd2, strlen(pwd2), 0, strlen(pwd2));
-                        securec_check_c(rc, "\0", "\0");
-                        FREE_AND_RESET(pwd2);
-
-                        continue;
-                    }
-
-                    /* Clear password related memory to avoid leaks when core. */
-                    if (pwd2 != NULL) {
-                        rc = memset_s(pwd2, strlen(pwd2), 0, strlen(pwd2));
-                        securec_check_c(rc, "\0", "\0");
-                        FREE_AND_RESET(pwd2);
-                    }
-
-                    /* if the pwd1 does not match, try it again*/
-                    if (CheckInitialPasswd(username, pwd1)) {
-                        break;
-                    } else if (pwd1 != NULL) {
-                        rc = memset_s(pwd1, strlen(pwd1), 0, strlen(pwd1));
-                        securec_check_c(rc, "\0", "\0");
-                        FREE_AND_RESET(pwd1);
-                    }
-                }
-                if (3 == i) {
-                    exit_nicely();
-                }
+            /* if the pwd1 does not match, try it again*/
+            if (CheckInitialPasswd(username, pwd1)) {
+                break;
+            } else if (pwd1 != NULL) {
+                rc = memset_s(pwd1, strlen(pwd1), 0, strlen(pwd1));
+                securec_check_c(rc, "\0", "\0");
+                FREE_AND_RESET(pwd1);
+            }
+        }
+        
+        if (i == 3) {
+            exit_nicely();
+        }
+    } else {
+    /* if pwpasswd is not NULL, use it as password for the new superuser */
+        if (pwpasswd != NULL) {
+            pwd1 = pwpasswd;
+            if (!CheckInitialPasswd(username, pwd1)) {
+                exit_nicely();
             }
         }
     }
@@ -1608,21 +1603,18 @@ static void get_set_pwd(void)
 
     PG_CMD_OPEN;
 
-    buf_pwd1 = escape_quotes(pwd1);
-    PG_CMD_PRINTF2("ALTER USER \"%s\" WITH PASSWORD E'%s';\n", username, buf_pwd1);
-    rc = memset_s(buf_pwd1, strlen(buf_pwd1), 0, strlen(buf_pwd1));
-    securec_check_c(rc, "\0", "\0");
-    FREE_AND_RESET(buf_pwd1);
-
-    /* MM: pwd1 is no longer needed, freeing it */
     if (pwd1 != NULL) {
+        buf_pwd1 = escape_quotes(pwd1);
+        PG_CMD_PRINTF2("ALTER USER \"%s\" WITH PASSWORD E'%s';\n", username, buf_pwd1);
+        rc = memset_s(buf_pwd1, strlen(buf_pwd1), 0, strlen(buf_pwd1));
+        securec_check_c(rc, "\0", "\0");
+        FREE_AND_RESET(buf_pwd1);
         /* Clear password related memory to avoid leaks when core. */
         rc = memset_s(pwd1, strlen(pwd1), 0, strlen(pwd1));
         securec_check_c(rc, "\0", "\0");
         FREE_AND_RESET(pwd1);
     }
     PG_CMD_CLOSE;
-
 
     check_ok();
 }
@@ -3334,7 +3326,11 @@ static void usage(const char* prog_name)
     printf(_("  -?, --help                show this help, then exit\n"));
     printf(_("\nIf the data directory is not specified, the environment variable PGDATA\n"
              "is used.\n"));
-    printf(_("\nReport bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+#endif
 }
 
 static void check_authmethod_unspecified(const char** authmethod)
@@ -3365,22 +3361,20 @@ static void check_authmethod_valid(const char* authmethod, const char** valid_me
     exit(1);
 }
 
-static void check_need_password(const char* locale_authmethod, const char* locale_authmethodhost)
+static bool is_file_exist(const char* path)
 {
-    if ((strcmp(locale_authmethod, "md5") == 0 || strcmp(locale_authmethod, "sha256") == 0 ||
-            strcmp(locale_authmethod, "password") == 0) &&
-        (strcmp(locale_authmethodhost, "md5") == 0 || strcmp(locale_authmethodhost, "password") == 0 ||
-            strcmp(locale_authmethodhost, "sha256") == 0) &&
-        !(pwprompt || (pwfilename != NULL))) {
-        fprintf(stderr,
-            _("%s: must specify a password for the system admin to enable %s authentication\n"),
-            progname,
-            (strcmp(locale_authmethod, "md5") == 0 || strcmp(locale_authmethod, "password") == 0 ||
-                strcmp(locale_authmethod, "sha256") == 0)
-                ? locale_authmethod
-                : locale_authmethodhost);
-        exit(1);
+    struct stat statbuf;
+    bool isExist = true;
+
+    if (lstat(path, &statbuf) < 0) {
+        if (errno != ENOENT) {
+            write_stderr(_("could not stat file \"%s\": %s\n"), path, strerror(errno));
+            exit(1);
+        }
+
+        isExist = false;
     }
+    return isExist;
 }
 
 int main(int argc, char* argv[])
@@ -3440,6 +3434,9 @@ int main(int argc, char* argv[])
     char* authmethodhost_tmp = NULL;
     char* authmethodlocal_tmp = NULL;
     char* default_text_search_config_tmp = NULL;
+    char encrypt_pwd_real_path[PATH_MAX] = {0};
+    char cipher_key_file[MAXPGPATH] = {0};
+    char rand_file[MAXPGPATH] = {0};
 
 #ifdef WIN32
     char* restrict_env = NULL;
@@ -3533,12 +3530,27 @@ int main(int argc, char* argv[])
                 pwprompt = true;
                 break;
             case 'C':
-                FREE_NOT_STATIC_ZERO_STRING(enpwdfiledir);
-                enpwdfiledir = xstrdup(optarg);
-                decode_cipher_files(SERVER_MODE, NULL, enpwdfiledir, (unsigned char*)depasswd, true);
+                if (realpath(optarg, encrypt_pwd_real_path) == NULL) {
+                    write_stderr(_("%s: The parameter of -C is invalid.\n"), progname);
+                    break;
+                }
+                
+                ret = snprintf_s(cipher_key_file, MAXPGPATH, MAXPGPATH - 1,
+                                 "%s/server.key.cipher", encrypt_pwd_real_path);
+                securec_check_ss_c(ret, "\0", "\0");
+                ret = snprintf_s(rand_file, MAXPGPATH, MAXPGPATH - 1,
+                                 "%s/server.key.rand", encrypt_pwd_real_path);
+                securec_check_ss_c(ret, "\0", "\0");
+                if (!is_file_exist(cipher_key_file) || !is_file_exist(rand_file)) {
+                    pwpasswd = NULL;
+                    printf(_("Read cipher or random parameter file failed." 
+                             "The password of the initial user is not set.\n"));
+                    break;
+                }
+
+                decode_cipher_files(SERVER_MODE, NULL, encrypt_pwd_real_path, (unsigned char*)depasswd, true);
                 FREE_NOT_STATIC_ZERO_STRING(pwpasswd);
                 pwpasswd = xstrdup(depasswd);
-                FREE_AND_RESET(enpwdfiledir);
                 break;
             case 'w':
                 if ((pwpasswd != NULL) && pwpasswd != (char*)"") {
@@ -3698,8 +3710,6 @@ int main(int argc, char* argv[])
 
     check_authmethod_valid(authmethodlocal, auth_methods_local, "local");
     check_authmethod_valid(authmethodhost, auth_methods_host, "host");
-
-    check_need_password(authmethodlocal, authmethodhost);
 
     if (strlen(pg_data) == 0) {
         pgdenv = getenv("PGDATA");
@@ -4258,10 +4268,7 @@ int main(int argc, char* argv[])
     /* Create the stuff we don't need to use bootstrap mode for */
 
     setup_auth();
-
-    pwprompt = true;
-    if (pwprompt || (pwfilename != NULL))
-        get_set_pwd();
+    get_set_pwd();
 
     setup_depend();
     load_plpgsql();

@@ -1014,9 +1014,12 @@ static void usage(const char* progname)
            "  -d only for test, use 0xFF to fill the last half page[4k]\n"
            "\nCommon options:\n"
            "  --help, -h       show this help, then exit\n"
-           "  --version, -V    output version information, then exit\n"
-           "\n"
-           "Report bugs to <pgsql-bugs@postgresql.org>.\n");
+           "  --version, -V    output version information, then exit\n");
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to openGauss community by raising an issue.\n");
+#endif
 }
 
 static bool HexStringToInt(char* hex_string, int* result)
@@ -2787,6 +2790,7 @@ static int parse_page_file(const char* filename, SegmentType type, const uint32 
 
     if ((0 == size) || (0 != size % BLCKSZ)) {
         fprintf(stderr, "The page file size is not an exact multiple of BLCKSZ\n");
+        fclose(fd);
         return false;
     }
 
@@ -2795,6 +2799,7 @@ static int parse_page_file(const char* filename, SegmentType type, const uint32 
     /* parse */
     if (start >= blknum) {
         fprintf(stderr, "start point exceeds the total block number of relation.\n");
+        fclose(fd);
         return false;
     } else if ((start + number) > blknum) {
         fprintf(stderr,
@@ -2817,11 +2822,13 @@ static int parse_page_file(const char* filename, SegmentType type, const uint32 
         result = fread(buffer, 1, BLCKSZ, fd);
         if (BLCKSZ != result) {
             fprintf(stderr, "Reading error");
+            fclose(fd);
             return false;
         }
 
         if (!parse_a_page(buffer, start, blknum, type)) {
             fprintf(stderr, "Error during parsing block %d/%d\n", start, blknum);
+            fclose(fd);
             return false;
         }
 
@@ -3962,12 +3969,20 @@ static bool parse_dw_single_flush_file(const char* file_name)
     result = fread(file_head, 1, BLCKSZ, fd);
     if (BLCKSZ != result) {
         fprintf(stderr, "Reading error");
+        free(item);
+        free(unaligned_buf);
+        free(unaligned_buf2);
+        fclose(fd);
         return false;
     }
     fseek(fd, BLCKSZ, SEEK_SET);
     result = fread(item_buf, 1, blk_num * BLCKSZ, fd);
     if (blk_num * BLCKSZ != result) {
         fprintf(stderr, "Reading error");
+        free(item);
+        free(unaligned_buf);
+        free(unaligned_buf2);
+        fclose(fd);
         return false;
     }
 
@@ -4023,6 +4038,10 @@ static bool parse_dw_single_flush_file(const char* file_name)
         result = fread(dw_block, 1, BLCKSZ, fd);
         if (BLCKSZ != result) {
             fprintf(stderr, "Reading error");
+            free(item);
+            free(unaligned_buf);
+            free(unaligned_buf2);
+            fclose(fd);
             return false;
         }
         if (temp->buf_tag.rnode.bucketNode == -1) {

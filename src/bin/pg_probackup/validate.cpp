@@ -134,7 +134,7 @@ pgBackupValidate(pgBackup *backup, pgRestoreParams *params)
     }
 
     /* setup threads */
-    for (i = 0; i < parray_num(files); i++)
+    for (i = 0; (size_t)i < parray_num(files); i++)
     {
         pgFile       *file = (pgFile *) parray_get(files, i);
         pg_atomic_clear_flag(&file->lock);
@@ -291,7 +291,6 @@ pgBackupValidateFiles(void *arg)
     int            i;
     validate_files_arg *arguments = (validate_files_arg *)arg;
     int            num_files = parray_num(arguments->files);
-    pg_crc32    crc;
 
     for (i = 0; i < num_files; i++)
     {
@@ -568,7 +567,7 @@ do_validate_instance(void)
     backups = catalog_get_backup_list(instance_name, INVALID_BACKUP_ID);
 
     /* Examine backups one by one and validate them */
-    for (i = 0; i < parray_num(backups); i++)
+    for (i = 0; (size_t)i < parray_num(backups); i++)
     {
         pgBackup   *base_full_backup;
 

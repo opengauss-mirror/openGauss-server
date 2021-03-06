@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-ERROR:  global setting "mycmk" does not exist
+ERROR:  client master key "mycmk" does not exist
 CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY MyCEK770 WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE TABLE IF NOT EXISTS tr2(i1 INT ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK770, ENCRYPTION_TYPE = RANDOMIZED) , i2 INT);
@@ -141,7 +141,7 @@ SELECT * FROM products;
 
 DROP TABLE products;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-NOTICE:  drop cascades to column setting: mycek770
+NOTICE:  drop cascades to column encryption key: mycek770
 \! gs_ktool -d all
 DELETE ALL
  1

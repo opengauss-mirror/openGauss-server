@@ -30,6 +30,7 @@
 #include "c.h"
 
 extern uint32 generate_unique_queryid(Query* query, const char* query_string);
-extern bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_string, int len);
+extern bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_string, int len,
+    uint32 multi_sql_offset);
 
 #endif

@@ -437,9 +437,10 @@ static void InitLocalBuffers(void)
     info.keysize = sizeof(BufferTag);
     info.entrysize = sizeof(LocalBufferLookupEnt);
     info.hash = tag_hash;
+    info.hcxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE);
 
     u_sess->storage_cxt.LocalBufHash = hash_create(
-            "Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_FUNCTION);
+            "Local Buffer Lookup Table", nbufs, &info, HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION);
 
     if (!u_sess->storage_cxt.LocalBufHash) {
         ereport(ERROR, (errcode(ERRCODE_INITIALIZE_FAILED),

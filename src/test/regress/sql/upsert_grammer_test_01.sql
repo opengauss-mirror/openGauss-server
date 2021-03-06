@@ -1,8 +1,5 @@
 \c upsert
 SET CURRENT_SCHEMA TO upsert_test;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
 
 -- support multiple set
 INSERT INTO t_grammer VALUES(11, 1) ON DUPLICATE KEY UPDATE c2 = 2, c4 = ROW(10, 20), c3 = '{10, 20, 30}';

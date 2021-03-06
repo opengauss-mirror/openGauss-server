@@ -219,7 +219,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
         DeclareCursorStmt CreateFunctionStmt
         PrepareStmt ExecDirectStmt ExecuteStmt
         CreateKeyStmt ViewStmt MergeStmt
-        CreateRlsPolicyStmt AlterRlsPolicyStmt
+        CreateRlsPolicyStmt AlterRlsPolicyStmt RenameStmt
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
 
@@ -237,6 +237,7 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <list>	copy_opt_list
 %type <defelt>	copy_opt_item
 %type <str>		copy_file_name
+                database_name
 
 %type <list>	func_name qual_Op qual_all_Op subquery_Op
                 opt_collate opt_class transaction_mode_list transaction_mode_list_or_empty
@@ -739,6 +740,7 @@ stmt :
             | ExecDirectStmt
             | CreateRlsPolicyStmt
             | AlterRlsPolicyStmt
+            | RenameStmt
             | /*EMPTY*/
 				{ $$ = NULL; }
 		;
@@ -1485,6 +1487,76 @@ VariableResetStmt:
                     $$ = (Node *) n;
                 }
         ;
+
+/*****************************************************************************
+ *
+ * ALTER THING name RENAME TO newname
+ *
+ *****************************************************************************/
+
+RenameStmt:
+            ALTER DATABASE database_name RENAME TO database_name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_DATABASE;
+                    n->subname = $3;
+                    n->newname = $6;
+                    n->missing_ok = false;
+                    $$ = (Node *)n;
+                }
+            | ALTER SCHEMA name RENAME TO name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_SCHEMA;
+                    n->subname = $3;
+                    n->newname = $6;
+                    n->missing_ok = false;
+                    $$ = (Node *)n;
+                }
+            | ALTER TABLE relation_expr RENAME TO name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_TABLE;
+                    n->relation = $3;
+                    n->subname = NULL;
+                    n->newname = $6;
+                    n->missing_ok = false;
+                    $$ = (Node *)n;
+                }
+            | ALTER TABLE IF_P EXISTS relation_expr RENAME TO name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_TABLE;
+                    n->relation = $5;
+                    n->subname = NULL;
+                    n->newname = $8;
+                    n->missing_ok = true;
+                    $$ = (Node *)n;
+                }
+            | ALTER TABLE relation_expr RENAME opt_column name TO name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_COLUMN;
+                    n->relationType = OBJECT_TABLE;
+                    n->relation = $3;
+                    n->subname = $6;
+                    n->newname = $8;
+                    n->missing_ok = false;
+                    $$ = (Node *)n;
+                }
+            | ALTER TABLE IF_P EXISTS relation_expr RENAME opt_column name TO name
+                {
+                    RenameStmt *n = makeNode(RenameStmt);
+                    n->renameType = OBJECT_COLUMN;
+                    n->relationType = OBJECT_TABLE;
+                    n->relation = $5;
+                    n->subname = $8;
+                    n->newname = $10;
+                    n->missing_ok = true;
+                    $$ = (Node *)n;
+                }
+        ;
+
 
 /****************************************************************************
  *
@@ -10311,6 +10383,9 @@ qualified_name:
 		;
 
 name:       ColId                                   { $$ = $1; };
+
+database_name:
+            ColId                                   { $$ = $1; };
 
 attr_name:  ColLabel                                { $$ = $1; };
 

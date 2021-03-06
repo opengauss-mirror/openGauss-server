@@ -29,6 +29,7 @@
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "commands/user.h"
+#include "commands/trigger.h"
 #include "executor/functions.h"
 #include "funcapi.h"
 #include "gs_policy/gs_policy_masking.h"
@@ -201,29 +202,18 @@ static char* get_temp_library(bool absolute_path)
     initStringInfo(&temp_file_strinfo);
     bool isExecCN = (IS_PGXC_COORDINATOR && !IsConnFromCoord());
     if (absolute_path) {
-        if (!GTM_MODE)
-            appendStringInfo(&temp_file_strinfo,
-                "%s/pg_plugin/T%lu_%s",
-                t_thrd.proc_cxt.pkglib_path,
-                isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid,
-                isExecCN ? g_instance.attr.attr_common.PGXCNodeName : u_sess->attr.attr_common.application_name);
-        else
-            appendStringInfo(&temp_file_strinfo,
-                "%s/pg_plugin/%ld%lu",
-                t_thrd.proc_cxt.pkglib_path,
-                GetCurrentTransactionStartTimestamp(),
-                GetCurrentTransactionId());
+        appendStringInfo(&temp_file_strinfo,
+            "%s/pg_plugin/%ld%lu",
+            t_thrd.proc_cxt.pkglib_path,
+            GetCurrentTransactionStartTimestamp(),
+            (GTM_MODE) ? (GetCurrentTransactionId()) :
+                          (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
     } else {
-        if (!GTM_MODE)
-            appendStringInfo(&temp_file_strinfo,
-                "$libdir/pg_plugin/T%lu_%s",
-                isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid,
-                isExecCN ? g_instance.attr.attr_common.PGXCNodeName : u_sess->attr.attr_common.application_name);
-        else
-            appendStringInfo(&temp_file_strinfo,
-                "$libdir/pg_plugin/%ld%lu",
-                GetCurrentTransactionStartTimestamp(),
-                GetCurrentTransactionId());
+        appendStringInfo(&temp_file_strinfo,
+            "$libdir/pg_plugin/%ld%lu",
+            GetCurrentTransactionStartTimestamp(),
+            (GTM_MODE) ? (GetCurrentTransactionId()) :
+                          (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
     }
 
     return temp_file_strinfo.data;
@@ -1368,6 +1358,9 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
 
         /* the 'shared dependencies' also change when update. */
         deleteSharedDependencyRecordsFor(ProcedureRelationId, retval, 0);
+
+        /* send invalid message for for relation holding replaced function as trigger */
+        InvalidRelcacheForTriggerFunction(retval, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
     }
 
     myself.classId = ProcedureRelationId;

@@ -574,3 +574,23 @@ static Oid FindRoleid(Oid relid)
     ReleaseSysCache(tuple);
     return roleid;
 }
+
+/*
+ * acquire locks of matview's tables
+ */
+void acquire_mativew_tables_lock(Query *query, bool incremental)
+{
+    Relation rel;
+    ListCell *lc = NULL;
+    List *relids = NIL;
+    LOCKMODE lockmode = incremental ?  ShareUpdateExclusiveLock : ExclusiveLock;
+
+    relids = pull_up_rels_recursive((Node *)query);
+    foreach (lc, relids) {
+        Oid relid = (Oid)lfirst_oid(lc);
+        rel = heap_open(relid, lockmode);
+        heap_close(rel, NoLock);
+    }
+
+    return;
+}

@@ -79,9 +79,9 @@ result:
 
 standby_config:
 		standby_list				{ $$ = create_syncrep_config("1", $1, SYNC_REP_PRIORITY); }
-		| NUM '(' standby_list ')'	{ $$ = create_syncrep_config($1, $3, SYNC_REP_PRIORITY); }
-		| ANY NUM '(' standby_list ')'   { $$ = create_syncrep_config($2, $4, SYNC_REP_QUORUM); }
-		| FIRST NUM '(' standby_list ')' { $$ = create_syncrep_config($2, $4, SYNC_REP_PRIORITY); }
+		| NUM '(' standby_list ')'	{ $$ = create_syncrep_config($1, $3, SYNC_REP_PRIORITY); pfree($1); }
+		| ANY NUM '(' standby_list ')'   { $$ = create_syncrep_config($2, $4, SYNC_REP_QUORUM); pfree($2); }
+		| FIRST NUM '(' standby_list ')' { $$ = create_syncrep_config($2, $4, SYNC_REP_PRIORITY); pfree($2); }
 	;
 
 standby_list:
@@ -148,6 +148,21 @@ create_syncrep_config(const char *num_sync, List *members, uint8 syncrep_method)
 		ptr += strlen(standby_name) + 1;
 		used_size += strlen(standby_name) + 1;
 	}
+	lc = list_head(members);
+	while (lc != NULL)
+	{
+		ListCell *tmp = lc;
+		char *standbyName = (char *) lfirst(lc);
+		lc = lnext(lc);
+		/* we do not need free "*" because it is not from palloc */
+		if (strcmp(standbyName, "*") != 0) {
+			pfree(lfirst(tmp));
+			pfree(tmp);
+		}
+	}
+	if (members != NULL) {
+		pfree(members);
+	}
 
 	return config;
 }
@@ -156,4 +171,4 @@ create_syncrep_config(const char *num_sync, List *members, uint8 syncrep_method)
 #undef yylval
 #undef yylloc
 
-#include "syncrep_scanner.cpp"
+#include "syncrep_scanner.inc"

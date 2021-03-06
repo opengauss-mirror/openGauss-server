@@ -373,8 +373,6 @@ static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
     mem_cxt->gs_signal_mem_cxt = NULL;
     mem_cxt->mask_password_mem_cxt = NULL;
     mem_cxt->row_desc_mem_cxt = NULL;
-    mem_cxt->stream_runtime_mem_cxt = NULL;
-    mem_cxt->data_exchange_mem_cxt = NULL;
     mem_cxt->portal_mem_cxt = NULL;
     mem_cxt->mem_track_mem_cxt = NULL;
     mem_cxt->batch_encode_numeric_mem_cxt = NULL;
@@ -629,7 +627,6 @@ static void knl_t_arch_init(knl_t_arch_context* arch)
     arch->task_wait_interval = 1000;
     arch->last_arch_time = 0;
     arch->sync_walsender_idx = -1;
-    arch->sync_walsender_term = 0;
 }
 
 static void knl_t_logger_init(knl_t_logger_context* logger)

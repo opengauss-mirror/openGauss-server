@@ -2043,12 +2043,10 @@ static Datum ExecMakeFunctionResultNoSets(
     int* var_dno = NULL;
 
     FunctionScanState *node = NULL;
-    HeapTuple tp;
     FuncExpr *fexpr = NULL;
 
     bool savedIsSTP = u_sess->SPI_cxt.is_stp;
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
-    bool isNullSTP = true;
     bool proIsProcedure = false;
     bool supportTranaction = false;
 
@@ -2075,32 +2073,12 @@ static Datum ExecMakeFunctionResultNoSets(
             stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
         }
 
-        /*
-         * If proconfig is set we can't allow transaction commands because of the
-         * way the GUC stacking works: The transaction boundary would have to pop
-         * the proconfig setting off the stack.  That restriction could be lifted
-         * by redesigning the GUC nesting mechanism a bit.
-         */
-        Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
-        tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
-        if (!HeapTupleIsValid(tp)) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                            errmsg("cache lookup failed for function %u", fexpr->funcid)));
-        }
-
-        if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
-            u_sess->SPI_cxt.is_proconfig_set = true;
+        proIsProcedure = PROC_IS_PRO(fcache->prokind);
+        if (u_sess->SPI_cxt.is_proconfig_set) {
             node->atomic = true;
-            stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
         }
-
-        Datum datum = heap_getattr(tp, Anum_pg_proc_prokind, RelationGetDescr(relation), &isNullSTP);
-        proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
-        heap_close(relation, AccessShareLock);
-
         /* if proIsProcedure is ture means it was a stored procedure */
         u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
-        ReleaseSysCache(tp);
     }
 
     /* Guard against stack overflow due to overly complex expressions */
@@ -2319,11 +2297,9 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     int* var_dno = NULL;
     bool has_refcursor = false;
 
-    HeapTuple tp;
     FuncExpr *fexpr = NULL;
     bool savedIsSTP = u_sess->SPI_cxt.is_stp;
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
-    bool isNull = true;
     bool proIsProcedure = false;
     bool supportTranaction = false;
 
@@ -2347,30 +2323,13 @@ Tuplestorestate* ExecMakeTableFunctionResult(
             stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
         }
 
-        /*
-         * If proconfig is set we can't allow transaction commands because of the
-         * way the GUC stacking works: The transaction boundary would have to pop
-         * the proconfig setting off the stack.  That restriction could be lifted
-         * by redesigning the GUC nesting mechanism a bit.
-         */
-        Relation relation = heap_open(ProcedureRelationId, AccessShareLock);
-        tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
-        if (!HeapTupleIsValid(tp)) {
-            elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+        char prokind = (reinterpret_cast<FuncExprState*>(funcexpr))->prokind;
+        proIsProcedure = PROC_IS_PRO(prokind);
+        if (u_sess->SPI_cxt.is_proconfig_set) {
+            node->atomic = true;             
         }
-		
-        Datum datum = heap_getattr(tp, Anum_pg_proc_prokind, RelationGetDescr(relation), &isNull);
-        proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
-        heap_close(relation, AccessShareLock);
-
         /* if proIsProcedure means it was a stored procedure */
         u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
-        if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
-            u_sess->SPI_cxt.is_proconfig_set = true;
-            node->atomic = true;
-            stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
-        }
-        ReleaseSysCache(tp);
     }
 
     callerContext = CurrentMemoryContext;
@@ -4919,11 +4878,29 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
         case T_FuncExpr: {
             FuncExpr* funcexpr = (FuncExpr*)node;
             FuncExprState* fstate = makeNode(FuncExprState);
-
+            bool isnull = true;
             fstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalFunc;
 
             fstate->args = (List*)ExecInitExpr((Expr*)funcexpr->args, parent);
             fstate->func.fn_oid = InvalidOid; /* not initialized */
+            HeapTuple proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcexpr->funcid));
+            if (!HeapTupleIsValid(proctup)) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("cache lookup failed for function %u", funcexpr->funcid)));
+            }
+            /*   
+             * If proconfig is set we can't allow transaction commands because of the
+             * way the GUC stacking works: The transaction boundary would have to pop
+             * the proconfig setting off the stack.  That restriction could be lifted
+             * by redesigning the GUC nesting mechanism a bit.
+             */
+            if (!heap_attisnull(proctup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+                u_sess->SPI_cxt.is_proconfig_set = true;
+                stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
+            }
+            Datum datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isnull);
+            fstate->prokind = CharGetDatum(datum);
+            ReleaseSysCache(proctup);
             state = (ExprState*)fstate;
         } break;
         case T_OpExpr: {

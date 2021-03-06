@@ -389,12 +389,13 @@ extern void agent_acquire_connections_parallel(
     PoolAgent* agent, PoolConnDef* result, List* datanodelist, List* coordlist);
 extern void agent_acquire_connections_start(PoolAgent* agent, List* datanodelist, List* coordlist);
 extern void agent_acquire_connections_end(PoolAgent* agent);
-extern bool is_current_node_during_connecting(PoolAgent* agent, Oid node_oid, char node_type);
+extern bool is_current_node_during_connecting(
+    PoolAgent* agent, const NodeRelationInfo *needClearNodeArray, int waitClearCnt, char node_type);
 extern void reset_params_htab(HTAB* htab, bool);
 extern int PGXCNodeSendSetParallel(PoolAgent* agent, const char* set_command);
 extern char* MakePoolerSessionParams(PoolCommandType commandType);
 extern int get_nodeinfo_from_matric(
-    PoolGeneralInfo *info, int needCreateArrayLen, NodeRelationInfo *needCreateNodeArray);
+    char nodeType, int needCreateArrayLen, NodeRelationInfo *needCreateNodeArray);
 extern void pooler_sleep_interval_time(bool *poolValidateCancel);
 extern HTAB* create_user_slothash(const char* tabname, long nelem);
 extern void agent_verify_node_size(PGXCNodePool* nodePool);

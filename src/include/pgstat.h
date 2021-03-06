@@ -1005,7 +1005,6 @@ typedef enum WaitEventSQL {
 
 typedef struct {
     uint64 total_time; /* total time for sql */
-    uint64 avg_time;   /* avg time for sql */
     uint64 min_time;   /* min time for sql */
     uint64 max_time;   /* max time for sql */
 } ElapseTime;
@@ -2449,6 +2448,7 @@ extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
 extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
                                           bool hasTID = false, ThreadId threadId = 0);
 extern void pgstat_setup_memcxt(void);
+extern void pgstat_clean_memcxt(void);
 extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
 extern void pgstat_send(void* msg, int len);
 

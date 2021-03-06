@@ -116,7 +116,8 @@ static const int newObjectTypePriority[] = {
     24, /* DO_BLOB_DATA */
     22, /* DO_PRE_DATA_BOUNDARY */
     25, /* DO_POST_DATA_BOUNDARY */
-    31  /* DO_FTBL_CONSTRAINT */
+    31, /* DO_FTBL_CONSTRAINT */
+    33  /* DO_RLSPOLICY */
 };
 
 static DumpId postDataBoundId;

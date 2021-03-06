@@ -23,5 +23,5 @@
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=256d"
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "autovacuum_naptime=114841866167300d"
 
-\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=6.6" 
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=6.6"
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "bgwriter_lru_multiplier=11.2"

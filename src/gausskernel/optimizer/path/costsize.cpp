@@ -1111,6 +1111,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     /* estimate number of main-table tuples fetched */
     tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
 
+    ereport(DEBUG2,
+        (errmodule(MOD_OPT),
+            errmsg("Computing IndexScanCost: tuples_fetched: %lf, indexSelectivity: %lf, indexTotalCost: %lf",
+                tuples_fetched, indexSelectivity, indexTotalCost)));
+
     /* fetch estimated page costs for tablespace containing table */
     get_tablespace_page_costs(baserel->reltablespace, &spc_random_page_cost, &spc_seq_page_cost);
 
@@ -1167,6 +1172,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
 
         max_IO_cost = (pages_fetched * spc_random_page_cost) / loop_count;
 
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT),
+                errmsg("Computing IndexScanCost(loop_count > 1): max_pages_fetched: %lf, max_IO_cost: %lf",
+                    pages_fetched, max_IO_cost)));
+
         /*
          * In the perfectly correlated case, the number of pages touched by
          * each scan is selectivity * table_size, and we can use the Mackert
@@ -1190,6 +1200,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
                                     spc_seq_page_cost, pages_fetched);
 
         min_IO_cost = (pages_fetched * spc_random_page_cost) / loop_count;
+
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT),
+                errmsg("Computing IndexScanCost(loop_count > 1): min_pages_fetched: %lf, min_IO_cost: %lf",
+                    pages_fetched, min_IO_cost)));
     } else {
         /*
          * Normal case: apply the Mackert and Lohman formula, and then
@@ -1208,6 +1223,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         /* max_IO_cost is for the perfectly uncorrelated case (csquared=0) */
         max_IO_cost = pages_fetched * spc_random_page_cost;
 
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT),
+                errmsg("Computing IndexScanCost(loop_count = 1): max_pages_fetched: %lf, max_IO_cost: %lf",
+                    pages_fetched, max_IO_cost)));
+
         /* min_IO_cost is for the perfectly correlated case (csquared=1) */
         pages_fetched = ceil(indexSelectivity * (double)baserel->pages);
 
@@ -1225,6 +1245,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         } else {
             min_IO_cost = 0;
         }
+
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT),
+                errmsg("Computing IndexScanCost(loop_count = 1): min_pages_fetched: %lf, min_IO_cost: %lf",
+                    pages_fetched, min_IO_cost)));
     }
 
     /*
@@ -1234,6 +1259,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     csquared = indexCorrelation * indexCorrelation;
 
     run_cost += max_IO_cost + csquared * (min_IO_cost - max_IO_cost);
+
+    ereport(DEBUG2,
+        (errmodule(MOD_OPT),
+            errmsg("Computing IndexScanCost: max_IO_cost: %lf, min_IO_cost: %lf, csquared: %lf, IO_run_cost: %lf",
+                max_IO_cost, min_IO_cost, csquared, max_IO_cost + csquared * (min_IO_cost - max_IO_cost))));
 
     /*
      * Estimate CPU costs per tuple.
@@ -1263,6 +1293,11 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
 
     run_cost += cpu_per_tuple * tuples_fetched;
+
+    ereport(DEBUG2,
+        (errmodule(MOD_OPT),
+            errmsg("Computing IndexScanCost: cpu_per_tuple: %lf, tuples_fetched: %lf, cpu_run_cost: %lf",
+                cpu_per_tuple, tuples_fetched, cpu_per_tuple * tuples_fetched)));
 
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;

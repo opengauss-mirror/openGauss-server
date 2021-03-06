@@ -253,7 +253,7 @@ static char* parse_gid_info(const char* gid, txn_info* txn)
 
     txn->gid = (char*)malloc(sizeof(char) * (end_loc + 1));
     if (txn->gid == NULL) {
-        free(txn);
+        /* caller will free the memory of txn */
         return NULL;
     }
     errorno = strncpy_s(txn->gid, (end_loc + 1), gid, end_loc);

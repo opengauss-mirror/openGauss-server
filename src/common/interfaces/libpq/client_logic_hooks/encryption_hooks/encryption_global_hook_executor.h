@@ -57,7 +57,7 @@ public:
         size_t existing_global_hook_executors_size) override;
     bool process(ColumnHookExecutor *column_hook_executor) override;
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    bool delete_localkms_file();
+    bool get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len);
 #endif
 
 private:

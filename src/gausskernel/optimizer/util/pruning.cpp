@@ -76,8 +76,6 @@ static PruningResult* partitionEqualPruningWalker(PartitionType partType, Expr* 
     ((pruningResult)->boundary->partitionKeyNum > 1 && (topValue) && PointerIsValid((topValue)[0]) && \
         !(pruningResult)->boundary->maxClose[0])
 
-#define IF_OPEN_PARTITION_PRUNING 0
-
 static PartitionMap* GetRelPartitionMap(Relation relation)
 {
     return relation->partMap;
@@ -634,17 +632,18 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
     else
         result = partitionPruningWalker(expr, context);
     if (result->exprPart != NULL || result->paramArg != NULL) {
-        if (!IF_OPEN_PARTITION_PRUNING) {
-            destroyPruningResult(result);
-            result = getFullPruningResult(rel);
-            return result;
-        }
+#ifndef ENABLE_MULTIPLE_NODES
+        destroyPruningResult(result);
+        result = getFullPruningResult(rel);
+        return result;
+#else
         Param* paramArg = (Param *)copyObject(result->paramArg);
         destroyPruningResult(result);
         result = getFullPruningResult(rel);
         result->expr = expr;
         result->paramArg = paramArg;
         return result;
+#endif
     }
     /* Never happen, just to be self-contained */
     if (!PointerIsValid(result)) {

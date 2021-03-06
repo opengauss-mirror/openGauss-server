@@ -1317,6 +1317,7 @@ static void BaseBackup(const char* dirname, uint32 term)
     get_value = PQgetvalue(res, 0, 0);
     if (get_value == NULL) {
         pg_log(PG_WARNING, _("get xlog end point failed\n"));
+        disconnect_and_exit(1);
     }
     rc = strncpy_s(xlogend, sizeof(xlogend), get_value, strlen(get_value));
     securec_check_c(rc, "", "");
@@ -1552,7 +1553,7 @@ static XLogRecPtr read_full_backup_label(
     retVal = realpath(backup_file, Lrealpath);
     if (retVal == NULL && Lrealpath[0] == '\0') {
         pg_log(PG_WARNING, _("realpath failed : %s!\n"), strerror(errno));
-        return false;
+        disconnect_and_exit(1);
     }
 
     /*
@@ -1605,7 +1606,8 @@ static XLogRecPtr read_full_backup_label(
      */
     retVal = realpath(backup_file, Lrealpath);
     if (retVal == NULL && Lrealpath[0] == '\0') {
-        pg_log(PG_WARNING, _(" realpath failed!\n"));
+        pg_log(PG_WARNING, _("realpath failed : %s!\n"), strerror(errno));
+        disconnect_and_exit(1);
     }
     lfp = fopen(Lrealpath, "r");
     if (lfp == NULL) {

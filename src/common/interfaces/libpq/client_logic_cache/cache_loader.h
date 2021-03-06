@@ -34,6 +34,14 @@
 #include "columns_list.h"
 #include "search_path_list.h"
 
+#define delete_key(__p)      \
+    do {                     \
+        if ((__p) != NULL) { \
+            delete((__p));     \
+            (__p) = NULL;    \
+        }                    \
+    } while (0)
+
 typedef struct pg_conn PGconn;
 typedef unsigned int Oid;
 

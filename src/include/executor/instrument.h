@@ -689,8 +689,8 @@ public:
         return m_threadInstrArray[1 + idx * dn_num_streams];
     }
 
-    /* get threadinstrArray in idx(DN) and planNodeId */
-    ThreadInstrumentation* getThreadInstrumentationCN(int idx, int planNodeId, int smp)
+    /* get ThreadInstrumentation in CN */
+    ThreadInstrumentation* getThreadInstrumentationCN(int idx, int planNodeId, int smpId)
     {
         Assert(planNodeId >= 1 && planNodeId <= m_plannodes_num);
         int offset =
@@ -700,7 +700,7 @@ public:
         if (offset == -1)
             return m_threadInstrArray[0];
         else
-            return m_threadInstrArray[1 + idx * dn_num_streams + offset + smp];
+            return m_threadInstrArray[1 + idx * dn_num_streams + offset + smpId];
     }
 
     /* get ThreadInstrumentation in DN */
@@ -709,6 +709,18 @@ public:
         Assert(planNodeId >= 1 && planNodeId <= m_plannodes_num);
         int offset = m_planIdOffsetArray[planNodeId - 1] * m_query_dop;
         return m_threadInstrArray[offset + smpId];
+    }
+
+    /* get ThreadInstrumentation */
+    ThreadInstrumentation *getThreadInstrumentation(int idx, int planNodeId, int smpId)
+    {
+        ThreadInstrumentation *threadInstr =
+#ifdef ENABLE_MULTIPLE_NODES
+            getThreadInstrumentationCN(idx, planNodeId, smpId);
+#else
+            getThreadInstrumentationDN(planNodeId, smpId);
+#endif /* ENABLE_MULTIPLE_NODES */
+        return threadInstr;
     }
 
     /* get threadinstrumentation of current CN */

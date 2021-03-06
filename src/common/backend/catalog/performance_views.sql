@@ -564,15 +564,14 @@ CREATE OR REPLACE VIEW dbe_perf.session_stat_activity AS
     S.enqueue,
     S.state,
     CASE
-      WHEN T.session_respool = 'unknown' THEN (U.rolrespool) :: name
-    ELSE T.session_respool
+      WHEN S.srespool = 'unknown' THEN (U.rolrespool) :: name
+    ELSE S.srespool
     END AS resource_pool,
           S.query_id,
           S.query
-  FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_authid U, gs_wlm_session_respool(0) AS T
+  FROM pg_database D, pg_stat_get_activity(NULL) AS S, pg_authid U
     WHERE S.datid = D.oid AND
-          S.usesysid = U.oid AND
-          T.threadid = S.pid;
+          S.usesysid = U.oid;
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_session_stat_activity
   (out coorname text, out datid oid, out datname text, out pid bigint,

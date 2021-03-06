@@ -144,7 +144,9 @@ struct PageRedoWorker {
      */
     /* XLog invalid pages. */
     void *xlogInvalidPages;
-
+#ifndef ENABLE_MULTIPLE_NODES
+    void *committingCsnList;
+#endif
     /* ---------------------------------------------
      * Phase barrier.
      *
@@ -219,6 +221,7 @@ void PutRecordToReadQueue(XLogReaderState *recordreader);
 bool LsnUpdate();
 void ResetRtoXlogReadBuf(XLogRecPtr targetPagePtr);
 bool XLogPageReadForExtRto(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen);
+void ExtremeRtoStopHere();
 
 }  // namespace extreme_rto
 #endif

@@ -854,7 +854,6 @@ void dropdb(const char* dbname, bool missing_ok)
     HeapTuple tup;
     int notherbackends;
     int npreparedxacts;
-    int nslots, nslots_active;
 
     /* If we will return before reaching function end, please release this lock */
     LWLockAcquire(DelayDDLLock, LW_SHARED);
@@ -924,16 +923,6 @@ void dropdb(const char* dbname, bool missing_ok)
     if (0 == strcmp(dbname, DEFAULT_DATABASE))
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("cannot drop the default database")));
 
-    /*
-     * Check whether there are, possibly unconnected, logical slots that refer
-     * to the to-be-dropped database. The database lock we are holding
-     * prevents the creation of new slots using the database.
-     */
-    if (ReplicationSlotsCountDBSlots(db_id, &nslots, &nslots_active))
-        ereport(ERROR,
-            (errcode(ERRCODE_OBJECT_IN_USE),
-                errmsg("database \"%s\" is used by a logical decoding slot", dbname),
-                errdetail("There are %d slot(s), %d of them active", nslots, nslots_active)));
     /*
      * Check for other backends in the target database.  (Because we hold the
      * database lock, no new ones can start after this.)
@@ -1669,6 +1658,10 @@ void AlterDatabaseSet(AlterDatabaseSetStmt* stmt)
     AlterDatabasePermissionCheck(datid, stmt->dbname);
 
     AlterSetting(datid, InvalidOid, stmt->setstmt);
+
+#ifdef ENABLE_MULTIPLE_NODES
+    printHintInfo(stmt->dbname, NULL);
+#endif
 
     UnlockSharedObject(DatabaseRelationId, datid, 0, AccessShareLock);
 }
@@ -2439,6 +2432,19 @@ static void AlterDatabasePrivateObject(const Form_pg_database fbform, Oid dbid, 
                 relation_close(rel, ShareUpdateExclusiveLock);
             }
         }
+        /*
+         * step 6: create row level security for pg_partition if not exists
+         *   CREATE ROW LEVEL SECURITY POLICY pg_partition_rls ON pg_partition AS PERMISSIVE FOR SELECT TO PUBLIC
+         *     USING (has_schema_privilege(current_user, nspname, 'select'))
+         */
+        rlsPolicyId = get_rlspolicy_oid(PartitionRelationId, "pg_partition_rls", true);
+        if (OidIsValid(rlsPolicyId) == false) {
+            CreateRlsPolicyForSystem(
+                "pg_catalog", "pg_partition", "pg_partition_rls", "has_table_privilege", "parentid", "select");
+            rel = relation_open(PartitionRelationId, ShareUpdateExclusiveLock);
+            ATExecEnableDisableRls(rel, RELATION_RLS_ENABLE, ShareUpdateExclusiveLock);
+            relation_close(rel, ShareUpdateExclusiveLock);
+        }
     } else {
         /* Remove row level security policy for system catalog */
         /* step 1: remove row level security policy from pg_class */
@@ -2482,6 +2488,14 @@ static void AlterDatabasePrivateObject(const Form_pg_database fbform, Oid dbid, 
                 ATExecEnableDisableRls(rel, RELATION_RLS_DISABLE, ShareUpdateExclusiveLock);
                 relation_close(rel, ShareUpdateExclusiveLock);
             }
+        }
+        /* step 6: remove row level security policy from pg_partition */
+        rlsPolicyId = get_rlspolicy_oid(PartitionRelationId, "pg_partition_rls", true);
+        if (OidIsValid(rlsPolicyId)) {
+            RemoveRlsPolicyById(rlsPolicyId);
+            rel = relation_open(PartitionRelationId, ShareUpdateExclusiveLock);
+            ATExecEnableDisableRls(rel, RELATION_RLS_DISABLE, ShareUpdateExclusiveLock);
+            relation_close(rel, ShareUpdateExclusiveLock);
         }
     }
 }

@@ -635,7 +635,7 @@ static Node* make_subplan(
      * Generate the plan for the subquery.
      */
     /* Set u_sess->opt_cxt.query_dop to forbidden the parallel of subquery. */
-    int dop_tmp = u_sess->opt_cxt.query_dop;
+    int outerDop = u_sess->opt_cxt.query_dop;
 
     if (isIntergratedMachine == false) {
         u_sess->opt_cxt.query_dop = 1;
@@ -645,6 +645,7 @@ static Node* make_subplan(
             u_sess->opt_cxt.query_dop = 1;
         }
     }
+    int dopTmp = u_sess->opt_cxt.query_dop;
 
     /* reset u_sess->analyze_cxt.need_autoanalyze */
     tmp_need_autoanalyze = u_sess->analyze_cxt.need_autoanalyze;
@@ -653,7 +654,7 @@ static Node* make_subplan(
     u_sess->analyze_cxt.need_autoanalyze = tmp_need_autoanalyze;
 
     /* Reset u_sess->opt_cxt.query_dop. */
-    u_sess->opt_cxt.query_dop = dop_tmp;
+    u_sess->opt_cxt.query_dop = outerDop;
     /* Isolate the params needed by this specific subplan */
     plan_params = root->plan_params;
     root->plan_params = NIL;
@@ -692,8 +693,10 @@ static Node* make_subplan(
         /* See if it can be converted to an ANY query */
         subquery = convert_EXISTS_to_ANY(root, subquery, &newtestexpr, &paramIds);
         if (subquery != NULL) {
+            u_sess->opt_cxt.query_dop = dopTmp;
             /* Generate the plan for the ANY subquery; we'll need all rows */
             plan = subquery_planner(root->glob, subquery, root, false, 0.0, &subroot, (SUBQUERY_SUBLINK | SUBQUERY_NORMAL));
+            u_sess->opt_cxt.query_dop = outerDop;
 
             /* Isolate the params needed by this specific subplan */
             plan_params = root->plan_params;
@@ -1977,7 +1980,7 @@ static Query* convert_EXISTS_to_ANY(PlannerInfo* root, Query* subselect, Node** 
      * subroot.
      */
     whereClause = eval_const_expressions(root, whereClause);
-    whereClause = (Node*)canonicalize_qual((Expr*)whereClause);
+    whereClause = (Node*)canonicalize_qual((Expr*)whereClause, false);
     whereClause = (Node*)make_ands_implicit((Expr*)whereClause);
 
     /*

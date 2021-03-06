@@ -29,6 +29,7 @@
 #include "client_logic/client_logic_enums.h"
 #include "client_logic_cache/icached_column.h"
 #include "nodes/parsenodes_common.h"
+#include "client_logic_processor/values_processor.h"
 typedef unsigned int Oid;
 
 class PGClientLogic;
@@ -52,7 +53,7 @@ public:
      * When a query is sent to the server, the data in the query first needs to be processed before the query is sent.
      * The query is replaced with the modified query upon submission.
      */
-    virtual int process_data_impl(bool is_during_refresh_cache, const ICachedColumn *cached_column,
+    virtual int process_data_impl(const ICachedColumn *cached_column,
         const unsigned char *data, int data_size, unsigned char *processed_data) = 0;
 
     /*
@@ -64,8 +65,8 @@ public:
      * When the client receives the response from the server, it has to be (de)processed.
      * The data is deprocessed to its original form in the client side so it can be transffered to the application.
      */
-    virtual int deprocess_data_impl(bool is_during_refresh_cache, const unsigned char *data_processed,
-        int data_processed_size, unsigned char **data) = 0;
+    virtual DecryptDataRes deprocess_data_impl(const unsigned char *data_processed,
+        int data_processed_size, unsigned char **data, int *data_plain_size) = 0;
 
     /*
      * returns the name of the data type the column was converted to.
@@ -86,10 +87,10 @@ public:
     const Oid getOid() const;
 
     /* wrapper functions for impl functions */
-    int process_data(bool is_during_refresh_cache, const ICachedColumn *cached_column, const unsigned char *data,
-        int data_size, unsigned char *processed_data);
-    int deprocess_data(bool is_during_refresh_cache, const unsigned char *data_processed, int data_processed_size,
-        unsigned char **data);
+    int process_data(const ICachedColumn *cached_column, const unsigned char *data, int data_size,
+        unsigned char *processed_data);
+    DecryptDataRes deprocess_data(const unsigned char *processed_data, int processed_data_size,
+        unsigned char **data, int *data_plain_size);
     int get_estimated_processed_data_size(int data_size) const;
     virtual bool set_deletion_expected();
     void inc_ref_count() override;

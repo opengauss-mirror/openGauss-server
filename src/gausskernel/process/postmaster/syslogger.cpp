@@ -1795,9 +1795,7 @@ static void LogCtlCreateLogParentDirectory(void)
          */
         (void)chmod(logdir, S_IRWXU);
     } else if (EEXIST != errno) {
-        ereport(FATAL,
-                (errmsg(
-                "could not create log directory \"%s\": %s\n", logdir, gs_strerror(errno))));
+        ereport(FATAL, (errmsg("could not create log directory \"%s\": %s\n", logdir, gs_strerror(errno))));
     }
     pfree(logdir);
 

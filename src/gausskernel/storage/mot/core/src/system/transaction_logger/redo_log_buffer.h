@@ -35,29 +35,18 @@
 #include "buffer.h"
 
 namespace MOT {
-/** @define By default use 1 MB buffers for redo log. */
-#define REDO_DEFAULT_BUFFER_SIZE (1024 * 1024)
-
 /**
  * @brief Class for managing a single redo log buffer.
  */
 class RedoLogBuffer {
 public:
-    inline RedoLogBuffer() : RedoLogBuffer(REDO_DEFAULT_BUFFER_SIZE)
+    inline RedoLogBuffer()
+        : m_bufferSize(REDO_DEFAULT_BUFFER_SIZE),
+          m_nextFree(sizeof(uint32_t)),
+          m_buffer(nullptr),
+          m_allocated(false),
+          m_next(nullptr)
     {}
-
-    inline RedoLogBuffer(uint8_t* buffer, uint32_t size)
-        : m_bufferSize(size), m_nextFree(sizeof(uint32_t)), m_buffer(buffer), m_allocated(true), m_next(nullptr)
-    {}
-
-    inline RedoLogBuffer(uint32_t size)
-        : m_bufferSize(size), m_nextFree(sizeof(uint32_t)), m_buffer(nullptr), m_allocated(false), m_next(nullptr)
-    {
-        if (size == 0) {
-            size = REDO_DEFAULT_BUFFER_SIZE;
-            m_bufferSize = size;
-        }
-    }
 
     inline bool Initialize()
     {
@@ -102,23 +91,20 @@ public:
 
     RedoLogBuffer& operator=(const RedoLogBuffer& other) = delete;
 
-    inline uint32_t AllocAppend(uint32_t size)
+    /**
+     * @brief Reserves space in the redo buffer for the given size.
+     * @param size The size to be reserved.
+     * @return The pointer to the start of the reserved space.
+     */
+    inline void* AllocAppend(size_t size)
     {
-        uint32_t offset = __atomic_fetch_add(&m_nextFree, size, __ATOMIC_RELAXED);
-        if (offset + size <= m_bufferSize) {
-            return offset;
-        } else {
-            // back off
-            __atomic_fetch_add(&m_nextFree, -((int32_t)size), __ATOMIC_RELAXED);
-            return (uint32_t)-1;
+        if (m_nextFree + size <= m_bufferSize) {
+            uint32_t offset = m_nextFree;
+            m_nextFree += size;
+            return &m_buffer[offset];
         }
-    }
 
-    inline void AppendAt(const void* data, uint32_t size, uint32_t offset)
-    {
-        MOT_ASSERT(offset + size < m_bufferSize);
-        errno_t erc = memcpy_s(&m_buffer[offset], m_bufferSize - offset, data, size);
-        securec_check(erc, "\0", "\0");
+        return nullptr;
     }
 
     /**
@@ -128,7 +114,7 @@ public:
     template <typename T>
     inline void Append(const T& x)
     {
-        MOT_ASSERT(m_nextFree + sizeof(T) < m_bufferSize);
+        MOT_ASSERT(m_nextFree + sizeof(T) <= m_bufferSize);
         T* ptr = (T*)&m_buffer[m_nextFree];
         *ptr = x;
         m_nextFree += sizeof(T);
@@ -141,7 +127,7 @@ public:
      */
     inline void Append(const void* data, uint32_t size)
     {
-        MOT_ASSERT(m_nextFree + size < m_bufferSize);
+        MOT_ASSERT(m_nextFree + size <= m_bufferSize);
         errno_t erc = memcpy_s(&m_buffer[m_nextFree], m_bufferSize - m_nextFree, data, size);
         securec_check(erc, "\0", "\0");
         m_nextFree += size;
@@ -154,7 +140,7 @@ public:
      */
     void Append(std::istream& is, uint32_t size)
     {
-        MOT_ASSERT(m_nextFree + size < m_bufferSize);
+        MOT_ASSERT(m_nextFree + size <= m_bufferSize);
         char* ptr = (char*)&m_buffer[m_nextFree];
         is.read(ptr, size);
         m_nextFree += size;
@@ -170,7 +156,7 @@ public:
     template <typename T1, typename T2, typename T3, typename T4>
     inline void Append(const T1& x1, const T2& x2, const T3& x3, const T4& x4)
     {
-        MOT_ASSERT(m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4)) < m_bufferSize);
+        MOT_ASSERT(m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4)) <= m_bufferSize);
         uint8_t* ptr = &m_buffer[m_nextFree];
         *(reinterpret_cast<T1*>(ptr)) = x1;
         *(reinterpret_cast<T2*>(ptr + sizeof(T1))) = x2;
@@ -190,7 +176,7 @@ public:
     template <typename T1, typename T2, typename T3, typename T4, typename T5>
     inline void Append(const T1& x1, const T2& x2, const T3& x3, const T4& x4, const T5& x5)
     {
-        MOT_ASSERT(m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4) + sizeof(T5)) < m_bufferSize);
+        MOT_ASSERT(m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4) + sizeof(T5)) <= m_bufferSize);
         uint8_t* ptr = &m_buffer[m_nextFree];
         *(reinterpret_cast<T1*>(ptr)) = x1;
         *(reinterpret_cast<T2*>(ptr + sizeof(T1))) = x2;
@@ -213,7 +199,7 @@ public:
     inline void Append(const T1& x1, const T2& x2, const T3& x3, const T4& x4, const T5& x5, const T6& x6)
     {
         MOT_ASSERT(
-            m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4) + sizeof(T5) + sizeof(T6)) < m_bufferSize);
+            m_nextFree + (sizeof(T1) + sizeof(T2) + sizeof(T3) + sizeof(T4) + sizeof(T5) + sizeof(T6)) <= m_bufferSize);
         uint8_t* ptr = &m_buffer[m_nextFree];
         *(reinterpret_cast<T1*>(ptr)) = x1;
         *(reinterpret_cast<T2*>(ptr + sizeof(T1))) = x2;
@@ -308,23 +294,6 @@ public:
         return ss.str();
     }
 
-    uint8_t* Detach()
-    {
-        uint8_t* buffer = m_buffer;
-        m_buffer = nullptr;
-        return buffer;
-    }
-
-    void Attach(uint8_t* buffer, uint32_t size)
-    {
-        if (m_buffer != nullptr) {
-            delete[] m_buffer;
-        }
-        m_buffer = buffer;
-        m_bufferSize = size;
-        m_nextFree = 0;
-    }
-
     inline void SetNext(RedoLogBuffer* nextBuffer)
     {
         m_next = nextBuffer;
@@ -334,6 +303,9 @@ public:
     {
         return m_next;
     }
+
+    /** @define By default use 1 MB buffers for redo log. */
+    static constexpr uint32_t REDO_DEFAULT_BUFFER_SIZE = 1024 * 1024;
 
 private:
     /** @var Buffer size. */

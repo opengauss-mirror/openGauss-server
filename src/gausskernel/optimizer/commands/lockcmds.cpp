@@ -56,6 +56,15 @@ void LockTableCommand(LockStmt* lockstmt)
         bool recurse = interpretInhOption(rv->inhOpt);
         Oid reloid;
 
+        reloid = get_relname_relid(rv->relname, PG_CATALOG_NAMESPACE);
+        if (unlikely(OidIsValid(reloid) && reloid < FirstBootstrapObjectId &&
+            lockstmt->mode == AccessExclusiveLock && !u_sess->attr.attr_common.xc_maintenance_mode)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                     errmsg("permission denied: \"%s\" is a system catalog", rv->relname),
+                     errhint("use xc_maintenance_mode to lock this system catalog")));
+        }
+
         reloid = RangeVarGetRelidExtended(rv,
             lockstmt->mode,
             false,

@@ -1743,7 +1743,15 @@ static Oid FuncNameAsType(List* funcname)
     Oid result;
     Type typtup;
 
+    /*
+     * temp_ok=false protects the <refsect1 id="sql-createfunction-security">
+     * contract for writing SECURITY DEFINER functions safely.
+     */
+#ifdef ENABLE_MULTIPLE_NODES
     typtup = LookupTypeName(NULL, makeTypeNameFromNameList(funcname), NULL);
+#else
+    typtup = LookupTypeNameExtended(NULL, makeTypeNameFromNameList(funcname), NULL, false);
+#endif
     if (typtup == NULL)
         return InvalidOid;
 

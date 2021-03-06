@@ -223,19 +223,15 @@ void initWaitCountCell(
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dml, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_dcl, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.total_time, 0);
-    pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.avg_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.min_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.max_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.total_time, 0);
-    pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.avg_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.min_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.max_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.total_time, 0);
-    pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.avg_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.min_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.max_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.total_time, 0);
-    pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.avg_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.min_time, 0);
     pg_atomic_init_u64(&WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.max_time, 0);
     pg_atomic_init_u32(&WaitCountStatusCell->WaitCountArray[dataid].userid, userid);
@@ -3027,6 +3023,9 @@ void AlterRoleSet(AlterRoleSetStmt* stmt)
     }
 
     AlterSetting(databaseid, HeapTupleGetOid(roletuple), stmt->setstmt);
+#ifdef ENABLE_MULTIPLE_NODES
+    printHintInfo(stmt->database, stmt->role);
+#endif
     heap_close(pg_authid_rel, NoLock);
     ReleaseSysCache(roletuple);
 }
@@ -4615,41 +4614,6 @@ static void DropAuthHistory(Oid roleID)
 }
 
 /*
- * Brief		:  Check if the initial password of the initial user has been modified
- * 			       by checking the number of tuples in pg_auth_history.
- *
- * Description	:  We only consider the roleId = 10. When the database is initialized,
- *                 the initial user has its own password, which should be modified in
- *                 force to satisfy the security request.
- * Notes 		:
- */
-bool HasModifiedInitPwdByChkAuthHistory(Oid roleID)
-{
-    bool hasmodified = false;
-    HeapTuple tmp_tuple = NULL;
-    ScanKeyData scankey;
-    int num = 0;
-
-    Relation pg_auth_history_rel = heap_open(AuthHistoryRelationId, AccessShareLock);
-
-    /* if the relation is valid, check the records */
-    ScanKeyInit(&scankey, Anum_pg_auth_history_roloid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleID));
-    SysScanDesc sscan = systable_beginscan(pg_auth_history_rel, AuthHistoryIndexId, true, SnapshotNow, 1, &scankey);
-    while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan))) {
-        num++;
-        if (num > 1) {
-            hasmodified = true;
-            break;
-        }
-    }
-
-    systable_endscan(sscan);
-    heap_close(pg_auth_history_rel, AccessShareLock);
-
-    return hasmodified;
-}
-
-/*
  * Brief			: Check if the current user ID has the privilege to alter user
  *					: with auditadmin.
  * Description		: For auditadmin user, when enablePrivilegesSeparate is turned
@@ -5011,6 +4975,16 @@ bool UnlockAccountToHashTable(Oid roleid, bool superlock, bool isreset)
     bool found = false;
     AccountLockHashEntry *account_entry = NULL;
     int2 status;
+
+    /* user account has not been locked if account_table is null */
+    if (g_instance.policy_cxt.account_table == NULL) {
+        char* relName = NULL;
+        relName = get_rel_name(roleid);
+        if (relName != NULL) {
+            ereport(NOTICE, (errmsg("user account %s has not been locked", relName)));
+        }
+        return true;
+    }
 
     account_entry = (AccountLockHashEntry *)hash_search(g_instance.policy_cxt.account_table, &roleid, HASH_FIND, &found);
     if (found) {

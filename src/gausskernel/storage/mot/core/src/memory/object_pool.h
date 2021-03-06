@@ -136,7 +136,7 @@ typedef struct PACKED __ThreadAOP {
 
 class GlobalObjPool : public ObjAllocInterface {
 public:
-    ThreadAOP m_threadAOP[MAX_THR_NUM];
+    ThreadAOP m_threadAOP[MAX_THREAD_COUNT];
 
     GlobalObjPool(uint16_t sz, uint8_t align) : ObjAllocInterface(true)
     {
@@ -145,7 +145,8 @@ public:
         m_size = ALIGN_N(sz + OBJ_INDEX_SIZE, align);
         m_oixOffset = m_size - 1;
         m_type = ObjAllocInterface::CalcBufferClass(sz);
-        errno_t erc = memset_s(m_threadAOP, MAX_THR_NUM * sizeof(ThreadAOP), 0, MAX_THR_NUM * sizeof(ThreadAOP));
+        errno_t erc = memset_s(
+            m_threadAOP, MAX_THREAD_COUNT * sizeof(ThreadAOP), 0, MAX_THREAD_COUNT * sizeof(ThreadAOP));
         securec_check(erc, "\0", "\0");
     };
 

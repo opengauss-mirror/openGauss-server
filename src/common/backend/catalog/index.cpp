@@ -2963,6 +2963,7 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
                              */
                             LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
                             XactLockTableWait(xwait);
+                            CHECK_FOR_INTERRUPTS();
                             goto recheck;
                         }
                     }
@@ -3008,6 +3009,7 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
                              */
                             LockBuffer(scan->rs_cbuf, BUFFER_LOCK_UNLOCK);
                             XactLockTableWait(xwait);
+                            CHECK_FOR_INTERRUPTS();
                             goto recheck;
                         }
 
@@ -3999,6 +4001,12 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
 
         if (!RELATION_IS_PARTITIONED(heapRelation)) /* for non partitioned table */
         {
+            if (RELATION_IS_GLOBAL_TEMP(heapRelation) && !gtt_storage_attached(RelationGetRelid(heapRelation))) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cannot reindex when the global temporary table is not in use")));
+            }
+
             /*
              * I move it here to avoid useless invoking.
              */

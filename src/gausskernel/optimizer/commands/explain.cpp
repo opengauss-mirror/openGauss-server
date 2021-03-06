@@ -505,11 +505,13 @@ void ExplainQuery(
         }
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     if (u_sess->instr_cxt.global_instr != NULL) {
         delete u_sess->instr_cxt.global_instr;
         u_sess->instr_cxt.thread_instr = NULL;
         u_sess->instr_cxt.global_instr = NULL;
     }
+#endif /* ENABLE_MULTIPLE_NODES */
 
     if (u_sess->analyze_cxt.autoanalyze_timeinfo != NULL) {
         pfree_ext(u_sess->analyze_cxt.autoanalyze_timeinfo->data);
@@ -938,7 +940,12 @@ void ExplainOnePlan(
      * and than calling ExecutorStart for ExecInitNode in CN.
      */
     /*  only stream plan can use  u_sess->instr_cxt.global_instr to collect executor info */
-    if (IS_PGXC_COORDINATOR && queryDesc->plannedstmt->is_stream_plan == true &&
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR &&
+#else
+    if (StreamTopConsumerAmI() &&
+#endif
+        queryDesc->plannedstmt->is_stream_plan == true &&
         check_stream_support() && instrument_option != 0 && u_sess->instr_cxt.global_instr == NULL &&
         queryDesc->plannedstmt->num_nodes != 0) {
         int dop = queryDesc->plannedstmt->query_dop;
@@ -1062,7 +1069,7 @@ void ExplainOnePlan(
     ExplainOpenGroup("Query", NULL, true, es);
 
     if (IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion == true &&
-        es->format == EXPLAIN_FORMAT_TEXT) {
+        es->format == EXPLAIN_FORMAT_TEXT && u_sess->attr.attr_sql.enable_hypo_index == false) {
         FusionType type = OpFusion::getFusionType(NULL, params, list_make1(queryDesc->plannedstmt));
         if (!es->is_explain_gplan)
             type = NOBYPASS_NO_CPLAN;
@@ -1074,6 +1081,11 @@ void ExplainOnePlan(
             appendStringInfo(es->str, "reason: %s.\n", bypass_reason);
         }
     }
+
+#ifndef ENBALE_MULTIPLE_NODE
+    /* Set sync point for waiting all stream threads complete. */
+    StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+#endif /* ENABLE_MULTIPLE_NODES */
 
     /* Create textual dump of plan tree */
     ExplainPrintPlan(es, queryDesc);
@@ -4276,11 +4288,7 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
             int file_num = 0;
             for (i = 0; i < datanode_size; i++) {
                 ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                    u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                    u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                    u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
                 if (threadinstr == NULL)
                     continue;
                 int count_dop_writefile = 0;
@@ -4393,11 +4401,7 @@ static void show_detail_execute_info(const PlanState* planstate, ExplainState* e
     if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_runtimeinfo) {
         for (i = 0; i < datanode_size; i++) {
             ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
             if (threadinstr == NULL)
                 continue;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -4966,11 +4970,7 @@ static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es)
                 file_num = 0;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                     ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                        u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                        u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                        u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
                     if (threadinstr == NULL)
                         continue;
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id);
@@ -5219,11 +5219,7 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
     if (nodeNum > 0) {
         for (int i = 0; i < nodeNum; i++) {
             ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
             if (threadinstr == NULL)
                 continue;
             for (int j = 0; j < dop; j++) {
@@ -6384,11 +6380,7 @@ static void show_track_time_info(ExplainState* es)
                 for (int k = 0; k < u_sess->instr_cxt.global_instr->getInstruNodeNum(); k++) {
                     for (int m = 0; m < u_sess->instr_cxt.global_instr->getNodeDop(j); m++) {
                         ThreadInstrumentation* threadinstr_tmp =
-#ifdef ENABLE_MULTIPLE_NODES
-                            u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(k, j, m);
-#else
-                            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(j, m);
-#endif
+                            u_sess->instr_cxt.global_instr->getThreadInstrumentation(k, j, m);
                         if (threadinstr_tmp != NULL) {
                             trackArray = threadinstr_tmp->get_tracks(j);
                             /* when m_instrArrayMap is initialized but nodeinstr is not executed, it should return. */
@@ -6547,11 +6539,7 @@ static void show_track_time_info(ExplainState* es)
                 for (int k = 0; k < u_sess->instr_cxt.global_instr->getInstruNodeNum(); k++) {
                     for (int m = 0; m < u_sess->instr_cxt.global_instr->getNodeDop(j); m++) {
                         ThreadInstrumentation* threadinstr_tmp =
-#ifdef ENABLE_MULTIPLE_NODES
-                            u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(k, j, m);
-#else
-                            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(j, m);
-#endif
+                            u_sess->instr_cxt.global_instr->getThreadInstrumentation(k, j, m);
                         if (threadinstr_tmp != NULL) {
                             Track* trackArray_tmp = threadinstr_tmp->get_tracks(j);
                             /* when m_instrArrayMap is initialized but nodeinstr is not executed, it should return. */
@@ -6754,11 +6742,7 @@ static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
 
     for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
         ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-            u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-            u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+            u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
         if (threadinstr == NULL)
             continue;
 #ifdef ENABLE_MULTIPLE_NODES
@@ -6950,11 +6934,7 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
         if (u_sess->instr_cxt.global_instr->getInstruNodeNum() > 0) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
                 ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                    u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                    u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                    u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
                 if (threadinstr == NULL)
                     continue;
                 for (j = 0; j < dop; j++) {
@@ -7117,11 +7097,7 @@ static void show_instrumentation_count(const char* qlabel, int which, const Plan
         u_sess->instr_cxt.global_instr->isFromDataNode(planstate->plan->plan_node_id)) {
         for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
             ThreadInstrumentation* threadinstr =
-#ifdef ENABLE_MULTIPLE_NODES
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationCN(i, planstate->plan->plan_node_id, 0);
-#else
-                u_sess->instr_cxt.global_instr->getThreadInstrumentationDN(planstate->plan->plan_node_id, 0);
-#endif
+                u_sess->instr_cxt.global_instr->getThreadInstrumentation(i, planstate->plan->plan_node_id, 0);
             if (threadinstr == NULL)
                 continue;
             for (int j = 0; j < dop; j++) {

@@ -1415,6 +1415,13 @@ bool remove_local_plan(Plan* stream_plan, Plan* parent, ListCell* lc, bool is_le
     if (stream_plan == NULL || parent == NULL)
         return false;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Plan who has initPlan can not be removed. */
+    if (stream_plan->initPlan) {
+        return false;
+    }
+#endif
+
     /* Check the plan type. */
     if (IsA(stream_plan, Stream) || IsA(stream_plan, VecStream))
         stream = (Stream*)stream_plan;
@@ -2006,4 +2013,62 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
             list_free_ext(subplan_list);
         }
     }
+}
+
+void mark_distribute_setop_remotequery(PlannerInfo* root, Node* node, Plan* plan, List* subPlans)
+{
+    Plan* remotePlan = NULL;
+    Plan* subPlan = NULL;
+    ListCell* cell = NULL;
+    List* newSubPlans = NIL;
+    MergeAppend* mergeAppend = NULL;
+    Append* append = NULL;
+    errno_t sprintf_rc = 0;
+
+    if (IsA(node, MergeAppend)) {
+        mergeAppend = (MergeAppend*)node;
+    } else if (IsA(node, RecursiveUnion)) {
+        sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "With-Recursive in subplan which executes on CN is not shippable");
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        mark_stream_unsupport();
+    } else {
+        AssertEreport(IsA(node, Append), MOD_OPT, "The node is NOT a Append");
+
+        append = (Append*)node;
+    }
+
+    foreach (cell, subPlans) {
+        subPlan = (Plan*)lfirst(cell);
+        remotePlan = make_simple_RemoteQuery(subPlan, root, true);
+
+        if (mergeAppend && is_execute_on_datanodes(subPlan)) {
+            remotePlan = (Plan*)make_sort(root,
+                remotePlan,
+                mergeAppend->numCols,
+                mergeAppend->sortColIdx,
+                mergeAppend->sortOperators,
+                mergeAppend->collations,
+                mergeAppend->nullsFirst,
+                -1);
+        }
+
+        newSubPlans = lappend(newSubPlans, remotePlan);
+    }
+
+    list_free_ext(subPlans);
+
+    if (PointerIsValid(mergeAppend)) {
+        mergeAppend->mergeplans = newSubPlans;
+    } else {
+        AssertEreport(PointerIsValid(append), MOD_OPT, "The append is NULL");
+
+        append->appendplans = newSubPlans;
+    }
+
+    plan->dop = 1;
+    plan->distributed_keys = NIL;
+    plan->exec_type = EXEC_ON_COORDS;
+    plan->exec_nodes = ng_get_single_node_group_exec_node();
 }

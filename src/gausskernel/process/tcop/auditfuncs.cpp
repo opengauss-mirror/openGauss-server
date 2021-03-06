@@ -728,7 +728,11 @@ static void pgaudit_ddl_full_encryption_key(const char* cmdtext)
         return;
     }
 
-    pgaudit_ddl_database_object(audit_type, audit_result, "full_encryption_key", cmdtext);
+    char *making_query = (char *)mask_encrypted_key(cmdtext, strlen(cmdtext));
+    pgaudit_ddl_database_object(audit_type, audit_result, "full_encryption_key", making_query);
+    if (making_query != cmdtext) {
+        selfpfree(making_query);
+    }
     return;
 }
 

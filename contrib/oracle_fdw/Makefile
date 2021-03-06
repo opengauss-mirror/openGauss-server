@@ -27,9 +27,9 @@ install:install-data
 top_builddir ?= ../../
 include $(top_builddir)/src/Makefile.global
 ORACLE_FDW_DIR=output
-ORACLE_FDW_PACKAGE=ORACLE_FDW_2_1_0
-ORACLE_FDW_UNZIPPED_PACKAGE=oracle_fdw-ORACLE_FDW_2_1_0
-ORACLE_FDW_PATCH=opengauss_oracle_fdw-2.1.0_patch
+ORACLE_FDW_PACKAGE=oracle_fdw-ORACLE_FDW_2_2_0
+ORACLE_FDW_UNZIPPED_PACKAGE=oracle_fdw-ORACLE_FDW_2_2_0
+ORACLE_FDW_PATCH=opengauss_oracle_fdw-2.2.0_patch
 ORACLE_FDW_MEGRED_SOURCES_DIR=$(ORACLE_FDW_DIR)/code
 
 .PHONY: oracle_fdw_target
@@ -38,8 +38,8 @@ oracle_fdw_target: prep_checked
 	@make -C $(ORACLE_FDW_MEGRED_SOURCES_DIR)/$(ORACLE_FDW_UNZIPPED_PACKAGE) NO_PGXS=1
 
 prep_checked:
-	@test -f $(ORCFDW_HOME)/$(ORACLE_FDW_PACKAGE).zip || ( echo "ERROR: You need copy oracle_fdw from 'third_party' repo to 'third_party_binarylibs' repo and keep directory strucutre unchanged" && exit 1 )
-	@test -f $(ORCFDW_HOME)/$(ORACLE_FDW_PACKAGE).zip && date > prep_checked
+	@test -f $(ORCFDW_HOME)/$(ORACLE_FDW_PACKAGE).tar.gz || ( echo "ERROR: You need copy oracle_fdw from 'third_party' repo to 'third_party_binarylibs' repo and keep directory strucutre unchanged" && exit 1 )
+	@test -f $(ORCFDW_HOME)/$(ORACLE_FDW_PACKAGE).tar.gz && date > prep_checked
 
 .PHONY: install-data
 install-data: oracle_fdw_target
@@ -53,14 +53,6 @@ define create_oracle_fdw_sources
 	mkdir $(ORACLE_FDW_DIR);\
 	cp -r $(ORCFDW_HOME)/. $(ORACLE_FDW_DIR);\
 	mkdir $(ORACLE_FDW_MEGRED_SOURCES_DIR); \
-	unzip -o $(ORACLE_FDW_DIR)/$(ORACLE_FDW_PACKAGE).zip -d $(ORACLE_FDW_MEGRED_SOURCES_DIR) &> /dev/null; \
-	for ((i=1;i<=99;i++)); \
-	do \
-		file_name="$(ORACLE_FDW_DIR)/$$i-oracle_fdw-2.2.0_patch.patch"; \
-		if [ ! -f "$$file_name" ]; then \
-			exit 0; \
-		fi; \
-		patch -p0 -d $(ORACLE_FDW_MEGRED_SOURCES_DIR)/$(ORACLE_FDW_UNZIPPED_PACKAGE) < $$file_name &> /dev/null; \
-	done	
+	tar -xzvf $(ORACLE_FDW_DIR)/$(ORACLE_FDW_PACKAGE).tar.gz -C $(ORACLE_FDW_MEGRED_SOURCES_DIR) &> /dev/null; \
 	patch -p0 -d $(ORACLE_FDW_MEGRED_SOURCES_DIR)/$(ORACLE_FDW_UNZIPPED_PACKAGE) < $(ORACLE_FDW_DIR)/$(ORACLE_FDW_PATCH).patch &> /dev/null;
 endef

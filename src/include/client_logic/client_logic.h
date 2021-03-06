@@ -30,7 +30,6 @@
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_column_keys_args.h"
 #include "catalog/gs_encrypted_columns.h"
-#include "client_logic_common.h"
 #include "lib/stringinfo.h"
 
 int set_column_encryption(const ColumnDef *def, CeHeapInfo *ce_heap_info);

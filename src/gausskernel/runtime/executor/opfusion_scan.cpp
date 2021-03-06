@@ -94,6 +94,8 @@ IndexFusion::IndexFusion(ParamListInfo params, PlannedStmt* planstmt) : ScanFusi
     m_index = NULL;
     m_parentRel = NULL;
     m_partRel = NULL;
+    m_parentIndex = NULL;
+    m_partIndex = NULL;
     m_keyInit = false;
 }
 
@@ -351,14 +353,12 @@ Oid GetRelOidForPartitionTable(Scan scan, const Relation rel, ParamListInfo para
 }
 
 /* init the index in construct */
-Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Relation rel)
+Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition* partIndex, Relation* parentIndex)
 {
-    Relation parentIndex = relation_open(parentIndexOid, AccessShareLock);
+    *parentIndex = relation_open(parentIndexOid, AccessShareLock);
     Oid partIndexOid = getPartitionIndexOid(parentIndexOid, partOid);
-    Partition partIndex = partitionOpen(parentIndex, partIndexOid, AccessShareLock);
-    Relation index = partitionGetRelation(parentIndex, partIndex);
-    partitionClose(parentIndex, partIndex, AccessShareLock);
-    relation_close(parentIndex, AccessShareLock);
+    *partIndex = partitionOpen(*parentIndex, partIndexOid, AccessShareLock);
+    Relation index = partitionGetRelation(*parentIndex, *partIndex);
     return index;
 }
 
@@ -371,23 +371,24 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition* p
 }
 
 /* execute the process of done in construct */
-void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation parentRel, Partition part, Relation index, Relation rel)
+static void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation* parentRel, Partition* part,
+                                            Relation* index, Relation* rel)
 {
     if (isPartTbl) {
-        partitionClose(parentRel, part, AccessShareLock);
-        part = NULL;
-        if (index != NULL) {
-            releaseDummyRelation(&index);
-            index = NULL;
+        partitionClose(*parentRel, *part, AccessShareLock);
+        *part = NULL;
+        if (*index != NULL) {
+            releaseDummyRelation(index);
+            *index = NULL;
         }
-        releaseDummyRelation(&rel);
-        heap_close(parentRel, AccessShareLock);
-        parentRel = NULL;
-        rel = NULL;
+        releaseDummyRelation(rel);
+        heap_close(*parentRel, AccessShareLock);
+        *parentRel = NULL;
+        *rel = NULL;
     } else {
-        heap_close((index == NULL) ? rel : index, AccessShareLock);
-        index = NULL;
-        rel = NULL;
+        heap_close((*index == NULL) ? *rel : *index, AccessShareLock);
+        *index = NULL;
+        *rel = NULL;
     }
 }
 
@@ -462,7 +463,8 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_isnull = (bool*)palloc(RelationGetDescr(rel)->natts * sizeof(bool));
     m_tmpisnull = (bool*)palloc(m_tupDesc->natts * sizeof(bool));
     setAttrNo();
-    ExeceDoneInIndexFusionConstruct(m_node->scan.isPartTbl, m_parentRel, m_partRel, NULL, m_rel);
+    Relation dummyIndex = NULL;
+    ExeceDoneInIndexFusionConstruct(m_node->scan.isPartTbl, &m_parentRel, &m_partRel, &dummyIndex, &m_rel);
 }
 
 
@@ -479,7 +481,7 @@ void IndexScanFusion::Init(long max_rows)
 
         /* get partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, m_rel);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
     } else {
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
@@ -591,16 +593,21 @@ void IndexScanFusion::End(bool isCompleted)
 
     if (m_reslot != NULL) {
         (void)ExecClearTuple(m_reslot);
+        m_reslot = NULL;
     }
     if (m_scandesc != NULL) {
         scan_handler_idx_endscan(m_scandesc);
+        m_scandesc = NULL;
     }
     if (m_index != NULL) {
         if (m_node->scan.isPartTbl) {
+            partitionClose(m_parentIndex, m_partIndex, AccessShareLock);
             releaseDummyRelation(&m_index);
+            index_close(m_parentIndex, AccessShareLock);
         } else {
             index_close(m_index, AccessShareLock);
         }
+        m_index = NULL;
     }
     if (m_rel != NULL) {
         if (m_node->scan.isPartTbl) {
@@ -610,6 +617,7 @@ void IndexScanFusion::End(bool isCompleted)
         } else {
             heap_close(m_rel, AccessShareLock);
         }
+        m_rel = NULL;
     }
 }
 
@@ -674,7 +682,7 @@ IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* plans
 
         /* get Partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, m_rel);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
     } else {
         m_reloid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
         m_index = index_open(m_node->indexid, AccessShareLock);
@@ -692,7 +700,11 @@ IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* plans
     m_isnull = (bool*)palloc(RelationGetDescr(rel)->natts * sizeof(bool));
     m_tmpisnull = (bool*)palloc(m_tupDesc->natts * sizeof(bool));
     setAttrNo();
-    ExeceDoneInIndexFusionConstruct(m_node->scan.isPartTbl, m_parentRel, m_partRel, m_index, m_rel);
+    ExeceDoneInIndexFusionConstruct(m_node->scan.isPartTbl, &m_parentRel, &m_partRel, &m_index, &m_rel);
+    if (m_node->scan.isPartTbl) {
+        partitionClose(m_parentIndex, m_partIndex, AccessShareLock);
+        index_close(m_parentIndex, AccessShareLock);
+    }
 }
 
 
@@ -709,7 +721,7 @@ void IndexOnlyScanFusion::Init(long max_rows)
 
         /* get partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, m_rel);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
     } else {
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
@@ -844,13 +856,17 @@ void IndexOnlyScanFusion::End(bool isCompleted)
 
     if (m_scandesc != NULL) {
         scan_handler_idx_endscan(m_scandesc);
+        m_scandesc = NULL;
     }
     if (m_index != NULL) {
         if (m_node->scan.isPartTbl) {
+            partitionClose(m_parentIndex, m_partIndex, AccessShareLock);
             releaseDummyRelation(&m_index);
+            index_close(m_parentIndex, AccessShareLock);
         } else {
             index_close(m_index, AccessShareLock);
         }
+        m_index = NULL;
     }
     if (m_rel != NULL) {
         if (m_node->scan.isPartTbl) {
@@ -860,9 +876,11 @@ void IndexOnlyScanFusion::End(bool isCompleted)
         } else {
             heap_close(m_rel, AccessShareLock);
         }
+        m_rel = NULL;
     }
     if (m_reslot != NULL) {
         (void)ExecClearTuple(m_reslot);
+        m_reslot = NULL;
     }
 
 }

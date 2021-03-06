@@ -111,7 +111,6 @@ BEGIN
     if not exists (select j.job_id, p.what 
                         from pg_job j, pg_job_proc p 
                         where j.dbname = database_name and j.job_id = p.job_id and p.what like 'call redis_ts_table(%') then
-        raise notice 'No redis_ts_table task exists for database %, so do not need to cancel task', database_name;
         return;
     end if;
     -- the job can only submit once
@@ -143,6 +142,7 @@ DECLARE
 BEGIN
     select current_database() into database_name;
     if not exists (select * from public.redis_timeseries_detail) then
+        raise exception 'no ts_table is in redistribution';
         return;
     end if;
     for var_r in (select reloid from public.redis_timeseries_detail) loop
@@ -168,15 +168,12 @@ LANGUAGE plpgsql;
 -- drop the partition if it is empty, if it is last partition, just drop the table
 CREATE OR REPLACE FUNCTION pg_catalog.redis_ts_table(
     --the old table in old nodes, relname is redis_old_
-            IN        redis_oid           oid,
-            IN        transfer_interval   interval
-)
+            IN        redis_oid           oid)
 RETURNS void  
 AS
 $$
 DECLARE
     v_count int;
-    time_column_name name;
     old_rel_name name;
     new_rel_name name;
     origin_relname name;
@@ -211,66 +208,56 @@ BEGIN
     end if;
 
     -- cannot just set in current transaction, the kernel check the usess, input parameter must be false
-    sql := 'select set_config(''enable_cluster_resize'', ''on'', false)';
+    sql = 'select set_config(''enable_cluster_resize'', ''on'', false)';
     execute sql;
-    
-    select attname from pg_attribute where attkvtype = 3 and attrelid = redis_oid into time_column_name;
-    select relname, boundaries[1] from pg_partition where parttype = 'p' and parentid = redis_oid 
-                                    order by boundaries[1] desc limit 1 into part_name, start_time;
-    sql := 'select count(*) from (select * from "'||schemaname||'"."'||old_rel_name||'" partition('||part_name||') limit 1);';
+    -- table is empty drop it
+    sql = 'select count(*) from "'||schemaname||'"."'||old_rel_name||'";';
     execute sql into v_count;
-    -- if this partition has no value, drop this partition or drop this table
+    -- no data in old_rel_name drop the table
     if v_count = 0 then
-        sql := 'select count(*) from (select * from pg_partition where parttype = ''p'' and parentid = '||redis_oid||' limit 2);';
-        execute sql into v_count;
-        if v_count = 1 then
-            -- drop the redis_view and rule cascade
-            sql = 'drop table if exists "'||schemaname||'"."'||old_rel_name||'" cascade;';
-            execute sql;
-            --cannot drop table redis_old_ because this task need it, in the task, if we cancel the task, it will raise error
-            sql = 'alter table "'||schemaname||'"."'||new_rel_name||'" rename to "'||origin_relname||'";';
-            execute sql;
-            return;
-        else
-            sql = 'alter table "'||schemaname||'"."'||old_rel_name||'" drop partition "'||part_name||'";';
-            execute sql;
-        end if;
+        -- drop the redis_view and rule cascade
+        sql = 'drop table if exists "'||schemaname||'"."'||old_rel_name||'" cascade;';
+        execute sql;
+        sql = 'alter table "'||schemaname||'"."'||new_rel_name||'" rename to "'||origin_relname||'";';
+        execute sql;
         return;
     end if;
-    -- the partition must has value, so execute delete this time
-    max_try_transfer = 0;
+    -- we have already handle condition with empty table, at least one partition should have data
     while 1 loop
-        sql := 'select timestamp '''||start_time||''' - interval '''||transfer_interval||''';';
-        execute sql into end_time;
-        sql := 'insert into "'||schemaname||'"."'||new_rel_name||
-                '" select * from "'||schemaname||'"."'||old_rel_name||'" partition("'||part_name||'") 
-                where "'||time_column_name||'" between '''||start_time||''' and '''||end_time||''';';
-        execute sql;
-        GET DIAGNOSTICS i_count = ROW_COUNT;
-        if i_count = 0 then
-            start_time = end_time;
-            -- for the last partition, if we just try to drop by time interval, it may be very long, so we just execute 50 times and then transfer all the partition
-            if max_try_transfer >= 50 then
-                sql := 'select count(*) from (select * from pg_partition where parttype = ''p'' and parentid = '||redis_oid||' limit 2);';
-                execute sql into v_count;
-                if v_count = 1 then
-                    -- next run time job will do the last drop rule and table
-                    sql := 'insert into "'||schemaname||'"."'||new_rel_name||
-                            '" select * from "'||schemaname||'"."'||old_rel_name||'" partition("'||part_name||'");';
-                    execute sql;
-                    sql := 'truncate "'||schemaname||'"."'||old_rel_name||'";';
-                    execute sql;
-                    return;
-                end if;
-            end if;
-        else
-            sql := 'delete from "'||schemaname||'"."'||old_rel_name||'" where "'||time_column_name||'" between '''
-                    ||start_time||''' and '''||end_time||''';';
+        select relname from pg_partition where parttype = 'p' and parentid = redis_oid 
+            order by boundaries[1] desc limit 1 into part_name;
+
+        sql := 'select count(*) from "'||schemaname||'"."'||old_rel_name||'" partition('||part_name||');';
+        execute sql into v_count;
+        -- if this partition has no value, drop this partition
+        if v_count = 0 then
+            sql = 'alter table "'||schemaname||'"."'||old_rel_name||'" drop partition "'||part_name||'";';
             execute sql;
-            return;
+            CONTINUE;
+        else
+            EXIT;
         end if;
-        max_try_transfer := max_try_transfer + 1;
     end loop;
+    -- the partition has value, so execute delete this time
+    sql = 'set session_timeout = 0;';
+    execute sql;
+    sql = 'set enable_analyze_check = off;';
+    execute sql;
+    sql = 'insert into "'||schemaname||'"."'||new_rel_name||
+        '" select * from "'||schemaname||'"."'||old_rel_name||'" partition("'||part_name||'") ';
+    execute sql;
+    sql = 'select count(*) from pg_partition where parentid = '||redis_oid||' and parttype = ''p'';';
+    execute sql into v_count;
+    -- if only only one partition left drop table cascade
+    if v_count = 1 then
+        sql = 'drop table if exists "'||schemaname||'"."'||old_rel_name||'" cascade;';
+        execute sql;
+        sql = 'alter table "'||schemaname||'"."'||new_rel_name||'" rename to "'||origin_relname||'";';
+        execute sql;
+    else
+        sql = 'alter table "'||schemaname||'"."'||old_rel_name||'" drop partition "'||part_name||'";';
+        execute sql;
+    end if;
 END;
 $$
 LANGUAGE plpgsql;
@@ -278,7 +265,6 @@ LANGUAGE plpgsql;
 -- submit the redis_ts_table task for one table, old_oid means redis_old_ which exists in the old group
 CREATE OR REPLACE FUNCTION pg_catalog.submit_redis_task(
                   IN        old_oid         oid,
-                  IN        transfer_interval    interval default '10 minutes',
                   IN        schedule_interval    interval default '1 minute'
 )
 RETURNS void  
@@ -299,7 +285,7 @@ BEGIN
     end if;
     sql := ' SELECT EXTRACT(epoch FROM interval '''||schedule_interval||''')/3600';
     EXECUTE sql INTO time_interval;
-    sql := 'SELECT DBE_TASK.submit(''call redis_ts_table('||old_oid||','''''||transfer_interval||''''');'',
+    sql := 'SELECT DBE_TASK.submit(''call redis_ts_table('||old_oid||');'',
                                  sysdate,  ''sysdate + '||time_interval||' / 24'');';
     EXECUTE sql into job_id;
     -- if drop the table redis_new_ or redis_old_, must cancel the task mannual
@@ -309,7 +295,6 @@ LANGUAGE plpgsql;
 
 -- the first is the time column that transfer to other table, the second is the intervel that call the job
 CREATE OR REPLACE FUNCTION pg_catalog.submit_all_redis_task(
-                    IN        transfer_interval    interval default '10 minutes',
                     IN        schedule_interval    interval default '1 minute')
 RETURNS void  
 AS
@@ -336,9 +321,8 @@ BEGIN
             c.relkind = ''r'' and c.parttype=''p'' and xc.pgroup='''||old_group_name||'''
             and xc.pcrelid = c.oid and c.relname like ''redis_old_%''';
     for var_r in execute sql loop
-        sql := 'select pg_catalog.submit_redis_task('||var_r.oid||', '
-                                                    ||quote_literal(transfer_interval)||', '
-                                                    ||quote_literal(schedule_interval)||');';
+        sql := 'select pg_catalog.submit_redis_task('||var_r.oid||',
+                                                    '||quote_literal(schedule_interval)||');';
         execute sql;
     end loop;
 END;

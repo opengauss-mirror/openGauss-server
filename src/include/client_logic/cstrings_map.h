@@ -65,4 +65,6 @@ private:
     size_t size;
     const size_t index(const char *key) const;
 };
+
+typedef CStringsMap StringArgsVec;
 #endif /* C_STRINGS_MAP_H */

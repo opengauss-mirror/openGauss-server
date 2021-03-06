@@ -63,7 +63,7 @@ void preprocess_rownum(PlannerInfo *root, Query *parse)
         }
     }
     
-    quals = (Node*)canonicalize_qual((Expr*)quals);
+    quals = (Node*)canonicalize_qual((Expr*)quals, false);
     switch (nodeTag(quals)) {
         case T_OpExpr: {
             quals = preprocess_rownum_opexpr(root, parse, (OpExpr*)quals, false);

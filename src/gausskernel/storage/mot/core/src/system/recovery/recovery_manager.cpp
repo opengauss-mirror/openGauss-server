@@ -95,9 +95,10 @@ bool RecoveryManager::RecoverDbStart()
 
 bool RecoveryManager::RecoverDbEnd()
 {
-    if (ApplyInProcessTransactions() != RC_OK) {
-        MOT_LOG_ERROR("applyInProcessTransactions failed!");
-        return false;
+    if (MOTEngine::GetInstance()->GetInProcessTransactions().GetNumTxns() != 0) {
+        MOT_LOG_ERROR("MOT recovery: There are uncommitted or incomplete transactions, "
+            "ignoring and clearing those log segments.");
+        MOTEngine::GetInstance()->GetInProcessTransactions().Clear();
     }
 
     if (m_sState.IsEmpty() == false) {
@@ -109,6 +110,7 @@ bool RecoveryManager::RecoverDbEnd()
 
     // merge and apply all SurrogateState maps
     SurrogateState::Merge(m_surrogateList, m_surrogateState);
+    m_surrogateList.clear();
     ApplySurrogate();
 
     if (m_enableLogStats && m_logStats != nullptr) {
@@ -212,8 +214,7 @@ bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len, uint64_t r
 bool RecoveryManager::CommitRecoveredTransaction(uint64_t externalTransactionId)
 {
     uint64_t internalId = 0;
-    if (MOTEngine::GetInstance()->GetInProcessTransactions().FindTransactionId(
-            externalTransactionId, internalId, false)) {
+    if (MOTEngine::GetInstance()->GetInProcessTransactions().FindTransactionId(externalTransactionId, internalId)) {
         return OperateOnRecoveredTransaction(internalId, externalTransactionId, RecoveryOps::RecoveryOpState::COMMIT);
     }
     return true;
@@ -240,7 +241,7 @@ bool RecoveryManager::OperateOnRecoveredTransaction(
         };
 
         status = MOTEngine::GetInstance()->GetInProcessTransactions().ForUniqueTransaction(
-            internalTransactionId, operateLambda);
+            internalTransactionId, externalTransactionId, operateLambda);
     }
     if (status != RC_OK) {
         MOT_LOG_ERROR("OperateOnRecoveredTransaction: wal recovery failed");
@@ -253,7 +254,6 @@ RC RecoveryManager::RedoSegment(
     LogSegment* segment, uint64_t csn, uint64_t transactionId, RecoveryOps::RecoveryOpState rState)
 {
     RC status = RC_OK;
-    bool is2pcRecovery = !MOTEngine::GetInstance()->IsRecovering();
     uint8_t* endPosition = (uint8_t*)(segment->m_data + segment->m_len);
     uint8_t* operationData = (uint8_t*)(segment->m_data);
     bool txnStarted = false;
@@ -278,29 +278,23 @@ RC RecoveryManager::RedoSegment(
             txnStarted = true;
         }
 
-        if (!is2pcRecovery) {
-            operationData += RecoveryOps::RecoverLogOperation(
-                MOTCurrTxn, operationData, csn, transactionId, MOTCurrThreadId, m_sState, status, wasCommit);
-            // check operation result status
-            if (status != RC_OK) {
-                MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Recover Redo Segment", "Failed to recover redo segment");
-                break;
-            }
-            // update transactional state
-            if (wasCommit) {
-                txnStarted = false;
-            }
-        } else {
-            operationData += RecoveryOps::TwoPhaseRecoverOp(
-                MOTCurrTxn, rState, operationData, csn, transactionId, MOTCurrThreadId, m_sState, status);
-        }
+        operationData += RecoveryOps::RecoverLogOperation(
+            MOTCurrTxn, operationData, csn, transactionId, MOTCurrThreadId, m_sState, status, wasCommit);
+
+        // check operation result status
         if (status != RC_OK) {
+            MOT_REPORT_ERROR(MOT_ERROR_RESOURCE_LIMIT, "Recover Redo Segment", "Failed to recover redo segment");
             break;
+        }
+
+        // update transactional state
+        if (wasCommit) {
+            txnStarted = false;
         }
     }
 
     // single threaded, no need for locking or CAS
-    if (!is2pcRecovery && csn > m_maxRecoveredCsn) {
+    if (csn > m_maxRecoveredCsn) {
         m_maxRecoveredCsn = csn;
     }
     if (status != RC_OK) {
@@ -378,97 +372,6 @@ void RecoveryManager::ApplySurrogate()
     for (int i = 0; i < m_maxConnections; i++) {
         GetSurrogateKeyManager()->SetSurrogateSlot(i, array[i]);
     }
-}
-
-// in-process (2pc) transactions recovery
-RC RecoveryManager::ApplyInProcessTransactions()
-{
-    auto applyLambda = [this](RedoLogTransactionSegments* segments, uint64_t id) -> RC {
-        RC status = RC_OK;
-        LogSegment* segment = segments->GetSegment(segments->GetCount() - 1);
-        uint64_t csn = segment->m_controlBlock.m_csn;
-        MOT_LOG_INFO("applyInProcessTransactions: tx %lu is %u",
-            segment->m_controlBlock.m_externalTransactionId,
-            segment->m_controlBlock.m_opCode);
-        if (segment->IsTwoPhase()) {
-            for (uint32_t i = 0; i < segments->GetCount(); i++) {
-                segment = segments->GetSegment(i);
-                status = ApplyInProcessSegment(segment, csn, id);
-                if (status != RC_OK) {
-                    MOT_LOG_ERROR(
-                        "applyInProcessTransactions: an error occured while applying in-process transactions");
-                    return status;
-                }
-            }
-        } else {
-            MOT_LOG_ERROR("applyInProcessTransactions: tx %lu is not two-phase commit. ignore",
-                segment->m_controlBlock.m_externalTransactionId);
-        }
-        return status;
-    };
-
-    return MOTEngine::GetInstance()->GetInProcessTransactions().ForEachTransaction(applyLambda, false);
-}
-
-RC RecoveryManager::ApplyInProcessTransaction(uint64_t internalTransactionId)
-{
-    auto applyLambda = [this](RedoLogTransactionSegments* segments, uint64_t id) -> RC {
-        RC status = RC_OK;
-        LogSegment* segment = segments->GetSegment(segments->GetCount() - 1);
-        uint64_t csn = segment->m_controlBlock.m_csn;
-        if (segment->IsTwoPhase()) {
-            for (uint32_t i = 0; i < segments->GetCount(); i++) {
-                segment = segments->GetSegment(i);
-                status = ApplyInProcessSegment(segment, csn, id);
-                if (status != RC_OK) {
-                    MOT_LOG_ERROR("applyInProcessTransaction: an error occured while applying in-process transactions");
-                    return status;
-                }
-            }
-        } else {
-            MOT_LOG_ERROR("applyInProcessTransaction: tx %lu is not two-phase commit. ignore",
-                segment->m_controlBlock.m_externalTransactionId);
-        }
-        return status;
-    };
-
-    return MOTEngine::GetInstance()->GetInProcessTransactions().ForUniqueTransaction(
-        internalTransactionId, applyLambda);
-}
-
-RC RecoveryManager::ApplyInProcessSegment(LogSegment* segment, uint64_t csn, uint64_t transactionId)
-{
-    RC status = RC_OK;
-    uint8_t* endPosition = (uint8_t*)(segment->m_data + segment->m_len);
-    uint8_t* operationData = (uint8_t*)(segment->m_data);
-    while (operationData < endPosition) {
-        operationData += RecoveryOps::TwoPhaseRecoverOp(MOTCurrTxn,
-            RecoveryOps::RecoveryOpState::TPC_APPLY,
-            operationData,
-            csn,
-            transactionId,
-            MOTCurrThreadId,
-            m_sState,
-            status);
-        if (status != RC_OK) {
-            MOT_LOG_ERROR("applyInProcessSegment: failed seg %p, txnid %lu", segment, transactionId);
-            return status;
-        }
-    }
-    return status;
-}
-
-uint64_t RecoveryManager::PerformInProcessTx(uint64_t id, bool isCommit)
-{
-    uint64_t internalId = 0;
-    if (MOTEngine::GetInstance()->GetInProcessTransactions().FindTransactionId(id, internalId, false)) {
-        if (OperateOnRecoveredTransaction(internalId,
-                INVALID_TRANSACTION_ID,
-                isCommit ? RecoveryOps::RecoveryOpState::TPC_COMMIT : RecoveryOps::RecoveryOpState::TPC_ABORT)) {
-            return internalId;
-        }
-    }
-    return 0;
 }
 
 bool RecoveryManager::IsMotTransactionId(LogSegment* segment)

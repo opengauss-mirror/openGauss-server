@@ -17,15 +17,22 @@ import sys
 import argparse
 import copy
 import getpass
+import random
 import re
 import shlex
 import subprocess
 import time
 
+SAMPLE_NUM = 5
 MAX_INDEX_COLUMN_NUM = 5
 MAX_INDEX_NUM = 10
 BASE_CMD = ''
 SQL_TYPE = ['select', 'delete', 'insert', 'update']
+SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',
+               r'([^\\])"((")|(.*?([^\\])"))',
+               r'([^a-zA-Z])-?\d+(\.\d+)?',
+               r'([^a-zA-Z])-?\d+(\.\d+)?',
+               r'(\'\d+\\.*?\')']
 
 
 class PwdAction(argparse.Action):
@@ -50,13 +57,6 @@ class IndexItem:
         self.benefit = 0
 
 
-def print_header_boundary(header):
-    term_width = int(os.get_terminal_size().columns / 2)
-    side_width = (term_width - len(header))
-
-    print('#' * side_width + header + '#' * side_width)
-
-
 def get_file_size(filename):
     if os.path.isfile(filename):
         return os.stat(filename).st_size
@@ -71,36 +71,83 @@ def run_shell_cmd(target_sql_list):
     cmd += '\"'
     proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (stdout, stderr) = proc.communicate()
-    stdout, stderr = stdout.decode(), stderr.decode()    
+    stdout, stderr = stdout.decode(), stderr.decode()
     if 'gsql' in stderr or 'failed to connect' in stderr:
         raise ConnectionError("An error occurred while connecting to the database.\n" + "Details: " + stderr)
 
     return stdout
 
 
-def run_shell_sql_cmd(sql_file, wait=0.1):
-    log_file = str(time.time()) + '.log'
-    cmd = BASE_CMD + ' -f ./' + sql_file + ' >> ' + log_file + ' 2>&1 &'
+def run_shell_sql_cmd(sql_file):
+    cmd = BASE_CMD + ' -f ./' + sql_file
 
-    try:
-        subprocess.check_output(cmd, shell=True)
-    except subprocess.CalledProcessError as e:
-        print(e, file=sys.stderr)
-        sys.exit()
+    proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (stdout, stderr) = proc.communicate()
+    stdout, stderr = stdout.decode(), stderr.decode()
+    if stderr:
+        print(stderr)
 
-    current_size = get_file_size(log_file)
-    while current_size != get_file_size(log_file) or get_file_size(log_file) == 0:
-        current_size = get_file_size(log_file)
-        time.sleep(wait)
+    return stdout
 
-    if not os.path.exists(log_file):
-        print(log_file + ' does not exist!')
-        sys.exit()
-    if not os.path.getsize(log_file):
-        print(log_file + ' is empty!')
-        sys.exit()
 
-    return log_file
+def print_header_boundary(header):
+    term_width = int(os.get_terminal_size().columns / 2)
+    side_width = (term_width - len(header))
+
+    print('#' * side_width + header + '#' * side_width)
+
+
+def load_workload(file_path):
+    wd_dict = {}
+    workload = []
+
+    with open(file_path, 'r') as f:
+        for sql in f.readlines():
+            sql = sql.strip('\n;')
+            if any(tp in sql.lower() for tp in SQL_TYPE):
+                if sql not in wd_dict.keys():
+                    wd_dict[sql] = 1
+                else:
+                    wd_dict[sql] += 1
+    for sql, freq in wd_dict.items():
+        workload.append(QueryItem(sql, freq))
+
+    return workload
+
+
+def get_workload_template(workload):
+    templates = {}
+    placeholder = r'@@@'
+
+    for item in workload:
+        sql_template = item.statement
+        for pattern in SQL_PATTERN:
+            sql_template = re.sub(pattern, placeholder, sql_template)
+        if sql_template not in templates:
+            templates[sql_template] = {}
+            templates[sql_template]['cnt'] = 0
+            templates[sql_template]['samples'] = []
+        templates[sql_template]['cnt'] += item.frequency
+        # reservoir sampling
+        if len(templates[sql_template]['samples']) < SAMPLE_NUM:
+            templates[sql_template]['samples'].append(item.statement)
+        else:
+            if random.randint(0, templates[sql_template]['cnt']) < SAMPLE_NUM:
+                templates[sql_template]['samples'][random.randint(0, SAMPLE_NUM - 1)] = item.statement
+
+    return templates
+
+
+def workload_compression(input_path):
+    compressed_workload = []
+
+    workload = load_workload(input_path)
+    templates = get_workload_template(workload)
+
+    for key in templates.keys():
+        for sql in templates[key]['samples']:
+            compressed_workload.append(QueryItem(sql, templates[key]['cnt'] / SAMPLE_NUM))
+    return compressed_workload
 
 
 # parse the explain plan to get estimated cost by database optimizer
@@ -138,33 +185,29 @@ def estimate_workload_cost_file(workload, index_config=None):
         if index_config:
             wf.write('SELECT hypopg_reset_index();')
 
-    log_file = run_shell_sql_cmd(sql_file)
+    result = run_shell_sql_cmd(sql_file).split('\n')
     if os.path.exists(sql_file):
         os.remove(sql_file)
 
     # parse the result of explain plans
     i = 0
-    with open(log_file, 'r') as rf:
-        for line in rf.readlines():
-            if 'QUERY PLAN' in line:
-                found_plan = True
-            if 'ERROR' in line:
-                workload.pop(i)
-            if found_plan and '(cost=' in line:
-                if i >= len(workload):
-                    raise ValueError("The size of workload is not correct!")
-                query_cost = parse_explain_plan(line)
-                query_cost *= workload[i].frequency
-                workload[i].cost_list.append(query_cost)
-                total_cost += query_cost
-                found_plan = False
-                i += 1
+    for line in result:
+        if 'QUERY PLAN' in line:
+            found_plan = True
+        if 'ERROR' in line:
+            workload.pop(i)
+        if found_plan and '(cost=' in line:
+            if i >= len(workload):
+                raise ValueError("The size of workload is not correct!")
+            query_cost = parse_explain_plan(line)
+            query_cost *= workload[i].frequency
+            workload[i].cost_list.append(query_cost)
+            total_cost += query_cost
+            found_plan = False
+            i += 1
     while i < len(workload):
         workload[i].cost_list.append(0)
         i += 1
-
-    if os.path.exists(log_file):
-        os.remove(log_file)
 
     return total_cost
 
@@ -204,10 +247,9 @@ def query_index_advisor(query):
         return table_index_dict
 
     sql = make_single_advisor_sql(query)
-    result = run_shell_cmd([sql])
-    res_list = result.split('\n')
+    result = run_shell_cmd([sql]).split('\n')
 
-    for res in res_list:
+    for res in result:
         table_index_dict.update(parse_single_advisor_result(res))
 
     return table_index_dict
@@ -227,11 +269,10 @@ def query_index_check(query, query_index_dict):
                 sql_list.append('SELECT hypopg_create_index(\'CREATE INDEX ON ' + table + '(' + columns + ')\')')
     sql_list.append('explain ' + query)
     sql_list.append('SELECT hypopg_reset_index()')
-    result = run_shell_cmd(sql_list)
-    result_list = result.split('\n')
+    result = run_shell_cmd(sql_list).split('\n')
 
     # parse the result of explain plan
-    for line in result_list:
+    for line in result:
         hypo_index = ''
         if 'Index' in line and 'Scan' in line and 'btree' in line:
             tokens = line.split(' ')
@@ -322,27 +363,23 @@ def generate_candidate_indexes_file(workload):
             if 'select' in query.statement.lower():
                 wf.write(make_single_advisor_sql(query.statement) + '\n')
 
-    log_file = run_shell_sql_cmd(sql_file, 5)
+    result = run_shell_sql_cmd(sql_file).split('\n')
     if os.path.exists(sql_file):
         os.remove(sql_file)
 
-    with open(log_file, 'r') as rf:
-        for line in rf.readlines():
-            table_index_dict = parse_single_advisor_result(line.strip('\n'))
-            # filter duplicate indexes
-            for table in table_index_dict.keys():
-                if table not in index_dict.keys():
-                    index_dict[table] = set()
-                for columns in table_index_dict[table]:
-                    if columns == "":
-                        continue
-                    if columns not in index_dict[table]:
-                        print("table: ", table, "columns: ", columns)
-                        index_dict[table].add(columns)
-                        candidate_indexes.append(IndexItem(table, columns))
-
-    if os.path.exists(log_file):
-        os.remove(log_file)
+    for line in result:
+        table_index_dict = parse_single_advisor_result(line.strip('\n'))
+        # filter duplicate indexes
+        for table in table_index_dict.keys():
+            if table not in index_dict.keys():
+                index_dict[table] = set()
+            for columns in table_index_dict[table]:
+                if columns == "":
+                    continue
+                if columns not in index_dict[table]:
+                    print("table: ", table, "columns: ", columns)
+                    index_dict[table].add(columns)
+                    candidate_indexes.append(IndexItem(table, columns))
 
     return candidate_indexes
 
@@ -466,26 +503,8 @@ def infer_workload_cost(workload, config, atomic_config_total):
     return total_cost
 
 
-def load_workload(file_path):
-    wd_dict = {}
-    workload = []
-
-    with open(file_path, 'r') as f:
-        for sql in f.readlines():
-            sql = sql.strip('\n;')
-            if any(tp in sql.lower() for tp in SQL_TYPE):
-                if sql not in wd_dict.keys():
-                    wd_dict[sql] = 1
-                else:
-                    wd_dict[sql] += 1
-    for sql, freq in wd_dict.items():
-        workload.append(QueryItem(sql, freq))
-
-    return workload
-
-
 def simple_index_advisor(input_path):
-    workload = load_workload(input_path)
+    workload = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     candidate_indexes = generate_candidate_indexes_file(workload)
     if len(candidate_indexes) == 0:
@@ -499,10 +518,29 @@ def simple_index_advisor(input_path):
         candidate_indexes[i].benefit = ori_total_cost - new_total_cost
     candidate_indexes = sorted(candidate_indexes, key=lambda item: item.benefit, reverse=True)
 
-    cnt = 0
+    # filter out duplicate index
+    final_index_set = {}
     for index in candidate_indexes:
-        print("create index ind" + str(cnt) + " on " + index.table + "(" + index.columns + ");")
-        cnt += 1
+        picked = True
+        cols = set(index.columns.split(','))
+        if index.table not in final_index_set.keys():
+            final_index_set[index.table] = []
+        for i in range(len(final_index_set[index.table]) - 1, -1, -1):
+            pre_index = final_index_set[index.table][i]
+            pre_cols = set(pre_index.columns.split(','))
+            if len(pre_cols.difference(cols)) == 0 and len(pre_cols) < len(cols):
+                final_index_set[index.table].pop(i)
+            if len(cols.difference(pre_cols)) == 0:
+                picked = False
+                break
+        if picked:
+            final_index_set[index.table].append(index)
+
+    cnt = 0
+    for table in final_index_set.keys():
+        for index in final_index_set[table]:
+            print("create index ind" + str(cnt) + " on " + table + "(" + index.columns + ");")
+            cnt += 1
         if cnt == MAX_INDEX_NUM:
             break
 
@@ -537,7 +575,7 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
 
 
 def complex_index_advisor(input_path):
-    workload = load_workload(input_path)
+    workload = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     candidate_indexes = generate_candidate_indexes(workload, True)
     if len(candidate_indexes) == 0:

@@ -188,6 +188,8 @@ void BootStrapProcessMain(int argc, char* argv[])
     /*
      * initialize globals
      */
+    PostmasterPid = gs_thread_self();
+
     t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
     t_thrd.proc_cxt.MyStartTime = time(NULL);

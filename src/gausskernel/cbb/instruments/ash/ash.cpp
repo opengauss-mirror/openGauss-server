@@ -248,6 +248,7 @@ static void CleanAspTable()
     PG_TRY();
     {
         StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
         HeapTuple tuple = NULL;
         Relation pg_asp_tbl = heap_open(GsAspRelationId, RowExclusiveLock);
         TableScanDesc scan = tableam_scan_begin(pg_asp_tbl, SnapshotNow, 0, NULL);
@@ -263,11 +264,13 @@ static void CleanAspTable()
         }
         tableam_scan_end(scan);
         heap_close(pg_asp_tbl, RowExclusiveLock);
+        PopActiveSnapshot();
         CommitTransactionCommand();
     }
     PG_CATCH();
     {
         ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("clean gs_asp table  failed")));
+        PopActiveSnapshot();
         AbortCurrentTransaction();
         PG_RE_THROW();
     }
@@ -840,6 +843,7 @@ static void WriteActiveSessInfo()
     PG_TRY();
     {
         StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
         for (uint32 i = 0; i < active_sess_hist_arrary->max_size; i++) {
             SessionHistEntry *ash_arrary_slot = active_sess_hist_arrary->active_sess_hist_info + i;
             if (ash_arrary_slot->need_flush_sample) {
@@ -853,11 +857,13 @@ static void WriteActiveSessInfo()
                 }
             }
         }
+        PopActiveSnapshot();
         CommitTransactionCommand();
     }
     PG_CATCH();
     {
         ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("flush pg_asp table into disk failed")));
+        PopActiveSnapshot();
         AbortCurrentTransaction();
         PG_RE_THROW();
     }

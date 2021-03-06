@@ -134,7 +134,7 @@ static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, bool hasbuck
 #ifndef ENABLE_MULTIPLE_NODES
     SharedInvalidationMessage* msgs = (SharedInvalidationMessage*)&subxacts[xlrec->nsubxacts];
     TransactionId* recentXmin = (TransactionId *)&(msgs[xlrec->nmsgs]);
-    appendStringInfo(buf, "; RecentXmin:%ld", *recentXmin);
+    appendStringInfo(buf, "; RecentXmin:%lu", *recentXmin);
 #endif
 
     if (xlrec->nlibrary > 0) {
@@ -161,7 +161,7 @@ static void xact_desc_commit_compact(StringInfo buf, xl_xact_commit_compact *xlr
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    appendStringInfo(buf, "; RecentXmin:%ld", xlrec->subxacts[xlrec->nsubxacts]);
+    appendStringInfo(buf, "; RecentXmin:%lu", xlrec->subxacts[xlrec->nsubxacts]);
 #endif
 }
 

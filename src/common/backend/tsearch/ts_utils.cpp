@@ -51,19 +51,11 @@ char* get_tsfile_prefix_tmp(bool isExecCN)
     initStringInfo(&strinfo);
     get_share_path(my_exec_path, tmpSharepath);
 
-    if (!GTM_MODE) {
-        appendStringInfo(&strinfo,
-            "%s/tsearch_data/%s%lu",
-            tmpSharepath,
-            isExecCN ? g_instance.attr.attr_common.PGXCNodeName : u_sess->attr.attr_common.application_name,
-            isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid);
-    } else {
-        appendStringInfo(&strinfo,
-            "%s/tsearch_data/%ld%lu",
-            tmpSharepath,
-            GetCurrentTransactionStartTimestamp(),
-            GetCurrentTransactionId());
-    }
+    appendStringInfo(&strinfo,
+        "%s/tsearch_data/%ld%lu",
+        tmpSharepath,
+        GetCurrentTransactionStartTimestamp(),
+        (GTM_MODE) ? (GetCurrentTransactionId()) : (isExecCN ? GetCurrentTransactionId() : t_thrd.xact_cxt.cn_xid));
 
     /* We need to check for my_exec_path */
     check_backend_env(strinfo.data);
@@ -126,9 +118,10 @@ char* get_tsfile_absolute_path(char* pathname, const char* basename, const char*
         pname = pstrdup(pname);
         check_file_path(pname);
     } else if (strncmp(pathname, FILEPATH_PREFIX_OBS, obs_plen) == 0) {
+        /* Here, isSecurityMode is just used to judge whether we are on DWS. */
         if (!isSecurityMode) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("FilePath must set an absolute path followed by \"file:///\".")));
+                errmsg("obs path can be accepted only in security mode.")));
         }
         /* Skip prefix and trim */
         pname = trim(pathname + obs_plen);

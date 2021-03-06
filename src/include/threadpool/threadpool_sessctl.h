@@ -54,6 +54,9 @@ public:
     int SendSignal(int ctrl_index, int signal);
     void SendProcSignal(int ctrl_index, ProcSignalReason reason, uint64 query_id);
     int CountDBSessions(Oid dbId);
+    int CountDBSessionsNotCleaned(Oid dbOid, Oid userOid);
+    int CleanDBSessions(Oid dbOid, Oid userOid);
+    bool ValidDBoidAndUseroid(Oid dbOid, Oid userOid, knl_sess_control* ctrl);
     void SigHupHandler();
     void HandlePoolerReload();
     void CheckSessionTimeout();

@@ -611,7 +611,7 @@ static void tuplesort_sort_memtuples(Tuplesortstate *state);
  * reduces to ApplySortComparator(), that is single-key MinimalTuple sorts
  * and Datum sorts.
  */
-#include "qsort_tuple.cpp"
+#include "qsort_tuple.inc"
 
 void sort_count(Tuplesortstate* state)
 {

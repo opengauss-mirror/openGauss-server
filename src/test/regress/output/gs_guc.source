@@ -132,4 +132,3 @@ gs_guc set: intervalstyle=a: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
 
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
-

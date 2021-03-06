@@ -26,10 +26,9 @@ ifneq "$(MAKECMDGOALS)" "clean"
 endif
 
 COMMON_OBJS = $(top_builddir)/src/lib/elog/elog.a
-EXTRA_OBJS =  $(top_builddir)/src/gausskernel/cbb/utils/aes/aes.o
 
 OBJS = pg_guc.o cluster_config.o cluster_guc.o pg_hba.o $(top_builddir)/src/lib/elog/elog.a \
-	$(top_builddir)/src/lib/config/libconfig.a $(EXTRA_OBJS)
+	$(top_builddir)/src/lib/config/libconfig.a
 
 all:gs_guc encrypt
 

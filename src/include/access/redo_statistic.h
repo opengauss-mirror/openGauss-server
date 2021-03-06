@@ -67,6 +67,8 @@ extern void redo_unlink_stats_file();
 
 static const uint64 US_TRANSFER_TO_S = (1000000);
 static const uint64 BYTES_TRANSFER_KBYTES = (1024);
+static const uint64 MAX_OUT_INTERVAL = (30 * 1000000);
+
 
 WaitEventIO redo_get_event_type_by_wait_type(uint32 type);
 char* redo_get_name_by_wait_type(uint32 type);

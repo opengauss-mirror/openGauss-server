@@ -190,6 +190,19 @@ static void tablespace_list_append(const char* arg)
     tablespacee_dirs.tail = cell;
 }
 
+#define TABLESPACE_LIST_RELEASE()                     \
+    if (tblspaceDirectory != NULL) {                  \
+        int k;                                        \
+        for (k = 0; k < tblspaceCount; k++) {         \
+            if (tblspaceDirectory[k] != NULL) {       \
+                free(tblspaceDirectory[k]);           \
+                tblspaceDirectory[k] = NULL;          \
+            }                                         \
+        }                                             \
+        free(tblspaceDirectory);                      \
+        tblspaceDirectory = NULL;                     \
+    }
+
 static void show_full_build_process(const char *errmg)
 {
     pg_log(PG_PROGRESS, _("%s\n"), errmg);
@@ -205,8 +218,6 @@ static void usage(void)
     printf(_("  -F, --format=p|t       output format (plain (default), tar)\n"));
     printf(_("  -T, --tablespace-mapping=OLDDIR=NEWDIR\n"
              "                         relocate tablespace in OLDDIR to NEWDIR\n"));
-    printf(_("  -t, --rw_timeout=TIME  rw_timeout limit\n"
-             "                         the value range from 60 to 3600 (s) (default 120s)\n"));
     printf(_("  -x, --xlog             include required WAL files in backup (fetch mode)\n"));
     printf(_("  -X, --xlog-method=fetch|stream\n"
              "                         include required WAL files with specified method\n"));
@@ -225,10 +236,17 @@ static void usage(void)
     printf(_("  -p, --port=PORT        database server port number\n"));
     printf(_("  -s, --status-interval=INTERVAL\n"
              "                         time between status packets sent to server (in seconds)\n"));
+    printf(_("  -t, --rw-timeout=RW_TIMEOUT\n"
+             "                         read-write timeout during idle connection.(in seconds)\n"));
     printf(_("  -U, --username=NAME    connect as specified database user\n"));
     printf(_("  -w, --no-password      never prompt for password\n"));
     printf(_("  -W, --password         force password prompt (should happen automatically)\n"));
-    printf(_("\nReport bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+#endif
 }
 
 static void GsTarUsage(void)
@@ -921,7 +939,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              * All files are padded up to 512 bytes
              */
             if (current_len_left < 0 || current_len_left > LLONG_MAX - 511) {
-                pg_log(stderr, _("%s: current_len_left is invalid\n"), progname);
+                pg_log(stderr, _("%s: the file '%s' is too big or file size is invalid\n"), progname, copybuf);
                 disconnect_and_exit(1);
             }
             current_padding = PADDING_LEFT(current_len_left);
@@ -931,9 +949,9 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
              */
             if (check_input_path_relative_path(copybuf) || check_input_path_relative_path(current_path)) {
                 pg_log(stderr,
-                        _("%s: the copybuf/current_path file path including .. is unallowed: %s\n"),
-                        progname,
-                        strerror(errno));
+                       _("%s: the copybuf/current_path file path including .. is unallowed: %s\n"),
+                       progname,
+                       strerror(errno));
                 disconnect_and_exit(1);
             }
             errorno = snprintf_s(filename, sizeof(filename), sizeof(filename) - 1, "%s/%s", current_path, copybuf);
@@ -1209,8 +1227,9 @@ static void BaseBackup(void)
     }
     rc = strncpy_s(xlogstart, sizeof(xlogstart), PQgetvalue(res, 0, 0), sizeof(xlogstart) - 1);
     securec_check_c(rc, "", "");
-    if (verbose && includewal)
+    if (verbose && includewal) {
         pg_log(stderr, "transaction log start point: %s\n", xlogstart);
+    }
     PQclear(res);
 
     rc = memset_s(xlogend, sizeof(xlogend), 0, sizeof(xlogend));
@@ -1336,8 +1355,9 @@ static void BaseBackup(void)
     }
     rc = strncpy_s(xlogend, sizeof(xlogend), PQgetvalue(res, 0, 0), sizeof(xlogend) - 1);
     securec_check_c(rc, "", "");
-    if (verbose && includewal)
+    if (verbose && includewal) {
         pg_log(stderr, "transaction log end point: %s\n", xlogend);
+    }
     PQclear(res);
 
     res = PQgetResult(conn);
@@ -1382,8 +1402,9 @@ static void BaseBackup(void)
         uint32 hi, lo;
 #endif
 
-        if (verbose)
+        if (verbose) {
             pg_log(stderr, _("%s: waiting for background process to finish streaming...\n"), progname);
+        }
 
 #ifndef WIN32
         if ((unsigned int)(write(bgpipe[1], xlogend, strlen(xlogend))) != strlen(xlogend)) {
@@ -1442,6 +1463,8 @@ static void BaseBackup(void)
         /* Exited normally, we're happy */
 #endif
     }
+
+    TABLESPACE_LIST_RELEASE();
 
     PQfinish(conn);
     conn = NULL;
@@ -1857,7 +1880,6 @@ static int GsBaseBackup(int argc, char** argv)
                                            {"format", required_argument, NULL, 'F'},
                                            {"checkpoint", required_argument, NULL, 'c'},
                                            {"tablespace-mapping", required_argument, NULL, 'T'},
-                                           {"rw_timeout", required_argument, NULL, 't'},
                                            {"xlog", no_argument, NULL, 'x'},
                                            {"xlog-method", required_argument, NULL, 'X'},
                                            {"gzip", no_argument, NULL, 'z'},
@@ -1869,11 +1891,11 @@ static int GsBaseBackup(int argc, char** argv)
                                            {"no-password", no_argument, NULL, 'w'},
                                            {"password", no_argument, NULL, 'W'},
                                            {"status-interval", required_argument, NULL, 's'},
+                                           {"rw-timeout", required_argument, NULL, 't'},
                                            {"verbose", no_argument, NULL, 'v'},
                                            {"progress", no_argument, NULL, 'P'},
                                            {NULL, 0, NULL, 0}};
-    int c;
-    int option_index;
+    int c = 0, option_index = 0;
     progname = "gs_basebackup";
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_basebackup"));
 
@@ -1887,7 +1909,7 @@ static int GsBaseBackup(int argc, char** argv)
         }
     }
 
-    while ((c = getopt_long(argc, argv, "D:l:c:h:p:U:s:X:F:T:t:Z:wWvPxz", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "D:l:c:h:p:U:s:X:F:T:Z:t:wWvPxz", long_options, &option_index)) != -1) {
         switch (c) {
             case 'D': {
                 GS_FREE(basedir);
@@ -1914,29 +1936,13 @@ static int GsBaseBackup(int argc, char** argv)
                 }
                 break;
             case 'T':
-                if (strlen(optarg) > MAXPGPATH) {
+                if (strlen(optarg) >= MAXPGPATH - 1) {
                     fprintf(stderr,
                         _("%s: invalid output length"), progname);
                     exit(1);
                 }
                 tablespace_list_append(optarg);
                 break;
-            case 't': {
-                /* set length limit for preventing para out of int range */
-                if (strspn(optarg, "0123456789") != strlen(optarg) || strlen(optarg) > 4) {
-                    fprintf(stderr, _("%s: invalid value:%s\n"), progname, optarg);
-                    exit(1);
-                }
-                int baseBackupPara = atoi(optarg);
-                
-                /* the timeout range is between 1min and 60mins */
-                if (baseBackupPara < 60 || baseBackupPara > 3600) {	
-                    fprintf(stderr, _("%s: invalid value:%s\n"), progname, optarg);
-                    exit(1);
-                }
-                baseBackupTimeout = xstrdup(optarg);
-                break;
-                }
             case 'x':
                 streamwal = false;
                 break;
@@ -2016,6 +2022,13 @@ static int GsBaseBackup(int argc, char** argv)
                     exit(1);
                 }
                 standby_message_timeout = atoi(optarg) * 1000;
+                break;
+            case 't':
+                if (atoi(optarg) < 0 || atoi(optarg)  > PG_INT32_MAX) {
+                    fprintf(stderr, _("%s: invalid read-write timeout \"%s\"\n"), progname, optarg);
+                    exit(1);
+                }
+                rwtimeout = atoi(optarg);
                 break;
             case 'v':
                 verbose++;

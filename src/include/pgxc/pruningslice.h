@@ -30,7 +30,7 @@
 void PruningSliceForExecNodes(ExecNodes* exec_nodes, ParamListInfo boundParams);
 void PruningSliceForQuals(ExecNodes* execNodes, Index varno, Node* quals, ParamListInfo boundParams);
 
-void InitDistColIndexMap(int* colMap, List* distColIdxList);
+void InitDistColIndexMap(int* colMap, int size, List* distColIdxList);
 Oid GetRangeNodeFromValue(RelationLocInfo* relLocInfo, Datum* datums, const bool* nulls, Oid* attrs,
     int* colMap, int len);
 Oid GetListNodeFromValue(RelationLocInfo* relLocInfo, Datum* datums, const bool* nulls, Oid* attrs,

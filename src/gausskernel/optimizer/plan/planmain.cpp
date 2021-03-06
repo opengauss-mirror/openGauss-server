@@ -27,7 +27,6 @@
 #include "parser/parse_hint.h"
 #include "pgxc/pgxc.h"
 #include "optimizer/cost.h"
-#include "optimizer/orclauses.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
 #include "optimizer/placeholder.h"
@@ -239,12 +238,6 @@ void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double
      * placeholder is evaluatable at a base rel.
      */
     add_placeholders_to_base_rels(root);
-
-    /*
-     * Look for join OR clauses that we can extract single-relation
-     * restriction OR clauses from.
-     */
-    extract_restriction_or_clauses(root);
 
     /*
      * We should now have size estimates for every actual table involved in

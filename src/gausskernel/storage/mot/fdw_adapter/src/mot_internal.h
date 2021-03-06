@@ -216,7 +216,6 @@ public:
     static MOT::RC Prepare();
     static void CommitPrepared(uint64_t csn);
     static void RollbackPrepared();
-    static MOT::RC FailedCommitPrepared(uint64_t csn);
     static MOT::RC InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);
     static MOT::RC UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT::Row* currRow);
     static MOT::RC DeleteRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);

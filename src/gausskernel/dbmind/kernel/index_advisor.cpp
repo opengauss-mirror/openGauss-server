@@ -50,8 +50,8 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
-#define MAX_SAMPLE_ROWS 10000      /* sampling range for executing a query */
-#define CARDINALITY_THRESHOLD 30   /* the threshold of index selection */ 
+#define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
+#define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
 #define MAX_QUERY_LEN 256
 
 typedef struct {
@@ -118,7 +118,7 @@ static TableCell *find_or_create_tblcell(char *, char *);
 static void add_index_from_field(char *, IndexCell *);
 static char *parse_group_clause(List *, List *);
 static char *parse_order_clause(List *, List *);
-static void add_index_from_group_order(TableCell *, List *, bool, List *);
+static void add_index_from_group_order(TableCell *, List *, List *, bool);
 static Oid find_table_oid(List *, const char *);
 static void generate_final_index(TableCell *, Oid);
 static void parse_from_clause(List *);
@@ -131,7 +131,6 @@ static void determine_driver_table();
 static uint4 get_join_table_result_set(const char *, const char *);
 static void add_index_from_join(TableCell *, char *);
 static void add_index_for_drived_tables();
-static inline Node *get_target_by_Const(List *, Node *);
 
 Datum gs_index_advise(PG_FUNCTION_ARGS)
 {
@@ -254,9 +253,9 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
             parse_where_clause(stmt->whereClause);
             determine_driver_table();
             if (parse_group_clause(stmt->groupClause, stmt->targetList)) {
-                add_index_from_group_order(g_driver_table, stmt->groupClause, true, stmt->targetList);
+                add_index_from_group_order(g_driver_table, stmt->groupClause, stmt->targetList, true);
             } else if (parse_order_clause(stmt->sortClause, stmt->targetList)) {
-                add_index_from_group_order(g_driver_table, stmt->sortClause, false, stmt->targetList);
+                add_index_from_group_order(g_driver_table, stmt->sortClause, stmt->targetList, false);
             }
             if (g_table_list->length > 1 && g_driver_table) {
                 add_index_for_drived_tables();
@@ -356,7 +355,7 @@ inline void analyze_tables(List *list)
 
 /* Search the oid of all indexes created on the table through the oid of the table, 
  * and return the index oid list. 
- * */
+ *  */
 List *get_table_indexes(Oid oid)
 {
     Relation rel = heap_open(oid, NoLock);
@@ -1356,17 +1355,19 @@ void add_index_for_drived_tables()
     list_free(to_be_joined_tables);
 }
 
-static inline Node *get_target_by_Const(List* targetList, Node* constNode)
+Node *transform_group_order_node(Node *node, List *target_list)
 {
-    Value* val = &((A_Const*)constNode)->val;
+    Value *val = &((A_Const *)node)->val;
     Assert(IsA(val, Integer));
     long target_pos = intVal(val);
-    Assert(target_pos <= list_length(targetList));
-    ResTarget* rt = (ResTarget*)list_nth(targetList, target_pos - 1);
-    return rt->val;
+    Assert(target_pos <= list_length(target_list));
+    ResTarget *rt = (ResTarget *)list_nth(target_list, target_pos - 1);
+    node = rt->val;
+
+    return node;
 }
 
-char *parse_group_clause(List *group_clause, List* targetList)
+char *parse_group_clause(List *group_clause, List *target_list)
 {
     if (group_clause == NULL)
         return NULL;
@@ -1376,15 +1377,14 @@ char *parse_group_clause(List *group_clause, List* targetList)
     char *pre_table = NULL;
 
     foreach (group_item, group_clause) {
-        Node* node = (Node*)lfirst(group_item);
+        Node *node = (Node *)lfirst(group_item);
+
         if (nodeTag(node) == T_A_Const) {
-            node = get_target_by_Const(targetList, node);
+            node = transform_group_order_node(node, target_list);
         }
-
         if (nodeTag(node) != T_ColumnRef)
-            continue;
-
-        List *fields = ((ColumnRef *)(node))->fields;    
+            break;
+        List *fields = ((ColumnRef *)node)->fields;
         char *table_group = find_table_name(fields);
         if (!table_group) {
             return NULL;
@@ -1405,7 +1405,7 @@ char *parse_group_clause(List *group_clause, List* targetList)
     return NULL;
 }
 
-char *parse_order_clause(List *order_clause, List* targetList)
+char *parse_order_clause(List *order_clause, List *target_list)
 {
     if (order_clause == NULL)
         return NULL;
@@ -1416,16 +1416,15 @@ char *parse_order_clause(List *order_clause, List* targetList)
     SortByDir pre_dir;
 
     foreach (order_item, order_clause) {
-        SortBy* sortby = (SortBy *)lfirst(order_item);
-        Node* node = sortby->node;
-        if (nodeTag(node) == T_A_Const) {
-            node = get_target_by_Const(targetList, node);
-        }
+        Node *node = ((SortBy *)lfirst(order_item))->node;
+        SortByDir dir = ((SortBy *)(lfirst(order_item)))->sortby_dir;
 
+        if (nodeTag(node) == T_A_Const) {
+            node = transform_group_order_node(node, target_list);
+        }
         if (nodeTag(node) != T_ColumnRef)
-            break;        
+            break;
         List *fields = ((ColumnRef *)node)->fields;
-        SortByDir dir = sortby->sortby_dir;        
         char *table_order = find_table_name(fields);
         if (!table_order) {
             return NULL;
@@ -1453,26 +1452,25 @@ char *parse_order_clause(List *order_clause, List* targetList)
  *
  * The index from goup or order clause is added after the index with operator '='.
  */
-void add_index_from_group_order(TableCell *table, List *clause, bool flag_group_order, List* targetList)
+void add_index_from_group_order(TableCell *table, List *clause, List *target_list, bool flag_group_order)
 {
     ListCell *item = NULL;
-   
+
     foreach (item, clause) {
-        List *fields = NULL;
         Node *node = NULL;
+        List *fields = NULL;
         char *index_name = NULL;
+
         if (flag_group_order) {
-            node = (Node*)lfirst(item);
+            node = (Node *)lfirst(item);
         } else {
             node = ((SortBy *)lfirst(item))->node;
         }
-
         if (nodeTag(node) == T_A_Const) {
-            node = get_target_by_Const(targetList, node);
+            node = transform_group_order_node(node, target_list);
         }
-
         if (nodeTag(node) != T_ColumnRef)
-            break;        
+            break;
         fields = ((ColumnRef *)node)->fields;
         index_name = find_field_name(fields);
         IndexCell *index = (IndexCell *)palloc(sizeof(*index));

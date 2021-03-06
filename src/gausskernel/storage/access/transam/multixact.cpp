@@ -1738,14 +1738,14 @@ static void TruncateMultiXact(void)
      */
     cutoffPage = (int)MultiXactIdToOffsetPage(oldestMXact);
 
-    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, cutoffPage);
+    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, cutoffPage, false, NUM_SLRU_DEFAULT_PARTITION);
 
     /*
      * Also truncate MultiXactMember at the previously determined offset.
      */
     cutoffPage = (int)MXOffsetToMemberPage(oldestOffset);
 
-    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, cutoffPage);
+    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, cutoffPage, false, NUM_SLRU_DEFAULT_PARTITION);
 
     /*
      * Set the last known truncation point.  We don't need a lock for this

@@ -6893,13 +6893,6 @@ void ExecCloseRemoteStatement(const char* stmt_name, List* nodelist)
         if (connections[i]->state == DN_CONNECTION_STATE_QUERY)
             BufferConnection(connections[i]);
 
-        if (ENABLE_CN_GPC && pgxc_node_send_cn_identifier(connections[i], HANDLE_RUN) != 0) {
-            connections[i]->state = DN_CONNECTION_STATE_ERROR_FATAL;
-            ereport(WARNING,
-                    (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                     errmsg("Failed to send global session id to Datanode %u",connections[i]->nodeoid)));
-        }
-
         if (pgxc_node_send_close(connections[i], true, stmt_name) != 0) {
             /*
              * statements are not affected by statement end, so consider

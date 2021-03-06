@@ -59,7 +59,6 @@
         (BLCKSZ - MAXALIGN(SizeOfPageHeaderData + 3 * sizeof(ItemIdData)) - MAXALIGN(sizeof(BTPageOpaqueData))) / 3)
 #define isExplain (u_sess->attr.attr_sql.hypopg_is_explain)
 
-static List *hypoIndexes;
 static ProcessUtility_hook_type prev_utility_hook = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd_hook = NULL;
 static get_relation_info_hook_type prev_get_relation_info_hook = NULL;
@@ -88,7 +87,7 @@ static void hypo_process_attr(IndexStmt *node, hypoIndex *volatile entry, String
     int &ind_avg_width);
 static const hypoIndex *hypo_index_store_parsetree(IndexStmt *node, const char *queryString);
 static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, int ninccolumns, List *options);
-static void hypo_set_indexname(hypoIndex *entry, char *indexname);
+static void hypo_set_indexname(hypoIndex *entry, const char *indexname);
 static void hypo_index_reset(void);
 static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel,
     Relation relation, hypoIndex *entry);
@@ -97,11 +96,11 @@ static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId
 void InitHypopg()
 {
     // init memory context
-    g_instance.stat_cxt.HypopgContext = AllocSetContextCreate(g_instance.instance_context, "HypopgContext",
-        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
-
+    if (g_instance.hypo_cxt.HypopgContext == NULL) {
+        g_instance.hypo_cxt.HypopgContext = AllocSetContextCreate(g_instance.instance_context, "HypopgContext", 
+            ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    }
     isExplain = false;
-    hypoIndexes = NIL;
 }
 
 void hypopg_register_hook()
@@ -234,7 +233,9 @@ static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId,
         if (relation->rd_rel->relkind == RELKIND_RELATION) {
             ListCell *lc;
 
-            foreach (lc, hypoIndexes) {
+            LWLockAcquire(HypoIndexLock, LW_SHARED);
+
+            foreach (lc, g_instance.hypo_cxt.hypo_index_list) {
                 hypoIndex *entry = (hypoIndex *)lfirst(lc);
 
                 if (hypo_index_match_table(entry, RelationGetRelid(relation))) {
@@ -245,6 +246,8 @@ static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId,
                     hypo_injectHypotheticalIndex(root, relationObjectId, inhparent, rel, relation, entry);
                 }
             }
+
+            LWLockRelease(HypoIndexLock);
         }
 
         /* Close the relation release the lock now */
@@ -278,7 +281,7 @@ static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, 
 
     oid = HeapTupleGetOid(tuple);
 
-    oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.HypopgContext);
+    oldcontext = MemoryContextSwitchTo(g_instance.hypo_cxt.HypopgContext);
 
     entry = (hypoIndex *)palloc0(sizeof(hypoIndex));
 
@@ -368,14 +371,18 @@ static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, 
     return entry;
 }
 
-/* Add an hypoIndex to hypoIndexes */
+/* Add an hypoIndex to hypo_index_list */
 static void hypo_addIndex(hypoIndex *entry)
 {
     MemoryContext oldcontext;
 
-    oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.HypopgContext);
+    oldcontext = MemoryContextSwitchTo(g_instance.hypo_cxt.HypopgContext);
 
-    hypoIndexes = lappend(hypoIndexes, entry);
+    LWLockAcquire(HypoIndexLock, LW_EXCLUSIVE);
+
+    g_instance.hypo_cxt.hypo_index_list = lappend(g_instance.hypo_cxt.hypo_index_list, entry);
+
+    LWLockRelease(HypoIndexLock);
 
     MemoryContextSwitchTo(oldcontext);
 }
@@ -388,18 +395,20 @@ void hypo_index_reset(void)
 {
     ListCell *lc;
 
-    /*
-     * The cell is removed in hypo_index_remove(), so we can't iterate using
-     * standard foreach / lnext macros.
-     */
-    while ((lc = list_head(hypoIndexes)) != NULL) {
+    LWLockAcquire(HypoIndexLock, LW_EXCLUSIVE);
+
+    while ((lc = list_head(g_instance.hypo_cxt.hypo_index_list)) != NULL) {
         hypoIndex *entry = (hypoIndex *)lfirst(lc);
 
-        hypo_index_remove(entry->oid);
+        g_instance.hypo_cxt.hypo_index_list = list_delete_ptr(g_instance.hypo_cxt.hypo_index_list, entry);
+        hypo_index_pfree(entry);
     }
 
-    list_free(hypoIndexes);
-    hypoIndexes = NIL;
+    list_free(g_instance.hypo_cxt.hypo_index_list);
+    g_instance.hypo_cxt.hypo_index_list = NIL;
+
+    LWLockRelease(HypoIndexLock);
+
     return;
 }
 
@@ -412,7 +421,7 @@ static void hypo_handle_predicate(IndexStmt *node, hypoIndex *volatile entry)
         CheckPredicate((Expr *)node->whereClause);
 
         pred = make_ands_implicit((Expr *)node->whereClause);
-        oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.HypopgContext);
+        oldcontext = MemoryContextSwitchTo(g_instance.hypo_cxt.HypopgContext);
 
         entry->indpred = (List *)copyObject(pred);
         MemoryContextSwitchTo(oldcontext);
@@ -522,7 +531,7 @@ static void hypo_process_attr(IndexStmt *node, hypoIndex *volatile entry, String
 
                 entry->indexkeys[attn] = 0; /* marks expression */
 
-                oldcontext = MemoryContextSwitchTo(g_instance.stat_cxt.HypopgContext);
+                oldcontext = MemoryContextSwitchTo(g_instance.hypo_cxt.HypopgContext);
                 entry->indexprs = lappend(entry->indexprs, (Node *)copyObject(attribute->expr));
                 MemoryContextSwitchTo(oldcontext);
             }
@@ -790,15 +799,23 @@ static bool hypo_index_remove(Oid indexid)
 {
     ListCell *lc;
 
-    foreach (lc, hypoIndexes) {
+    LWLockAcquire(HypoIndexLock, LW_EXCLUSIVE);
+
+    foreach (lc, g_instance.hypo_cxt.hypo_index_list) {
         hypoIndex *entry = (hypoIndex *)lfirst(lc);
 
         if (entry->oid == indexid) {
-            hypoIndexes = list_delete_ptr(hypoIndexes, entry);
+            g_instance.hypo_cxt.hypo_index_list = list_delete_ptr(g_instance.hypo_cxt.hypo_index_list, entry);
             hypo_index_pfree(entry);
+
+            LWLockRelease(HypoIndexLock);
+
             return true;
         }
     }
+
+    LWLockRelease(HypoIndexLock);
+
     return false;
 }
 
@@ -856,8 +873,7 @@ static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId
 
     /* General stuff */
     index->indexoid = entry->oid;
-    index->reltablespace = rel->reltablespace; /* same tablespace as
-                                                * relation, TODO */
+    index->reltablespace = rel->reltablespace;
     index->rel = rel;
     index->ncolumns = ncolumns = entry->ncolumns;
     index->nkeycolumns = nkeycolumns = entry->nkeycolumns;
@@ -977,13 +993,17 @@ const char *hypo_explain_get_index_name_hook(Oid indexId)
          */
         ListCell *lc;
 
-        foreach (lc, hypoIndexes) {
+        LWLockAcquire(HypoIndexLock, LW_SHARED);
+
+        foreach (lc, g_instance.hypo_cxt.hypo_index_list) {
             hypoIndex *entry = (hypoIndex *)lfirst(lc);
 
             if (entry->oid == indexId) {
                 ret = entry->indexname;
             }
         }
+
+        LWLockRelease(HypoIndexLock);
     }
 
     if (ret) {
@@ -1038,12 +1058,12 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
 
     MemoryContextSwitchTo(oldcontext);
 
-    foreach (lc, hypoIndexes) {
+    LWLockAcquire(HypoIndexLock, LW_SHARED);
+
+    foreach (lc, g_instance.hypo_cxt.hypo_index_list) {
         hypoIndex *entry = (hypoIndex *)lfirst(lc);
         Datum values[HYPO_INDEX_NB_COLS];
         bool nulls[HYPO_INDEX_NB_COLS];
-        // ListCell   *lc2;
-        // StringInfoData exprsString;
         StringInfoData index_columns;
         int i = 0;
         int keyno;
@@ -1070,6 +1090,8 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
 
         tuplestore_putvalues(tupstore, tupdesc, values, nulls);
     }
+
+    LWLockRelease(HypoIndexLock);
 
     /* clean up and return the tuplestore */
     tuplestore_donestoring(tupstore);
@@ -1184,15 +1206,19 @@ Datum hypopg_estimate_size(PG_FUNCTION_ARGS)
     Oid indexid = PG_GETARG_OID(0);
     ListCell *lc;
 
+    LWLockAcquire(HypoIndexLock, LW_SHARED);
+
     pages = 0;
     tuples = 0;
-    foreach (lc, hypoIndexes) {
+    foreach (lc, g_instance.hypo_cxt.hypo_index_list) {
         hypoIndex *entry = (hypoIndex *)lfirst(lc);
 
         if (entry->oid == indexid) {
             hypo_estimate_index_simple(entry, &pages, &tuples);
         }
     }
+
+    LWLockRelease(HypoIndexLock);
 
     PG_RETURN_INT64(pages * 1.0L * BLCKSZ);
 }
@@ -1213,7 +1239,7 @@ Datum hypopg_reset_index(PG_FUNCTION_ARGS)
 /* Simple function to set the indexname, dealing with max name length, and the
  * ending \0
  */
-static void hypo_set_indexname(hypoIndex *entry, char *indexname)
+static void hypo_set_indexname(hypoIndex *entry, const char *indexname)
 {
     char oid[12] = {0}; /* store <oid>, oid shouldn't be more than 9999999999 */
     int totalsize;

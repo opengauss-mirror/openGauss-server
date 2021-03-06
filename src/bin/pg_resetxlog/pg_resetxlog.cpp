@@ -1005,6 +1005,10 @@ static void usage(void)
     printf(_("  -V, --version    output version information, then exit\n"));
     printf(_("  -x XID           set next transaction ID\n"));
     printf(_("  -?, --help       show this help, then exit\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to openGauss community by raising an issue.\n");
+#endif
 }
 

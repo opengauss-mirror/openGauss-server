@@ -28,7 +28,7 @@
 do {                                                                                            \
     errno_t rc = memcpy_s(targetTimestamp, size, timestamptz_to_str(convertTimeStamp), size);   \
     securec_check(rc, "\0", "\0");                                                              \
-} while(0)
+} while (0)
 
 
 #ifndef FRONTEND_PARSER
@@ -104,13 +104,10 @@ typedef struct WalReplicationTimestampInfo {
     char timeoutStamp[MAXTIMESTAMPLEN + 1];
     char lastRecStamp[MAXTIMESTAMPLEN + 1];
     char heartbeatStamp[MAXTIMESTAMPLEN + 1];
-    TimestampTz timeout;
-    TimestampTz nowtime;
-    TimestampTz last_timestamp;
-    TimestampTz heartbeat;
 } WalReplicationTimestampInfo;
 
-void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo);
+void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo, TimestampTz nowtime,
+    TimestampTz timeout, TimestampTz lastTimestamp, TimestampTz heartbeat);
 
 /*
  * timestamp.c prototypes

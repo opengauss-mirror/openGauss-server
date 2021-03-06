@@ -125,7 +125,9 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 abort;
 
 --failed
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
+set xc_maintenance_mode = off;
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
@@ -134,7 +136,9 @@ vacuum analyze test_gpi_more_invalid;
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
 
 -- success
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
+set xc_maintenance_mode = off;
 
 set force_bitmapand = on;
 -- partition 1

@@ -313,12 +313,13 @@ static void wakeupObsArchLatch()
 void RefuseConnect()
 {
     WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-
     knl_g_disconn_node_context_data disconn_node =
         g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+
     if (disconn_node.conn_mode == POLLING_CONNECTION) {
         return;
     }
+
     if (disconn_node.conn_mode == SPECIFY_CONNECTION &&
         strcmp(disconn_node.disable_conn_node_host, (char *)walrcv->conn_channel.remotehost) == 0 &&
         disconn_node.disable_conn_node_port == walrcv->conn_channel.remoteport) {
@@ -437,9 +438,13 @@ void WalReceiverMain(void)
     int channel_identifier = 0;
     int nRet = 0;
     errno_t rc = 0;
+    uint32 isRedoFinish;
 
     t_thrd.walreceiver_cxt.last_sendfilereply_timestamp = GetCurrentTimestamp();
     t_thrd.walreceiver_cxt.standby_config_modify_time = time(NULL);
+    isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
+    knl_g_set_redo_finish_status(isRedoFinish | REDO_FINISH_STATUS_CM);
+    ereport(LOG, (errmsg("set knl_g_set_redo_finish_status_CM to true when connecting to the primary")));
 
     /*
      * WalRcv should be set up already (if we are a backend, we inherit this
@@ -573,6 +578,7 @@ void WalReceiverMain(void)
     t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
     /* Establish the connection to the primary for XLOG streaming */
     EnableWalRcvImmediateExit();
+
     WalReceiverFuncTable[GET_FUNC_IDX].walrcv_connect(conninfo, &startpoint, slotname[0] != '\0' ? slotname : NULL,
                                                       channel_identifier);
     DisableWalRcvImmediateExit();
@@ -636,6 +642,10 @@ void WalReceiverMain(void)
 
     knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL);
     ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false when connecting to the primary")));
+    /*
+     * Prevent the effect of the last wallreceiver connection.
+     */
+    InitHeartbeatTimestamp();
 
     /* Loop until end-of-streaming or error */
     for (;;) {
@@ -671,7 +681,24 @@ static inline TimestampTz CalculateTimeout(TimestampTz last_reply_time)
 static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timestamp, bool ping_sent)
 {
     bool requestReply = false;
-    TimestampTz timeout;
+    TimestampTz heartbeat = GetHeartbeatLastReplyTimestamp();
+    TimestampTz calculateTime = CalculateTimeout(heartbeat);
+    TimestampTz hbValid = TimestampTzPlusMilliseconds(heartbeat, u_sess->attr.attr_storage.wal_receiver_timeout * 2);
+    /*
+     * The host locally records the last communication time of the standby,
+     * when the time exceeds heartbeat_ Timeout: if the heartbeat message is not received,
+     * the heartbeat timeout will be triggered and walsender will exit.
+     * In switchover scenario, if the host exits the heartbeat thread,
+     * the standby will exit the walkreceiver thread. This causes switchover to fail,
+     * so heartbeat timeout is not judged during switchover.
+     */
+    if (timestamptz_cmp_internal(nowtime, calculateTime) >= 0 && timestamptz_cmp_internal(hbValid, nowtime) >= 0 &&
+        (t_thrd.walreceiverfuncs_cxt.WalRcv != NULL &&
+        t_thrd.walreceiverfuncs_cxt.WalRcv->node_state != NODESTATE_STANDBY_WAITING)) {
+        ereport(ERROR, (errmsg(
+            "terminating walreceiver due to heartbeat timeout,now time(%s) last heartbeat time(%s) calculateTime(%s)",
+            timestamptz_to_str(nowtime), timestamptz_to_str(heartbeat), timestamptz_to_str(calculateTime))));
+    }
 
     /* don't bail out if we're doing something that doesn't require timeouts */
     if (u_sess->attr.attr_storage.wal_receiver_timeout <= 0) {
@@ -688,12 +715,11 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
         last_reply_time = last_recv_timestamp;
     }
 
-    timeout = CalculateTimeout(last_reply_time);
+    TimestampTz timeout = CalculateTimeout(last_reply_time);
     if (nowtime < timeout) {
         return requestReply;
     }
 
-    TimestampTz heartbeat = GetHeartbeatLastReplyTimestamp();
     /* If heartbeat newer, use heartbeat to recalculate timeout. */
     if (timestamptz_cmp_internal(heartbeat, last_reply_time) > 0) {
         last_reply_time = heartbeat;
@@ -705,17 +731,12 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
      * replication timeout. Ping the server.
      */
     if (nowtime >= timeout) {
-        WalReplicationTimestampInfo timeStampInfo;
-        timeStampInfo.timeout = timeout;
-        timeStampInfo.nowtime = nowtime;
-        timeStampInfo.last_timestamp = last_reply_time;
-        timeStampInfo.heartbeat = heartbeat;
+        WalReplicationTimestampInfo tpInfo;
         if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
-            WalReplicationTimestampToString(&timeStampInfo);
+            WalReplicationTimestampToString(&tpInfo, nowtime, timeout, last_recv_timestamp, heartbeat);
             ereport(DEBUG2,
-                    (errmsg("now time(%s) timeout time(%s) last recv time(%s), heartbeat time(%s), ping_sent(%d)",
-                            timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp, timeStampInfo.lastRecStamp,
-                            timeStampInfo.heartbeatStamp, ping_sent)));
+                (errmsg("now time(%s) timeout time(%s) last recv time(%s), heartbeat time(%s), ping_sent(%d)",
+                tpInfo.nowTimeStamp, tpInfo.timeoutStamp, tpInfo.lastRecStamp, tpInfo.heartbeatStamp, ping_sent)));
         }
         if (!ping_sent) {
             requestReply = true;
@@ -723,13 +744,10 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
             knl_g_set_redo_finish_status(0);
             ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false in WalRecCheckTimeOut")));
             if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
-                timeStampInfo.last_timestamp = last_recv_timestamp;
-                WalReplicationTimestampToString(&timeStampInfo);
-                ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                                errmsg("terminating walreceiver due to timeout "
-                                       "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
-                                       timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp, timeStampInfo.lastRecStamp,
-                                       timeStampInfo.heartbeatStamp)));
+                WalReplicationTimestampToString(&tpInfo, nowtime, timeout, last_recv_timestamp, heartbeat);
+                ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT), errmsg("terminating walreceiver due to timeout "
+                    "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
+                    tpInfo.nowTimeStamp, tpInfo.timeoutStamp, tpInfo.lastRecStamp, tpInfo.heartbeatStamp)));
             }
         }
     }
@@ -779,8 +797,8 @@ static void WalRcvDie(int code, Datum arg)
        extremRTO is on, and DN received force finish signal, if cleanup is blocked, the force finish 
        signal will be ignored!
     */
-    knl_g_set_redo_finish_status(0);
-    ereport(LOG, (errmsg("set knl_g_set_redo_finish_status to false in WalRcvDie")));
+    knl_g_clear_local_redo_finish_status();
+    ereport(LOG, (errmsg("set local_redo_finish_status to false in WalRcvDie")));
 
     walRcvDataCleanup();
 

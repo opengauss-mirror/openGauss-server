@@ -45,6 +45,7 @@ extern char       *replication_slot;
 #endif
 extern bool     temp_slot;
 extern char       *password;
+extern int        rw_timeout;
 
 /* backup options */
 extern bool        smooth_checkpoint;

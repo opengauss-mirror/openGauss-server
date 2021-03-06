@@ -30,7 +30,7 @@ typedef struct EventInfo {
     char* type;
     char* event;
 } EventInfo;
-#define WAIT_EVENT_SIZE 248
+#define WAIT_EVENT_SIZE 249
 struct EventInfo waitEventInfo[WAIT_EVENT_SIZE] = {
     {"none", "STATUS", "none"},
     {"LWLock", "STATUS", "acquire lwlock"},
@@ -280,6 +280,7 @@ struct EventInfo waitEventInfo[WAIT_EVENT_SIZE] = {
     {"Transaction", "LWLOCK_EVENT", "OldSerXid SLRU Ctl"},
     {"WAL", "LWLOCK_EVENT", "WALInsertLock"},
     {"DoubleWrite", "LWLOCK_EVENT", "DoubleWriteLock"},
+    {"Dbmind", "LWLOCK_EVENT", "HypoIndexLock"},
     {"Plugin", "LWLOCK_EVENT", "GeneralExtendedLock"},
     {"plugin", "LWLOCK_EVENT", "extension"},
     {"plugin", "LWLOCK_EVENT", "extension"}

@@ -2,9 +2,6 @@ DROP SCHEMA test_upsert_002 CASCADE;
 CREATE SCHEMA test_upsert_002;
 SET CURRENT_SCHEMA TO test_upsert_002;
 
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-
 -- test t1 with no index
 CREATE TABLE t1 (
     col1 INT,

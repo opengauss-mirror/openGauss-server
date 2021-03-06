@@ -279,18 +279,21 @@ reindex table test_exchange_llt;
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_exchange_llt'::regclass ORDER BY c.relname;
         relname        | indisusable 
 -----------------------+-------------
- test_exchange_llt_idx | t
+ test_exchange_llt_idx | f
 (1 row)
 
 set enable_bitmapscan=on;
 set enable_seqscan=on;
 -- indexscan
 explain (costs false) select * from test_exchange_llt where a=40;
-                         QUERY PLAN                          
--------------------------------------------------------------
- Index Scan using test_exchange_llt_idx on test_exchange_llt
-   Index Cond: (a = 40)
-(2 rows)
+                   QUERY PLAN                    
+-------------------------------------------------
+ Partition Iterator
+   Iterations: 1
+   ->  Partitioned Seq Scan on test_exchange_llt
+         Filter: (a = 40)
+         Selected Partitions:  4
+(5 rows)
 
 select * from test_exchange_llt where a=40;
  a  |  b  

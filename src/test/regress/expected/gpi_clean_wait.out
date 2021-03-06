@@ -348,9 +348,11 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 
 abort;
 --failed
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
 WARNING:  system table pg_partition contain relation test_gpi_more_invalid have reloptions wait_clean_gpi=y,must run the vacuum (full) test_gpi_more_invalid first
 WARNING:  skipping "pg_partition" --- only table or database can vacuum it
+set xc_maintenance_mode = off;
 -- test_gpi_more_invalid have wait_clean_gpi=y
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
@@ -366,7 +368,9 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (0 rows)
 
 -- success
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
+set xc_maintenance_mode = off;
 set force_bitmapand = on;
 -- partition 1
 explain (costs off) select * from test_gpi_more_invalid where b = 100000 and c = 100;

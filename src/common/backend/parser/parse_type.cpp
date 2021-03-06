@@ -106,6 +106,15 @@ static bool IsTypeInBlacklist(Oid typoid);
 
 /*
  * LookupTypeName
+ *       Wrapper for typical case.
+ */
+Type LookupTypeName(ParseState *pstate, const TypeName *typeName, int32 *typmod_p, bool print_notice)
+{
+       return LookupTypeNameExtended(pstate, typeName, typmod_p, true, print_notice);
+}
+
+/*
+ * LookupTypeNameExtended
  *		Given a TypeName object, lookup the pg_type syscache entry of the type.
  *		Returns NULL if no such type can be found.	If the type is found,
  *		the typmod value represented in the TypeName struct is computed and
@@ -124,9 +133,15 @@ static bool IsTypeInBlacklist(Oid typoid);
  * found but is a shell, and there is typmod decoration, an error will be
  * thrown --- this is intentional.
  *
+ * If temp_ok is false, ignore types in the temporary namespace.  Pass false
+ * when the caller will decide, using goodness of fit criteria, whether the
+ * typeName is actually a type or something else.  If typeName always denotes
+ * a type (or denotes nothing), pass true.
+ *
  * pstate is only used for error location info, and may be NULL.
  */
-Type LookupTypeName(ParseState* pstate, const TypeName* typname, int32* typmod_p, bool print_notice)
+Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* typmod_p, bool temp_ok,
+                            bool print_notice)
 {
     Oid typoid;
     HeapTuple tup;
@@ -193,7 +208,7 @@ Type LookupTypeName(ParseState* pstate, const TypeName* typname, int32* typmod_p
         typoid = get_atttype(relid, attnum);
 
         /* this construct should never have an array indicator */
-        AssertEreport(typname->arrayBounds == NIL, MOD_OPT, "");
+        Assert(typname->arrayBounds == NIL);
 
         /* emit nuisance notice (intentionally not errposition'd) */
         if (print_notice) {
@@ -216,7 +231,7 @@ Type LookupTypeName(ParseState* pstate, const TypeName* typname, int32* typmod_p
             typoid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typeName), ObjectIdGetDatum(namespaceId));
         } else {
             /* Unqualified type name, so search the search path */
-            typoid = TypenameGetTypid(typeName);
+            typoid = TypenameGetTypidExtended(typeName, temp_ok);
         }
 
         /* If an array reference, return the array type instead */

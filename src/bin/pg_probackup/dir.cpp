@@ -1046,7 +1046,7 @@ void
 create_data_directories(parray *dest_files, const char *data_dir, const char *backup_dir,
                                                 bool extract_tablespaces, bool incremental, fio_location location)
 {
-    int     i;
+    size_t     i = 0;
     parray      *links = NULL;
     mode_t  pg_tablespace_mode = DIR_PERMISSION;
     char    to_path[MAXPGPATH];
@@ -1295,10 +1295,11 @@ check_tablespace_mapping(pgBackup *backup, bool incremental, bool *tblspaces_are
 
         if (!dir_is_empty(linked_path, FIO_DB_HOST))
         {
-            if (!incremental)
+            if (!incremental) {
                 elog(ERROR, "restore tablespace destination is not empty: \"%s\"",
                     linked_path);
-                *tblspaces_are_empty = false;
+            }
+            *tblspaces_are_empty = false;
         }
     }
 
@@ -1312,7 +1313,7 @@ check_external_dir_mapping(pgBackup *backup, bool incremental)
 {
     TablespaceListCell *cell;
     parray *external_dirs_to_restore;
-    int     i;
+    size_t  i = 0;
 
     elog(LOG, "check external directories of backup %s",
         base36enc(backup->start_time));
@@ -1793,7 +1794,7 @@ backup_contains_external(const char *dir, parray *dirs_list)
 void
 print_database_map(FILE *out, parray *database_map)
 {
-    int i;
+    size_t i = 0;
 
     for (i = 0; i < parray_num(database_map); i++)
     {

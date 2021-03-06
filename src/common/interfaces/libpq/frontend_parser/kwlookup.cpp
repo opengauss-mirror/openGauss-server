@@ -29,7 +29,6 @@
 #include "catalog/pg_attribute.h"
 #include "access/tupdesc.h"
 #include "nodes/parsenodes_common.h"
-#include "nodes/primnodes.h"
 #include "gram.hpp"
 #include "parser/keywords.h"
 

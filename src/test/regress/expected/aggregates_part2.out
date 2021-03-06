@@ -457,37 +457,6 @@ select count(*) from (select distinct(c*d) from t_agg1);
    343
 (1 row)
 
--- test agg with gs_index_advise
-select gs_index_advise('SELECT max(a), min(a), max(b), min(b) FROM t_agg1 order by 1, 2, 3, 4;');
- gs_index_advise 
------------------
- (t_agg1,"")
-(1 row)
-
-select gs_index_advise('SELECT a, b, c FROM t_agg1 order by 1 ;');
- gs_index_advise 
------------------
- (t_agg1,"(a)")
-(1 row)
-
-select gs_index_advise('SELECT a, b, c FROM t_agg1 order by 1, 2;');
- gs_index_advise  
-------------------
- (t_agg1,"(a,b)")
-(1 row)
-
-select gs_index_advise('SELECT a, max(b) FROM t_agg1 group by 1;');
- gs_index_advise 
------------------
- (t_agg1,"(a)")
-(1 row)
-
-select gs_index_advise('SELECT a, b, max(c) FROM t_agg1 group by 1, 2;');
- gs_index_advise  
-------------------
- (t_agg1,"(a,b)")
-(1 row)
-
 reset current_schema;
 drop schema if exists distribute_aggregates_part2 cascade;
 NOTICE:  drop cascades to 3 other objects

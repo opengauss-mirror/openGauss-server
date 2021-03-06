@@ -39,10 +39,11 @@
         return -1;                                   \
     } while (0)
 
-
+#ifdef ENABLE_MULTIPLE_NODES
 int GetAllDatabaseInfo(int index, DNDatabaseInfo **dnDatabaseInfo, int *dnDatabaseCount);
 int GetDBTableFromSQL(int index, uint32 databaseId, uint32 tableId, uint32 tableIdSize,
                       DNDatabaseInfo *dnDatabaseInfo, int dnDatabaseCount, char* databaseName, char* tableName);
+#endif
 int cmagent_execute_query_and_check_result(PGconn* db_connection, const char* run_command);
 int cmagent_execute_query(PGconn* db_connection, const char* run_command);
 
@@ -62,9 +63,12 @@ extern int check_datanode_status_by_SQL6(
     agent_to_cm_datanode_status_report* report_msg, uint32 ii, const char* data_path);
 
 extern int check_datanode_status_by_SQL7(agent_to_cm_datanode_status_report* report_msg,
-    uint32 ii, agent_to_cm_datanode_barrier_status_report* barrier_info);
+    uint32 ii, agent_to_cm_coordinate_barrier_status_report* barrier_info);
 extern int check_datanode_status_by_SQL8(agent_to_cm_datanode_status_report* report_msg,
-    uint32 ii, agent_to_cm_datanode_barrier_status_report* barrier_info);
+    uint32 ii, agent_to_cm_coordinate_barrier_status_report* barrier_info);
+extern int CheckDatanodeStatusBySqL9(agent_to_cm_datanode_status_report* report_msg,
+    uint32 ii, agent_to_cm_coordinate_barrier_status_report* barrier_info);
+extern int CheckDatanodeSyncList(AgentToCmserverDnSyncList *syncListMsg, uint32 ii);
 extern int cmagent_execute_query(PGconn* db_connection, const char* run_command);
 extern int cmagent_execute_query_and_check_result(PGconn* db_connection, const char* run_command);
 

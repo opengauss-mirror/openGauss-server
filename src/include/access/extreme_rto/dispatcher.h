@@ -168,6 +168,7 @@ typedef struct {
     slock_t updateLck;
 #endif
     RedoInterruptCallBackFunc oldStartupIntrruptFunc;
+    volatile bool recoveryStop;
 } LogDispatcher;
 
 typedef struct {
@@ -247,6 +248,9 @@ void StartupSendFowarder(RedoItem *item);
 XLogRecPtr GetSafeMinCheckPoint();
 RedoWaitInfo redo_get_io_event(int32 event_id);
 void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uint32 workerLen);
+#ifndef ENABLE_MULTIPLE_NODES
+void CheckCommittingCsnList();
+#endif
 
 }  // namespace extreme_rto
 

@@ -384,9 +384,15 @@ int pg_get_encoding_from_locale(const char* ctype, bool write_message)
         /* keep newline separate so there's only one translatable string */
         fputc('\n', stderr);
 #else
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
         ereport(WARNING,
             (errmsg("could not determine encoding for locale \"%s\": codeset is \"%s\"", ctype, sys),
-                errdetail("Please report this to <pgsql-bugs@postgresql.org>.")));
+                errdetail("Please report this to GaussDB support.")));
+#else
+        ereport(WARNING,
+            (errmsg("could not determine encoding for locale \"%s\": codeset is \"%s\"", ctype, sys),
+                errdetail("Please report this to openGauss community by raising an issue.")));
+#endif
 #endif
     }
 #ifdef FRONTEND

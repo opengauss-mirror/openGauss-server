@@ -501,6 +501,9 @@ trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, con
         /* Buffer size of Shared memory should be greater than 0. */
         return TRACE_BUFFER_SIZE_ERR;
     }
+
+    /* align with slot size, and the buffer is expected to fill one trace record at least. */
+    bufferSize = gsAlign(((bufferSize > MIN_BUF_SIZE) ? bufferSize : MIN_BUF_SIZE), SLOT_SIZE);
     bufferSize = bTrcToFile ? MIN_BUF_SIZE : roundToNearestPowerOfTwo(bufferSize);
 
     if (attachTraceCfgSharedMem(key) != TRACE_OK) {

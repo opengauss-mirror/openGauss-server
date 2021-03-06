@@ -184,6 +184,7 @@ public:
         pg_atomic_fetch_sub_u32((volatile uint32*)&m_refcount, 1);
     }
 
+    /* this check function can only be used to change gpc table when has write lock */
     inline bool RefCountZero()
     {
         /* if is same as 0 then set 0 and return true, if is different then do nothing and return false */
@@ -193,14 +194,7 @@ public:
 
     inline int GetRefCount()
     {
-    	return m_refcount;
-    }
-
-    inline bool CheckRefCount()
-    {
-        /* m_refcount can not less than 0 */
-        int val = (int)pg_atomic_fetch_add_u32((volatile uint32*)&m_refcount, 0);
-        return val >= 0;
+        return m_refcount;
     }
 
 private:
@@ -420,5 +414,6 @@ extern void ResetPlanCache(CachedPlanSource *plansource);
 extern void PlanCacheRelCallback(Datum arg, Oid relid);
 extern void PlanCacheFuncCallback(Datum arg, int cacheid, uint32 hashvalue);
 extern void PlanCacheSysCallback(Datum arg, int cacheid, uint32 hashvalue);
+extern bool IsStreamSupport();
 
 #endif /* PLANCACHE_H */

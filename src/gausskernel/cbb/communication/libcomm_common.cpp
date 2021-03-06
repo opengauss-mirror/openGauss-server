@@ -216,6 +216,7 @@ void node_sock::reset_all() {
     ctrl_tcp_port = -1;
     ctrl_tcp_sock_id = 0;
     libcomm_reply_sock = -1;
+    libcomm_reply_sock_id = -1;
     errno_t ss_rc = 0;
     ss_rc = memset_s(remote_host, HOST_ADDRSTRLEN, 0x0, HOST_ADDRSTRLEN);
     securec_check(ss_rc, "\0", "\0");

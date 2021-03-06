@@ -35,6 +35,7 @@ extern void CreateStorageThresholdCheckThread();
 extern void create_deal_phony_alarm_thread();
 extern void CreateAzStatusCheckForAzThread();
 extern void CreateAz1Az2ConnectStateCheckThread();
+extern void CreateDnGroupStatusCheckAndArbitrateThread();
 extern void Init_cluster_to_switchover();
 extern void CreateSyncDynamicInfoThread();
 extern void CreateMultiAzConnectStateCheckThread();

@@ -89,11 +89,11 @@ static VectorBatch* extract_scan_batch(
  * Build dummy junkfilter for cstore update
  */
 static JunkFilter* build_dummy_junk_filter(
-    ModifyTableState* mtstate, MergeAction* action, EState* estate, ResultRelInfo* result_rel_info)
+    ModifyTableState* mtstate, List* new_targetlist, EState* estate, ResultRelInfo* result_rel_info)
 {
     JunkFilter* junk_filter = NULL;
     ListCell* cell = NULL;
-    Index new_index = list_length(action->targetList);
+    Index new_index = list_length(new_targetlist);
     List* target_list = mtstate->mt_plans[0]->plan->targetlist;
 
     foreach (cell, target_list) {
@@ -105,12 +105,12 @@ static JunkFilter* build_dummy_junk_filter(
             new_index++;
             ((Var*)res_tle->expr)->varno = 1;
             ((Var*)res_tle->expr)->varattno = new_index;
-            action->targetList = lappend(action->targetList, res_tle);
+            new_targetlist = lappend(new_targetlist, res_tle);
             res_tle->resno = new_index;
         }
     }
 
-    junk_filter = ExecInitJunkFilter(action->targetList, false, ExecInitExtraTupleSlot(estate));
+    junk_filter = ExecInitJunkFilter(new_targetlist, false, ExecInitExtraTupleSlot(estate));
 
     junk_filter->jf_junkAttNo = ExecFindJunkAttribute(junk_filter, "ctid");
     if (!AttributeNumberIsValid(junk_filter->jf_junkAttNo)) {
@@ -445,16 +445,18 @@ void ExecInitVecMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* 
         MergeActionState* action_state = makeNode(MergeActionState);
         TupleDesc tup_desc;
         List* target_list = NULL;
+        List* new_targetlist = NULL;
+        new_targetlist = (List*)copyObject(action->targetList);
 
         action_state->matched = action->matched;
         action_state->commandType = action->commandType;
         action_state->whenqual = ExecInitVecExpr((Expr*)action->qual, &mtstate->ps);
 
         if (IS_PGXC_DATANODE && CMD_UPDATE == action->commandType) {
-            action_state->junkfilter = build_dummy_junk_filter(mtstate, action, estate, resultRelInfo);
+            action_state->junkfilter = build_dummy_junk_filter(mtstate, new_targetlist, estate, resultRelInfo);
 
             /* create target slot for this action's projection */
-            tup_desc = ExecTypeFromTL((List*)action->targetList, false, true);
+            tup_desc = ExecTypeFromTL((List*)new_targetlist, false, true);
             action_state->tupDesc = tup_desc;
 
             action_state->scanBatch = New(CurrentMemoryContext) VectorBatch(CurrentMemoryContext, tup_desc);
@@ -462,14 +464,14 @@ void ExecInitVecMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* 
             ExecSetSlotDescriptor(mtstate->mt_mergeproj, tup_desc);
         } else {
             /* create target slot for this action's projection */
-            tup_desc = ExecTypeFromTL((List*)action->targetList, false, true);
+            tup_desc = ExecTypeFromTL((List*)new_targetlist, false, true);
             action_state->tupDesc = tup_desc;
 
             ExecSetSlotDescriptor(mtstate->mt_mergeproj, relation_desc);
         }
 
         /* build action projection state */
-        target_list = (List*)ExecInitVecExpr((Expr*)action->targetList, &mtstate->ps);
+        target_list = (List*)ExecInitVecExpr((Expr*)new_targetlist, &mtstate->ps);
         action_state->proj = ExecBuildVecProjectionInfo(target_list, NULL, econtext, mtstate->mt_mergeproj, tup_desc);
 
         /*
@@ -484,11 +486,11 @@ void ExecInitVecMerge(ModifyTableState* mtstate, EState* estate, ResultRelInfo* 
 
         switch (action->commandType) {
             case CMD_INSERT:
-                ExecCheckPlanOutput(resultRelInfo->ri_RelationDesc, action->targetList);
+                ExecCheckPlanOutput(resultRelInfo->ri_RelationDesc, new_targetlist);
                 mtstate->mt_merge_subcommands |= MERGE_INSERT;
                 break;
             case CMD_UPDATE:
-                ExecCheckPlanOutput(resultRelInfo->ri_RelationDesc, action->targetList);
+                ExecCheckPlanOutput(resultRelInfo->ri_RelationDesc, new_targetlist);
                 mtstate->mt_merge_subcommands |= MERGE_UPDATE;
                 break;
             default:

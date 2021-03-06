@@ -46,6 +46,7 @@
 #include "postmaster/postmaster.h"
 #include "utils/palloc.h"
 #include "utils/memutils.h"
+#include "utils/guc.h"
 
 #define SUB_HODLER_SIZE 100
 #define RES_SIGNAL SIGUSR2
@@ -736,6 +737,10 @@ void gs_signal_handle(void)
         psnd_signal = (GsSndSignal*)(&(local_node->sig_data));
 
         sndsigno = psnd_signal->signo;
+        if (log_min_messages == DEBUG1 && module_logging_is_on(MOD_HOTKEY)) {
+            ereport(LOG, (errmsg("thread id of sender is %lu. signo is %d",
+                psnd_signal->thread.thid, psnd_signal->signo)));
+        }
 
         if (FALSE == sigismember(&pGsSignal->masksignal, sndsigno)) {
             gs_thread_t tmpThread;

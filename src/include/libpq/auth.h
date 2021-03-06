@@ -19,7 +19,7 @@
 #include "gssapi/gssapi_krb5.h"
 
 #define INITIAL_USER_ID 10
-#define PREFIX_LENGTH 8
+#define POSTFIX_LENGTH 8
 
 /* The struct for gss kerberos authentication. */
 typedef struct GssConn {

@@ -150,7 +150,7 @@ extern int errcode_for_socket_access(void);
 
 /* set error module */
 extern int errmodule(ModuleId id);
-
+extern const char* mask_encrypted_key(const char* query_string, int str_len);
 extern char* maskPassword(const char* query_string);
 
 #define MASK_PASSWORD_START(mask_string, query_string) \
@@ -276,7 +276,7 @@ typedef struct ErrorContextCallback {
 #define securec_check(errno, charList, ...)                                                                            \
     {                                                                                                                  \
         if (EOK != errno) {                                                                                            \
-            freeSecurityFuncSpace((char*)charList, ##__VA_ARGS__);                                                     \
+            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                        \
             switch (errno) {                                                                                           \
                 case EINVAL:                                                                                           \
                     elog(ERROR,                                                                                        \
@@ -321,7 +321,7 @@ typedef struct ErrorContextCallback {
 #define securec_check(errno, charList, ...)                                                                          \
     {                                                                                                                \
         if (errno == -1) {                                                                                           \
-            freeSecurityFuncSpace_c((char*)charList, ##__VA_ARGS__);                                                 \
+            freeSecurityFuncSpace_c(static_cast<char*>(charList), ##__VA_ARGS__);                                    \
             printf("ERROR at %s : %d : The destination buffer or format is a NULL pointer or the invalid parameter " \
                    "handle is invoked..\n",                                                                          \
                 __FILE__,                                                                                            \
@@ -336,7 +336,7 @@ typedef struct ErrorContextCallback {
 #define securec_check_ss(errno, charList, ...)                                                                     \
     {                                                                                                              \
         if (errno == -1) {                                                                                         \
-            freeSecurityFuncSpace((char*)charList, ##__VA_ARGS__);                                                 \
+            freeSecurityFuncSpace(static_cast<char*>(charList), ##__VA_ARGS__);                                    \
             elog(ERROR,                                                                                            \
                 "%s : %d : The destination buffer or format is a NULL pointer or the invalid parameter handle is " \
                 "invoked.",                                                                                        \

@@ -183,3 +183,78 @@ from web_page ) t2
 on ( t1.c1=t2.c5+50 )
 when matched then update set t1.c6 = t2.c6
 when not matched then insert values(t2.c5, t2.c6, t2.c2);
+
+-------------------------------------------------------
+-- Verify foreign key validity
+-- Notice: merge into  when matched then update [FK] when not matched then insert values(value, [FK]);
+--         we must take attention about column in "[]";
+-------------------------------------------------------
+create table pkt(a int primary key);
+create table fkt(a int primary key, b int references pkt);
+create table dtt(a int, b int);
+insert into pkt values(1),(2),(3);
+insert into dtt values(1,1),(2,2);
+merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 3 when not matched then insert values(dtt.a, dtt.b);
+select * from fkt;
+merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 3 when not matched then insert values(dtt.a, dtt.b);
+select * from fkt;
+merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 5 when not matched then insert values(dtt.a, dtt.b);
+select * from fkt;
+truncate fkt;
+insert into dtt values(5,5);
+merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 3 when not matched then insert values(dtt.a, dtt.b);
+select * from fkt;
+
+
+----------------------------------------------------
+-- trigger
+----------------------------------------------------
+CREATE FUNCTION mgit_before_func()
+  RETURNS TRIGGER language plpgsql AS
+$$
+BEGIN
+  IF (TG_OP = 'UPDATE') THEN
+    RAISE warning 'before update (old): %', old.*::TEXT;
+    RAISE warning 'before update (new): %', new.*::TEXT;
+  elsIF (TG_OP = 'INSERT') THEN
+    RAISE warning 'before insert (new): %', new.*::TEXT;
+  END IF;
+  RETURN new;
+END;
+$$;
+CREATE TRIGGER mgit_before_trig BEFORE INSERT OR UPDATE ON fkt
+  FOR EACH ROW EXECUTE procedure mgit_before_func();
+
+CREATE FUNCTION mgit_after_func()
+  RETURNS TRIGGER language plpgsql AS
+$$
+BEGIN
+  IF (TG_OP = 'UPDATE') THEN
+    RAISE warning 'after update (old): %', old.*::TEXT;
+    RAISE warning 'after update (new): %', new.*::TEXT;
+  elsIF (TG_OP = 'INSERT') THEN
+    RAISE warning 'after insert (new): %', new.*::TEXT;
+  END IF;
+  RETURN null;
+END;
+$$;
+CREATE TRIGGER mgit_after_trig AFTER INSERT OR UPDATE ON fkt
+  FOR EACH ROW EXECUTE procedure mgit_after_func();
+
+insert into fkt values(1,1);
+delete from dtt where a = 5; -- now dtt: (1,1),(2,2)  fkt:(1,1)
+merge into fkt using dtt on (dtt.a=fkt.a) when matched then update set fkt.b = 3 when not matched then insert values(dtt.a, dtt.b);
+select * from fkt;
+
+
+------------------------------------------------
+-- clean up
+------------------------------------------------
+drop trigger mgit_after_trig on fkt;
+drop trigger mgit_before_trig on fkt;
+drop function mgit_before_func;
+drop function mgit_after_func;
+drop table dtt;
+drop table fkt;
+drop table pkt;
+

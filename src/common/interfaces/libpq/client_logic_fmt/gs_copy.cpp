@@ -764,7 +764,7 @@ static int process_txt_chunk(PGconn *conn, PreparedStatement *entry, const char 
                 data = NULL;
                 return -1;
             }
-        } else if (found_delim || found_eol) {
+        } else if (found_delim || found_eol || (end_ptr == line_end_ptr)) {
             /* process */
             if (!process_and_replace(conn, entry, data, data_size, false, buffer, written, res_length)) {
                 free(data);
@@ -1214,7 +1214,7 @@ int process_csv_chunk(PGconn *conn, PreparedStatement *entry, const char *in_buf
                 data = NULL;
                 return 0;
             }
-        } else if (found_delim || found_eol) {
+        } else if (found_delim || found_eol || (end_ptr == line_end_ptr)) {
             /* process */
             if (!process_and_replace(conn, entry, data, data_size, false, buffer, written, res_length)) {
                 free(data);
@@ -1597,7 +1597,7 @@ static bool process_and_replace(PGconn *conn, PreparedStatement *entry, const ch
     /* process data */
     char err_msg[1024];
     err_msg[0] = '\0';
-    if (!rawValue.process(conn->client_logic->isDuringRefreshCacheOnError, cached_column, err_msg)) {
+    if (!rawValue.process(cached_column, err_msg)) {
         if (strlen(err_msg) == 0) {
             printfPQExpBuffer(&conn->errorMessage,
                 libpq_gettext("ERROR(CLIENT): failed to process data of processed column"));
@@ -1626,7 +1626,8 @@ static bool deprocess_and_replace(PGconn *conn, PreparedStatement *entry, const 
     unsigned char *plaintext = NULL;
     size_t plaintext_len;
     if (ValuesProcessor::deprocess_value(conn, (const unsigned char *)processed_bytea, processed_bytea_size,
-        entry->original_data_types_oids[entry->copy_state->fieldno], 0, &plaintext, plaintext_len, false)) {
+        entry->original_data_types_oids[entry->copy_state->fieldno], 0, &plaintext, plaintext_len, false) == 
+        DEC_DATA_SUCCEED) {
         size_t escaped_size = 0;
         char *escaped = escape_and_quote(conn, entry, plaintext, is_quoted, &escaped_size);
         ret = append_buffer(buffer, res_length, written, escaped, escaped_size);
@@ -1635,8 +1636,6 @@ static bool deprocess_and_replace(PGconn *conn, PreparedStatement *entry, const 
     } else {
         printfPQExpBuffer(&conn->errorMessage,
             libpq_gettext("ERROR(CLIENT): failed to deprocess data of processed column"));
-        conn->client_logic->isInvalidOperationOnColumn = true; // FAILED TO READ
-        checkRefreshCacheOnError(conn);
     }
 
     return ret;
@@ -1982,7 +1981,11 @@ static CopyStateData *begin_copy(bool is_from, bool is_rel, Node *raw_query, con
     List *attnamelist, List *options)
 {
     /* Allocate workspace and zero all fields */
-    CopyStateData *cstate = new CopyStateData();
+    CopyStateData *cstate = new (std::nothrow) CopyStateData();
+    if (cstate == NULL) {
+        fprintf(stderr, "failed to new CopyStateData object\n");
+        exit(EXIT_FAILURE);
+    }
     copy_state_data_init(cstate);
     /* Extract options from the statement node tree */
     fe_process_copy_options(cstate, is_from, options);
@@ -2007,7 +2010,12 @@ static CopyStateData *begin_copy(bool is_from, bool is_rel, Node *raw_query, con
 
     if (is_return_empty) {
         delete cstate;
-        return new CopyStateData();
+        cstate = new (std::nothrow) CopyStateData();
+        if (cstate == NULL) {
+            fprintf(stderr, "failed to new CopyStateData object\n");
+            exit(EXIT_FAILURE);
+        }
+        return cstate;
     }
 
     /* Use client encoding when ENCODING option is not specified. */

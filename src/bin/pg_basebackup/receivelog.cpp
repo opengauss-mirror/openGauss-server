@@ -678,6 +678,8 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
          * Check if we should continue streaming, or abort at this point.
          */
         if ((stream_stop != NULL) && stream_stop(blockpos, timeline, false)) {
+            closeHearBeatTimer();
+            xlogconn = NULL;
             if (walfile != -1)
                 /* Potential error message is written by close_walfile */
                 return close_walfile(walfile, basedir, current_walfile_name, rename_partial, blockpos);
@@ -836,6 +838,8 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
         else if (DO_WAL_DATA_WRITE_STOP == ret) {
             PQfreemem(copybuf);
             copybuf = NULL;
+            closeHearBeatTimer();
+            xlogconn = NULL;
             if (walfile != -1)
                 /* Potential error message is written by close_walfile */
                 return close_walfile(walfile, basedir, current_walfile_name, rename_partial, blockpos);
@@ -852,8 +856,6 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
      * a shutdown message, and we'll return the latest xlog location that has
      * been streamed.
      */
-    closeHearBeatTimer();
-    xlogconn = NULL;
 
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
@@ -870,6 +872,9 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
     if (walfile != -1 && close(walfile) != 0)
         pg_log(PG_WARNING, _(" could not close file \"%s\": %s.\n"), current_walfile_name, strerror(errno));
     walfile = -1;
+
+    closeHearBeatTimer();
+    xlogconn = NULL;
     return true;
 
 error:

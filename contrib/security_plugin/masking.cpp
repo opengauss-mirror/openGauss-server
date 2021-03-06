@@ -136,9 +136,8 @@ static bool mask_func(ParseState *pstate, Expr*& expr,
     bool is_masking = false;
     if (nodeTag(expr) == T_FuncExpr) {
         FuncExpr *fe = (FuncExpr *)(expr);
-        {
-            PolicyLabelItem func_value;
-            get_function_name(fe->funcid, &func_value);
+        PolicyLabelItem func_value;
+        if (get_function_name(fe->funcid, &func_value)) {
             set_result_set_function(func_value);
         }
         if (fe->args != NULL) {
@@ -161,8 +160,9 @@ static void parse_func(Node* expr)
             FuncExpr *fe = (FuncExpr *)expr;
             {
                 PolicyLabelItem func_value;
-                get_function_name(fe->funcid, &func_value);
-                set_result_set_function(func_value);
+                if (get_function_name(fe->funcid, &func_value)) {
+                    set_result_set_function(func_value);
+                }
             }
             if (fe->args != NIL) {
                 ListCell* temp = NULL;
@@ -826,75 +826,72 @@ static bool mask_list_parameters(List **params, ParseState *pstate, bool *is_mas
     return *is_masking;
 }
 
+static bool mask_sublink(ParseState *pstate, Expr*& expr,
+    const policy_set *policy_ids, masking_result *result, List* rtable, bool can_mask)
+{
+    if (expr == NULL) {
+        return false;
+    }
+    SubLink *sublink = (SubLink *) expr;
+    Query *query = (Query *) sublink->subselect;
+    ListCell* temp = NULL;
+    bool is_masking = false;
+    foreach (temp, query->targetList) {
+        TargetEntry *old_tle = (TargetEntry *) lfirst(temp);
+        is_masking = parser_target_entry(pstate, old_tle, policy_ids, result, query->rtable, can_mask) || is_masking;
+    }
+    return is_masking;
+}
+
 static bool mask_expr_node(ParseState *pstate, Expr*& expr,
     const policy_set *policy_ids, masking_result *result, List* rtable, bool can_mask)
 {
     if (expr == NULL) {
         return false;
     }
-    bool is_masking = false;
     switch (nodeTag(expr)) {
         case T_SubLink:
-        {
-            SubLink *sublink = (SubLink *) expr;
-            Query *query = (Query *) sublink->subselect;
-            ListCell* temp = NULL;
-            foreach (temp, query->targetList) {
-                TargetEntry *old_tle = (TargetEntry *) lfirst(temp);
-                parser_target_entry(pstate, old_tle, policy_ids, result, query->rtable, can_mask);
-            }
-        }
-        break;
+            return mask_sublink(pstate, expr, policy_ids, result, rtable, can_mask);
         case T_FuncExpr:
-        {
-            bool func_masked = mask_func(pstate, expr, policy_ids, result, rtable, can_mask);
-            is_masking = func_masked || is_masking;
-        }
-        break;
+            return mask_func(pstate, expr, policy_ids, result, rtable, can_mask);
         case T_Var:
-        {
-            bool var_masked = handle_masking_node(pstate, expr, policy_ids, result, rtable, can_mask);
-            is_masking = var_masked || is_masking;
-        }
-        break;
-        case T_RelabelType:
-        {
+            return handle_masking_node(pstate, expr, policy_ids, result, rtable, can_mask);
+        case T_RelabelType: {
             RelabelType *relabel = (RelabelType *) expr;
             if (relabel->arg != NULL) {
-                bool expr_masked = mask_expr_node(pstate, (Expr *&)relabel->arg, policy_ids, result, rtable, can_mask);
-                is_masking = expr_masked || is_masking;
+                return mask_expr_node(pstate, (Expr *&)relabel->arg, policy_ids, result, rtable, can_mask);
             }
+            break;
         }
-        break;
-        case T_CoerceViaIO:
-        {
+        case T_CoerceViaIO: {
             CoerceViaIO *coerce = (CoerceViaIO *) expr;
             if (coerce->arg != NULL) {
-                bool expr_masked = mask_expr_node(pstate, (Expr *&)coerce->arg, policy_ids, result, rtable, false);
-                is_masking = expr_masked || is_masking;
+                return mask_expr_node(pstate, (Expr *&)coerce->arg, policy_ids, result, rtable, false);
             }
+            break;
         }
-        break;
-        case T_Aggref:
-        {
+        case T_Aggref: {
             Aggref *agg = (Aggref *) expr;
             if (agg->args != NIL && list_length(agg->args) > 0) {
+                bool is_masking = false;
                 mask_list_parameters(&(agg->args), pstate, &is_masking, policy_ids, result, rtable, can_mask);
+                return is_masking;
             }
+            break;
         }
-        break;
-        case T_OpExpr:
-        {
+        case T_OpExpr: {
             OpExpr *opexpr = (OpExpr *) expr;
             if (opexpr->args != NIL && list_length(opexpr->args) > 0) {
+                bool is_masking = false;
                 mask_list_parameters(&(opexpr->args), pstate, &is_masking, policy_ids, result, rtable, can_mask);
+                return is_masking;
             }
+            break;
         }
-        break;
         default:
             break;
     }
-    return is_masking;
+    return false;
 }
 
 bool parser_target_entry(ParseState *pstate, TargetEntry *&old_tle,

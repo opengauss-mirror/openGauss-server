@@ -32,7 +32,9 @@
 #include "optimizer/nodegroups.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
+#include "nodes/print.h"
 #include "utils/dynahash.h"
+#include "utils/lsyscache.h"
 #include "utils/globalplancache.h"
 #include "utils/memutils.h"
 #include "utils/plancache.h"
@@ -88,14 +90,48 @@ GlobalPlanCache::GetStatus(uint32 *num)
             stat_array[index].query = (char *)palloc0(sizeof(char) * len);
             rc = memcpy_s(stat_array[index].query, len, ps->query_string, len);
             securec_check(rc, "\0", "\0");
+            char* maskQuery = maskPassword(stat_array[index].query);
+            stat_array[index].query = (maskQuery != NULL) ? maskQuery : stat_array[index].query;
             stat_array[index].refcount = ps->gpc.status.GetRefCount();
             stat_array[index].valid = ps->gpc.status.IsValid();
             stat_array[index].DatabaseID = entry->key.env.plainenv.database_id;
-            stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
-            rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, entry->key.env.schema_name, NAMEDATALEN);
-            securec_check(rc, "\0", "\0");
+            StringInfoData all_schema_name;
+            ListCell *cell = NULL;
+            bool has_schema = false;
+            foreach(cell, entry->key.env.search_path->schemas) {
+                char* nspname = get_namespace_name(lfirst_oid(cell));
+                if (nspname != NULL) {
+                    if (has_schema)
+                        appendStringInfo(&all_schema_name, ", ");
+                    else
+                        initStringInfo(&all_schema_name);
+                    appendStringInfo(&all_schema_name, "%s", nspname);
+                    has_schema = true;
+                }
+                pfree_ext(nspname);
+            }
+            if (!has_schema) {
+                stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
+                rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, entry->key.env.schema_name, NAMEDATALEN);
+                securec_check(rc, "\0", "\0");
+            } else {
+                stat_array[index].schema_name = all_schema_name.data;
+            }
             stat_array[index].params_num = ps->num_params;
             stat_array[index].func_id = entry->key.spi_signature.func_oid;
+            bool printPlan = u_sess->attr.attr_sql.Debug_print_plan && entry->val.plansource->gplan &&
+                             u_sess->proc_cxt.MyDatabaseId == entry->key.env.plainenv.database_id;
+            if (printPlan) {
+                elog(LOG, "gpc query string: %s", stat_array[index].query);
+                ListCell* lc = NULL;
+                foreach (lc, entry->val.plansource->gplan->stmt_list) {
+                    Node* st = NULL;
+                    st = (Node*)lfirst(lc);
+                    if (IsA(st, PlannedStmt)) {
+                        elog_node_display(LOG, "gpc gplan", st, u_sess->attr.attr_sql.Debug_pretty_print);
+                    }
+                }
+            }
             index++;
         }
     }
@@ -107,10 +143,10 @@ GlobalPlanCache::GetStatus(uint32 *num)
             CachedPlanSource *curr = (CachedPlanSource *)cell->data.ptr_value;
             int len = strlen(curr->query_string) + 1;
             stat_array[index].query = (char *)palloc0(sizeof(char) * len);
-
             rc = memcpy_s(stat_array[index].query, len, curr->query_string, len);
             securec_check(rc, "\0", "\0");
-
+            char* maskQuery = maskPassword(stat_array[index].query);
+            stat_array[index].query = (maskQuery != NULL) ? maskQuery : stat_array[index].query;
             stat_array[index].refcount = curr->gpc.status.GetRefCount();
             stat_array[index].valid = curr->gpc.status.IsValid();
             stat_array[index].DatabaseID = 0;

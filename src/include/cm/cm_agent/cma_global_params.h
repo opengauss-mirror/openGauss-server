@@ -202,7 +202,7 @@ extern int g_clean_drop_cn_flag;
 extern int g_cm_server_instance_status;
 extern int g_dn_role_for_phony_dead[CM_MAX_DATANODE_PER_NODE];
 extern int g_gtm_role_for_phony_dead;
-extern int g_cn_state_for_phony_dead;
+extern int g_localCnStatus;
 extern int g_dn_phony_dead_times[CM_MAX_DATANODE_PER_NODE];
 extern int g_gtm_phony_dead_times;
 extern int g_cn_phony_dead_times;

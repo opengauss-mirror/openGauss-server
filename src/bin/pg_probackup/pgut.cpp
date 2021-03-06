@@ -496,69 +496,6 @@ prompt_for_password(const char *username)
     in_password = false;
 }
 
-/*
- * Copied from pg_basebackup.c
- * Escape a parameter value so that it can be used as part of a libpq
- * connection string, e.g. in:
- *
- * application_name=<value>
- *
- * The returned string is malloc'd. Return NULL on out-of-memory.
- */
-static char *
-escapeConnectionParameter(const char *src)
-{
-    bool    need_quotes = false;
-    bool    need_escaping = false;
-    const char *p;
-    char    *dstbuf;
-    char    *dst;
-
-    /*
-    * First check if quoting is needed. Any quote (') or backslash (\)
-    * characters need to be escaped. Parameters are separated by whitespace,
-    * so any string containing whitespace characters need to be quoted. An
-    * empty string is represented by ''.
-    */
-    if (strchr(src, '\'') != NULL || strchr(src, '\\') != NULL)
-        need_escaping = true;
-
-    for (p = src; *p; p++)
-    {
-        if (isspace((unsigned char) *p))
-        {
-            need_quotes = true;
-            break;
-        }
-    }
-
-    if (*src == '\0')
-        return pg_strdup("''");
-
-    if (!need_quotes && !need_escaping)
-        return pg_strdup(src);	/* no quoting or escaping needed */
-
-    /*
-    * Allocate a buffer large enough for the worst case that all the source
-    * characters need to be escaped, plus quotes.
-    */
-    dstbuf = (char *)pg_malloc(strlen(src) * 2 + 2 + 1);
-
-    dst = dstbuf;
-    if (need_quotes)
-        *(dst++) = '\'';
-    for (; *src; src++)
-    {
-        if (*src == '\'' || *src == '\\')
-            *(dst++) = '\\';
-        *(dst++) = *src;
-    }
-    if (need_quotes)
-        *(dst++) = '\'';
-    *dst = '\0';
-
-    return dstbuf;
-}
 
 PGconn* pgut_connect(const char *host, const char *port,
                      const char *dbname, const char *username)
@@ -569,6 +506,8 @@ PGconn* pgut_connect(const char *host, const char *port,
     int            i;
     const char **keywords;
     const char **values;
+    errno_t rc = EOK;
+    char rwtimeoutStr[12] = {0};
 
     if (interrupted && !in_cleanup)
         elog(ERROR, "interrupted");
@@ -587,8 +526,12 @@ PGconn* pgut_connect(const char *host, const char *port,
     keywords[i] = "connect_timeout";               /* param connect timeout */
     values[i] = "120";                               /* default value         */
     i++;
+
+    rc = snprintf_s(rwtimeoutStr, sizeof(rwtimeoutStr), sizeof(rwtimeoutStr) - 1, "%d",
+                    rw_timeout ? 120 : rw_timeout);  /* default rw_timeout 120 */
+    securec_check_ss_c(rc, "", "");
     keywords[i] = "rw_timeout";                    /* param rw_timeout      */
-    values[i] = "120";                              /* default value         */
+    values[i] = rwtimeoutStr;                      /* rw_timeout value      */
     i++;
 
     if (host)
@@ -668,6 +611,8 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     int                 i;
     const char **keywords;
     const char **values;
+    errno_t rc = EOK;
+    char rwtimeoutStr[12] = {0};
 
     if (interrupted && !in_cleanup)
         elog(ERROR, "interrupted");
@@ -690,8 +635,12 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     keywords[i] = "connect_timeout";                /* param connect timeout */
     values[i] = "120";                                /* default value         */
     i++;
+
+    rc = snprintf_s(rwtimeoutStr, sizeof(rwtimeoutStr), sizeof(rwtimeoutStr) - 1, "%d",
+                    rw_timeout ? 120 : rw_timeout); /* default rw_timeout 120 */
+    securec_check_ss_c(rc, "", "");
     keywords[i] = "rw_timeout";                     /* param rw_timeout      */
-    values[i] = "120";                               /* default value         */
+    values[i] = rwtimeoutStr;                       /* rw_timeout value  */
     i++;
 
     if (host)
@@ -1528,6 +1477,7 @@ pgut_pgfnames(const char *path, bool strict)
             pfree(filenames[i]);
         }
         pfree(filenames);
+        (void)closedir(dir);
         return NULL;
     }
 

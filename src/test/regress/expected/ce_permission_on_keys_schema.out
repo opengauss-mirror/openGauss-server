@@ -1,0 +1,203 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS MyCMK1 CASCADE;
+NOTICE:  client master key "mycmk1" does not exist
+-- create another user
+DROP ROLE IF EXISTS newuser;
+NOTICE:  role "newuser" does not exist, skipping
+CREATE USER newuser PASSWORD 'gauss@123';
+-- create schema
+DROP SCHEMA IF EXISTS testns CASCADE;
+NOTICE:  schema "testns" does not exist, skipping
+CREATE SCHEMA testns;
+SET search_path to testns;
+-- grant privileges on schema (ALL = USAGE, CREATE)
+GRANT ALL ON SCHEMA testns TO newuser;
+-- CREATE CMK
+CREATE CLIENT MASTER KEY MyCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+-- CREATE CEK
+CREATE COLUMN ENCRYPTION KEY MyCEK1 WITH VALUES (CLIENT_MASTER_KEY = MyCMK1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- SHOULD FAILL - create TABLE using existing MyCEK1 (missing permissions to both MyCEK1 and MyCMK1)
+CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
+ERROR:  permission denied for column encryption key mycek1
+RESET SESSION AUTHORIZATION;
+-- add permission to the keys to newuser (ALL = USAGE, DROP)
+GRANT USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 to newuser;
+GRANT USAGE ON CLIENT_MASTER_KEY MyCMK1 to newuser;
+-------------------------
+-- change to new user
+-------------------------
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+-- create TABLE 
+CREATE TABLE acltest1 (x int, x2 varchar(50) ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = MyCEK1, ENCRYPTION_TYPE = DETERMINISTIC));
+SELECT has_cmk_privilege('newuser', 'testns.MyCMK1', 'USAGE');
+ has_cmk_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_cek_privilege('newuser', 'testns.MyCEK1', 'USAGE');
+ has_cek_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_cmk_privilege('newuser', 'testns.MyCMK1', 'DROP');
+ has_cmk_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_cek_privilege('newuser', 'testns.MyCEK1', 'DROP');
+ has_cek_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_schema_privilege('newuser', 'testns', 'USAGE');
+ has_schema_privilege 
+----------------------
+ t
+(1 row)
+
+SELECT has_schema_privilege('newuser', 'testns', 'CREATE');
+ has_schema_privilege 
+----------------------
+ t
+(1 row)
+
+SELECT has_table_privilege('newuser', 'acltest1', 'INSERT, SELECT, UPDATE, DELETE, TRUNCATE, TRIGGER');
+ has_table_privilege 
+---------------------
+ t
+(1 row)
+
+--check key namespace
+SELECT nspname FROM pg_namespace JOIN gs_client_global_keys on pg_namespace.Oid = key_namespace;
+ nspname 
+---------
+ testns
+(1 row)
+
+SELECT nspname FROM pg_namespace JOIN gs_column_keys on pg_namespace.Oid = key_namespace;
+ nspname 
+---------
+ testns
+(1 row)
+
+RESET SESSION AUTHORIZATION;
+--check key owner
+SELECT count(usename) FROM pg_user JOIN gs_client_global_keys on usesysid = key_owner;
+ count 
+-------
+     1
+(1 row)
+
+SELECT count(usename) FROM pg_user JOIN gs_column_keys on usesysid = key_owner;
+ count 
+-------
+     1
+(1 row)
+
+--check drop cek/cmk if encrypted table exist(false)
+DROP COLUMN ENCRYPTION KEY MyCEK1;
+ERROR:  cannot drop column encryption key: mycek1 because other objects depend on it
+DETAIL:  encrypted column: x2 depends on column encryption key: mycek1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP CLIENT MASTER KEY MyCMK1;
+ERROR:  cannot drop client master key: mycmk1 because other objects depend on it
+DETAIL:  column encryption key: mycek1 depends on client master key: mycmk1
+encrypted column: x2 depends on column encryption key: mycek1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+--check drop cek/cmk cascade if encrypted table exist(false)
+DROP COLUMN ENCRYPTION KEY MyCEK1 CASCADE;
+ERROR:  cannot drop column encryption key: mycek1 cascadely because encrypted column depend on it.
+HINT:  we have to drop encrypted column: x2, ... before drop column encryption key: mycek1 cascadely.
+DROP CLIENT MASTER KEY MyCMK1 CASCADE;
+ERROR:  cannot drop client master key: mycmk1 cascadely because encrypted column depend on it.
+HINT:  we have to drop encrypted column: x2, ... before drop client master key: mycmk1 cascadely.
+--check drop table(success)
+DROP TABLE acltest1;
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+--check DROP KEY WITHOUT PREMISSION(false)
+DROP COLUMN ENCRYPTION KEY MyCEK1;
+ERROR:  permission denied for column encryption key mycek1
+DROP CLIENT MASTER KEY MyCMK1;
+ERROR:  cannot drop client master key: mycmk1 because other objects depend on it
+DETAIL:  column encryption key: mycek1 depends on client master key: mycmk1
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+--check DELETE KEYS(false)
+delete from gs_client_global_keys;
+ERROR:  permission denied for relation gs_client_global_keys
+delete from gs_column_keys;
+ERROR:  permission denied for relation gs_column_keys
+RESET SESSION AUTHORIZATION;
+REVOKE USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 FROM newuser;
+REVOKE USAGE ON CLIENT_MASTER_KEY MyCMK1 FROM newuser;
+GRANT DROP ON COLUMN_ENCRYPTION_KEY MyCEK1 to newuser;
+GRANT DROP ON CLIENT_MASTER_KEY MyCMK1 to newuser;
+SELECT has_cmk_privilege('newuser', 'testns.MyCMK1', 'USAGE');
+ has_cmk_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_cek_privilege('newuser', 'testns.MyCEK1', 'USAGE');
+ has_cek_privilege 
+-------------------
+ f
+(1 row)
+
+SELECT has_cmk_privilege('newuser', 'testns.MyCMK1', 'DROP');
+ has_cmk_privilege 
+-------------------
+ t
+(1 row)
+
+SELECT has_cek_privilege('newuser', 'testns.MyCEK1', 'DROP');
+ has_cek_privilege 
+-------------------
+ t
+(1 row)
+
+SET SESSION AUTHORIZATION newuser PASSWORD 'gauss@123';
+SET search_path to testns;
+--check DROP KEY WITH PREMISSION(success)
+DROP COLUMN ENCRYPTION KEY MyCEK1;
+DROP CLIENT MASTER KEY MyCMK1;
+RESET SESSION AUTHORIZATION;
+--check pg_depend(false)
+SELECT exists (SELECT refobjid FROM pg_depend JOIN gs_client_global_keys on gs_client_global_keys.key_namespace = refobjid);
+ exists 
+--------
+ f
+(1 row)
+
+SET search_path to testns;
+CREATE CLIENT MASTER KEY MyCMK1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY MyCEK1 WITH VALUES (CLIENT_MASTER_KEY = MyCMK1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+--check pg_depend(true)
+SELECT exists (SELECT refobjid FROM pg_depend JOIN gs_client_global_keys on gs_client_global_keys.key_namespace = refobjid);
+ exists 
+--------
+ t
+(1 row)
+
+--check drop schema cascade if cek/cmk exist(success)
+DROP SCHEMA IF EXISTS testns CASCADE;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to client master key: mycmk1
+drop cascades to column encryption key: mycek1
+DROP SCHEMA IF EXISTS newuser CASCADE;
+DROP ROLE IF EXISTS newuser;
+\! gs_ktool -d all
+DELETE ALL
+ 1

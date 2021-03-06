@@ -1480,36 +1480,29 @@ List* ExecInsertIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* e
             continue;
         }
 
+        /* The GPI index insertion is the same as that of a common table */
         if (ispartitionedtable && !RelationIsGlobalIndex(indexRelation)) {
-            /* The GPI index insertion is the same as that of a common table */
-            if (RelationIsGlobalIndex(indexRelation)) {
-                if (!indexRelation->rd_index->indisusable) {
-                    continue;
-                }
-                actualindex = indexRelation;
-            } else {
-                partitionedindexid = RelationGetRelid(indexRelation);
+            partitionedindexid = RelationGetRelid(indexRelation);
+            if (!PointerIsValid(partitionIndexOidList)) {
+                partitionIndexOidList = PartitionGetPartIndexList(p);
+                // no local indexes available
                 if (!PointerIsValid(partitionIndexOidList)) {
-                    partitionIndexOidList = PartitionGetPartIndexList(p);
-                    // no local indexes available
-                    if (!PointerIsValid(partitionIndexOidList)) {
-                        return NIL;
-                    }
+                    return NIL;
                 }
+            }
 
-                indexpartitionid = searchPartitionIndexOid(partitionedindexid, partitionIndexOidList);
+            indexpartitionid = searchPartitionIndexOid(partitionedindexid, partitionIndexOidList);
 
-                searchFakeReationForPartitionOid(estate->esfRelations,
-                    estate->es_query_cxt,
-                    indexRelation,
-                    indexpartitionid,
-                    actualindex,
-                    indexpartition,
-                    RowExclusiveLock);
-                // skip unusable index
-                if (!indexpartition->pd_part->indisusable) {
-                    continue;
-                }
+            searchFakeReationForPartitionOid(estate->esfRelations,
+                estate->es_query_cxt,
+                indexRelation,
+                indexpartitionid,
+                actualindex,
+                indexpartition,
+                RowExclusiveLock);
+            // skip unusable index
+            if (!indexpartition->pd_part->indisusable) {
+                continue;
             }
         } else {
             actualindex = indexRelation;

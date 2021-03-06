@@ -78,7 +78,8 @@ endif
 
 ifeq ($(SUPPORT_HOTPATCH), yes)
 define hotpatch_setup_func
-    export CODE_BASE=$(realpath $(top_builddir)/../)
+    export CODE_BASE=$(realpath $(top_builddir)) && \
+    export PATCHLIB_HOME=$(realpath $(LIBHOTPATCH_HOME))
 endef
 else
 define hotpatch_setup_func
@@ -262,7 +263,8 @@ fastcheck_inplace: all tablespace-setup
 
 fastcheck_single: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
-	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0 -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+	$(call hotpatch_setup_func) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
 fastcheck_single_mot: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \

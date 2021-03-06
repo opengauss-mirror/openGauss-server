@@ -87,7 +87,7 @@ typedef enum {
     DO_BLOB_DATA,
     DO_PRE_DATA_BOUNDARY,
     DO_POST_DATA_BOUNDARY,
-    DO_FTBL_CONSTRAINT, /* dump informational constraint info of the HDFS foreign table */
+    DO_FTBL_CONSTRAINT, /* dump informational constraint info of the HDFS foreign table, also used for MOT table */
     DO_RLSPOLICY        /* dump row level security policy of table */
 } DumpableObjectType;
 

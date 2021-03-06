@@ -6340,6 +6340,11 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("\"%c\" not supported", *(Np->inout_p))));
                         if (plen > 0 && plen <= MAX_HEX_LEN_FOR_INT32) {
+                            if ((int64)Np->read_pre * 16 + curNum > INT_MAX) {
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                                        errmsg("The hexadecimal number is greater than the maximum INT value")));
+                            }
                             Np->read_pre = Np->read_pre * 16 + curNum;
                             int pre_len = 1, dup_read_pre = Np->read_pre;
 

@@ -194,8 +194,6 @@ recheck:
          * Do the hard part.
          */
         func = do_compile(fcinfo, proc_tup, func, &hashkey, for_validator);
-        if (ENABLE_CN_GPC)
-            set_func_expr_unique_id(func);
     }
 
     ReleaseSysCache(proc_tup);

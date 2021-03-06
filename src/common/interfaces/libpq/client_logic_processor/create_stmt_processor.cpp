@@ -49,7 +49,12 @@ RawValue *createStmtProcessor::add_cl_column_type(const ColumnDef * const column
     if (data_type == NULL) {
         return NULL;
     }
-    RawValue *raw_value = new RawValue(statement_data->conn);
+    RawValue *raw_value = new (std::nothrow) RawValue(statement_data->conn);
+    if (raw_value == NULL) {
+        fprintf(stderr, "failed to new RawValue object\n");
+        free((char *)data_type);
+        exit(EXIT_FAILURE);
+    }
     if (strlen(data_type) == 0) {
         return raw_value;
     }
@@ -156,7 +161,7 @@ RawValue *createStmtProcessor::trans_column_definition(const ColumnDef * const c
                 case CONSTR_DEFAULT: {
                     Assert(constraint->raw_expr);
                     if (!exprProcessor::expand_expr(constraint->raw_expr, statement_data, expr_vec)) {
-                        fprintf(stderr, "failed to create default value of client_logic\n");
+                        fprintf(stderr, "failed to new default value of client_logic\n");
                     }
                     if (cached_column->get_column_hook_executors()->at(0) != NULL) {
                         cached_column->get_column_hook_executors()->at(0)->set_data_type(column_def, cached_column);
@@ -326,8 +331,13 @@ bool createStmtProcessor::process_column_defintion(ColumnDef *column, Node *elem
     char object_fqdn[NAMEDATALEN * 4] = {0};
     size_t object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
     if (object_fqdn_size == 0) {
-        fprintf(stderr, "ERROR(CLIENT):error while trying to retrieve column encryption key from cache\n");
-        return false;
+        statement_data->conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
+        ICachedColumnManager::get_instance().load_cache(statement_data->conn);
+        object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
+        if (object_fqdn_size == 0) {
+            fprintf(stderr, "ERROR(CLIENT):error while trying to retrieve column encryption key from cache\n");
+            return false;
+        }
     }
 
     bool error = false;

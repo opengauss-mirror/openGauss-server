@@ -12,7 +12,7 @@ create table table1 (id int);
 select /*+ redistribute(table1) +*/ * from table1;
 drop table table1;
 create barrier;
-clean connection to node (dn2);
+clean connection to node (dn2) for database regression;
 execute direct on (dn2) 'select * from table1';
 create table table_neg_tmp (id int);
 create table table1 (id int) to node (dn2);

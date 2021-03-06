@@ -230,13 +230,13 @@ int main(int argc, char** argv)
     }
 
     /* Make sure the input file exists */
-    FILE* fd = fopen(inputFileSpec, PG_BINARY_R);
-    if (NULL == fd) {
+    FILE* fp = fopen(inputFileSpec, PG_BINARY_R);
+    if (NULL == fp) {
         (void)fprintf(stderr, "%s: %s\n", inputFileSpec, strerror(errno));
         exit_nicely(1);
     }
-    (void)fclose(fd);
-    fd = NULL;
+    (void)fclose(fp);
+    fp = NULL;
 
     /* validate the restore options before start the actual operation */
     validate_restore_options(argv, opts);
@@ -340,6 +340,10 @@ int main(int argc, char** argv)
     CloseArchive(AH);
 
     GS_FREE(opts->superuser);
+    if (decrypt_key != NULL) {
+        rc = memset_s(decrypt_key, strlen(decrypt_key), '\0', strlen(decrypt_key));
+        securec_check_c(rc, "\0", "\0");
+    }
     GS_FREE(decrypt_key);
 
     /*free the memory allocated for gs_restore options */

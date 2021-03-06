@@ -175,7 +175,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     // PGSTAT_INIT_PLSQL_TIME_RECORD
     int64 startTime = 0;
     bool needRecord = false;
-
+    bool saved_current_stp_with_exception = false;
     /* 
      * if the atomic stored in fcinfo is false means allow 
      * commit/rollback within stored procedure. 
@@ -216,11 +216,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     }
 
     PGSTAT_START_PLSQL_TIME_RECORD();
-
+    saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
     /* Find or compile the function */
     func = plpgsql_compile(fcinfo, false);
-    /* gpc's spi hash key */
-    u_sess->SPI_cxt._current->spi_hash_key = SPICacheHashFunc(func->fn_hashkey, sizeof(PLpgSQL_func_hashkey));
 
     PGSTAT_END_PLSQL_TIME_RECORD(PL_COMPILATION_TIME);
 
@@ -268,6 +266,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         /* Decrement use-count, restore cur_estate, and propagate error */
         func->use_count--;
         func->cur_estate = save_cur_estate;
+        plpgsql_restore_current_value_stp_with_exception(saved_current_stp_with_exception);
         // resume the search_path when there is an error
         PopOverrideSearchPath();
         u_sess->misc_cxt.Pseudo_CurrentUserId = saved_Pseudo_CurrentUserId;
@@ -348,6 +347,11 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     int64 startTime = 0;
     bool needRecord = false;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    bool outerIsStream = u_sess->opt_cxt.is_stream;
+    bool outerIsStreamSupport = u_sess->opt_cxt.is_stream_support;
+#endif
+
     _PG_init();
 
     AssertEreport(IsA(codeblock, InlineCodeBlock), MOD_PLSQL, "Inline code block is required.");
@@ -356,8 +360,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
      * Connect to SPI manager
      */
     if ((rc = SPI_connect_ext(DestSPI, NULL, NULL, codeblock->atomic ? 0 : SPI_OPT_NONATOMIC)) != SPI_OK_CONNECT) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
+        ereport(ERROR, (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                 errmsg("SPI_connect failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
     }
@@ -410,11 +413,15 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
      * Disconnect from SPI manager
      */
     if ((rc = SPI_finish()) != SPI_OK_FINISH) {
-        ereport(ERROR,
-            (errmodule(MOD_PLSQL),
+        ereport(ERROR, (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                 errmsg("SPI_finish failed: %s when execute anonymous block.", SPI_result_code_string(rc))));
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    u_sess->opt_cxt.is_stream = outerIsStream;
+    u_sess->opt_cxt.is_stream_support = outerIsStreamSupport;
+#endif
 
     return retval;
 }
@@ -440,6 +447,11 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
     char* argmodes = NULL;
     bool istrigger = false;
     int i;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    bool outerIsStream = u_sess->opt_cxt.is_stream;
+    bool outerIsStreamSupport = u_sess->opt_cxt.is_stream_support;
+#endif
 
     _PG_init();
 
@@ -498,8 +510,7 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
          * Connect to SPI manager (is this needed for compilation?)
          */
         if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
+            ereport(ERROR, (errmodule(MOD_PLSQL),
                     errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                     errmsg("SPI_connect failed: %s when validate function.", SPI_result_code_string(rc))));
         }
@@ -528,12 +539,16 @@ Datum plpgsql_validator(PG_FUNCTION_ARGS)
          * Disconnect from SPI manager
          */
         if ((rc = SPI_finish()) != SPI_OK_FINISH) {
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL),
+            ereport(ERROR, (errmodule(MOD_PLSQL),
                     errcode(ERRCODE_SPI_CONNECTION_FAILURE),
                     errmsg("SPI_connect failed: %s when validate function.", SPI_result_code_string(rc))));
         }
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    u_sess->opt_cxt.is_stream = outerIsStream;
+    u_sess->opt_cxt.is_stream_support = outerIsStreamSupport;
+#endif
 
     ReleaseSysCache(tuple);
 

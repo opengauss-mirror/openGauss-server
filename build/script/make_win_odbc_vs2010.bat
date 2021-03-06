@@ -1,3 +1,12 @@
+rem #######################################################################
+rem Copyright (c): 2020-2025, Huawei Tech. Co., Ltd.
+rem descript: Compile windows ODBC
+rem           Return 0 means OK.
+rem           Return error-code means failed.
+rem version:  1.0
+rem date:     2020-12-29
+rem #######################################################################
+
 @echo off
 rem Make sure current dir is .\Build\Script
 
@@ -18,9 +27,8 @@ set ODBC_TMP_DIR=%ROOT_DIR%odbc_tmp
 
 set FULLBRANCH=%1
 if "%FULLBRANCH%" == "" (
-	echo FULLBRANCH is null
-	set ERRORNO=%ERROR_FULLBRANCH_NULL%
-	goto END
+    echo FULLBRANCH is null
+    set ERRORNO=%ERROR_FULLBRANCH_NULL% && goto END
 )
 
 set TAR_FILE=%ROOT_DIR%%FULLBRANCH%-Windows-Odbc.zip
@@ -54,8 +62,7 @@ if exist C:\"Program Files (x86)"\WinRAR (
 	set winrar=C:\"Program Files"\WinRAR\winrar
 ) else (
 	echo WinRAR was nowhere to be found in C:\"Program Files (x86)"\WinRAR or C:\"Program Files"\WinRAR
-	set ERRORNO=%ERROR_WINRAR_NOTEXIST%
-	goto END
+	set ERRORNO=%ERROR_WINRAR_NOTEXIST% && goto END
 )
 
 cd %ODBC_TMP_DIR%

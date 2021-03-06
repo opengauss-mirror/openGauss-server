@@ -964,7 +964,11 @@ int save_guc_para_info()
             continue;
         } else if (strncmp(line_info, "[cmserver]", sizeof("[cmserver]")) == 0) {
             is_cmserver = true;
+#ifdef ENABLE_MULTIPLE_NODES
             is_gtm = false;
+#else
+            is_cndn = false;
+#endif
             continue;
         } else if (strncmp(line_info, "[cmagent]", sizeof("[cmagent]")) == 0) {
             is_cmagent = true;
