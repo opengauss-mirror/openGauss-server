@@ -810,7 +810,6 @@ audit_enabled = on
 #------------------------------------------------------------------------------
 # ADIO 
 #------------------------------------------------------------------------------
-#enable_adio_function = off
 #enable_fast_allocate = off
 #prefetch_quantity = 32MB
 #backwrite_quantity = 8MB
