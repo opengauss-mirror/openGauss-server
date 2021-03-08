@@ -23,7 +23,7 @@ SELECT * FROM 信息;
 
 DROP TABLE 信息;
 DROP CLIENT MASTER KEY mycmk CASCADE;
-NOTICE:  drop cascades to column setting: mycek
+NOTICE:  drop cascades to column encryption key: mycek
 \! gs_ktool -d all
 DELETE ALL
  1

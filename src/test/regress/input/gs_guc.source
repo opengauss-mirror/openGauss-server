@@ -10,4 +10,3 @@
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_beta_nestloop_fusion=on"
 -----Reload(GUC)
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "cstore_buffers=10GB"
-

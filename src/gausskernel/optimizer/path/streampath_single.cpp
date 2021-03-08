@@ -54,63 +54,161 @@
 #endif /* PGXC */
 
 /*
- * @Description: create stream path for join.
+ * @Description: constructor for JoinPathGen.
  *
- * @param[IN] stream_outer: the stream is at the outer side of join.
- * @return Path*
+ * @param[IN] root: the plannerInfo for this join.
+ * @param[IN] joinrel: the join relation.
+ * @param[IN] jointype: join type.
+ * @param[IN] save_jointype: save join type.
+ * @param[IN] sjinfo: extra info about the join for selectivity estimation.
+ * @param[IN] semifactors: contains valid data if jointype is SEMI or ANTI.
+ * @param[IN] joinclauses: the clauses nodes to do join match.
+ * @param[IN] restrictlist: all RestrictInfo nodes to apply at the join.
+ * @param[IN] inner_path: the inner subpath for join.
+ * @param[IN] outer_path: the outer subpath for join.
+ * @param[IN] required_outer: the set of required outer rels.
  */
-Path* JoinPathGen::streamSidePath(bool stream_outer)
+JoinPathGen::JoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
+    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+    Path* outer_path, Path* inner_path, Relids required_outer)
+    : JoinPathGenBase(root, joinrel, jointype, save_jointype, sjinfo, semifactors, joinclauses,
+                      restrictinfo, outer_path, inner_path, required_outer)
+{}
+
+/*
+ * @Description: decontructor function for join path generation.
+ */
+JoinPathGen::~JoinPathGen()
+{}
+
+/*
+ * @Description: decide whether we need redistribute inner or outer side
+ *               base on subpath distribute keys, join clauses and target
+ *               node group.
+ *
+ * @return void
+ */
+void JoinPathGen::initDistribution()
 {
-    StreamInfo* sinfo = stream_outer ? &m_streamInfoPair->outer_info : &m_streamInfoPair->inner_info;
-    StreamType stream_type = sinfo->type;
-    List* distribute_key = sinfo->stream_keys;
-    ParallelDesc* smpDesc = &sinfo->smpDesc;
-    List* ssinfo = sinfo->ssinfo;
+    /*
+     * Wheather inner or outer need to be redistributed base on their distribute key and join clauses
+     *     TRUE means need to be redistributed,
+     *     FALSE means do not need to be redistributed
+     */
+    m_redistributeInner = is_distribute_need_on_joinclauses(
+        m_root, m_innerPath->distribute_keys, m_joinClauses, m_innerRel, m_outerRel, &m_rrinfoInner);
 
-    Path* path = sinfo->subpath;
-    List* pathkeys = NIL;
+    /*
+     * Wheather inner or outer need to be redistributed base on their distribute key and join clauses
+     *     TRUE means need to be redistributed,
+     *     FALSE means do not need to be redistributed
+     */
+    m_redistributeOuter = is_distribute_need_on_joinclauses(
+        m_root, m_outerPath->distribute_keys, m_joinClauses, m_outerRel, m_innerRel, &m_rrinfoOuter);
 
-    if (STREAM_NONE == sinfo->type)
-        return path;
-
-    /* choose pathkeys for stream */
-    if (m_joinmethod == T_MergeJoin) {
-        pathkeys = stream_outer ? m_outerPath->pathkeys : m_innerPath->pathkeys;
-    } else if (m_joinmethod == T_NestLoop && m_pathkeys != NIL) {
-        if (m_dop > 1)
-            pathkeys = NIL;
-        else
-            pathkeys = stream_outer ? m_outerPath->pathkeys : m_innerPath->pathkeys;
-    }
-
-    if ((JOIN_UNIQUE_INNER == m_saveJointype && stream_outer == false) ||
-        (JOIN_UNIQUE_OUTER == m_saveJointype && stream_outer)) {
-        return makeJoinUniquePath(stream_outer, pathkeys);
-    } else {
-        return create_stream_path(m_root,
-            path->parent,
-            stream_type,
-            distribute_key,
-            pathkeys,
-            path,
-            sinfo->multiple,
-            m_targetDistribution,
-            smpDesc,
-            ssinfo);
-    }
-
-    return NULL;
+    initRangeListDistribution();
 }
 
 /*
- * @Description: when subpath is replicate, we need to check if we can use redistribute.
+ * @Description: choose suitable parallel stream(like local stream)
+ *               for parallel plan.
  *
- * @return bool: true -- redistribution can be used.
+ * @return void
  */
-bool JoinPathGen::isReplicateJoinCanRedistribute()
+bool JoinPathGen::addJoinParallelInfo()
 {
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return false;
+    StreamType inner_stream = m_streamInfoPair->inner_info.type;
+    StreamType outer_stream = m_streamInfoPair->outer_info.type;
+
+    bool is_subplan_parallel = (m_innerPath->dop > 1) || (m_outerPath->dop > 1);
+    bool inner_can_local_distribute = true;
+    bool outer_can_local_distribute = true;
+    bool inner_need_local_distribute = true;
+    bool outer_need_local_distribute = true;
+
+    /* No need to add parallel info, keep origin path. */
+    if (!is_subplan_parallel && m_dop <= 1) {
+        return true;
+    }
+
+    /* check if we can use local redistribute and if we need local redistribute. */
+    parallelLocalRedistribute(&inner_can_local_distribute,
+        &outer_can_local_distribute,
+        &inner_need_local_distribute,
+        &outer_need_local_distribute);
+
+    /* Set unparallel stream info. */
+    if (is_subplan_parallel && m_dop <= 1) {
+        setStreamParallelInfo(false);
+        setStreamParallelInfo(true);
+    } else {
+        if (inner_stream == STREAM_BROADCAST || outer_stream == STREAM_BROADCAST) {
+                setStreamParallelInfo(false);
+                setStreamParallelInfo(true);
+        } else if (inner_stream == STREAM_REDISTRIBUTE && outer_stream == STREAM_NONE) {
+            if (outer_can_local_distribute) {
+                if (outer_need_local_distribute)
+                    setStreamParallelInfo(true, LOCAL_DISTRIBUTE);
+                else
+                    setStreamParallelInfo(true);
+                setStreamParallelInfo(false);
+            } else {
+                return false;
+            }
+        } else if (inner_stream == STREAM_NONE && outer_stream == STREAM_REDISTRIBUTE) {
+            if (inner_can_local_distribute) {
+                if (inner_need_local_distribute)
+                    setStreamParallelInfo(false, LOCAL_DISTRIBUTE);
+                else
+                    setStreamParallelInfo(false);
+                setStreamParallelInfo(true);
+            } else {
+                return false;
+            }
+        } else if (inner_stream == STREAM_REDISTRIBUTE && outer_stream == STREAM_REDISTRIBUTE) {
+            setStreamParallelInfo(false);
+            setStreamParallelInfo(true);
+        } else if (inner_stream == STREAM_NONE && outer_stream == STREAM_NONE) {
+            /* New stream info is create for this situation. */
+            StreamInfoPair* streamInfoPair = m_streamInfoPair;
+
+            /* case 1: local broadcast inner */
+            if (can_broadcast_inner(m_jointype, m_saveJointype, false, NIL, NIL)) {
+                newStreamInfoPair(streamInfoPair);
+                setStreamParallelInfo(false, LOCAL_BROADCAST);
+                setStreamParallelInfo(true);
+                m_streamInfoList = lappend(m_streamInfoList, (void*)m_streamInfoPair);
+            }
+
+            /* case 2: local broadcast outer */
+            if (can_broadcast_outer(m_jointype, m_saveJointype, false, NIL, NIL)) {
+                newStreamInfoPair(streamInfoPair);
+                setStreamParallelInfo(false);
+                setStreamParallelInfo(true, LOCAL_BROADCAST);
+                m_streamInfoList = lappend(m_streamInfoList, m_streamInfoPair);
+            }
+
+            /* case 3: local redistribute inner and outer */
+            if (inner_can_local_distribute && outer_can_local_distribute) {
+                newStreamInfoPair(streamInfoPair);
+                if (inner_need_local_distribute)
+                    setStreamParallelInfo(false, LOCAL_DISTRIBUTE);
+                else
+                    setStreamParallelInfo(false);
+
+                if (outer_need_local_distribute)
+                    setStreamParallelInfo(true, LOCAL_DISTRIBUTE);
+                else
+                    setStreamParallelInfo(true);
+                m_streamInfoList = lappend(m_streamInfoList, (void*)m_streamInfoPair);
+            }
+
+            pfree_ext(streamInfoPair);
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /*
@@ -130,59 +228,15 @@ void JoinPathGen::addJoinStreamInfo()
 
     initDistribution();
 
-    /* Add stream info base on join clauses and subpath distributions. */
-    addStreamMppInfo();
+    if (m_dop > 1) {
+        /* Add stream info base on join clauses and subpath distributions. */
+        addStreamMppInfo();
+    } else {
+        setStreamBaseInfo(STREAM_NONE, STREAM_NONE, NIL, NIL);
+    }
 
     /* Add stream info base on parallel degree. */
     addStreamParallelInfo();
-}
-
-/*
- * @Description: Add stream info based on target nodegroup and subpath nodegroup.
- *
- * @return void
- */
-void JoinPathGen::addStreamNodeGroupInfo()
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-}
-
-/*
- * @Description: Add stream info based on data skew info when we use redistribute.
- *
- * @return void
- */
-void JoinPathGen::addStreamSkewInfo()
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-}
-
-/*
- * @Description: set stream info for nodegroup.
- *
- * @param[IN] stream_outer: true -- outer side of join.
- * @return bool: not suitable for this target nodegroup.
- */
-bool JoinPathGen::setStreamNodeGroupInfo(bool stream_outer)
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return false;
-}
-
-/*
- * @Description: check data skew info and try to generate a optimize path.
- *               And we need know where the skew info comes from to decide
- *               futher option.
- *
- * @return int: SKEW_RES_NONE -- no skew optimize path is generate.
- *              SKEW_RES_STATISTIC -- skew info comes from statistic info.
- *              SKEW_RES_HINT -- skew info comes from plan hint.
- *              SKEW_RES_RULE -- skew info comes from rules.
- */
-uint32 JoinPathGen::setStreamSkewInfo()
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return 0;
 }
 
 /*
@@ -233,26 +287,34 @@ void JoinPathGen::setStreamParallelInfo(bool stream_outer, SmpStreamType sstype)
 }
 
 /*
- * @Description: create a unique path for unique join with
- *               skewness at the no-unique side.
+ * @Description: set distribute keys for join path.
  *
- * @param[IN] stream_outer: if it is the outer side of join.
- * @param[OUT] pathkeys: path sort keys.
- * @return Path*: unique path.
+ * @param[IN] joinpath: join path.
+ * @param[IN] desired_key: desired key that try to meet.
+ * @param[IN] exact_match: if there's a desired key, whether we should do exact match.
+ * @return bool: if the path is valid.
  */
-Path* JoinPathGen::makeJoinSkewUniquePath(bool stream_outer, List* pathkeys)
+const bool JoinPathGen::setJoinDistributeKeys(JoinPath* joinpath, List* desired_key, bool exact_match)
 {
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return NULL;
-}
+    Path* inner_path = joinpath->innerjoinpath;
+    Path* outer_path = joinpath->outerjoinpath;
 
-/*
- * @Description: confirm if we can find distribute keys at subpath's targetlist.
- *
- * @return void
- */
-void JoinPathGen::confirmDistributeKeys(StreamInfo* sinfo)
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    bool is_roundrobin_inner = (inner_path->locator_type == LOCATOR_TYPE_RROBIN);
+    bool is_roundrobin_outer = (outer_path->locator_type == LOCATOR_TYPE_RROBIN);
+
+    bool is_path_valid = true;
+
+    if (is_roundrobin_inner || is_roundrobin_outer) {
+        joinpath->path.distribute_keys = NIL;
+    } else if (joinpath->path.dop > 1) {
+        if (m_jointype != JOIN_FULL) {
+            joinpath->path.distribute_keys = locate_distribute_key(
+                m_jointype, outer_path->distribute_keys, inner_path->distribute_keys, desired_key, exact_match);
+            if (!joinpath->path.distribute_keys)
+                is_path_valid = false;
+        }
+    }
+
+    return is_path_valid;
 }
 

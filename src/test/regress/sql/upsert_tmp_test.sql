@@ -8,10 +8,6 @@ CREATE TEMP TABLE t_hash_tmp_1 (c1 INT, c2 INT PRIMARY KEY, c3 VARCHAR, c4 INT[3
 CREATE TEMP TABLE t_rep_tmp_0 (c1 INT, c2 INT, c3 VARCHAR, c4 INT[3], c5 INT[5], c6 atype, c7 btype) ;
 CREATE TEMP TABLE t_rep_tmp_1 (c1 INT, c2 INT PRIMARY KEY, c3 VARCHAR, c4 INT[3], c5 INT[5], c6 atype, c7 btype) ;
 
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
-
 -- hash table
 -- tmp table without primary key
 INSERT INTO t_hash_tmp_0 VALUES(1, 1, 'C3', '{1,2,3}', '{10,20,30,40,50}', ROW(10,20), ROW(100, ROW(10,20), '{100,200}')),

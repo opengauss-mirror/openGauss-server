@@ -98,6 +98,11 @@ typedef struct knl_u_stream_context {
     class StreamNodeGroup* global_obj;
 
     class StreamProducer* producer_obj;
+
+    MemoryContext stream_runtime_mem_cxt;
+
+    /* Shared memory context for in-memory data exchange. */
+    MemoryContext data_exchange_mem_cxt;
 } knl_u_stream_context;
 
 typedef struct knl_u_executor_context {
@@ -209,6 +214,12 @@ typedef struct knl_u_SPI_context {
     /* Recording the nested exception counts for commit/rollback statement after. */
     int portal_stp_exception_counter;
 
+    /* 
+     * Recording the current execute procedure or function is with a exception declare
+     * or not, if it called by a procedure or function with exception,it's value still
+     * be true
+     */
+    bool current_stp_with_exception;
 } knl_u_SPI_context;
 
 typedef struct knl_u_index_context {
@@ -743,6 +754,10 @@ typedef struct knl_u_plancache_context {
      * in order to reduce overhead for short-lived queries.
      */
     struct CachedPlanSource* unnamed_stmt_psrc;
+    /* current plancache pointer for pbe in dn gpc */
+    struct CachedPlanSource* cur_stmt_psrc;
+    /* plancache pointer count in dn gpc for dfx, always be 0 or 1 */
+    int private_refcount;
 
     /* recode if the query contains params, used in pgxc_shippability_walker */
     bool query_has_params;
@@ -971,18 +986,15 @@ typedef struct knl_u_proc_context {
     bool gsRewindAddCount;
     bool PassConnLimit;
 
+    char applicationName[NAMEDATALEN];        /* receive application name in ProcessStartupPacket */
+
     /*
      * * Session status of running backup, used for sanity checks in SQL-callable
      * * functions to start and stop backups.
      * */
     enum SessionBackupState sessionBackupState;
     bool registerExclusiveHandlerdone;
-    /*
-     * Store label file and tablespace map during non-exclusive backups.
-     */
-    char* LabelFile;
-    char* TblspcMapFile;
-    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
+
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */
@@ -1221,6 +1233,8 @@ typedef struct knl_u_xact_context {
     char* savePrepareGID;
 
     bool pbe_execute_complete;
+    char *send_seqname;
+    int64 send_result;
 } knl_u_xact_context;
 
 typedef struct knl_u_plpgsql_context {
@@ -1554,6 +1568,7 @@ typedef struct knl_u_libpq_context {
     List* ident_line_nums;
     MemoryContext ident_context;
     bool IsConnFromCmAgent;
+    bool HasErrorAccurs; /* error accurs, need destory handle */
 #ifdef USE_SSL
     bool ssl_loaded_verify_locations;
     bool ssl_initialized;
@@ -1789,6 +1804,8 @@ typedef struct knl_u_unique_sql_context {
      *      # call PortalRun -> update unique sql stat
      */
     bool is_multi_unique_sql;
+    /* for each sql in multi queries, remember the offset location */
+    int32 multi_sql_offset;
     char* curr_single_unique_sql;
 
     /*
@@ -2261,7 +2278,6 @@ typedef struct knl_session_context {
     MemoryContext top_transaction_mem_cxt;
     MemoryContext self_mem_cxt;
     MemoryContext top_portal_cxt;
-    MemoryContext probackup_context;
     MemoryContextGroup* mcxt_group;
     /* temp_mem_cxt is a context which will be reset when the session attach to a thread */
     MemoryContext temp_mem_cxt;

@@ -45,6 +45,39 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node);
 static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node);
 
 /* ----------------------------------------------------------------
+ *		ReleaseNodeVMBuffer
+ *
+ *		Release VM buffer pin, if any.
+ * ----------------------------------------------------------------
+ */
+static void ReleaseNodeVMBuffer(IndexOnlyScanState* node)
+{
+    if (node->ioss_VMBuffer != InvalidBuffer) {
+        ReleaseBuffer(node->ioss_VMBuffer);
+        node->ioss_VMBuffer = InvalidBuffer;
+    }
+}
+
+/* ----------------------------------------------------------------
+ *		ExecGPIGetNextPartRelation
+ * ----------------------------------------------------------------
+ */
+static bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc indexScan)
+{
+    if (IndexScanNeedSwitchPartRel(indexScan)) {
+        /* Release VM buffer pin, if any. */
+        ReleaseNodeVMBuffer(node);
+        /* Change the heapRelation in indexScanDesc to Partition Relation of current index */
+        if (!GPIGetNextPartRelation(indexScan->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+            return false;
+        }
+        indexScan->heapRelation = indexScan->xs_gpi_scan->fakePartRelation;
+    }
+
+    return true;
+}
+
+/* ----------------------------------------------------------------
  *		IndexOnlyNext
  *
  *		Retrieve a tuple from the IndexOnlyScan node's index.
@@ -100,14 +133,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
          * reading the TID; and (2) is satisfied by the acquisition of the
          * buffer content lock in order to insert the TID.
          */
-        if (IndexScanNeedSwitchPartRel(indexScan)) {
-            /*
-             * Change the heapRelation in indexScanDesc to Partition Relation of current index
-             */
-            if (!GPIGetNextPartRelation(indexScan->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
-                continue;
-            }
-            indexScan->heapRelation = indexScan->xs_gpi_scan->fakePartRelation;
+        if (!ExecGPIGetNextPartRelation(node, indexScan)) {
+            continue;
         }
         if (!visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
             /*

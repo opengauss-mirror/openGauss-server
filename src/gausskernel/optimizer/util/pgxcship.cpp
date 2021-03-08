@@ -3561,6 +3561,17 @@ static inline bool trigger_need_compile(int trig_idx, Relation rel)
  */
 static bool pgxc_is_trigger_shippable(int trig_idx, Relation rel)
 {
+    /* For ordinary triggers, if enable_trigger_shipping is off, directly return false. 
+     * Notice: We should consider if trigger is internal or not, since internal trigger 
+     * must run on DN.
+     */
+    if (!u_sess->attr.attr_sql.enable_trigger_shipping) {
+        if (!REL_GET_ITH_TRIG(rel, trig_idx).tgisinternal)
+            return false;
+        else
+            return true;
+    }
+
     bool res = true;
 
     /* We don't check the trigger when it's disabled. */
@@ -4085,11 +4096,16 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
     if (!has_consistent_execnodes(exec_nodes_rte, exec_nodes_qry, &dcnt_all)) {
         return;
     }
-    /* Only Support pure HASH/REPLICATION for now */
-    if (exec_nodes_rte->baselocatortype != LOCATOR_TYPE_HASH) {
+    /* Support HASH/REPLICATION/LIST/RANGE for now */
+    bool isDistBySlice = IsLocatorDistributedBySlice(exec_nodes_rte->baselocatortype);
+    if (exec_nodes_rte->baselocatortype != LOCATOR_TYPE_HASH && !isDistBySlice) {
         /* Handle REPLICATION statements, all target entries need to be parsable */
         sc_context->sc_inselect = IsExecNodesReplicated(exec_nodes_rte) && \
             is_insert_subquery_parsable(query->targetList);
+        return;
+    }
+    /* List/Range tables are shippable iff sliceinfo matches, keys and key order match, and NodeGroup matches. */
+    if (isDistBySlice && !PgxcIsDistInfoSame(exec_nodes_rte, exec_nodes_qry)) {
         return;
     }
     /* If targets are not consistent throughout the query, drop it */

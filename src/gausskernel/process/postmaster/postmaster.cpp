@@ -199,7 +199,6 @@
 #include "funcapi.h"
 #include "utils/memprot.h"
 #include "pgstat.h"
-#include "utils/globalpreparestmt.h"
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
@@ -262,6 +261,7 @@ static bool isNeedGetLCName = true;
 #define PM_BUSY_ALARM_US 1000000L
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
+#define CHECK_TIMES 10
 
 static char gaussdb_state_file[MAXPGPATH] = {0};
 
@@ -1867,7 +1867,7 @@ int PostmasterMain(int argc, char* argv[])
         write_nondefault_variables(PGC_POSTMASTER);
 #endif
     }
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     /* init hotpatch */
     if (hotpatch_remove_signal_file(t_thrd.proc_cxt.DataDir) == HP_OK) {
         int ret;
@@ -1976,18 +1976,9 @@ int PostmasterMain(int argc, char* argv[])
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
         SHARED_CONTEXT);
-
-    g_instance.cache_cxt.global_cache_mem = AllocSetContextCreate(g_instance.instance_context,
-                                                        "GlobalCacheMemory",
-                                                        ALLOCSET_DEFAULT_MINSIZE,
-                                                        ALLOCSET_DEFAULT_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE,
-                                                        SHARED_CONTEXT,
-                                                        DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
-                                                        false);
-
-    g_instance.plan_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPlanCache();
-    g_instance.prepare_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPrepareStmt();
+        
+    /* create global cache memory context */
+    knl_g_cachemem_create();
 
     /* create node group cache hash table */
     ngroup_info_hash_create();
@@ -3291,6 +3282,15 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     ereport(elevel,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("requested backend version is larger than grand version.")));
+            } else if (strcmp(nameptr, "enable_full_encryption") == 0) {
+                bool enable_ce = false;
+                if (!parse_bool(valptr, &enable_ce)) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("invalid value for parameter \"enable_full_encryption\""),
+                            errhint("Valid values are: 0, 1.")));
+                }
+                u_sess->attr.attr_common.enable_full_encryption = enable_ce;
             } else if (strcmp(nameptr, "connect_timeout") == 0) {
                 errno = 0;
                 const uint32 poolerConnectTimeoutMaxValue = 7200;  /* Max value of pooler_connect_timeout */
@@ -3361,6 +3361,11 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         ereport(DEBUG5, (errmsg("gs_restore connected")));
                     } else {
                         ereport(DEBUG5, (errmsg("application %s connected", valptr)));
+                    }
+
+                    errno_t ssrc = strncpy_s(u_sess->proc_cxt.applicationName, NAMEDATALEN, valptr, NAMEDATALEN - 1);
+                    if (ssrc != EOK) {
+                        ereport(WARNING, (errmsg("Save app name %s failed in receive startup packet", valptr)));
                     }
                 }
                 /* Assume it's a generic GUC option */
@@ -3528,22 +3533,23 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
     if ((!AM_WAL_SENDER && !(isMaintenanceConnection &&
                                (clientIsGsql || clientIsCmAgent || t_thrd.postmaster_cxt.senderToBuildStandby))) ||
         t_thrd.postmaster_cxt.senderToDummyStandby) {
-#ifdef ENABLE_MULTIPLE_NODES
-        if (STANDBY_MODE == hashmdata->current_mode)
-            ereport(
-                elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
-        else if (PENDING_MODE == hashmdata->current_mode && !IS_PGXC_COORDINATOR)
-            ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection in pending mode.")));
-#else
+
         if (PENDING_MODE == hashmdata->current_mode && !IS_PGXC_COORDINATOR) {
             ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection in pending mode.")));
-        } else if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
-            ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection if hot standby off")));
-        }
+                    errmsg("can not accept connection in pending mode.")));
+        } else {
+#ifdef ENABLE_MULTIPLE_NODES
+            if (STANDBY_MODE == hashmdata->current_mode) {
+                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("can not accept connection in standby mode.")));
+            }
+#else
+            if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
+                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("can not accept connection if hot standby off")));
+            }
 #endif
+        }
     }
 
     if ((PM_RUN != pmState) && t_thrd.postmaster_cxt.senderToDummyStandby) {
@@ -4303,6 +4309,17 @@ static void pmdie(SIGNAL_ARGS)
 
                 /*  Audit system stop */
                 pgaudit_system_stop_ok(FastShutdown);
+            }
+
+            if (pmState == PM_STARTUP || pmState == PM_INIT) {
+                KillGraceThreads();
+                WaitGraceThreadsExit();
+
+                // threading: do not clean sema, maybe other thread is using it.
+                cancelSemphoreRelease();
+                cancelIpcMemoryDetach();
+
+                ExitPostmaster(0);
             }
 
             if (g_instance.pid_cxt.StartupPID != 0)
@@ -5338,11 +5355,12 @@ static void reaper(SIGNAL_ARGS)
             if (XLogArchivingActive()) {
                 if (pmState == PM_RUN) {
                     g_instance.pid_cxt.PgArchPID = pgarch_start();
-                }else if (pmState == PM_HOT_STANDBY)
+                }else if (pmState == PM_HOT_STANDBY) {
                     obs_slot = getObsReplicationSlot();
                     if (obs_slot != NULL) {
                         g_instance.pid_cxt.PgArchPID = pgarch_start();
                     }
+                }
             }
             continue;
         }
@@ -6998,12 +7016,6 @@ static void handle_recovery_started()
         if (IS_PGXC_DATANODE && t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE &&
             !IS_DN_WITHOUT_STANDBYS_MODE() && IsRemoteReadModeOn())
             g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
-#ifndef ENABLE_MULTIPLE_NODES
-        PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
-        ereport(LOG,
-            (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
-                wal_get_role_string(get_cur_mode()))));
-#endif
         pmState = PM_RECOVERY;
     }
 }
@@ -7017,12 +7029,10 @@ static void handle_begin_hot_standby()
         Assert(g_instance.pid_cxt.PgStatPID == 0);
         if (!dummyStandbyMode)
             g_instance.pid_cxt.PgStatPID = pgstat_start();
-#ifdef ENABLE_MULTIPLE_NODES
         PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
-#endif
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
 
@@ -7312,7 +7322,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     check_and_process_hotpatch();
 #endif
 
@@ -10172,6 +10182,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10189,6 +10202,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10211,6 +10227,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10232,6 +10251,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10291,6 +10313,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             t_thrd.postmaster_cxt.IsRPCWorkerThread = true;
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             InitProcessAndShareMemory();
 
@@ -10303,6 +10328,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             SnapshotMain();
@@ -10312,6 +10341,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             ActiveSessionCollectMain();
@@ -10321,6 +10354,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             StatementFlushMain();
@@ -10330,6 +10367,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             PercentileMain();
@@ -10358,6 +10399,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case BARRIER_CREATOR: {
             if (START_BARRIER_CREATOR) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+                if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                    return STATUS_ERROR;
+                }
                 InitProcessAndShareMemory();
                 barrier_creator_main();
                 proc_exit(0);
@@ -10373,6 +10417,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
         case STREAMING_BACKEND: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcessAndShareMemory();
             streaming_backend_main(arg);
             proc_exit(0);
@@ -10381,6 +10429,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
        case CSNMIN_SYNC: {
             if (GTM_LITE_CN) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+                if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                    return STATUS_ERROR;
+                }
+
                 InitProcessAndShareMemory();
                 csnminsync_main();
                 proc_exit(0);
@@ -10623,6 +10675,8 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     knl_g_disconn_node_context_data disconn_node;
     text* arg0 = (text*)PG_GETARG_DATUM(0);
     text* arg1 = (text*)PG_GETARG_DATUM(1);
+    bool redoDone = false;
+    int checkTimes = CHECK_TIMES;
     if (arg0 == NULL) {
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("Invalid null pointer attribute for disable_conn()")));
@@ -10658,7 +10712,16 @@ Datum disable_conn(PG_FUNCTION_ARGS)
      * Sleep 0.5s is an auxiliary way to check whether all xlog has been redone.
      */
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
-        if(!knl_g_get_redo_finish_status()) {
+        while (checkTimes--) {
+            if (knl_g_get_redo_finish_status()) {
+                redoDone = true;
+                break;
+            }
+            ereport(LOG, (errmsg("%d redo_done", redoDone)));
+            sleep(0.01);
+        }
+        ereport(LOG, (errmsg("%d redo_done", redoDone)));
+        if (!redoDone) {
             g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node = true;
             ereport(ERROR, (errcode_for_file_access(),
                 errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
@@ -10723,6 +10786,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     SpinLockAcquire(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
     g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data = disconn_node;
     SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
+    ereport(LOG, (errcode(ERRCODE_LOG), errmsg("disable_conn set mode to %s", disconn_mode)));
     PG_RETURN_VOID();
 }
 

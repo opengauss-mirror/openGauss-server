@@ -126,23 +126,6 @@ public:
         return m_errorSet;
     }
 
-    /**
-     * @brief performs a commit or abort on an in-process transaction
-     * @param id the transaction id.
-     * @param isCommit specifies commit or abort.
-     * @return Int indicates the internal transaction id or 0 in case
-     * the transaction id was not found
-     */
-    uint64_t PerformInProcessTx(uint64_t id, bool isCommit) override;
-
-    /**
-     * @brief applies a failed 2pc transaction according to its type.
-     * a detailed info is described in the function's implementation.
-     * @param internalTransactionId the transaction id to apply
-     * @return RC value denoting the operation's status
-     */
-    RC ApplyInProcessTransaction(uint64_t internalTransactionId) override;
-
     inline void SetLastReplayLsn(uint64_t replayLsn) override
     {
         if (m_lastReplayLsn < replayLsn) {
@@ -290,22 +273,6 @@ private:
      */
     bool OperateOnRecoveredTransaction(
         uint64_t internalTransactionId, uint64_t externalTransactionId, RecoveryOps::RecoveryOpState rState);
-
-    /**
-     * @brief performs 'apply' on the in-process transactions map in the
-     * post recovery stage.
-     * @return RC value denoting the operation's status
-     */
-    RC ApplyInProcessTransactions();
-
-    /**
-     * @brief performs 'apply' on a specific segment
-     * @param segment the log segment to appy
-     * @param csn the segment's csn
-     * @param transactionId the transaction id
-     * @return RC value denoting the operation's status
-     */
-    RC ApplyInProcessSegment(LogSegment* segment, uint64_t csn, uint64_t transactionId);
 
     /**
      * @brief checks if a transaction id specified in the log segment is an mot

@@ -101,6 +101,12 @@ static bool pgxc_is_internal_trig_firable(Relation rel, const Trigger* trigger);
 static HeapTuple pgxc_get_trigger_tuple(HeapTupleHeader tuphead);
 static bool pgxc_should_exec_trigship(Relation rel, const EState* estate);
 #endif
+#ifdef ENABLE_MULTIPLE_NODES
+inline bool IsReplicatedRelationWithoutPK(Relation rel, AttrNumber* indexed_col, int16 index_col_count)
+{
+    return IsRelationReplicated(RelationGetLocInfo(rel)) && (indexed_col == NULL || index_col_count == 0);
+}
+#endif
 
 /*
  * Create a trigger.  Returns the OID of the created trigger.
@@ -185,6 +191,20 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("\"%s\" is a table", RelationGetRelationName(rel)),
                     errdetail("Tables cannot have INSTEAD OF triggers.")));
+        
+#ifdef ENABLE_MULTIPLE_NODES
+        /* Triggers must be created on replicated table with primary key or unique index. */
+        AttrNumber* indexed_col = NULL;
+        int16 index_col_count = 0;
+
+        if (IS_PGXC_COORDINATOR && !u_sess->attr.attr_sql.enable_trigger_shipping && !isInternal) {
+            index_col_count = pgxc_find_primarykey(RelationGetRelid(rel), &indexed_col, true);
+            if (IsReplicatedRelationWithoutPK(rel, indexed_col, index_col_count)) {
+                ereport(WARNING,
+                    (errmsg("Triggers must be created on replicated table with primary key or unique index.")));
+            }
+        }
+#endif
     } else if (rel->rd_rel->relkind == RELKIND_VIEW || rel->rd_rel->relkind == RELKIND_CONTQUERY) {
         /*
          * Views can have INSTEAD OF triggers (which we check below are
@@ -5388,6 +5408,11 @@ int16 pgxc_get_trigevent(CmdType commandType)
     return ret;
 }
 
+inline bool CheckTriggerType(TriggerDesc* trigdesc, uint16 tgtype_event)
+{
+    return trigdesc != NULL && pgxc_has_trigger_for_event(tgtype_event, trigdesc);
+}
+
 /*
  * pgxc_should_exec_triggers:
  * Return true if it is determined that all of the triggers for the relation
@@ -5444,6 +5469,10 @@ static bool pgxc_should_exec_triggers(
     has_nonshippable = pgxc_find_nonshippable_row_trig(rel, tgtype_event, tgtype_timing, false);
 
     if (IS_PGXC_COORDINATOR) {
+        /* If enable_trigger_shipping is off, directly return true on CN. */
+        if (!u_sess->attr.attr_sql.enable_trigger_shipping && CheckTriggerType(rel->trigdesc, tgtype_event))
+            return true;
+
         if (RelationGetLocInfo(rel)) {
             /*
              * So this is a typical coordinator table that has locator info.
@@ -5460,6 +5489,10 @@ static bool pgxc_should_exec_triggers(
             return true;
         }
     } else {
+        /* Directly return false on DN. */
+        if (!u_sess->attr.attr_sql.enable_trigger_shipping && CheckTriggerType(rel->trigdesc, tgtype_event))
+            return false;
+
         /*
          * On datanode, it is straightforward; just execute if all are
          * shippable. Coordinator would have skipped such triggers.
@@ -5637,3 +5670,40 @@ static bool pgxc_should_exec_trigship(Relation rel, const EState* estate)
 }
 
 #endif
+
+void InvalidRelcacheForTriggerFunction(Oid funcoid, Oid returnType)
+{
+    /* Only handle function that returns trigger */
+    if (returnType != TRIGGEROID) {
+        return;
+    }
+
+    SysScanDesc sscan = NULL;
+    HeapTuple tuple;
+    Relation trigRel = heap_open(TriggerRelationId, AccessShareLock);
+
+    /*
+     * Find associated trigger with given function, and send invalid message to
+     * the relation holding these triggers.
+     */
+    sscan = systable_beginscan(trigRel, InvalidOid, false, SnapshotNow, 0, NULL);
+    while (HeapTupleIsValid(tuple = systable_getnext(sscan))) {
+        Form_pg_trigger trigger = (Form_pg_trigger)GETSTRUCT(tuple);
+        if (trigger->tgfoid == funcoid) {
+            Relation rel = heap_open(trigger->tgrelid, AccessShareLock);
+            CacheInvalidateRelcache(rel);
+            heap_close(rel, AccessShareLock);
+        }
+    }
+    systable_endscan(sscan);
+    heap_close(trigRel, AccessShareLock);
+}
+
+/* reset row trigger shipping flag before exiting */
+void ResetTrigShipFlag()
+{
+    if (u_sess->tri_cxt.afterTriggers->query_depth == 0) {
+        u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
+    }
+
+}

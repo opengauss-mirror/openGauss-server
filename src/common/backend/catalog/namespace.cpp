@@ -779,12 +779,21 @@ bool RelationIsVisible(Oid relid)
 
 /*
  * TypenameGetTypid
+ *     Wrapper for binary compatibility.
+ */
+Oid TypenameGetTypid(const char *typname)
+{
+        return TypenameGetTypidExtended(typname, true);
+}
+
+/*
+ * TypenameGetTypidExtended
  *		Try to resolve an unqualified datatype name.
  *		Returns OID if type found in search path, else InvalidOid.
  *
  * This is essentially the same as RelnameGetRelid.
  */
-Oid TypenameGetTypid(const char* typname)
+Oid TypenameGetTypidExtended(const char* typname, bool temp_ok)
 {
     Oid typid;
     ListCell* l = NULL;
@@ -795,6 +804,10 @@ Oid TypenameGetTypid(const char* typname)
     tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
     foreach (l, tempActiveSearchPath) {
         Oid namespaceId = lfirst_oid(l);
+
+        /* do not look in temp namespace if temp_ok if false */
+        if (!temp_ok && namespaceId == u_sess->catalog_cxt.myTempNamespace)
+            continue;
 
         typid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(namespaceId));
         if (OidIsValid(typid)) {
@@ -3468,15 +3481,17 @@ void RemoveTmpNspFromSearchPath(Oid tmpnspId)
 {
     /* Sanity checks. */
 
+    if (!OidIsValid(tmpnspId))
+        return;
+
     MemoryContext oldcxt = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     ListCell* lc = NULL;
     foreach (lc, u_sess->catalog_cxt.overrideStack) {
         OverrideStackEntry* entry = (OverrideStackEntry*)lfirst(lc);
-        if (OidIsValid(tmpnspId) && entry->inProcedure &&
-            list_member_oid(u_sess->catalog_cxt.activeSearchPath, tmpnspId))
+        if (entry->inProcedure && list_member_oid(u_sess->catalog_cxt.activeSearchPath, tmpnspId))
             u_sess->catalog_cxt.activeSearchPath = list_delete_oid(u_sess->catalog_cxt.activeSearchPath, tmpnspId);
-        if (OidIsValid(tmpnspId) && entry->inProcedure && list_member_oid(entry->searchPath, tmpnspId))
+        if (entry->inProcedure && list_member_oid(entry->searchPath, tmpnspId))
             entry->searchPath = list_delete_oid(entry->searchPath, tmpnspId);
     }
 
@@ -4844,7 +4859,7 @@ void validateTempRelation(Relation rel)
 {
     if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
         ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION),
+            (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                 errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.",
                     g_instance.attr.attr_common.PGXCNodeName)));
@@ -4918,7 +4933,7 @@ static void CheckTempTblAlias()
         // do noting for now, if query retry is on, just to skip validateTempRelation here
     } else if (!validateTempNamespace(u_sess->catalog_cxt.myTempNamespace)) {
         ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION),
+            (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                 errmsg("Temp tables are invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.",
                     g_instance.attr.attr_common.PGXCNodeName)));

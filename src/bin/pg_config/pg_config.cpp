@@ -367,7 +367,12 @@ static void help(void)
     printf(("  --version             show the openGauss version\n"));
     printf(("  -?, --help            show this help, then exit\n"));
     printf(("\nWith no arguments, all known items are shown.\n\n"));
-    printf(("Report bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n");
+#endif
 }
 
 static void show_all(void)

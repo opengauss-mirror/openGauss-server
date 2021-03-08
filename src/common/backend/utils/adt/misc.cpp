@@ -27,6 +27,7 @@
 #include "commands/tablespace.h"
 #include "commands/user.h"
 #include "funcapi.h"
+#include "instruments/gs_stat.h"
 #include "miscadmin.h"
 #include "parser/keywords.h"
 #include "pgstat.h"
@@ -47,7 +48,7 @@
 #include "pgxc/pgxc.h"
 #endif
 
-extern void cancel_backend(Oid pid);
+extern void cancel_backend(ThreadId pid);
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 
 /*
@@ -145,20 +146,43 @@ static int pg_signal_backend(ThreadId pid, int sig)
 
 uint64 get_query_id_beentry(ThreadId  tid)
 {
-    PgBackendStatusNode* node = gs_stat_read_current_status(NULL);
+    uint64 queryId = 0;
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.BackendStatusArray + BackendStatusArray_size - 1;
+    PgBackendStatus* localentry = (PgBackendStatus*)palloc0(sizeof(PgBackendStatus));
 
-    while (node != NULL) {
-        PgBackendStatus *beentry = node->data;
-
-        if (beentry != NULL) {
-            if (beentry->st_procpid == tid) {
-                return beentry->st_queryid;
+    /*
+     * We go through BackendStatusArray from back to front, because
+     * in thread pool mode, both an active session and its thread pool worker
+     * will have the same procpid in their entry and in most cases what we want
+     * is session's entry, which will be returned first in such searching direction.
+     */
+    for (int i = 1; i <= BackendStatusArray_size; i++) {
+        /*
+         * Follow the protocol of retrying if st_changecount changes while we
+         * copy the entry, or if it's odd.  (The check for odd is needed to
+         * cover the case where we are able to completely copy the entry while
+         * the source backend is between increment steps.)	We use a volatile
+         * pointer here to ensure the compiler doesn't try to get cute.
+         */
+        if (gs_stat_encap_status_info(localentry, beentry)) {
+            if (localentry->st_procpid == tid) {
+                queryId = localentry->st_queryid;
+                break;
             }
         }
-        node = node->next;
+        beentry--;
     }
 
-    return 0;
+    if (localentry->st_procpid > 0 || localentry->st_sessionid > 0) {
+        pfree_ext(localentry->st_appname);
+        pfree_ext(localentry->st_clienthostname);
+        pfree_ext(localentry->st_conninfo);
+        pfree_ext(localentry->st_activity);
+    }
+
+    pfree(localentry);
+
+    return queryId;
 }
 
 /*
@@ -924,7 +948,7 @@ Datum pg_test_err_contain_err(PG_FUNCTION_ARGS)
 
 // Signal to cancel a backend process. This is allowed if you are superuser
 // or have the same role as the process being canceled.
-void cancel_backend(Oid pid)
+void cancel_backend(ThreadId       pid)
 {
     int sig_return = 0;
 

@@ -147,8 +147,8 @@ drop table sales2007q4;
 drop table sales2007q6;
 DROP CLIENT MASTER KEY cmk1 CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to column setting: cek1
-drop cascades to column setting: cek2
+DETAIL:  drop cascades to column encryption key: cek1
+drop cascades to column encryption key: cek2
 \! gs_ktool -d all
 DELETE ALL
  1

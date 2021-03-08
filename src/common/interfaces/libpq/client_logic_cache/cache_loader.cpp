@@ -452,6 +452,7 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
             if (!function_name || strlen(function_name) == 0) {
                 PQclear(res);
                 fprintf(stderr, "function name is missing\n");
+                delete_key(cached_global_setting);
                 return false;
             }
             cached_global_setting->set_global_hook_executor(
@@ -460,6 +461,7 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
         if (!cached_global_setting->get_executor()) {
             PQclear(res);
             fprintf(stderr, "failed to get global hook executor\n");
+            delete_key(cached_global_setting);
             return false;
         }
 
@@ -469,6 +471,7 @@ bool CacheLoader::fill_global_settings_map(PGconn *conn)
         if (!arg_key || strlen(arg_key) == 0 || !arg_value || strlen(arg_value) == 0) {
             PQclear(res);
             fprintf(stderr, "failed to get argument for client master key\n");
+            delete_key(cached_global_setting);
             return false;
         }
         cached_global_setting->get_executor()->add_argument(arg_key, arg_value);
@@ -558,6 +561,7 @@ bool CacheLoader::fill_column_settings_info_cache(PGconn *conn)
             const char *function_name = PQgetvalue(res, n, arg_function_name_num);
             if (!function_name || strlen(function_name) == 0) {
                 fprintf(stderr, "failed to get related client master key when loading column encryption key\n");
+                delete_key(column_setting);
                 continue;
             }
 
@@ -566,6 +570,7 @@ bool CacheLoader::fill_column_settings_info_cache(PGconn *conn)
             const CachedGlobalSetting *cached_global_setting = get_global_setting_by_oid(global_setting_oid);
             if (!cached_global_setting) {
                 fprintf(stderr, "failed to get related client master key when loading column encryption key\n");
+                delete_key(column_setting);
                 continue;
             }
             check_strcat_s(strcat_s(column_setting->m_cached_global_setting, NAMEDATALEN * 4,
@@ -578,6 +583,7 @@ bool CacheLoader::fill_column_settings_info_cache(PGconn *conn)
         if (!column_setting->get_executor()) {
             PQclear(res);
             fprintf(stderr, "failed to get column hook executor\n");
+            delete_key(column_setting);
             return false;
         }
 
@@ -587,6 +593,7 @@ bool CacheLoader::fill_column_settings_info_cache(PGconn *conn)
         if (!arg_key || strlen(arg_key) == 0 || !arg_value || strlen(arg_value) == 0) {
             PQclear(res);
             fprintf(stderr, "failed to get argument for column encryption key\n");
+            delete_key(column_setting);
             return false;
         }
         column_setting->get_executor()->add_argument(arg_key, arg_value);
@@ -657,8 +664,13 @@ bool CacheLoader::fill_cached_columns(PGconn *conn)
         Oid data_type_oid = (Oid)atoi(PQgetvalue(res, n, orig_type_oid_num));
         int data_type_mod = atoi(PQgetvalue(res, n, orig_type_mod_num));
 
-        CachedColumn *cached_column = new CachedColumn(table_oid, database_name, schema_name, table_name, column_name,
-            column_position, data_type_oid, data_type_mod);
+        CachedColumn *cached_column = new (std::nothrow) CachedColumn(table_oid, database_name, schema_name, table_name,
+            column_name, column_position, data_type_oid, data_type_mod);
+        if (cached_column == NULL) {
+            PQclear(res);
+            fprintf(stderr, "failed to new CachedColumn object\n");
+            return false;
+        }
         cached_column->init();
         cached_column->set_data_type(atoi(PQgetvalue(res, n, atttypid_num)));
         m_schemas_list.add(PQgetvalue(res, n, table_schema_num));

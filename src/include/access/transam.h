@@ -152,7 +152,7 @@ typedef struct VariableCacheData {
      * transactions; it's not necessarily the one that started first).
      * Must hold ProcArrayLock in shared mode, and use atomic ops, to update.
      */
-    CommitSeqNo nextCommitSeqNo;
+    pg_atomic_uint64 nextCommitSeqNo;
     TransactionId latestCompletedXid; /* newest XID that has committed or
                                        * aborted */
     /*
@@ -162,6 +162,7 @@ typedef struct VariableCacheData {
     TransactionId xmin;
     TransactionId recentLocalXmin;           /* the lastest xmin in local node */
     pg_atomic_uint64 recentGlobalXmin;       /* the lastest xmin in global  */
+    pg_atomic_uint64 standbyXmin;            /* the  xmin for read snapshot on standby */
     pg_atomic_uint32 CriticalCacheBuildLock; /* lock of create relcache init file */
 
     pg_atomic_uint64 cutoff_csn_min;

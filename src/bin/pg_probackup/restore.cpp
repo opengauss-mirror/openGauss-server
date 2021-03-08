@@ -106,7 +106,7 @@ set_orphan_status(parray *backups, pgBackup *parent_backup)
 {
     /* chain is intact, but at least one parent is invalid */
     char    *parent_backup_id;
-    int        j;
+    size_t        j;
 
     /* parent_backup_id is a human-readable backup ID  */
     parent_backup_id = base36enc_dup(parent_backup->start_time);
@@ -416,7 +416,7 @@ static pgBackup *find_backup_range(parray *backups,
                                    pgRecoveryTarget *rt,
                                    pgRestoreParams *params)
 {
-    int      i = 0;
+    size_t      i = 0;
     pgBackup *dest_backup = NULL;
     pgBackup *current_backup = NULL;
 
@@ -499,6 +499,8 @@ static pgBackup *find_backup_range(parray *backups,
             return dest_backup;
         }
     }
+
+    return dest_backup;
 }
 
 static void check_backup_status(pgBackup *current_backup, pgRestoreParams *params)
@@ -549,7 +551,7 @@ static pgBackup *find_full_backup(parray *backups,
         missing_backup_start_time = tmp_backup->parent_backup;
         missing_backup_id = base36enc_dup(tmp_backup->parent_backup);
 
-        for (int j = 0; j < parray_num(backups); j++)
+        for (size_t j = 0; j < parray_num(backups); j++)
         {
             pgBackup *backup = (pgBackup *) parray_get(backups, j);
 
@@ -603,7 +605,7 @@ static XLogRecPtr determine_shift_lsn(pgBackup *dest_backup)
     get_redo(instance_config.pgdata, &redo);
 
     if (redo.checksum_version == 0)
-        elog(ERROR, "Incremental restore in 'lsn' mode require "
+        elog(INFO, "Incremental restore in 'lsn' mode require "
             "data_checksums to be enabled in destination data directory");
 
     timelines = read_timeline_history(arclog_path, redo.tli, false);
@@ -788,7 +790,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
         if (parray_num(external_dirs) > 0)
             elog(LOG, "Restore external directories");
 
-        for (i = 0; i < parray_num(external_dirs); i++)
+        for (i = 0; (size_t)i < parray_num(external_dirs); i++)
             fio_mkdir((const char *)parray_get(external_dirs, i),
                       DIR_PERMISSION, FIO_DB_HOST);
     }
@@ -804,7 +806,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
     /*
      * Setup directory structure for external directories and file locks
      */
-    for (i = 0; i < parray_num(dest_files); i++)
+    for (i = 0; (size_t)i < parray_num(dest_files); i++)
     {
         pgFile       *file = (pgFile *) parray_get(dest_files, i);
 
@@ -817,7 +819,7 @@ restore_chain(pgBackup *dest_backup, parray *parent_chain,
             char       *external_path;
             char        dirpath[MAXPGPATH];
 
-            if (parray_num(external_dirs) < file->external_dir_num - 1)
+            if ((int)parray_num(external_dirs) < file->external_dir_num - 1)
                 elog(ERROR, "Inconsistent external directory backup metadata");
 
             external_path = (char *)parray_get(external_dirs, file->external_dir_num - 1);
@@ -901,7 +903,7 @@ static void get_pgdata_files(const char *pgdata_path,
     /* get external dirs content */
     if (external_dirs)
     {
-        for (int i = 0; i < parray_num(external_dirs); i++)
+        for (int i = 0; (size_t)i < parray_num(external_dirs); i++)
         {
             char *external_path = (char *)parray_get(external_dirs, i);
             parray *external_files = parray_new();
@@ -938,7 +940,7 @@ static void remove_redundant_files(const char *pgdata_path,
 
     elog(INFO, "Removing redundant files in destination directory");
     time(&start_time);
-    for (int i = 0; i < parray_num(pgdata_files); i++)
+    for (int i = 0; (size_t)i < parray_num(pgdata_files); i++)
     {
         pgFile	   *file = (pgFile *)parray_get(pgdata_files, i);
 
@@ -1061,7 +1063,7 @@ static void sync_restored_files(parray *dest_files,
     elog(INFO, "Syncing restored files to disk");
     time(&start_time);
 
-    for (int i = 0; i < parray_num(dest_files); i++)
+    for (size_t i = 0; i < parray_num(dest_files); i++)
     {
         char        to_fullpath[MAXPGPATH];
         pgFile       *dest_file = (pgFile *)parray_get(dest_files, i);
@@ -1116,7 +1118,7 @@ restore_files(void *arg)
 
     n_files = (unsigned long) parray_num(arguments->dest_files);
 
-    for (i = 0; i < parray_num(arguments->dest_files); i++)
+    for (i = 0; (size_t)i < parray_num(arguments->dest_files); i++)
     {
         bool     already_exists = false;
         PageState      *checksum_map = NULL; /* it should take ~1.5MB at most */
@@ -1293,7 +1295,6 @@ create_recovery_conf(time_t backup_id,
     bool        target_latest;
     bool        target_immediate;
     bool         restore_command_provided = false;
-    char restore_command_guc[16384];
     errno_t     rc = 0;
 
     if (instance_config.restore_command &&
@@ -1772,7 +1773,6 @@ parseRecoveryTargetOptions(const char *target_time,
                     const char *target_name,
                     const char *target_action)
 {
-    bool        dummy_bool;
     /*
      * count the number of the mutually exclusive options which may specify
      * recovery target. If final value > 1, throw an error.

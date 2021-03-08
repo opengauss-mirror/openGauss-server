@@ -2,7 +2,7 @@
 -- unsupport procedure --
 -------------------------
 
-set enable_stream_operator = on;
+--set enable_stream_operator = on;
 ---------------------forall------------------------
 SET CHECK_FUNCTION_BODIES TO ON;
 
@@ -27,7 +27,7 @@ Alititude INT                                          ENCRYPTED WITH (COLUMN_EN
 Latitude FLOAT4                                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
 Longitude FLOAT4                                 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
 ImagePath VARCHAR(100)                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC)
-);
+) DISTRIBUTE BY HASH(id);
 
 INSERT INTO Image VALUES ( 1, 'img4214189','IDO', 'it is a flower in roadsize', '2019-11-07', 1080, 1440, 'px', 776, 108, 23.45, 120.24, '/DCIM/Camera/img4214189');
 INSERT INTO Image VALUES ( 2, 'img4214190','IDO', 'the park', '2019-11-10', 1080, 1920, 'px', 187, 292, 45.28, 102.24, '/DCIM/Camera/img4214190');

@@ -917,6 +917,13 @@ void PortalSetResultFormat(Portal portal, int nFormats, int16* formats)
     int natts;
     int i;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (StreamTopConsumerAmI()) {
+        portal->streamInfo.RecordSessionInfo();
+        u_sess->stream_cxt.global_obj->m_portal = portal;
+    }
+#endif
+
     /* Do nothing if portal won't return tuples */
     if (portal->tupDesc == NULL)
         return;

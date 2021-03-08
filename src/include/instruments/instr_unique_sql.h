@@ -155,21 +155,36 @@ extern int GetUniqueSQLTrackType();
 
 #define IS_UNIQUE_SQL_TRACK_TOP ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && GetUniqueSQLTrackType() == UNIQUE_SQL_TRACK_TOP)
 
-#define INIT_UNIQUE_SQL_CXT()                                          \
-        bool old_is_top_unique_sql = false;                            \
-        uint64 old_unique_sql_id = 0;
+#define INIT_UNIQUE_SQL_CXT()                                                           \
+        bool old_is_top_unique_sql = false;                                             \
+        uint64 old_unique_sql_id = 0;                                                   \
+        bool old_is_multi_unique_sql = false;                                           \
+        char *old_curr_single_unique_sql = NULL;                                        \
+        int32 old_multi_sql_offset = 0;
 
-#define BACKUP_UNIQUE_SQL_CXT()                                        \
-        old_is_top_unique_sql = IsTopUniqueSQL();                      \
-        if (old_is_top_unique_sql) {                                   \
-            SetIsTopUniqueSQL(false);                                  \
-            old_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;  \
+#define BACKUP_UNIQUE_SQL_CXT()                                                         \
+        old_is_top_unique_sql = IsTopUniqueSQL();                                       \
+        if (old_is_top_unique_sql) {                                                    \
+            SetIsTopUniqueSQL(false);                                                   \
+            old_unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;                   \
+        }                                                                               \
+        if (u_sess->unique_sql_cxt.is_multi_unique_sql) {                               \
+            u_sess->unique_sql_cxt.is_multi_unique_sql = false;                         \
+            old_is_multi_unique_sql = true;                                             \
+            old_curr_single_unique_sql = u_sess->unique_sql_cxt.curr_single_unique_sql; \
+            old_multi_sql_offset = u_sess->unique_sql_cxt.multi_sql_offset;             \
+            u_sess->unique_sql_cxt.multi_sql_offset = 0;                                \
         }
 
-#define RESTORE_UNIQUE_SQL_CXT()                                       \
-        if (old_is_top_unique_sql) {                                   \
-            SetIsTopUniqueSQL(true);                                   \
-            u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;  \
+#define RESTORE_UNIQUE_SQL_CXT()                                                        \
+        if (old_is_top_unique_sql) {                                                    \
+            SetIsTopUniqueSQL(true);                                                    \
+            u_sess->unique_sql_cxt.unique_sql_id = old_unique_sql_id;                   \
+        }                                                                               \
+        if (old_is_multi_unique_sql) {                                                  \
+            u_sess->unique_sql_cxt.is_multi_unique_sql = true;                          \
+            u_sess->unique_sql_cxt.curr_single_unique_sql = old_curr_single_unique_sql; \
+            u_sess->unique_sql_cxt.multi_sql_offset = old_multi_sql_offset;             \
         }
 
 #define START_TRX_UNIQUE_SQL_ID 2718638560

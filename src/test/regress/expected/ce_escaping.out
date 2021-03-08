@@ -29,7 +29,7 @@ select * from ce_customer where first_name = 'Ido''s';
 
 drop table ce_customer;
 DROP CLIENT MASTER KEY mycmk CASCADE;
-NOTICE:  drop cascades to column setting: mycek
+NOTICE:  drop cascades to column encryption key: mycek
 \! gs_ktool -d all
 DELETE ALL
  1

@@ -1830,7 +1830,7 @@ static bool editFile(const char* fname, int lineno)
     char* editor_lineno_arg = NULL;
     char* sys = NULL;
     size_t syssz = 0;
-    int result;
+    int result = 0;
 
     psql_assert(fname);
 
@@ -1881,7 +1881,7 @@ static bool editFile(const char* fname, int lineno)
         }
 
         syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
-                + 1 + strlen(fname) + 10 + 1;
+                 + 1 + strlen(fname) + 10 + 1;
     } else {
         syssz = strlen(editorName) + strlen(fname) + 10 + 1;
     }

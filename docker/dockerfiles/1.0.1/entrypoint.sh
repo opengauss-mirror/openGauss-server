@@ -1,4 +1,26 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# entrypoint of docker file
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2028. All rights reserved.
+#
+#openGauss is licensed under Mulan PSL v2.
+#You can use this software according to the terms and conditions of the Mulan PSL v2.
+#You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+#-------------------------------------------------------------------------
+#
+# entrypoint.sh
+#    entrypoint of docker file
+#
+# IDENTIFICATION
+#    GaussDBKernel/server/docker/dockerfiles/1.0.1/entrypoint.sh
+#
+#-------------------------------------------------------------------------
 set -Eeo pipefail 
 
 # usage: file_env VAR [DEFAULT]
@@ -12,20 +34,20 @@ export LD_LIBRARY_PATH=$GAUSSHOME/lib:$LD_LIBRARY_PATH
 
 file_env() {
         local var="$1"
-        local fileVar="${var}_FILE"
+        local file_var="${var}_FILE"
         local def="${2:-}"
-        if [ "${!var:-}" ] && [ "${!fileVar:-}" ]; then
-                echo >&2 "error: both $var and $fileVar are set (but are exclusive)"
+        if [ "${!var:-}" ] && [ "${!file_var:-}" ]; then
+                echo >&2 "error: both $var and $file_var are set (but are exclusive)"
                 exit 1
         fi
         local val="$def"
         if [ "${!var:-}" ]; then
                 val="${!var}"
-        elif [ "${!fileVar:-}" ]; then
-                val="$(< "${!fileVar}")"
+        elif [ "${!file_var:-}" ]; then
+                val="$(< "${!file_var}")"
         fi
         export "$var"="$val"
-        unset "$fileVar"
+        unset "$file_var"
 }
 
 # check to see if this file is being run or sourced from another script

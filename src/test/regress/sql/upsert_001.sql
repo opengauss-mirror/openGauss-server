@@ -2,9 +2,6 @@ DROP SCHEMA test_upsert_001 CASCADE;
 CREATE SCHEMA test_upsert_001;
 SET CURRENT_SCHEMA TO test_upsert_001;
 
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-
 -- test description
 \h INSERT
 

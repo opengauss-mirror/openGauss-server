@@ -41,7 +41,7 @@ public:
     RawValue(const RawValue &) = delete;
     RawValue &operator = (const RawValue &) = delete;
 
-    bool process(bool is_during_refresh_cache, const ICachedColumn *cached_column, char *err_msg);
+    bool process(const ICachedColumn *cached_column, char *err_msg);
     void set_data(const unsigned char *data, size_t data_size);
     void set_data_value(const unsigned char *data_value, size_t size)
     {

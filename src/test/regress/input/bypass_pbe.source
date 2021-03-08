@@ -1,6 +1,7 @@
 DROP USER IF EXISTS tom CASCADE;
 CREATE USER tom WITH PASSWORD "tom@1234";
 SET ROLE tom PASSWORD 'tom@1234';
+\! chmod -R 700 @abs_bindir@/../jre
 \! @abs_bindir@/../jre/bin/java -cp $CLASSPATH:@abs_builddir@/jdbc_test/gsjdbc400.jar:@abs_builddir@/jdbc_test/bypass_pbe/. BypassPbe @portstring@ 2>&1
 DROP TABLE IF EXISTS jdbcpbebypass CASCADE;
 RESET ROLE;

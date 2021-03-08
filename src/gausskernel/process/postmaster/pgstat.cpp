@@ -1508,8 +1508,7 @@ void pgstat_report_sql_rt(uint64 UniqueSQLId, int64 start_time, int64 rt)
     if (IS_SINGLE_NODE) {
         return; /* disable in single node tmp for performance issue */
     }
-    if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET || !u_sess->attr.attr_common.enable_instr_rt_percentile ||
-        strncmp(u_sess->attr.attr_common.application_name, "gs_clean", strlen("gs_clean") == 0))
+    if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET || !u_sess->attr.attr_common.enable_instr_rt_percentile)
         return;
 
     pgstat_setheader(&msg.m_hdr, PGSTAT_MTYPE_RESPONSETIME);
@@ -3024,7 +3023,6 @@ void pgstat_bestart(void)
     beentry->st_cgname = u_sess->wlm_cxt->control_group;
     beentry->st_stmtmem = 0;
     beentry->st_block_sessionid = 0;
-    beentry->statement_cxt = bind_statement_context();
 
     beentry->st_connect_info = u_sess->pgxc_cxt.PoolerConnectionInfo;
     /*
@@ -3043,6 +3041,7 @@ void pgstat_bestart(void)
     beentry->st_lw_is_cleanning_flag = false;
 
     pgstat_increment_changecount_after(beentry);
+    beentry->statement_cxt = bind_statement_context();
 
     /* add remote node info */
     if (u_sess->proc_cxt.MyProcPort != NULL) {
@@ -3205,6 +3204,8 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     beentry->st_procpid = 0;   /* mark pid invalid */
     beentry->st_sessionid = 0; /* mark sessionid invalid */
 
+    pgstat_increment_changecount_after(beentry);
+
     /*
      * handle below cases:
      * if thread pool worker is shuting down, this hook is called previously,
@@ -3222,8 +3223,6 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
     } else {
         release_statement_context(t_thrd.shemem_ptr_cxt.MyBEEntry, __FUNCTION__, __LINE__);
     }
-
-    pgstat_increment_changecount_after(beentry);
 
     WaitUntilLWLockInfoNeverAccess(beentry);
 
@@ -3262,9 +3261,9 @@ void pgstat_beshutdown_session(int ctrl_index)
          * compiler doesn't try to get cute.
          */
         pgstat_increment_changecount_before(beentry);
-
         beentry->st_procpid = 0;   /* mark pid invalid */
         beentry->st_sessionid = 0; /* mark sessionid invalid */
+        pgstat_increment_changecount_after(beentry);
 
         /*
          * pgstat_beshutdown_session will be called in thread pool mode:
@@ -3275,8 +3274,6 @@ void pgstat_beshutdown_session(int ctrl_index)
          * so we need to release statemement context.
          */
         release_statement_context(&t_thrd.shemem_ptr_cxt.BackendStatusArray[ctrl_index], __FUNCTION__, __LINE__);
-
-        pgstat_increment_changecount_after(beentry);
 
         /*
          * During process exit, t_thrd.proc may have been cleared, so that
@@ -3732,7 +3729,15 @@ bool CheckUserExist(Oid userId, bool removeCount)
     }
     return isExist;
 }
-
+#define UPDATE_SQL_COUNT(count, elapseTime)                                                       \
+    do {                                                                                          \
+        TimestampTz duration = GetCurrentTimestamp() - GetCurrentStatementLocalStartTimestamp();  \
+        duration = (duration == 0) ? 1 : duration;                                                \
+        pg_atomic_fetch_add_u64(&(count), 1);                                                     \
+        pg_atomic_fetch_add_u64(&((elapseTime).total_time), duration);                            \
+        updateMaxValueForAtomicType(duration, &((elapseTime).max_time));                          \
+        updateMinValueForAtomicType(duration, &((elapseTime).min_time));                          \
+    } while (0)
 /*
  * @Description:  according to wait_event_info to add sql count for user,
  *    add action realize by pg_atomic_fetch_add_u64 function
@@ -3802,60 +3807,20 @@ void pgstat_report_wait_count(unsigned int wait_event_info)
         WaitEventSQL w = (WaitEventSQL)wait_event_info;
         switch (w) {
             case WAIT_EVENT_SQL_SELECT: {
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_select), 1);
-                TimestampTz elapse_time = GetCurrentTimestamp() - GetCurrentStatementLocalStartTimestamp();
-                pg_atomic_fetch_add_u64(
-                    &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.total_time), elapse_time);
-                int64 avg =
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.total_time)) /
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_select));
-                pg_atomic_init_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.avg_time), avg);
-                updateMaxValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.max_time));
-                updateMinValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse.min_time));
+                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_select,
+                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.selectElapse);
             } break;
             case WAIT_EVENT_SQL_UPDATE: {
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_update), 1);
-                TimestampTz elapse_time = GetCurrentTimestamp() - GetCurrentStatementLocalStartTimestamp();
-                pg_atomic_fetch_add_u64(
-                    &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.total_time), elapse_time);
-                int64 avg =
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.total_time)) /
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_update));
-                pg_atomic_init_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.avg_time), avg);
-                updateMaxValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.max_time));
-                updateMinValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse.min_time));
+                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_update,
+                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.updateElapse);
             } break;
             case WAIT_EVENT_SQL_INSERT: {
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_insert), 1);
-                TimestampTz elapse_time = GetCurrentTimestamp() - GetCurrentStatementLocalStartTimestamp();
-                pg_atomic_fetch_add_u64(
-                    &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.total_time), elapse_time);
-                updateMaxValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.max_time));
-                updateMinValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.min_time));
-                int64 avg =
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.total_time)) /
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_insert));
-                pg_atomic_init_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse.avg_time), avg);
+                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_insert,
+                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.insertElapse);
             } break;
             case WAIT_EVENT_SQL_DELETE: {
-                pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_delete), 1);
-                TimestampTz elapse_time = GetCurrentTimestamp() - GetCurrentStatementLocalStartTimestamp();
-                pg_atomic_fetch_add_u64(
-                    &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.total_time), elapse_time);
-                updateMaxValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.max_time));
-                updateMinValueForAtomicType(
-                    elapse_time, &(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.min_time));
-                int64 avg =
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.total_time)) /
-                    pg_atomic_read_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_delete));
-                pg_atomic_init_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse.avg_time), avg);
+                UPDATE_SQL_COUNT(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_delete,
+                    WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.deleteElapse);
             } break;
             case WAIT_EVENT_SQL_MERGEINTO:
                 pg_atomic_fetch_add_u64(&(WaitCountStatusCell->WaitCountArray[dataid].wc_cnt.wc_sql_mergeinto), 1);
@@ -6109,12 +6074,20 @@ done:
  */
 void pgstat_setup_memcxt(void)
 {
-    if (!u_sess->stat_cxt.pgStatLocalContext)
+    if (u_sess->stat_cxt.pgStatLocalContext == NULL)
         u_sess->stat_cxt.pgStatLocalContext = AllocSetContextCreate(u_sess->top_mem_cxt,
             "Statistics snapshot",
             ALLOCSET_SMALL_MINSIZE,
             ALLOCSET_SMALL_INITSIZE,
             ALLOCSET_SMALL_MAXSIZE);
+}
+
+void pgstat_clean_memcxt(void)
+{
+    if (u_sess->stat_cxt.pgStatLocalContext != NULL) {
+        MemoryContextDelete(u_sess->stat_cxt.pgStatLocalContext);
+        u_sess->stat_cxt.pgStatLocalContext = NULL;
+    }
 }
 
 static void pgstat_collect_thread_status_setup_memcxt(void)
@@ -6909,8 +6882,7 @@ void pgstat_update_responstime_singlenode(uint64 UniqueSQLId, int64 start_time, 
 {
     int32 sqlRTIndex;
 
-    if (!u_sess->attr.attr_common.enable_instr_rt_percentile ||
-        strncmp(u_sess->attr.attr_common.application_name, "gs_clean", strlen("gs_clean") == 0))
+    if (!u_sess->attr.attr_common.enable_instr_rt_percentile)
         return;
 
     /* if the percentile thread is memory copying or memory is null, not record */
@@ -8280,6 +8252,7 @@ static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const Memo
 {
     MemoryContext child;
 
+    bool checkLock = false;
     PG_TRY();
     {
         /*check for pending interrupts before waiting.*/
@@ -8287,6 +8260,7 @@ static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const Memo
 
         if (isShared) {
             MemoryContextLock(context);
+            checkLock = true;
         }
 
         /* calculate MemoryContext Stats */
@@ -8301,7 +8275,7 @@ static void recursiveThreadMemoryContext(const volatile PGPROC* proc, const Memo
     }
     PG_CATCH();
     {
-        if (isShared) {
+        if (isShared && checkLock) {
             MemoryContextUnlock(context);
         }
 

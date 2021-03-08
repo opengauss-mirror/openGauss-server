@@ -224,6 +224,10 @@ static void help(const char* progname)
     printf(_("  -U, --username=USERNAME   user name to connect as\n"));
     printf(_("  -w, --no-password         never prompt for password\n"));
     printf(_("  -W, --password            force password prompt\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to openGauss community by raising an issue.\n"));
+#endif
 }
 

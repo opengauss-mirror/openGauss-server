@@ -220,12 +220,6 @@ public:
     void LiteRollbackPrepared();
 
     /**
-     * @brief Handle CommitPrepared failure - keep the rows locked until gs_clean releases them.
-     * @return Result code denoting success or failure.
-     */
-    RC FailedCommitPrepared();
-
-    /**
      * @brief Rolls back the transaction. No changes are propagated to the logs.
      */
     void CleanTxn();
@@ -436,16 +430,6 @@ public:
         return m_gcSession;
     }
 
-    inline bool IsFailedCommitPrepared() const
-    {
-        return m_failedCommitPrepared;
-    }
-
-    inline void SetFailedCommitPrepared(bool value)
-    {
-        m_failedCommitPrepared = value;
-    }
-
     /**
      * @brief Sets or clears the validate-no-wait flag in OccTransactionManager.
      * @detail Determines whether to call Access::lock() or
@@ -491,13 +475,6 @@ private:
     void* operator new(std::size_t size) = delete;
     void* operator new(std::size_t size, const std::nothrow_t& tag) = delete;
     /** @endcond */
-
-    /**
-     * @brief Enqueues prepared rows/ddls to be later release by gs_clean
-     * @param none
-     * @return Boolean value denoting success or failure.
-     */
-    RC SavePreparedData();
 
     // allow privileged access
     friend TxnInsertAction;
@@ -573,8 +550,6 @@ private:
     TxnState m_state;
 
     int m_isolationLevel;
-
-    bool m_failedCommitPrepared;
 
 public:
     /** @var Transaction cache (OCC optimization). */

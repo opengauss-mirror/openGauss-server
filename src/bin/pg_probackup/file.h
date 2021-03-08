@@ -78,7 +78,7 @@ typedef enum
 #define FIO_PIPE_MARKER 0x40000000
 
 #define SYS_CHECK(cmd) do if ((cmd) < 0) { fprintf(stderr, "%s:%d: (%s) %s\n", __FILE__, __LINE__, #cmd, strerror(errno)); exit(EXIT_FAILURE); } while (0)
-#define IO_CHECK(cmd, size) do { int _rc = (cmd); if (_rc != (size)) fio_error(_rc, size, __FILE__, __LINE__); } while (0)
+#define IO_CHECK(cmd, size) do { int _rc = (cmd); if (_rc != (int)(size)) fio_error(_rc, size, __FILE__, __LINE__); } while (0)
 
 #define FILE_PERMISSIONS 0600
 

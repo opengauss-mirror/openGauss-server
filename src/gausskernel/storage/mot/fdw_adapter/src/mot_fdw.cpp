@@ -281,28 +281,6 @@ void TermMOT()
     MOTAdaptor::Destroy();
 }
 
-void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit)
-{
-    if (!MOTAdaptor::m_initialized) {
-        return;
-    }
-
-    if (MOT::MOTEngine::GetInstance()->IsInProcessTx(txid)) {
-        elog(LOG, "MOTProcessRecoveredTransaction: %lu - %s", txid, isCommit ? "commit" : "abort");
-        MOT::TxnManager* mgr = GetSafeTxn(__FUNCTION__);
-        uint64_t inTxId = MOT::MOTEngine::GetInstance()->PerformInProcessTx(txid, isCommit);
-        if (inTxId == INVALID_TRANSACTION_ID) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("Memory engine: failed to perform commit prepared.")));
-        }
-        mgr->SetInternalTransactionId(inTxId);
-        mgr->SetTransactionId(txid);
-        mgr->RedoWriteAction(isCommit);
-        mgr->SetTxnState(isCommit ? MOT::TxnState::TXN_COMMIT : MOT::TxnState::TXN_ROLLBACK);
-    }
-}
-
 /*
  * Foreign-data wrapper handler function: return a struct with pointers
  * to my callback routines.
@@ -1666,24 +1644,8 @@ static void MOTXactCallback(XactEvent event, void* arg)
         }
         txn->SetTxnState(MOT::TxnState::TXN_PREPARE);
     } else if (event == XACT_EVENT_ABORT) {
-        if (txnState == MOT::TxnState::TXN_PREPARE) {
-            elog(DEBUG2, "XACT_EVENT_ABORT in prepare, tid %lu", tid);
-            // Need to get the envelope CSN for cross transaction support.
-            // Envelope is using a special CSN (COMMITSEQNO_ABORTED) for this case.
-            // Need to consider this and adapt to this when we support 2pc.
-            if (MOTAdaptor::FailedCommitPrepared(MOT::CSNManager::INVALID_CSN) != MOT::RC_OK) {
-                // This is the case where ABORT is done for a prepared transaction in one of the DN, but CN may still
-                // commit this transaction. So we need to save the prepared transaction for further instructions from
-                // CN or gs_clean. If we failed to save it, it's a panic situation.
-                report_pg_error(
-                    MOT::RC_PANIC, (char*)"Failed to save prepared transaction data (FailedCommitPrepared)");
-            }
-            return;
-        } else {
-            elog(DEBUG2, "XACT_EVENT_ABORT, tid %lu", tid);
-            MOTAdaptor::Rollback();
-        }
-
+        elog(DEBUG2, "XACT_EVENT_ABORT, tid %lu", tid);
+        MOTAdaptor::Rollback();
         txn->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
     } else if (event == XACT_EVENT_COMMIT_PREPARED) {
         if (txnState == MOT::TxnState::TXN_PREPARE) {
@@ -1700,8 +1662,9 @@ static void MOTXactCallback(XactEvent event, void* arg)
             elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, tid %lu", tid);
             abortParentTransactionParamsNoDetail(
                 ERRCODE_T_R_SERIALIZATION_FAILURE, "Commit Prepared: commit prepared without prepare (%u)", txnState);
-        } else
+        } else {
             rc = MOT::RC_OK;
+        }
         if (rc != MOT::RC_OK) {
             elog(DEBUG2, "commit prepared failed");
             elog(DEBUG2, "Abort parent transaction from MOT commit prepared, tid %lu", tid);

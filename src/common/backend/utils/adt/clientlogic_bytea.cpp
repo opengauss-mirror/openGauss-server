@@ -58,6 +58,8 @@
 #define IS_VAL_ESCAPE_CHAR(val) (((val[0]) == '\\') && ((val[1]) >= '0' && (val[1]) <= '3') && \
     ((val[2]) >= '0' && (val[2]) <= '7') && ((val[3]) >= '0' && (val[3]) <= '7'))
 #define IS_TWO_BACKSLASH(val)   (((val[0]) == '\\') && ((val[1]) == '\\'))
+#define IS_INVALID_INPUT(val)   ((strlen(val)) != 0 && (strlen(val)) < 12 && \
+    !((strlen(val)) == 2 && (val[0]) == '\\' && (val[1]) == 'x'))
 
 /* GUC variable */
 #define BYTEA_WITHOUT_ORDER_WITH_EQAL_COL_OUTPUT ENCRYPTEDCOL_OUTPUT_HEX
@@ -167,14 +169,37 @@ const Oid getOidFromInputText(const char *inputText)
     const int base = 16;
     return strtol(buf, NULL, base);
 }
+
+const void check_cek_oid(const char *inputText)
+{
+    char buf[3] = { /* 3 is to prevent subscript out of bounds */
+        inputText[2], /* 2 is the 2nd bit */
+        inputText[3], /* 3 is the 3rd bit */
+        0
+    };
+    const int base = 16;
+    size_t count = strtol(buf, NULL, base);
+    for (size_t i = 0; i < count; i++) {
+        const Oid cek = getOidFromInputText((inputText + 4));
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#endif
+            !checkColumnSettingId(cek))
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA), errmsg("cek with OID %u not found", cek)));
+    }
+}
+
 Datum
 byteawithoutordercolin(PG_FUNCTION_ARGS) 
 {
     char *inputText = PG_GETARG_CSTRING(0);
     size_t len = strlen(inputText);
-    if (len < 12) { /* 12 : the minimum length used to ensure the correct input parameters */
+    /* 12 : the minimum length used to ensure the correct input parameters */
+    if (IS_INVALID_INPUT(inputText)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type  byteawithoutordercol")));
+                errmsg("invalid input syntax for type byteawithoutordercol")));
     }
     int bc;
     byteawithoutordercol *result = NULL;
@@ -184,22 +209,8 @@ byteawithoutordercolin(PG_FUNCTION_ARGS)
     int cl;
     /* Recognize hex input */
     if (inputText[0] == '\\' && inputText[1] == 'x') {
-        char buf[3] = { /* 3 is to prevent subscript out of bounds */
-            inputText[2], /* 2 is the 2nd bit */
-            inputText[3], /* 3 is the 3rd bit */
-            0
-        };
-        const int base = 16;
-        size_t count = strtol(buf, NULL, base);
-        for (size_t i = 0; i < count; i++) {
-            const Oid cek = getOidFromInputText((inputText + 4));
-            if (
-#ifdef ENABLE_MULTIPLE_NODES
-    IS_PGXC_COORDINATOR &&
-#endif
-                !checkColumnSettingId(cek))
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA), errmsg("cek with OID %u not found", cek)));
+        if (len != 2) { /* 2: inputValue is '\x' */
+            check_cek_oid(inputText);
         }
 
         bc = (len - 2) / 2 + VARHDRSZ; /* maximum possible length */
@@ -208,6 +219,9 @@ byteawithoutordercolin(PG_FUNCTION_ARGS)
         SET_VARSIZE(result, bc + VARHDRSZ); /* actual length */
 
         PG_RETURN_ENCRYPTEDCOL_P(result);
+    } else if (inputText[0] != '\0') {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA),
+            errmsg("invalid input syntax for type byteawithoutordercol")));
     }
     bc = 0;
     temp = inputText;
@@ -225,7 +239,7 @@ byteawithoutordercolin(PG_FUNCTION_ARGS)
         } else {
             /* one backslash, not followed by another or ### valid octal */
             ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type  byteawithoutordercol")));
+                errmsg("invalid input syntax for type byteawithoutordercol")));
         }
     }
 
@@ -257,7 +271,7 @@ byteawithoutordercolin(PG_FUNCTION_ARGS)
         } else {
             // * We should never get here. The first pass should not allow it.
             ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
-                errmsg("invalid input syntax for type  byteawithoutordercol")));
+                errmsg("invalid input syntax for type byteawithoutordercol")));
         }
     }
 
@@ -331,7 +345,8 @@ Datum byteawithoutorderwithequalcolin(PG_FUNCTION_ARGS)
 {
     char *inputValue = PG_GETARG_CSTRING(0);
     size_t len = strlen(inputValue);
-    if (len < 12) { /* 12 : the minimum length used to ensure the correct input parameters */
+    /* 12 : the minimum length used to ensure the correct input parameters */
+    if (IS_INVALID_INPUT(inputValue)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
                 errmsg("invalid input syntax for type byteawithoutorderwithequalcol")));
     }
@@ -343,22 +358,8 @@ Datum byteawithoutorderwithequalcolin(PG_FUNCTION_ARGS)
     int cl;
     /* Recognize hex input */
     if (inputValue[0] == '\\' && inputValue[1] == 'x') {
-        char buf[3] = {
-            inputValue[2],
-            inputValue[3],
-            0
-        };
-        size_t count = strtol(buf, NULL, 16);
-        for (size_t i = 0; i < count; i++) {
-            const Oid cek = getOidFromInputText((inputValue + 4));
-            if (
-#ifdef ENABLE_MULTIPLE_NODES
-    IS_PGXC_COORDINATOR &&
-#endif
-                !checkColumnSettingId(cek)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA), errmsg("cek with OID %u not found", cek)));
-            }
+        if (len != 2) { /* 2: inputValue is '\x' */
+            check_cek_oid(inputValue);
         }
 
         bc = (len - 2) / 2 + VARHDRSZ; /* maximum possible length */
@@ -369,7 +370,7 @@ Datum byteawithoutorderwithequalcolin(PG_FUNCTION_ARGS)
         PG_RETURN_ENCRYPTEDCOL_P(result);
     } else if (inputValue[0] != '\0') {
         ereport(ERROR, (errcode(ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA),
-            errmsg("could not insert unencrypted values into encrypted column")));
+            errmsg("invalid input syntax for type byteawithoutorderwithequalcol")));
     }
     bc = 0;
     tp = inputValue;

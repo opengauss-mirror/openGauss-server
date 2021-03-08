@@ -95,6 +95,7 @@
 
 #include "client_logic/client_logic.h"
 #include "client_logic/client_logic_enums.h"
+#include "storage/checksum_impl.h"
 
 /* State shared by transformCreateStmt and its subroutines */
 typedef struct {
@@ -2084,6 +2085,31 @@ static void transformOfType(CreateStmtContext* cxt, TypeName* ofTypename)
     ReleaseSysCache(tuple);
 }
 
+char* getTmptableIndexName(const char* srcSchema, const char* srcIndex)
+{
+    char *idxname;
+    errno_t rc;
+    char srcIndexName[NAMEDATALEN * 2];
+    Assert(strlen(srcSchema) < NAMEDATALEN && strlen(srcIndex) < NAMEDATALEN);
+
+    rc = memset_s(srcIndexName, NAMEDATALEN * 2, 0, NAMEDATALEN * 2);
+    securec_check(rc, "", "");
+    /* Generate idxname based on src schema and src index name */
+    rc = strncpy_s(srcIndexName, NAMEDATALEN, srcSchema, NAMEDATALEN - 1);
+    securec_check(rc, "", "");
+    rc = strncpy_s(srcIndexName + NAMEDATALEN, NAMEDATALEN, srcIndex, NAMEDATALEN - 1);
+    securec_check(rc, "", "");
+    /* Calculates feature values based on schemas and indexes. */
+    uint32 srcIndexNum = pg_checksum_block(srcIndexName, NAMEDATALEN * 2);
+
+    /* In redistribution, idx name is "data_redis_tmp_index_srcIndexNum" */
+    uint len = OIDCHARS + strlen("data_redis_tmp_index_") + 1;
+    idxname = (char*)palloc0(len);
+    int ret = snprintf_s(idxname, len, len -1, "data_redis_tmp_index_%u", srcIndexNum);
+    securec_check_ss(ret, "", "");
+    return idxname;
+}
+
 /*
  * Generate an IndexStmt node using information from an already existing index
  * "source_idx".  Attribute numbers should be adjusted according to attmap.
@@ -2168,14 +2194,11 @@ static IndexStmt* generateClonedIndexStmt(
      */
     if (PointerIsValid(rel) && RelationInClusterResizing(rel)) {
         /* Generate idxname based on src index name */
-        errno_t rc;
-        uint4 len = strlen(NameStr(source_idx->rd_rel->relname)) + 1;
-        Assert(len <= NAMEDATALEN);
-
-        index->idxname = (char*)palloc(len);
-        rc = strncpy_s(index->idxname, len, NameStr(source_idx->rd_rel->relname), len - 1);
-        securec_check(rc, "", "");
+        char *srcSchema = get_namespace_name(source_idx->rd_rel->relnamespace);
+        char *srcIndex = NameStr(source_idx->rd_rel->relname);
+        index->idxname = getTmptableIndexName(srcSchema, srcIndex);
         isResize = true;
+        pfree_ext(srcSchema);
     } else {
         index->idxname = NULL;
     }
@@ -4299,8 +4322,8 @@ List* transformCreateSchemaStmt(CreateSchemaStmt* stmt)
                 cxt.triggers = lappend(cxt.triggers, element);
             } break;
 
-            case T_GrantStmt: /* GRANT XXX ON XXX TO XXX */
-            case T_AlterRoleStmt: /* GRANT ALL PRIVILEGES TO XXX */
+            case T_GrantStmt:
+            case T_AlterRoleStmt:
                 cxt.grants = lappend(cxt.grants, element);
                 break;
 
@@ -6787,8 +6810,7 @@ TryReuseFilenode(Relation rel, CreateStmtContext *ctx, bool clonepart)
 
 static bool IsCreatingSeqforAnalyzeTempTable(CreateStmtContext* cxt)
 {
-    if ((u_sess->attr.attr_sql.default_statistics_target >= 0 && log_min_messages > DEBUG1) ||
-            cxt->relation->relpersistence != RELPERSISTENCE_TEMP) {
+    if (cxt->relation->relpersistence != RELPERSISTENCE_TEMP) {
             return false;
     }
     bool isUnderAnalyze = false;

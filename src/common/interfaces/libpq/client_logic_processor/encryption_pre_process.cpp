@@ -22,6 +22,7 @@
  */
 
 #include "encryption_pre_process.h"
+#include "client_logic_cache/icached_column_manager.h"
 #include "processor_utils.h"
 #include "pqexpbuffer.h"
 #include "libpq-int.h"
@@ -60,10 +61,15 @@ bool EncryptionPreProcess::run_pre_column_encryption_key(PGconn *conn, CreateCli
                 size_t global_fqdn_size =
                     CacheLoader::get_instance().get_object_fqdn(global_key_name, true, global_fqdn);
                 if (global_fqdn_size == 0) {
-                    printfPQExpBuffer(&conn->errorMessage,
-                        libpq_gettext("ERROR(CLIENT): failed to get client master key %s from cache\n"),
-                        global_key_name);
-                    return false;
+                    conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
+                    ICachedColumnManager::get_instance().load_cache(conn);
+                    global_fqdn_size = CacheLoader::get_instance().get_object_fqdn(global_key_name, true, global_fqdn);
+                    if (global_fqdn_size == 0) {
+                        printfPQExpBuffer(&conn->errorMessage,
+                            libpq_gettext("ERROR(CLIENT): failed to get client master key %s from cache\n"),
+                            global_key_name);
+                        return false;
+                    }
                 }
                 check_strncpy_s(strncpy_s(global_key_name, NAMEDATALEN * NAME_CNT, global_fqdn, global_fqdn_size));
                 if_duplicate_masterkey = true;

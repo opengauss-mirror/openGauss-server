@@ -264,13 +264,14 @@ static bool dw_verify_pg_checksum(PageHeader page_header, BlockNumber blockNum)
 {
     /* new page donot have crc and lsn, we donot recovery it */
     if (PageIsNew(page_header)) {
+        ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: new page")));
         return false;
     }
     if (PageIsChecksumByFNV1A(page_header)) {
         uint16 checksum = pg_checksum_page((char *)page_header, blockNum);
         return checksum == page_header->pd_checksum;
     } else {
-        ereport(FATAL, (errmodule(MOD_DW), errmsg("DW verify checksum: page checksum flag is wrong")));
+        ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: page checksum flag is wrong")));
         return false;
     }
 }

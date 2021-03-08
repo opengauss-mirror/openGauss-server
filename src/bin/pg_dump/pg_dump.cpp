@@ -62,6 +62,7 @@
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
 #include "libpq/libpq-fs.h"
+#include "libpq/libpq-int.h"
 #include "catalog/pgxc_node.h"
 #include "pg_backup_archiver.h"
 #include "pg_backup_db.h"
@@ -1608,6 +1609,7 @@ void help(const char* pchProgname)
     /* Database Security: Data importing/dumping support AES128. */
     printf(_("  --with-encryption=AES128                    dump data is encrypted using AES128\n"));
     printf(_("  --with-key=KEY                              AES128 encryption key, must be 16 bytes in length\n"));
+    printf(_("  --with-salt=RANDVALUES                      used by gs_dumpall, pass rand value array\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --include-nodes                             include TO NODE/GROUP clause in the dumped CREATE TABLE "
              "and CREATE FOREIGN TABLE commands.\n"));
@@ -3496,20 +3498,20 @@ static void dumpColumnEncryptionKeys(Archive *fout, const Oid nspoid, const char
                     exit_nicely(1);
                 }
 
-                if (!read_cmk_plain(cmk_id, cmk_plain, true)) {
+                if (!read_cmk_plain(cmk_id, cmk_plain)) {
                     exit_nicely(1);
                 }
 
                 if (!decrypt_cek_use_aes256((const unsigned char *)encrypted_value, unescapedDataSize, cmk_plain,
-                    (unsigned char *)decryptedKey, &decryptedKeySize, true)) {
+                    decryptedKey, &decryptedKeySize)) {
                     exit_nicely(1);
                 }
 #else
                 RealCmkPath real_cmk_path = {0};
                 KmsErrType err_type = SUCCEED;
 
-                err_type = get_real_key_path_kms(key_path_str, &real_cmk_path);
-                if (err_type != KEY_FILES_EXIST) {
+                err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, READ_KEY_FILE);
+                if (err_type != SUCCEED) {
                     handle_kms_err(err_type);
                     exit_nicely(1);
                 }
@@ -4219,9 +4221,6 @@ NamespaceInfo* getNamespaces(Archive* fout, int* numNamespaces)
 
         /* Decide whether to dump this nmspace */
         selectDumpableNamespace(&nsinfo[i]);
-
-        if (strlen(nsinfo[i].rolname) == 0)
-            write_msg(NULL, "WARNING: owner of schema \"%s\" appears to be invalid\n", nsinfo[i].dobj.name);
     }
 
     PQclear(res);
@@ -4604,9 +4603,6 @@ TypeInfo* getTypes(Archive* fout, int* numTypes)
                 }
             }
         }
-
-        if (strlen(tyinfo[i].rolname) == 0 && tyinfo[i].isDefined)
-            write_msg(NULL, "WARNING: owner of data type \"%s\" appears to be invalid\n", tyinfo[i].dobj.name);
     }
 
     *numTypes = ntups;
@@ -4707,9 +4703,6 @@ OprInfo* getOperators(Archive* fout, int* numOprs)
 
         /* Decide whether we want to dump it */
         selectDumpableObject(&(oprinfo[i].dobj));
-
-        if (strlen(oprinfo[i].rolname) == 0)
-            write_msg(NULL, "WARNING: owner of operator \"%s\" appears to be invalid\n", oprinfo[i].dobj.name);
     }
 
     PQclear(res);
@@ -4948,12 +4941,6 @@ OpclassInfo* getOpclasses(Archive* fout, int* numOpclasses)
 
         /* Decide whether we want to dump it */
         selectDumpableObject(&(opcinfo[i].dobj));
-
-        if (fout->remoteVersion >= 70300) {
-            if (strlen(opcinfo[i].rolname) == 0)
-                write_msg(
-                    NULL, "WARNING: owner of operator class \"%s\" appears to be invalid\n", opcinfo[i].dobj.name);
-        }
     }
 
     PQclear(res);
@@ -5031,12 +5018,6 @@ OpfamilyInfo* getOpfamilies(Archive* fout, int* numOpfamilies)
 
         /* Decide whether we want to dump it */
         selectDumpableObject(&(opfinfo[i].dobj));
-
-        if (fout->remoteVersion >= 70300) {
-            if (strlen(opfinfo[i].rolname) == 0)
-                write_msg(
-                    NULL, "WARNING: owner of operator family \"%s\" appears to be invalid\n", opfinfo[i].dobj.name);
-        }
     }
 
     PQclear(res);
@@ -5165,10 +5146,6 @@ AggInfo* getAggregates(Archive* fout, int* numAggs)
         agginfo[i].aggfn.dobj.nmspace =
             findNamespace(fout, atooid(PQgetvalue(res, i, i_aggnamespace)), agginfo[i].aggfn.dobj.catId.oid);
         agginfo[i].aggfn.rolname = gs_strdup(PQgetvalue(res, i, i_rolname));
-        if (strlen(agginfo[i].aggfn.rolname) == 0)
-            write_msg(NULL,
-                "WARNING: owner of aggregate function \"%s\" appears to be invalid\n",
-                agginfo[i].aggfn.dobj.name);
         agginfo[i].aggfn.lang = InvalidOid;       /* not currently interesting */
         agginfo[i].aggfn.prorettype = InvalidOid; /* not saved */
         agginfo[i].aggfn.proacl = gs_strdup(PQgetvalue(res, i, i_aggacl));
@@ -5351,9 +5328,6 @@ FuncInfo* getFuncs(Archive* fout, int* numFuncs)
 
         /* Decide whether we want to dump it */
         selectDumpableObject(&(finfo[i].dobj));
-
-        if (strlen(finfo[i].rolname) == 0)
-            write_msg(NULL, "WARNING: owner of function \"%s\" appears to be invalid\n", finfo[i].dobj.name);
     }
 
     PQclear(res);
@@ -6418,12 +6392,6 @@ TableInfo* getTables(Archive* fout, int* numTables)
                 ExecuteSqlStatement(fout, query->data);
             }
         }
-
-        /* Emit notice if join for owner failed */
-        if (strlen(tblinfo[i].rolname) == 0)
-            write_msg(NULL,
-                "WARNING: owner of table \"%s\" appears to be invalid\n",
-                fmtQualifiedId(fout, tblinfo[i].dobj.nmspace->dobj.name, tblinfo[i].dobj.name));
     }
 
     /*
@@ -14336,6 +14304,17 @@ static void dumpForeignServer(Archive* fout, ForeignServerInfo* srvinfo)
     destroyPQExpBuffer(q);
     destroyPQExpBuffer(delq);
     destroyPQExpBuffer(labelq);
+    destroyPQExpBuffer(query);
+    if (res == NULL) {
+        return;
+    }
+    GS_FREE(res->tuples);
+    GS_FREE(res->paramDescs);
+    GS_FREE(res->events);
+    GS_FREE(res->errMsg);
+    GS_FREE(res->errFields);
+    GS_FREE(res->curBlock);
+    GS_FREE(res);
 }
 
 /*
@@ -14439,6 +14418,7 @@ static void dumpUserMappings(
     destroyPQExpBuffer(query);
     destroyPQExpBuffer(delq);
     destroyPQExpBuffer(q);
+    destroyPQExpBuffer(tag);
 }
 
 /*
@@ -19652,6 +19632,7 @@ static void dumpRlsPolicy(Archive* fout, RlsPolicyInfo* policyinfo)
         NULL);
     destroyPQExpBuffer(query);
     destroyPQExpBuffer(tag);
+    destroyPQExpBuffer(delcmd);
     return;
 }
 

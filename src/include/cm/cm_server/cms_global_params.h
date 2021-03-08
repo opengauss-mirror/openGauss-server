@@ -56,6 +56,7 @@ typedef enum MAINTENANCE_MODE_ {
     MAINTENANCE_MODE_UPGRADE,
     MAINTENANCE_MODE_UPGRADE_OBSERVATION,
     MAINTENANCE_MODE_DILATATION,
+    MAINTENANCE_NODE_UPGRADED_GRAYSCALE
 } maintenance_mode;
 
 /* data structures to record instances that are in switchover procedure */
@@ -89,6 +90,11 @@ typedef struct DynamicNodeReadOnlyInfo {
     uint32 lastLogDiskPreAlarm;
     uint32 logDiskUsage;
 } DynamicNodeReadOnlyInfo;
+
+typedef struct DatanodeDynamicStatus {
+    int count;
+    uint32 dnStatus[CM_PRIMARY_STANDBY_NUM];
+} DatanodeDynamicStatus;
 
 #define ELASTICGROUP "elastic_group"
 
@@ -135,12 +141,20 @@ typedef struct DynamicNodeReadOnlyInfo {
 #define SWITCHOVER_SEND_CHECK_NUM 3
 #define MAX_VALUE_OF_CM_PRIMARY_HEARTBEAT 86400
 #define MAX_COUNT_OF_NOTIFY_CN 86400
+#define MAX_VALUE_OF_PRINT 86400
 #define CM_MAX_AUTH_TOKEN_LENGTH 65535
 #define INSTANCE_ID_LEN 5
 #define CM_GS_GUC_SEND_INTERVAL 3
 
 #define CN_DELETE_DELAY_SECONDS 10
 #define MAX_QUERY_DOWN_COUNTS 30
+
+#define INSTANCE_DATA_NO_REDUCED 0 //  no reduce shard instanceId
+#define INSTANCE_DATA_REDUCED 1   // reduce shard instanceId
+
+#define SUCCESS_GET_VALUE 1
+#define CAN_NOT_FIND_THE_KEY 2
+#define FAILED_GET_VALUE 3
 
 #define AZ1_INDEX 0                              // for the index flag, az1
 #define AZ2_INDEX 1                              // for the index flag, az2
@@ -174,6 +188,9 @@ typedef struct DynamicNodeReadOnlyInfo {
 
 #define AUTHENTICATION_TIMEOUT 60
 
+#define CAN_NOT_SEND_SYNC_lIST 1
+#define NOT_NEED_TO_SEND_SYNC_LIST 2
+#define NEED_TO_SEND_SYNC_LIST 3
 
 #define IS_CN_INSTANCEID(instanceId) \
     ((instanceId) > 5000 && (instanceId) < 6000)
@@ -268,6 +285,7 @@ extern int g_monitor_thread_check_invalid_times;
 extern int cm_server_current_role;
 extern int ccn_change_delay_time;
 extern int* cn_dn_disconnect_times;
+extern int* g_lastCnDnDisconnectTimes;
 extern int g_cms_ha_heartbeat_timeout[CM_PRIMARY_STANDBY_NUM];
 extern int g_cms_ha_heartbeat_from_etcd[CM_PRIMARY_STANDBY_NUM];
 extern int HAListenSocket[MAXLISTEN];

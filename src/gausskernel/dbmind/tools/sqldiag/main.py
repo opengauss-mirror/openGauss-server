@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details.
 """
 import argparse
 import os
+import stat
 
 from src.file_processor import get_train_dataset, get_test_dataset
 from src.sql_template import SqlTemplate
@@ -33,8 +34,6 @@ w2v_model_parameter = {'max_len': 300,
 
 
 def train(template_dir, data):
-    if not os.path.exists(template_dir):
-        os.makedirs(template_dir)
     w2v_model_path = os.path.join(template_dir, w2v_model_name)
     w2v = Word2Vector(**w2v_model_parameter)
     if not os.path.exists(w2v_model_path):
@@ -67,7 +66,11 @@ def parse_args():
 def main(args):
     mode = args.mode
     filepath = args.file
-    template_dir = './template'
+    template_dir = os.path.realpath('./template')
+    if not os.path.exists(template_dir):
+        os.makedirs(template_dir, mode=0o700)
+    if oct(os.stat(template_dir).st_mode)[-3:] != '700':
+        os.chmod(template_dir, stat.S_IRWXU)
     if mode == 'train':
         train_data = get_train_dataset(filepath)
         train(template_dir, train_data)

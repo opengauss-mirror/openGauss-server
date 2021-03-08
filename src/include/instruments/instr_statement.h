@@ -96,7 +96,7 @@ typedef enum {
     LWLOCK_WAIT_END,
     LWLOCK_RELEASE,
     TYPE_INVALID
-} StatementDetailType;
+} StmtDetailType;
 
 // type(1 byte), timestamp(8 bytes), locktag(20 bytes), lockmode(4 bytes)
 #define LOCK_START_DETAIL_BUFSIZE 33
@@ -134,13 +134,19 @@ struct StatementDetailItem {
 struct StatementDetail {
     int n_items;        /* how many of detail items */
     uint32 cur_pos;     /* the write position of the last item */
+    bool oom;           /* whether OutOfMemory happened. */
     StatementDetailItem *head;  /* the first detail item. */
     StatementDetailItem *tail;  /* the last detail item. */
 };
 
+/* increment this version if more detail is supported. */
 #define STATEMENT_DETAIL_VERSION 1
+
+/* flag for detail content's integrity, CAUTION: modify is_valid_detail_record() if add new flag */
 #define STATEMENT_DETAIL_NOT_TRUNCATED 0
 #define STATEMENT_DETAIL_TRUNCATED 1
+#define STATEMENT_DETAIL_MISSING_OOM 2
+
 #define STATEMENT_DETAIL_FORMAT_STRING "plaintext"
 #define STATEMENT_DETAIL_FORMAT_JSON "json"
 #define STATEMENT_DETAIL_TYPE_PRETTY "pretty"
@@ -187,8 +193,8 @@ extern void assign_statement_stat_level(const char* newval, void* extra);
 extern bool check_statement_retention_time(char** newval, void** extra, GucSource source);
 extern void assign_statement_retention_time(const char* newval, void* extra);
 
-extern void statement_full_info_record(
-    StatementDetailType type, int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0);
+extern void instr_stmt_report_lock(
+    StmtDetailType type, int lockmode = -1, const LOCKTAG *locktag = NULL, uint16 lwlockId = 0);
 
 extern void instr_stmt_report_stat_at_handle_init();
 extern void instr_stmt_report_stat_at_handle_commit();
@@ -200,8 +206,6 @@ extern void instr_stmt_report_query_plan(QueryDesc *queryDesc);
 extern void instr_stmt_report_debug_query_id(uint64 debug_query_id);
 extern void instr_stmt_report_start_time();
 extern void instr_stmt_report_finish_time();
-extern text *get_statement_detail(StatementDetail *text);
-extern char *decode_statement_detail_text(text *details, const char *format, bool pretty);
 extern bool instr_stmt_need_track_plan();
 extern void instr_stmt_report_returned_rows(uint64 returned_rows);
 extern void instr_stmt_report_soft_parse(uint64 soft_parse);

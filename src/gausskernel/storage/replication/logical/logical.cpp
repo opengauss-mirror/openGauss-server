@@ -959,8 +959,8 @@ retry:
         }
         ereport(FATAL,
             (errmsg("pg_recvlogical_sender could not connect to the remote server, "
-                    "we have tried %d times, the connection info :%s : %s",
-                    count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
+                     "we have tried %d times, the connection info :%s : %s",
+                     count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
     }
 
     /* 2. identify version */

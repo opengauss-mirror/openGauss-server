@@ -3610,14 +3610,6 @@ pgxc_node_send_queryid(PGXCNodeHandle *handle, uint64 queryid)
 	return 0;
 }
 
-int
-pgxc_node_send_cn_identifier(PGXCNodeHandle *handle, PGXCNode_HandleGPC handle_type)
-{
-	Assert(false);
-	DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-	return 0;
-}
-
 /*
  * Send unique sql id to PGXC node
  *
@@ -3868,8 +3860,9 @@ pgxc_node_notify_commit(PGXCNodeHandle * handle)
 	ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, 4);
 	securec_check(ss_rc,"\0","\0");
 	handle->outEnd += 4;
+	CommitSeqNo currentNextCommitSeqNo = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
 	ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd,
-					 &t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo, sizeof(uint64));
+					 &currentNextCommitSeqNo, sizeof(uint64));
 	securec_check(ss_rc,"\0","\0");
 	handle->outEnd += sizeof(uint64);
 

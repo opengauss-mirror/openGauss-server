@@ -50,7 +50,7 @@ bool KeyRecord::create_encrypted_sample_string(std::string dek_b64)
     unsigned char dek[DEK_LEN] = {};
     ret = EVP_DecodeBlock(dek, (unsigned char*)dek_b64.c_str(), dek_b64.length());
     if (ret < 0) {
-        std::cout << "keymanagement DEK is wrrong,base64 decode fail." << std::endl;
+        std::cout << "keymanagement DEK is wrong, base64 decode failed." << std::endl;
         return false;
     }
 
@@ -60,14 +60,14 @@ bool KeyRecord::create_encrypted_sample_string(std::string dek_b64)
     /* new cipher ctx */
     ctx = EVP_CIPHER_CTX_new();
     if (ctx == NULL) {
-        std::cout << "keymanagement create encrypted_sample_string fail,cannot new ctx." << std::endl;
+        std::cout << "keymanagement create encrypted sample string failed, cannot new cipher ctx." << std::endl;
         return false;
     }
 
     /* get aes cipher address */
     cipher = EVP_aes_128_ctr();
     if (cipher == NULL) {
-        std::cout << "keymanagement create encrypted_sample_string fail,cannot new aes128 cipher." << std::endl;
+        std::cout << "keymanagement create encrypted sample string failed, cannot get aes128 cipher." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -76,7 +76,7 @@ bool KeyRecord::create_encrypted_sample_string(std::string dek_b64)
     /* init ctx */
     ret = EVP_EncryptInit(ctx, cipher, dek, iv);
     if (ret == 0) {
-        std::cout << "keymanagement create encrypted_sample_string fail,cannot init cipher." << std::endl;
+        std::cout << "keymanagement create encrypted sample string failed, cannot init cipher." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -88,7 +88,7 @@ bool KeyRecord::create_encrypted_sample_string(std::string dek_b64)
     /* Perform encryption operations */
     ret = EVP_EncryptUpdate(ctx, ciphertext, &ciphertextlen, plaintext, sizeof(plaintext));
     if (ret == 0) {
-        std::cout << "keymanagement create encrypted_sample_string fail,cannot encrypt.Plaintext length:"
+        std::cout << "keymanagement create encrypted sample string failed, cannot encrypt. Plaintext length:"
                   << sizeof(plaintext) << std::endl;
         EVP_CIPHER_CTX_free(ctx);
 
@@ -101,13 +101,13 @@ bool KeyRecord::create_encrypted_sample_string(std::string dek_b64)
     memset_s(ciphertext_base64, sizeof(ciphertext_base64), 0, sizeof(ciphertext_base64));
     ret = EVP_EncodeBlock(ciphertext_base64, ciphertext, ciphertextlen);
     if (ret < 0) {
-        std::cout << "keymanagement create encrypted_sample_string fail,cannot base64 encoding." << std::endl;
+        std::cout << "keymanagement create encrypted sample string failed, cannot base64 encoding." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
 
     encrypted_sample_string = std::string((char*)ciphertext_base64);
-    std::cout << "keymanagement create encrypted_sample_string:" << encrypted_sample_string << std::endl;
+    std::cout << "keymanagement create encrypted sample string ok." << std::endl;
     EVP_CIPHER_CTX_free(ctx);
     return true;
 }
@@ -127,7 +127,7 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
         (unsigned char*)encrypted_sample_string.c_str(),
         encrypted_sample_string.length());
     if (encrypted_sample_string_orign_length <= 0) {
-        std::cout << "keymanagement encrypted_sample_string is wrong, base64 decode fail." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed, base64 decode fail." << std::endl;
         return false;
     }
 
@@ -137,14 +137,14 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
     /* new cipher ctx */
     ctx = EVP_CIPHER_CTX_new();
     if (ctx == NULL) {
-        std::cout << "keymanagement check encrypted_sample_string fail,cannot new ctx." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed, cannot new ctx." << std::endl;
         return false;
     }
 
     /* get aes cipher address */
     cipher = EVP_aes_128_ctr();
     if (cipher == NULL) {
-        std::cout << "keymanagement check encrypted_sample_string fail,cannot new aes128 cipher." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed, cannot get aes128 cipher." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -153,7 +153,7 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
     /* init ctx */
     ret = EVP_DecryptInit(ctx, cipher, dek, iv);
     if (ret == 0) {
-        std::cout << "keymanagement check encrypted_sample_string fail,cannot init cipher." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed, cannot init cipher." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -165,7 +165,7 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
     ret = EVP_DecryptUpdate(
         ctx, out_plain_text, &out_plain_text_len, encrypted_sample_string_orign, encrypted_sample_string_orign_length);
     if (ret == 0) {
-        std::cout << "keymanagement check encrypted_sample_string fail,decrypt fail." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed, decrypt failed." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -173,7 +173,7 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
     /* Comparing value */
     if (strlen((const char*)out_plain_text) != strlen(TRANS_ENCRYPT_SAMPLE_STRING) ||
         strncmp((const char*)out_plain_text, TRANS_ENCRYPT_SAMPLE_STRING, strlen(TRANS_ENCRYPT_SAMPLE_STRING)) != 0) {
-        std::cout << "keymanagement check encrypted_sample_string fail." << std::endl;
+        std::cout << "keymanagement check encrypted sample string failed." << std::endl;
         EVP_CIPHER_CTX_free(ctx);
         return false;
     }
@@ -185,7 +185,7 @@ bool KeyRecord::check_encrypted_sample_string(unsigned char* dek)
 std::string KeyRecord::getEncryptedSampleStr()
 {
     if (encrypted_sample_string.empty()) {
-        std::cout << "keymanagement encrypted_sample_string is empty." << std::endl;
+        std::cout << "keymanagement encrypted sample string is empty." << std::endl;
     }
 
     return encrypted_sample_string;
@@ -209,7 +209,7 @@ bool KeyRecord::create_dek_iv()
 bool KeyRecord::getIV(unsigned char* out_iv)
 {
     if (out_iv == NULL) {
-        std::cout << "keymanagement out_iv is empty." << std::endl;
+        std::cout << "keymanagement out_iv is NULL." << std::endl;
         return false;
     }
 

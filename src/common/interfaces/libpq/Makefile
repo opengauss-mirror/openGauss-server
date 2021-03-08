@@ -22,14 +22,14 @@ SO_MINOR_VERSION= 5
 
 DOXYGEN="$(top_builddir)/../$(BUILD_TOOLS_PATH)/doxygen/bin/doxygen"
 override CPPFLAGS :=  -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/common/port -I$(top_srcdir)/src/common/port
-override CPPFLAGS += -DPGXC -Wno-write-strings -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/include/libpq/
+override CPPFLAGS += -DPGXC -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/include/libpq/
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_hooks
 
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 endif
 
@@ -175,7 +175,7 @@ endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 all: gs_ktool all-lib-depends
 gs_ktool:
-	$(MAKE) -C $(top_builddir)/src/distribute/bin/gs_ktool
+	$(MAKE) -C $(top_builddir)/src/bin/gs_ktool
 else
 all: all-lib-depends
 endif

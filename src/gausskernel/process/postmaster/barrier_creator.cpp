@@ -112,6 +112,25 @@ static uint64_t read_barrier_id_from_obs(const ReplicationSlot *obs_archive_slot
     return 0;
 }
 
+static void BarrierPoolerReload(void) 
+{
+    MemoryContext oldContext;
+    
+    /* Now session information is reset in correct memory context */
+    oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
+
+    /* Reinitialize session, while old pooler connection is active */
+    InitMultinodeExecutor(true);
+    /* And reconnect to pool manager */
+    PoolManagerReconnect();
+
+    MemoryContextSwitchTo(oldContext);
+    ereport(LOG,
+        (errmsg("[barrierPoolerReload] Reload connections with CN/DN, dn count : %d, cn count : %d",
+            u_sess->pgxc_cxt.NumDataNodes,
+            u_sess->pgxc_cxt.NumCoords)));
+}
+
 void barrier_creator_main(void)
 {
     ReplicationSlot *obs_archive_slot = NULL;
@@ -235,6 +254,11 @@ void barrier_creator_main(void)
             g_instance.barrier_creator_cxt.stop = true;
             break;
         }
+
+        if (u_sess->sig_cxt.got_PoolReload) {
+            BarrierPoolerReload();
+            u_sess->sig_cxt.got_PoolReload = false;
+        }
         gettimeofday(&tv, NULL);
 
         /* create barrier with increasing index */
@@ -243,7 +267,11 @@ void barrier_creator_main(void)
             TIME_GET_MILLISEC(tv));
         securec_check_ss_c(rc, "\0", "\0");
         ereport(LOG, (errmsg("[BarrierCreator] creating barrier %s", barrier_name)));
+#ifdef ENABLE_MULTIPLE_NODES
+        RequestBarrier(barrier_name, NULL);
+#else
         DisasterRecoveryRequestBarrier(barrier_name);
+#endif
         write_barrier_id_to_obs(barrier_name);
         index++;
     }

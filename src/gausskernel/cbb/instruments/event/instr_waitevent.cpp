@@ -61,15 +61,9 @@ static void updateMaxValueForAtomicType(int64 new_val, volatile int64* max)
 /*
  * updateMinValueForAtomicType - update ming value for atomic type
  */
-static void updateMinValueForAtomicType(int64 new_val, volatile int64* mix, int counter)
+static void updateMinValueForAtomicType(int64 new_val, volatile int64* mix)
 {
     int64 prev;
-    if (counter == 0) {
-        prev = *mix;
-        (void)gs_compare_and_swap_64(mix, prev, new_val);
-        return;
-    }
-
     do {
         prev = *mix;
     } while ((prev == 0 || prev > new_val) && !gs_compare_and_swap_64(mix, prev, new_val));
@@ -126,8 +120,7 @@ static void updateWaitStatusInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo statu
             continue;
         }
         updateMinValueForAtomicType(status_info.statistics_info[i].min_duration,
-            &(gsInstrWaitInfo->status_info.statistics_info[i].min_duration),
-            gsInstrWaitInfo->status_info.statistics_info[i].counter);
+            &(gsInstrWaitInfo->status_info.statistics_info[i].min_duration));
         updateMaxValueForAtomicType(status_info.statistics_info[i].max_duration,
             &(gsInstrWaitInfo->status_info.statistics_info[i].max_duration));
         gsInstrWaitInfo->status_info.statistics_info[i].counter += status_info.statistics_info[i].counter;
@@ -175,9 +168,13 @@ static void instr_wait_event_report_last_updated(volatile WaitStatisticsInfo* ev
 
 void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, int64 duration)
 {
+    /* Because the time precision is microseconds,
+     * all actions less than microseconds are recorded as 0.
+     * When the duration is 0, we set the duration to 1
+     */
+    duration = (duration == 0) ? 1 : duration;
     updateMinValueForAtomicType(duration,
-        &(InstrWaitInfo->status_info.statistics_info[waitstatus].min_duration),
-        InstrWaitInfo->status_info.statistics_info[waitstatus].counter);
+        &(InstrWaitInfo->status_info.statistics_info[waitstatus].min_duration));
     InstrWaitInfo->status_info.statistics_info[waitstatus].counter++;
     InstrWaitInfo->status_info.statistics_info[waitstatus].total_duration += duration;
     updateMaxValueForAtomicType(duration, &(InstrWaitInfo->status_info.statistics_info[waitstatus].max_duration));
@@ -191,12 +188,15 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
     if (eventId == UINT32_MAX) {
         return;
     }
-
+    /* Because the time precision is microseconds,
+     * all actions less than microseconds are recorded as 0.
+     * When the duration is 0, we set the duration to 1
+     */
+    duration = (duration == 0) ? 1 : duration;
     switch (classId) {
         case PG_WAIT_LWLOCK:
             updateMinValueForAtomicType(duration,
-                &(InstrWaitInfo->event_info.lwlock_info[eventId].min_duration),
-                InstrWaitInfo->event_info.lwlock_info[eventId].counter);
+                &(InstrWaitInfo->event_info.lwlock_info[eventId].min_duration));
             InstrWaitInfo->event_info.lwlock_info[eventId].counter++;
             InstrWaitInfo->event_info.lwlock_info[eventId].total_duration += duration;
             updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.lwlock_info[eventId].max_duration));
@@ -204,8 +204,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
             break;
         case PG_WAIT_LOCK:
             updateMinValueForAtomicType(duration,
-                &(InstrWaitInfo->event_info.lock_info[eventId].min_duration),
-                InstrWaitInfo->event_info.lock_info[eventId].counter);
+                &(InstrWaitInfo->event_info.lock_info[eventId].min_duration));
             InstrWaitInfo->event_info.lock_info[eventId].counter++;
             InstrWaitInfo->event_info.lock_info[eventId].total_duration += duration;
             updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.lock_info[eventId].max_duration));
@@ -214,8 +213,7 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
         case PG_WAIT_IO:
             if (wait_event_info != WAIT_EVENT_WAL_BUFFER_ACCESS) {
                 updateMinValueForAtomicType(duration,
-                    &(InstrWaitInfo->event_info.io_info[eventId].min_duration),
-                    InstrWaitInfo->event_info.io_info[eventId].counter);
+                    &(InstrWaitInfo->event_info.io_info[eventId].min_duration));
                 InstrWaitInfo->event_info.io_info[eventId].counter++;
                 InstrWaitInfo->event_info.io_info[eventId].total_duration += duration;
                 updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.io_info[eventId].max_duration));
@@ -264,7 +262,7 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
         update_max_last_updated(io_info, event_info.io_info[i].last_updated);
         if (event_info.io_info[i].counter != 0) {
             updateMinValueForAtomicType(event_info.io_info[i].min_duration,
-                &io_info->min_duration, io_info->counter);
+                &io_info->min_duration);
             updateMaxValueForAtomicType(event_info.io_info[i].max_duration, &io_info->max_duration);
             io_info->counter += event_info.io_info[i].counter;
             io_info->total_duration += event_info.io_info[i].total_duration;
@@ -279,7 +277,7 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
         update_max_last_updated(lock_info, event_info.lock_info[i].last_updated);
         if (event_info.lock_info[i].counter != 0) {
             updateMinValueForAtomicType(event_info.lock_info[i].min_duration,
-                &lock_info->min_duration, lock_info->counter);
+                &lock_info->min_duration);
             updateMaxValueForAtomicType(event_info.lock_info[i].max_duration, &lock_info->max_duration);
             lock_info->counter += event_info.lock_info[i].counter;
             lock_info->failed_counter += event_info.lock_info[i].failed_counter;
@@ -295,7 +293,7 @@ void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, Wait
         update_max_last_updated(lwlock_info, event_info.lwlock_info[i].last_updated);
         if (event_info.lwlock_info[i].counter != 0) {
             updateMinValueForAtomicType(event_info.lwlock_info[i].min_duration,
-                &lwlock_info->min_duration, lwlock_info->counter);
+                &lwlock_info->min_duration);
             updateMaxValueForAtomicType(event_info.lwlock_info[i].max_duration, &lwlock_info->max_duration);
             lwlock_info->counter += event_info.lwlock_info[i].counter;
             lwlock_info->failed_counter += event_info.lwlock_info[i].failed_counter;

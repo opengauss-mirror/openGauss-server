@@ -112,7 +112,16 @@ void UpdateDBStateFile(char* path, GaussState* state)
     if (statef == NULL) {
         return;
     }
+    if (chmod(temppath, S_IRUSR | S_IWUSR) == -1) {
+        /* Close file and Nullify the pointer for retry */
+        fclose(statef);
+        statef = NULL;
+        return;
+    }
     if (0 == (fwrite(state, 1, sizeof(GaussState), statef))) {
+        fclose(statef);
+        statef = NULL;
+        return;
     }
     fclose(statef);
 

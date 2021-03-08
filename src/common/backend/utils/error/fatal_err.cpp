@@ -190,8 +190,12 @@ static void print_frame(int fd, void *pc, elf_parser *parser)
                     !parser->reset(dlinfo.dli_fname)) {
                 output(fd, "%p", pc);
             } else {
+                /* If the current file is a shared object file, address to resolve
+                 * is a pseudo address, otherwise it is pc.
+                 */
                 char buf[SIG_BUFLEN];
-                if (parser->resolve_addr(dl_off, buf, sizeof(buf), &sym_off)) {
+                uintptr_t addr = parser->isdyn() ? dl_off : (uintptr_t)pc;
+                if (parser->resolve_addr(addr, buf, sizeof(buf), &sym_off)) {
                     output(fd, " %s + 0x%x", buf, sym_off);
                 } else {
                     output(fd, "%p", pc);

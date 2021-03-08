@@ -181,7 +181,9 @@ COPY LINEITEM FROM '@abs_srcdir@/data/lineitem_cstore.data' delimiter '|';
 VACUUM FULL LINEITEM;
 
 
+set xc_maintenance_mode = on;
 VACUUM FULL;
+set xc_maintenance_mode = off;
 
 
 DROP TABLE LINEITEM;

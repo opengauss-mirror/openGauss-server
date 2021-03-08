@@ -231,7 +231,8 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          */
         if (t_thrd.int_cxt.CritSectionCount > 0)
             elevel = PANIC;
-
+        /* error accurs, cannot just release slot to pool */
+        u_sess->libpq_cxt.HasErrorAccurs = true;
         /*
          * Check reasons for treating ERROR as FATAL:
          *
@@ -2609,6 +2610,72 @@ char* unpack_sql_state(int sql_state)
     return buf;
 }
 
+const char* mask_encrypted_key(const char *query_string, int str_len)
+{
+    int mask_len = 8;
+    const char *mask_string = NULL;
+    errno_t rc = EOK;
+
+    const char *column_setting_str = "encrypted_value";
+    size_t iden_len = strlen(column_setting_str);
+    char *lower_string = (char*)palloc0(str_len + 1);
+    rc = memcpy_s(lower_string, str_len + 1, query_string, str_len);
+    securec_check(rc, "\0", "\0");
+    tolower_func(lower_string);
+
+    char *word_ptr = strstr(lower_string, column_setting_str);
+    if (word_ptr == NULL) {
+        pfree_ext(lower_string);
+        return query_string;
+    }
+    char *tmp_string = (char*)palloc0(str_len + 1);
+    rc = memcpy_s(tmp_string, str_len + 1, query_string, str_len);
+    securec_check(rc, "\0", "\0");
+    word_ptr = tmp_string + (word_ptr - lower_string);
+    char *token_ptr = word_ptr + iden_len;
+    size_t head_len = word_ptr - tmp_string + iden_len;
+    char *first_quote = NULL;
+    char *second_quote = NULL;
+    for (size_t i = 0; i < str_len - head_len; i++) {
+        if (token_ptr[i] == '\'') {
+            if (first_quote == NULL) {
+                first_quote = token_ptr + i;
+            } else if (second_quote == NULL) {
+                second_quote = token_ptr + i;
+            }
+        }
+    }
+    if (first_quote == NULL || second_quote == NULL) {
+        if (token_ptr != NULL && strlen(token_ptr) > 0) {
+            token_ptr[0] = '\0';
+        }
+        mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), tmp_string);
+        pfree_ext(lower_string);
+        pfree_ext(tmp_string);
+        return mask_string;
+    }
+    int offset = second_quote - first_quote - 1;
+    if (offset <= 0) {
+        pfree_ext(lower_string);
+        pfree_ext(tmp_string);
+        return query_string;
+    }
+    if (offset < mask_len) {
+        mask_len = offset;
+    }
+    int first_quote_len = strlen(first_quote);
+    rc = memset_s(first_quote + 1, offset, '*', mask_len);
+    securec_check(rc, "\0", "\0");
+    rc = memmove_s(first_quote + mask_len + 1, first_quote_len - mask_len - 1, second_quote, strlen(second_quote));
+    securec_check(rc, "\0", "\0");
+    first_quote[first_quote_len - offset + mask_len] = '\0';
+    pfree_ext(lower_string);
+    mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), tmp_string);
+    pfree_ext(tmp_string);
+
+    return mask_string;
+}
+
 static int output_backtrace_to_log(StringInfoData* pOutBuf)
 {
     const int max_buffer_size = 128;
@@ -2756,14 +2823,20 @@ static void send_message_to_server_log(ErrorData* edata)
         if (edata->sqlerrcode == ERRCODE_SYNTAX_ERROR) {
             if (mask_string != NULL) {
                 truncate_identified_by(mask_string, strlen(mask_string));
-            } else if (t_thrd.postgres_cxt.debug_query_string != NULL) {
+            } else {
                 mask_string = mask_error_password(t_thrd.postgres_cxt.debug_query_string, 
                     strlen(t_thrd.postgres_cxt.debug_query_string));
             }
         }
         if (mask_string == NULL)
             mask_string = (char*)t_thrd.postgres_cxt.debug_query_string;
-
+        char* mask_key = (char *)mask_encrypted_key(mask_string, strlen(mask_string));
+        if (mask_key != mask_string) {
+            if (mask_string != t_thrd.postgres_cxt.debug_query_string) {
+                pfree(mask_string);
+            }
+            mask_string = mask_key;
+        }
         log_line_prefix(&buf, edata);
         appendStringInfoString(&buf, _("STATEMENT:  "));
 
@@ -3688,6 +3761,7 @@ void getElevelAndSqlstate(int* eLevel, int* sqlState)
     *eLevel = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].elevel;
     *sqlState = t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth].sqlerrcode;
 }
+
 char* maskPassword(const char* query_string)
 {
     char* mask_string = NULL;

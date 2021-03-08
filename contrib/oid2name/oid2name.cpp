@@ -188,10 +188,14 @@ static void help(const char* progname)
            "  -V, --version  output version information, then exit\n"
            "  -x             extended (show additional columns)\n"
            "  -?, --help     show this help, then exit\n"
-           "\nThe default action is to show all database OIDs.\n\n"
-           "Report bugs to <pgsql-bugs@postgresql.org>.\n",
+           "\nThe default action is to show all database OIDs.\n",
         progname,
         progname);
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to openGauss community by raising an issue.\n");
+#endif
 }
 
 void* pg_malloc(size_t size)

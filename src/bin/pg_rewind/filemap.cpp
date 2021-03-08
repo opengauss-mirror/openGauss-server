@@ -72,6 +72,8 @@ const char *excludeFiles[] = {
     "gaussdb.state",
     "pg_errorinfo",
     "pg_location",
+    "pg_xlog",
+    "pg_copydir",
     "config_exec_params",
     "delay_xlog_recycle",
     "delay_ddl_recycle",

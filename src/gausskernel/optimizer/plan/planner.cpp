@@ -364,9 +364,8 @@ PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams)
      * streaming engine hook for agg rewrite.
      */
     if (t_thrd.streaming_cxt.streaming_planner_hook)
-        result = (*(planner_hook_type) t_thrd.streaming_cxt.streaming_planner_hook)\
+        (*(planner_hook_type) t_thrd.streaming_cxt.streaming_planner_hook)\
                  (parse, cursorOptions, boundParams);
-    else
     /*
      * A Coordinator receiving a query from another Coordinator
      * is not allowed to go into PGXC planner.
@@ -873,10 +872,6 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         result->initPlan = init_plan;
     }
     pfree_ext(subplan_ids);
-    
-#ifndef ENABLE_MULTIPLE_NODES
-    (void)InitStreamObject(result);
-#endif
 
     /* dynamic query dop main entry */
     if (IsDynamicSmpEnabled()) {
@@ -1803,7 +1798,7 @@ Node* preprocess_expression(PlannerInfo* root, Node* expr, int kind)
      * If it's a qual or havingQual, canonicalize it.
      */
     if (kind == EXPRKIND_QUAL) {
-        expr = (Node*)canonicalize_qual((Expr*)expr);
+        expr = (Node*)canonicalize_qual((Expr*)expr, false);
 
 #ifdef OPTIMIZER_DEBUG
         printf("After canonicalize_qual()\n");
@@ -3201,7 +3196,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                                           "while others only support sorting"))));
                 }
 
-                if (IS_STREAM_PLAN && is_hashed_plan(result_plan)) {
+                if (IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
                     if (expression_returns_set((Node*)tlist)) {
                         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                             NOTPLANSHIPPING_LENGTH,
@@ -4158,7 +4153,8 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          * we can deduct that we have already add sort in the data node, so we only need
          * add a mergesort to remote query if there are multiple dn involved.
          */
-        if (IsA(result_plan, RemoteQuery) && !is_replicated_plan(result_plan->lefttree) && !single_node &&
+        if ((IsA(result_plan, RemoteQuery) || IsA(result_plan, Stream))&&
+            !is_replicated_plan(result_plan->lefttree) && !single_node &&
             root->sort_pathkeys != NIL && pathkeys_contained_in(root->sort_pathkeys, current_pathkeys)) {
             Sort* sortPlan = make_sort_from_pathkeys(root, result_plan, current_pathkeys, limit_tuples);
 
@@ -4170,7 +4166,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
             streamSort->sortToStore = false;
             streamSort->sortCollations = sortPlan->collations;
 
-            ((RemoteQuery*)result_plan)->sort = streamSort;
+            if (IsA(result_plan, RemoteQuery)) {
+                ((RemoteQuery*)result_plan)->sort = streamSort;
+            } else if (IsA(result_plan, Stream)) {
+                ((Stream*)result_plan)->sort = streamSort;
+            }
         }
     }
 
@@ -7894,7 +7894,11 @@ static Plan* mark_windowagg_stream(
              */
             if (pathkeys != NIL) {
                 gatherPlan = make_simple_RemoteQuery((Plan*)sortPlan, root, false);
-                ((RemoteQuery*)gatherPlan)->sort = streamSort;
+                if (IsA(gatherPlan, RemoteQuery)) {
+                    ((RemoteQuery*)gatherPlan)->sort = streamSort;
+                } else if (IsA(gatherPlan, Stream)) {
+                    ((Stream*)gatherPlan)->sort = streamSort;
+                }
             } else {
                 gatherPlan = make_simple_RemoteQuery(bottomPlan, root, false);
             }
@@ -7906,6 +7910,9 @@ static Plan* mark_windowagg_stream(
                     gatherPlan = (Plan*)make_sort_from_pathkeys(root, gatherPlan, pathkeys, -1.0);
             } else {
                 bool single_node =
+#ifndef ENABLE_MULTIPLE_NODES
+                    plan->dop <= 1 &&
+#endif
                     (bottomPlan->exec_nodes != NULL && list_length(bottomPlan->exec_nodes->nodeList) == 1);
                 /* If there's a sort, we need it to do merge sort */
                 if (IsA(plan->lefttree, Sort)) {
@@ -7969,11 +7976,9 @@ static Plan* mark_distinct_stream(
     if (plan == NULL || !IsA(plan, Unique) || is_execute_on_coordinator(plan) || is_execute_on_allnodes(plan))
         return plan;
 
-    /**
-     * if on single-node and smp enabled, do not add a stream operator
-     */
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->opt_cxt.query_dop > 1) {
+    /* if on single-node and dop is 1, no need add a stream operator */
+    if (plan->dop == 1) {
         return plan;
     }
 #endif

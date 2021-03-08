@@ -124,6 +124,18 @@ uint32 generate_unique_queryid(Query* query, const char* query_string)
     }
     return queryid;
 }
+
+static void update_multi_sql_location(pgssJumbleState* jstate, int32 multi_sql_offset)
+{
+    if (multi_sql_offset > 0 && jstate != NULL) {
+        for (int i = 0; i < jstate->clocations_count; i++) {
+            if (jstate->clocations[i].location >= multi_sql_offset) {
+                jstate->clocations[i].location = jstate->clocations[i].location - multi_sql_offset; 
+            }
+        }
+    }
+}
+
 /*
  * The caller must apply for a space no smaller than strlen(query_string),
  * and return true if the function is called successfully.
@@ -133,7 +145,8 @@ uint32 generate_unique_queryid(Query* query, const char* query_string)
  * unique_buf       returned unique query text
  * len          The size of the unique_buf's
  */
-bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_buf, int buf_len)
+bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_buf, int buf_len,
+    uint32 multi_sql_offset)
 {
     if (query == NULL || query_string == NULL || unique_buf == NULL) {
         return false;
@@ -152,6 +165,7 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
     if (query->utilityStmt == NULL) {
         UniqueSql::generate_jstate(&jstate, query);
         if (jstate.clocations_count > 0) {
+            update_multi_sql_location(&jstate, multi_sql_offset);
             norm_query = UniqueSql::generate_normalized_query(&jstate, query_string, &query_len, encoding);
             if (norm_query == NULL) {
                 result = false;

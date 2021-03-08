@@ -2,9 +2,6 @@ DROP SCHEMA test_insert_update_010 CASCADE;
 CREATE SCHEMA test_insert_update_010;
 SET CURRENT_SCHEMA TO test_insert_update_010;
 
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-
 -- test t4 with one primary key with three columns
 CREATE TABLE t4 (
     col1 INT,

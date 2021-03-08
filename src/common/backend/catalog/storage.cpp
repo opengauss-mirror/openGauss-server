@@ -506,7 +506,9 @@ void RelationDropStorage(Relation rel, bool isDfsTruncate)
             Tsdb::DropPartStorage(rel->rd_id, &(rel->rd_node), rel->rd_backend,
                 rel->rd_rel->relowner, cudesc_relid_list);
         }
-        Tsdb::PartCacheMgr::GetInstance().clear_partition_cache(rel->rd_id);
+        if (g_instance.attr.attr_common.enable_tsdb) {
+            Tsdb::PartCacheMgr::GetInstance().clear_partition_cache(rel->rd_id);
+        }
         list_free_ext(cudesc_relid_list);
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -577,7 +579,9 @@ void PartitionDropStorage(Relation rel, Partition part)
             Tsdb::DropPartStorage(
                 part->pd_id, &(part->pd_node), rel->rd_backend, rel->rd_rel->relowner, cudesc_relid_list);
         }
-        Tsdb::PartCacheMgr::GetInstance().clear_partition_cache(part->pd_id);
+        if (g_instance.attr.attr_common.enable_tsdb) {
+            Tsdb::PartCacheMgr::GetInstance().clear_partition_cache(part->pd_id);
+        }
         list_free_ext(cudesc_relid_list);
     }
 #endif   /* ENABLE_MULTIPLE_NODES */

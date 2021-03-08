@@ -20,7 +20,9 @@ void CreateCNStatusCheckThread();
 void CreateCCNStatusCheckThread(void);
 void CreateDNStatusCheckThread(int* i);
 void CreateDNXlogCheckThread(int* i);
+#ifdef ENABLE_MULTIPLE_NODES
 void CreateDNStorageScalingAlarmThread(int* i);
+#endif
 void CreateFaultDetectThread();
 void CreateGtmModeThread();
 void CreateConnCmsPThread();

@@ -319,10 +319,15 @@ lightProxy::lightProxy(MemoryContext context, CachedPlanSource *psrc, const char
 
     m_msgctl = (lightProxyMsgCtl *)palloc0(sizeof(lightProxyMsgCtl));
     m_msgctl->errData = (lightProxyErrData *)palloc0(sizeof(lightProxyErrData));
-    m_isRowTriggerShippable = false;
+
+    if (psrc != NULL && list_length(psrc->query_list) == 1 && linitial(psrc->query_list) != NULL) {
+        m_isRowTriggerShippable = ((Query*)linitial(psrc->query_list))->isRowTriggerShippable;
+    } else {
+        m_isRowTriggerShippable = false;
+    }
 
     if (portalname != NULL && portalname[0] != '\0') {
-        storeLightProxy(pstrdup(portalname));
+        storeLightProxy(portalname);
     } else {
         m_portalName = NULL;
     }
@@ -470,27 +475,14 @@ void lightProxy::sendParseIfNecessary()
     }
     Assert(m_nodeIdx != -1);
     bool need_send_again = false;
-    instr_time cur_time;
-    INSTR_TIME_SET_CURRENT(cur_time);
-    if (ENABLE_CN_GPC) {
-        /* see if statement already active on the node, update used time for using statement */
-        for (int i = 0; i < m_entry->current_nodes_number; i++) {
-            if (m_entry->dns_node_indices[i] == m_nodeIdx) {
-                if (NEED_SEND_PARSE_AGAIN(m_entry->last_used_time[i], cur_time)) {
-                    need_send_again = true;
-                    m_entry->last_used_time[i] = cur_time;
-                    break;
-                } else {
-                    m_entry->last_used_time[i] = cur_time;
-                }
+    /* see if statement already active on the node */
+    for (int i = 0; i < m_entry->current_nodes_number; i++) {
+        if (m_entry->dns_node_indices[i] == m_nodeIdx) {
+            if (ENABLE_CN_GPC) {
+                need_send_again = true;
+            } else {
                 return;
             }
-        }
-    } else {
-        /* see if statement already active on the node */
-        for (int i = 0; i < m_entry->current_nodes_number; i++) {
-            if (m_entry->dns_node_indices[i] == m_nodeIdx)
-                return;
         }
     }
 
@@ -517,15 +509,6 @@ void lightProxy::sendParseIfNecessary()
         securec_check(error_no, "\0", "\0");
         pfree_ext(m_entry->dns_node_indices);
         m_entry->dns_node_indices = new_dns_node_indices;
-        instr_time* new_last_used_time = (instr_time*)MemoryContextAllocZero(
-            u_sess->pcache_cxt.datanode_queries->hcxt, m_entry->max_nodes_number * 2 * sizeof(instr_time));
-        error_no = memcpy_s(new_last_used_time,
-            m_entry->max_nodes_number * 2 * sizeof(instr_time),
-            m_entry->last_used_time,
-            m_entry->max_nodes_number * sizeof(instr_time));
-        securec_check(error_no, "\0", "\0");
-        pfree_ext(m_entry->last_used_time);
-        m_entry->last_used_time = new_last_used_time;
         m_entry->max_nodes_number = m_entry->max_nodes_number * 2;
         elog(LOG,
             "expand node ids array for active datanode statements "
@@ -534,8 +517,7 @@ void lightProxy::sendParseIfNecessary()
     }
 
     /* statement is not active on the specified node append item to the list */
-    m_entry->dns_node_indices[m_entry->current_nodes_number] = m_nodeIdx;
-    m_entry->last_used_time[m_entry->current_nodes_number++] = cur_time;
+    m_entry->dns_node_indices[m_entry->current_nodes_number++] = m_nodeIdx;
 }
 
 /*
@@ -801,14 +783,16 @@ void lightProxy::storeLpByStmtName(const char *stmtname)
 
 void lightProxy::storeLightProxy(const char* portalname)
 {
-	lightProxyNamedObj* entry = NULL;
-	if(!u_sess->pcache_cxt.lightproxy_objs)
-		initlightProxyTable();
+    lightProxyNamedObj* entry = NULL;
+    if(!u_sess->pcache_cxt.lightproxy_objs)
+        initlightProxyTable();
 
-	entry = (lightProxyNamedObj*)hash_search(u_sess->pcache_cxt.lightproxy_objs, portalname, HASH_ENTER, NULL);
-	entry->proxy = this;
+    entry = (lightProxyNamedObj*)hash_search(u_sess->pcache_cxt.lightproxy_objs, portalname, HASH_ENTER, NULL);
+    entry->proxy = this;
     pfree_ext(m_portalName);
-	m_portalName = portalname;
+    MemoryContext old_context = MemoryContextSwitchTo(m_context);
+    m_portalName = pstrdup(portalname);
+    (void)MemoryContextSwitchTo(old_context);
 }
 
 lightProxy *lightProxy::locateLpByStmtName(const char *stmtname)
@@ -945,7 +929,9 @@ void lightProxy::handleResponse()
         if (res) {
             ereport(ERROR,
                 (errcode(ERRCODE_CONNECTION_FAILURE),
-                    errmsg("[LIGHT PROXY] Failed to fetch from Datanode %u", m_handle->nodeoid)));
+                    errmsg("[LIGHT PROXY] Failed to fetch from Datanode %s[%u]",
+                        m_handle->remoteNodeName,
+                        m_handle->nodeoid)));
         }
 
         res = light_handle_response(m_handle, m_msgctl, this);
@@ -1061,12 +1047,6 @@ int lightProxy::runBatchMsg(StringInfo batch_message, bool sendDMsg, int batch_c
 
     proxyNodeBegin(m_cplan->is_read_only);
 
-    if (ENABLE_CN_GPC) {
-        if (pgxc_node_send_cn_identifier(m_handle, HANDLE_RUN))
-        	ereport(ERROR,
-            	(errcode(ERRCODE_CANNOT_CONNECT_NOW),
-               	 errmsg("[LIGHT PROXY] Failed to send global sess id to Datanode %u", m_handle->nodeoid)));
-	}
     /* check if we need to send parse or not */
     sendParseIfNecessary();
 
@@ -1143,6 +1123,10 @@ void lightProxy::runMsg(StringInfo exec_message)
         m_stmtName,
         m_cplan->query_string));
 
+    bool trigger_ship = false;
+    if (u_sess->attr.attr_sql.enable_trigger_shipping && m_isRowTriggerShippable)
+        trigger_ship = true;
+
     /*
      * Ensure we are in a transaction command (this should normally be the
      * case already due to prior BIND).
@@ -1162,14 +1146,6 @@ void lightProxy::runMsg(StringInfo exec_message)
 #endif
 
     proxyNodeBegin(m_cplan->is_read_only);
-
-    if (ENABLE_CN_GPC) {
-        if (pgxc_node_send_cn_identifier(m_handle, HANDLE_RUN)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                    errmsg("[LIGHT PROXY] Failed to send global sess id to Datanode %u", m_handle->nodeoid)));
-        }
-    }
     /* check if we need to send parse or not */
     sendParseIfNecessary();
 
@@ -1186,7 +1162,7 @@ void lightProxy::runMsg(StringInfo exec_message)
         m_msgctl->sendDMsg = false;
     }
 
-    assemableMsg('E', exec_message);
+    assemableMsg('E', exec_message, trigger_ship);
 
     /* send sync message and flush */
     if (pgxc_node_send_sync(m_handle)) {
@@ -1247,12 +1223,7 @@ void lightProxy::runMsg(StringInfo exec_message)
         UpdateUniqueSQLStat(NULL, NULL, GetCurrentStatementLocalStartTimestamp());
     }
     pgstate_update_percentile_responsetime();
-
-    (void)pq_getmsgstring(exec_message);
-    unsigned int max_rows = pq_getmsgint(exec_message, 4);
-    if (max_rows == 0)
-        /* finish with this proxy */
-        setCurrentProxy(NULL);
+    setCurrentProxy(NULL);
 }
 
 bool lightProxy::isDeleteLimit(const Query* query)
@@ -1415,6 +1386,7 @@ void GPCFillMsgForLp(CachedPlanSource* psrc)
     Assert(psrc != NULL);
     Assert(psrc->gpc.status.IsSharePlan());
     if (psrc->gpc.status.InSavePlanList(GPC_SHARED)) {
+        pfree_ext(psrc->gpc.key);
         MemoryContext oldcxt = MemoryContextSwitchTo(psrc->context);
         psrc->gpc.key = (GPCKey*)palloc0(sizeof(GPCKey));
         psrc->gpc.key->query_string = psrc->query_string;

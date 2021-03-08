@@ -120,6 +120,7 @@ bool range_var_is_cont_view(RangeVar *name);
 bool relid_is_cv_tab(Oid relid);
 bool view_stmt_has_stream(ViewStmt *view_stmt);
 bool range_var_list_include_streaming_object(List *objects);
+bool range_var_is_cv_tab(RangeVar *name);
 
 char *cv_name_to_mrel_name(const char *cvname);
 #endif

@@ -313,6 +313,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
         }
 
         LWLockRelease(ReplicationSlotControlLock);
+        LWLockRelease(ReplicationSlotAllocationLock);
         ereport(ERROR, (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED), errmsg("all replication slots are in use"),
                         errhint("Free one or increase max_replication_slots.")));
     }
@@ -1757,6 +1758,7 @@ char *formObsConfigStringFromStruct(ObsArchiveConfig *obs_config)
 ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted)
 {
     ObsArchiveConfig* obs_config = NULL;
+    errno_t rc = EOK;
     /* SplitIdentifierString will change origin string */
     char *content_copy = pstrdup(content);
     List* elemlist = NIL;
@@ -1780,6 +1782,8 @@ ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted)
     } else {
         decryptKeyString((char*)list_nth(elemlist, 3), decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, NULL);
         obs_config->obs_sk = pstrdup(decryptSecretAccessKeyStr);
+        rc = memset_s(decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+        securec_check(rc, "\0", "\0");
     }
     obs_config->obs_prefix = pstrdup((char*)list_nth(elemlist, 4));
     pfree_ext(content_copy);
@@ -1816,10 +1820,6 @@ ReplicationSlot *getObsReplicationSlot()
 
     // avoid concurrent update g_instance.archive_obs_cxt.archive_slot
     SpinLockAcquire(&g_instance.archive_obs_cxt.mutex);
-    if (*slot_idx != -1) {
-        // recheck global archive slot is updated
-        return g_instance.archive_obs_cxt.archive_slot;
-    }
     for (int slotno = 0; slotno < g_instance.attr.attr_storage.max_replication_slots; slotno++) {
         ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotno];
         SpinLockAcquire(&slot->mutex);
@@ -2038,4 +2038,3 @@ void markObsSlotOperate(int p_slot_num)
         pfree_ext(g_instance.archive_obs_cxt.archive_slot->archive_obs);
     }
 }
-

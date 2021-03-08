@@ -75,73 +75,55 @@
 
 void set_default_stream()
 {
-    u_sess->opt_cxt.is_stream = (u_sess->attr.attr_sql.query_dop_tmp > 1);
-    u_sess->opt_cxt.is_stream_support = true;
+    /* initdb could not use smp */
+    if (IsInitdb) {
+        u_sess->opt_cxt.is_stream = false;
+        u_sess->opt_cxt.is_stream_support = false;
+    } else {
+        u_sess->opt_cxt.is_stream = (u_sess->opt_cxt.query_dop > 1);
+        u_sess->opt_cxt.is_stream_support = (u_sess->opt_cxt.query_dop > 1);
+    }
 }
 
 int2vector* get_baserel_distributekey_no(Oid relid)
 {
     /* while smp is not allowed, no need to generate distribute key */
-    if (!check_stream_support() || !(u_sess->attr.attr_sql.query_dop_tmp > 1)) {
+    if (!check_stream_support()) {
         return NULL;
     }
-
     AttrNumber attnum  = 1;
     while (true) {
         HeapTuple tp;
         Form_pg_attribute att_tup;
-
         tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
-
         if (!HeapTupleIsValid(tp)) {
             attnum = 0;
             ReleaseSysCache(tp);
             break;
         }
-
         att_tup = (Form_pg_attribute)GETSTRUCT(tp);
         if (!att_tup->attisdropped) {
             ReleaseSysCache(tp);
             break;
         }
-
         ++attnum;
         ReleaseSysCache(tp);
     }
-
     if (attnum == 0)
         return NULL;
-
     int2 col[1] = { attnum };
     int2vector* attnumVec = buildint2vector(col, 1);
-
     return attnumVec;
 }
 
 /* in build_simple_rel used. Put it all back. Record it */
 List* build_baserel_distributekey(RangeTblEntry* rte, int relindex)
 {
-    int2vector* attnum = NULL;
-    Oid vartypeid;
-    int32 type_mod;
-    Oid varcollid;
-    List* list = NULL;
-
-    if (!rte->relid ||
-        (get_rel_relkind(rte->relid) != RELKIND_RELATION && get_rel_relkind(rte->relid) != RELKIND_MATVIEW))
+    if (IS_PGXC_DATANODE || !IS_PGXC_COORDINATOR || !rte->relid || get_rel_relkind(rte->relid) != RELKIND_RELATION)
         return NIL;
 
-    attnum = get_baserel_distributekey_no(rte->relid);
-    if (attnum == NULL) {
-        return NIL;
-    }
-
-    Assert(attnum->dim1 == 1);
-    int attno = attnum->values[0];
-    get_rte_attribute_type(rte, attno, &vartypeid, &type_mod, &varcollid);
-    Var* colVar = makeVar(relindex, attno, vartypeid, type_mod, varcollid, 0);
-    list = lappend(list, colVar);
-    return list;
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NIL;
 }
 
 Plan* make_simple_RemoteQuery(Plan* lefttree, PlannerInfo* root, bool is_subplan, ExecNodes* target_exec_nodes)
@@ -196,6 +178,14 @@ bool is_replicated_plan(Plan* plan)
 
 bool is_hashed_plan(Plan* plan)
 {
+    if (IsA(plan, Stream)) {
+        if (is_broadcast_stream((Stream*)plan) || is_gather_stream((Stream*)plan))
+            return false;
+        else if (is_redistribute_stream((Stream*)plan))
+            return true;
+    } else if (plan->exec_nodes != NULL)
+        return IsLocatorDistributedByHash(plan->exec_nodes->baselocatortype);
+
     return false;
 }
 
@@ -781,6 +771,12 @@ void mark_distribute_setop(PlannerInfo* root, Node* node, bool isunionall, bool 
             if (result) {
                 mark_distribute_setop_distribution(
                     root, node, plan, subPlans, redistributePlanSet, redistributeKey, redistributeDistribution);
+            } else {
+                /*
+                 * Add remote query node on top of each subplan if fail
+                 * to get redistribute information
+                 */
+                mark_distribute_setop_remotequery(root, node, plan, subPlans);
             }
         }
 

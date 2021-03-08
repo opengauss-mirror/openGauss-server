@@ -33,7 +33,7 @@ show search_path;
 
 -- CREATE CEK
 CREATE COLUMN ENCRYPTION KEY MyCEK1 WITH VALUES (CLIENT_MASTER_KEY = public.MyCMK1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
-ERROR(CLIENT): failed to get global setting public.mycmk1 from cache
+ERROR(CLIENT): failed to get client master key public.mycmk1 from cache
 select count(*), 'count' from gs_client_global_keys;
  count | ?column? 
 -------+----------

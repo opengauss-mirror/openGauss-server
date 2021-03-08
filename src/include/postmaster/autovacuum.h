@@ -41,6 +41,8 @@ typedef enum {
 
 #endif
 
+extern const char* AUTO_VACUUM_WORKER;
+
 /* Status inquiry functions */
 extern bool AutoVacuumingActive(void);
 extern bool IsAutoVacuumLauncherProcess(void);

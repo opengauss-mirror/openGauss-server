@@ -710,7 +710,7 @@ static int getOptions(const int argc, char* const* argv)
             break;
             case 'P':
                 check_env_value_c(optarg);
-                if (g_change_plugin && plugin) {
+                if (plugin) {
                     pfree_ext(plugin);
                 }
                 plugin = pg_strdup(optarg);

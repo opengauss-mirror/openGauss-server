@@ -11,6 +11,8 @@ product_name VARCHAR(60) DEFAULT 'null',
 category VARCHAR(60) DEFAULT 'unknown',
 total INTEGER DEFAULT '0'
 );
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'product_id' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 INSERT INTO products_base VALUES (1501, 'vivitar 35mm', 'electrncs', 100);
 INSERT INTO products_base VALUES (1502, 'olympus is50', 'electrncs', 100);
 INSERT INTO products_base VALUES (1600, 'play gym', 'toys', 100);
@@ -23,14 +25,16 @@ product_name VARCHAR(60) DEFAULT 'null',
 category VARCHAR(60) DEFAULT 'unknown',
 total INTEGER DEFAULT '0'
 );
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'product_id' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 INSERT INTO newproducts_base VALUES (1502, 'olympus camera', 'electrncs', 200);
 INSERT INTO newproducts_base VALUES (1601, 'lamaze', 'toys', 200);
 INSERT INTO newproducts_base VALUES (1666, 'harry potter', 'toys', 200);
 INSERT INTO newproducts_base VALUES (1700, 'wait interface', 'books', 200);
 ANALYZE products_base;
 ANALYZE newproducts_base;
-create node group mergegroup1 with (datanode1, datanode3, datanode5, datanode7);
-create node group mergegroup2 with (datanode2, datanode4, datanode6, datanode8, datanode10, datanode12);
+create node group mergegroup1 with (datanode1, datanode3, datanode5);
+create node group mergegroup2 with (datanode2, datanode4, datanode6);
 create node group mergegroup3 with (datanode1, datanode2, datanode3, datanode4, datanode5, datanode6);
 --
 -- stream mode(MERGE can be pushed down), row table
@@ -42,6 +46,8 @@ product_name VARCHAR(60) DEFAULT 'null',
 category VARCHAR(60) DEFAULT 'unknown',
 total INTEGER DEFAULT '0'
 ) to group mergegroup1;
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'product_id' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 CREATE TABLE newproducts_row
 (
 product_id INTEGER DEFAULT 0,
@@ -49,6 +55,8 @@ product_name VARCHAR(60) DEFAULT 'null',
 category VARCHAR(60) DEFAULT 'unknown',
 total INTEGER DEFAULT '0'
 ) to group mergegroup2;
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'product_id' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 INSERT INTO products_row SELECT * FROM products_base;
 INSERT INTO newproducts_row SELECT * FROM newproducts_base;
 ANALYZE products_row;
@@ -65,33 +73,33 @@ WHEN NOT MATCHED THEN
                                                                                                                 QUERY PLAN                                                                                                                
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Streaming (type: GATHER)
-   Node/s: (GenGroup) datanode1, datanode3, datanode5, datanode7, datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+   Node/s: All datanodes
    ->  Merge on mergeinto_ng.products_row p
          ->  Streaming(type: REDISTRIBUTE)
                Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
                Distribute Key: (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
-               Spawn on: (mergegroup1) datanode1, datanode3, datanode5, datanode7
-               Consumer Nodes: (mergegroup1) datanode1, datanode3, datanode5, datanode7
+               Spawn on: (mergegroup1) datanode1, datanode3, datanode5
+               Consumer Nodes: (mergegroup1) datanode1, datanode3, datanode5
                ->  Hash Left Join
                      Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END
-                     Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5, datanode7
+                     Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5
                      Hash Cond: (np.product_id = p.product_id)
                      ->  Streaming(type: REDISTRIBUTE ng: mergegroup2->mergegroup1)
                            Output: np.product_id, np.product_name, np.category, np.total, np.ctid
                            Distribute Key: np.product_id
-                           Spawn on: (mergegroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
-                           Consumer Nodes: (mergegroup1) datanode1, datanode3, datanode5, datanode7
+                           Spawn on: (mergegroup2) datanode2, datanode4, datanode6
+                           Consumer Nodes: (mergegroup1) datanode1, datanode3, datanode5
                            ->  Seq Scan on mergeinto_ng.newproducts_row np
                                  Output: np.product_id, np.product_name, np.category, np.total, np.ctid
                                  Distribute Key: np.product_id
-                                 Exec Nodes: (mergegroup2) datanode10, datanode12, datanode2, datanode4, datanode6, datanode8
+                                 Exec Nodes: (mergegroup2) datanode2, datanode4, datanode6
                      ->  Hash
                            Output: p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id
-                           Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5, datanode7
+                           Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5
                            ->  Seq Scan on mergeinto_ng.products_row p
                                  Output: p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id
                                  Distribute Key: p.product_id
-                                 Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5, datanode7
+                                 Exec Nodes: (mergegroup1) datanode1, datanode3, datanode5
 (28 rows)
 
 -- only MATCHED clause
@@ -439,6 +447,8 @@ PARTITION BY RANGE (product_id)
   PARTITION P2 VALUES LESS THAN (1700),
   PARTITION P3 VALUES LESS THAN (1800)
 ) ENABLE ROW MOVEMENT;
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'product_id' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 INSERT INTO products_part SELECT * FROM products_base;
 ANALYZE products_part;
 MERGE INTO products_part p
@@ -799,6 +809,8 @@ SELECT * FROM products_row ORDER BY 1;
 ROLLBACK;
 -- Function scans
 CREATE TABLE fs_target (a int, b int, c text);
+NOTICE:  The 'DISTRIBUTE BY' clause is not specified. Using 'a' as the distribution column by default.
+HINT:  Please use 'DISTRIBUTE BY' clause to specify suitable data distribution column.
 MERGE INTO fs_target t
 USING generate_series(1,100,1) AS id
 ON t.a = id

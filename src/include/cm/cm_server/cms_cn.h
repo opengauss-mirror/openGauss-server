@@ -34,6 +34,6 @@ void process_ctl_to_cm_disable_cn(CM_Connection* con, ctl_to_cm_disable_cn* ctl_
 void process_agent_to_central_coordinate_status(
     CM_Connection* con, const agent_to_cm_coordinate_status_report* report_msg, int group_index, uint32 count);
 #endif
-void set_cn_barrier_info (agent_to_cm_coordinate_barrier_status_report* barrier_info);
+void SetBarrierInfo(agent_to_cm_coordinate_barrier_status_report* barrier_info);
 
 #endif

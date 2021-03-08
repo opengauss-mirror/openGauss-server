@@ -58,6 +58,7 @@ typedef struct LogCtrlData {
     uint64 pre_rate2;
     int64 prev_RPO;
     int64 current_RPO;
+    bool just_keep_alive;
 } LogCtrlData;
 
 /*

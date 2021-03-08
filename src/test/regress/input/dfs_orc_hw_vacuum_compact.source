@@ -16,7 +16,9 @@ vacuum compact full verbose freeze;
 
 vacuum;
 vacuum t1;
+set xc_maintenance_mode = on;
 vacuum full;
+set xc_maintenance_mode = off;
 vacuum full t1;
 
 -- start ...

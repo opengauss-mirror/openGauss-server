@@ -512,6 +512,8 @@ typedef struct EState {
 
     uint64 es_processed; /* # of tuples processed */
 
+    uint64 deleteLimitCount; /* delete Limit */
+
     uint64 es_last_processed; /* last value of es_processed for ModifyTable plan*/
 
     Oid es_lastoid; /* last oid processed (by INSERT) */
@@ -806,7 +808,7 @@ typedef struct ArrayRefExprState {
 typedef struct FuncExprState {
     ExprState xprstate;
     List* args; /* states of argument expressions */
-
+    char prokind;
     /*
      * Function manager's lookup info for the target function.  If func.fn_oid
      * is InvalidOid, we haven't initialized it yet (nor any of the following
@@ -1354,6 +1356,7 @@ typedef struct ModifyTableState {
     uint32 mt_merge_subcommands;           /* Flags showing which subcommands are present INS/UPD/DEL/DO NOTHING */
     UpsertState* mt_upsert;                /*  DUPLICATE KEY UPDATE evaluation state */
     instr_time first_tuple_modified; /* record the end time for the first tuple inserted, deleted, or updated */
+    ExprContext* limitExprContext; /* for limit expresssion */
 } ModifyTableState;
 
 typedef struct CopyFromManagerData* CopyFromManager;

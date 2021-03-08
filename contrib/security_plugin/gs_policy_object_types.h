@@ -118,7 +118,10 @@ struct PolicyLabelItem {
     PolicyLabelItem(const char *schema = "", const char *object = "",
                     const char *column = "", int obj_type = O_TABLE);
     PolicyLabelItem(Oid schema, Oid object, int obj_type, const char *column = "");
+    PolicyLabelItem(const PolicyLabelItem &arg);
+    PolicyLabelItem &operator=(const PolicyLabelItem &arg);
 
+    void init(const PolicyLabelItem &arg);
     void get_fqdn_value(gs_stl::gs_string *value) const;
 
     bool operator < (const PolicyLabelItem& arg) const;

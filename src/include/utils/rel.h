@@ -322,6 +322,7 @@ typedef struct StdRdOptions {
     char* ttl_interval; /* ttl interval for streaming contquery table */
     char* gather_interval; /* gather interval for streaming contquery table */
     char* string_optimize; /* string optimize for streaming contquery table */
+    char* sw_interval; /* sliding window interval for streaming contquery table */
     char* version;
     char* wait_clean_gpi; /* pg_partition system catalog wait gpi-clean or not */
     /* item for online expand */

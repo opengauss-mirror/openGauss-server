@@ -133,6 +133,7 @@ extern void SPI_save_current_stp_transaction_state();
 extern void SPI_restore_current_stp_transaction_state();
 extern TransactionId SPI_get_top_transaction_id();
 
+extern void SPI_forbid_exec_push_down_with_exception();
 extern void SPICleanup(void);
 extern void AtEOXact_SPI(bool isCommit, bool STP_rollback, bool STP_commit);
 extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool STP_rollback, bool STP_commit);

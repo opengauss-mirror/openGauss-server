@@ -48,6 +48,8 @@ extern void obs_disconnect(void);
 #define OBS_XLOG_SAVED_FILES_NUM 25600 /* 100G*1024*1024*1024/OBS_XLOG_SLICE_BLOCK_SIZE */
 #define IS_DISASTER_RECOVER_MODE \
     (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&  !XLogArchivingActive() && getObsReplicationSlot())
+#define IS_CNDISASTER_RECOVER_MODE \
+    (IS_PGXC_COORDINATOR &&  !XLogArchivingActive() && getObsReplicationSlot())
 
 
 extern int obs_replication_receive(XLogRecPtr startPtr, char **buffer,

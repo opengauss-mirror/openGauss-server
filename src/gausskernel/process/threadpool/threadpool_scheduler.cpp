@@ -40,7 +40,6 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/guc.h"
-#include "utils/globalpreparestmt.h"
 
 #define SCHEDULER_TIME_UNIT 1000000  //us
 #define ENLARGE_THREAD_TIME 5
@@ -57,17 +56,22 @@ static void SchedulerSIGKILLHandler(SIGNAL_ARGS)
 void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 {
     int gpc_count = 0;
-    int cn_gpc_count = 0;
 
     (void)gspqsignal(SIGKILL, SchedulerSIGKILLHandler);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
+    if (ENABLE_GPC) {
+        scheduler->m_gpcContext = AllocSetContextCreate(CurrentMemoryContext,
+                                                        "GPCScheduler",
+                                                        ALLOCSET_SMALL_MINSIZE,
+                                                        ALLOCSET_SMALL_INITSIZE,
+                                                        ALLOCSET_DEFAULT_MAXSIZE);
+    }
 
     while (true) {
         pg_usleep(SCHEDULER_TIME_UNIT);
         scheduler->DynamicAdjustThreadPool();
         scheduler->GPCScheduleCleaner(&gpc_count);
-        scheduler->CNGPCScheduleCleaner(&cn_gpc_count);
         g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
     }
     proc_exit(0);
@@ -80,6 +84,7 @@ ThreadPoolScheduler::ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups)
     m_hangTestCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_freeTestCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_freeStreamCount = (uint *)palloc0(sizeof(uint) * groupNum);
+    m_gpcContext = NULL;
 }
 
 ThreadPoolScheduler::~ThreadPoolScheduler()
@@ -108,24 +113,15 @@ void ThreadPoolScheduler::DynamicAdjustThreadPool()
 
 void ThreadPoolScheduler::GPCScheduleCleaner(int* gpc_count)
 {
-    if (ENABLE_DN_GPC && *gpc_count == GPC_CLEAN_TIME) {
+    if (ENABLE_GPC && *gpc_count == GPC_CLEAN_TIME) {
         if (pmState == PM_RUN) {
-            pthread_mutex_lock(&g_instance.gpc_reset_lock);
-            g_instance.prepare_cache->PrepareCleanUpByTime(true);
-            pthread_mutex_unlock(&g_instance.gpc_reset_lock);
-        }
-        *gpc_count = 0;
-    }
-    (*gpc_count)++;
-}
-
-void ThreadPoolScheduler::CNGPCScheduleCleaner(int* gpc_count)
-{
-    if (ENABLE_CN_GPC && *gpc_count == GPC_CLEAN_TIME) {
-        if (pmState == PM_RUN) {
+            MemoryContext oldCxt = MemoryContextSwitchTo(m_gpcContext);
             pthread_mutex_lock(&g_instance.gpc_reset_lock);
             g_instance.plan_cache->DropInvalid();
+            g_instance.plan_cache->CleanUpByTime();
             pthread_mutex_unlock(&g_instance.gpc_reset_lock);
+            (void)MemoryContextSwitchTo(oldCxt);
+            MemoryContextReset(m_gpcContext);
         }
         *gpc_count = 0;
     }

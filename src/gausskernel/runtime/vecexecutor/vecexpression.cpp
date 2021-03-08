@@ -859,7 +859,7 @@ static ScalarVector* ExecEvalVecParamExec(
             Assert(prm->execPlan == NULL);
         }
         paramVec->m_desc.typeId = prm->valueType;
-        paramVec->m_desc.encoded = COL_IS_ENCODE(desc.typeId);
+        paramVec->m_desc.encoded = COL_IS_ENCODE(paramVec->m_desc.typeId);
 
         /*
          * Extend the result to a const vector and return.
@@ -3200,10 +3200,8 @@ ScalarVector* ExecVecQual(List* qual, ExprContext* econtext, bool resultForNull,
     uint8* pFlag = NULL;
     bool res = false;
     ScalarVector* qual_result = NULL;
-    ScalarDesc unknownDesc;
     int rows = 0;
     ScalarVector* pVector = econtext->boolVector;
-    errno_t rc;
 
     bool savedUseSelection = econtext->m_fUseSelection;
 
@@ -3242,9 +3240,12 @@ ScalarVector* ExecVecQual(List* qual, ExprContext* econtext, bool resultForNull,
 
         // Reset null flag to avoid influence from each qual.
         // no need to reset m_vals because it will be overwritten.
-        rc = memset_s(pVector->m_flag, sizeof(uint8) * BatchMaxSize, 0, sizeof(uint8) * econtext->align_rows);
+        errno_t rc = memset_s(pVector->m_flag, sizeof(uint8) * BatchMaxSize, 0, sizeof(uint8) * econtext->align_rows);
         securec_check(rc, "\0", "\0");
         pVector->m_rows = 0;
+
+        if (!PointerIsValid(clause))
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Invalid clause in qual")));
 
         qual_result = VectorExprEngine(clause, econtext, econtext->ecxt_scanbatch->m_sel, pVector, NULL);
 

@@ -273,6 +273,7 @@ endif
 #############################################################################
 # Saved arguments form configure
 with_3rd = @with_3rdpartydir@
+with_jdk = @with_jdk@
 
 ifeq ($(with_3rd), NONE)
   BINARYPATH = binarylibs/dependency/$(PLAT_FORM_STR)
@@ -737,7 +738,12 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${GRPC_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(HLL_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(EVENT_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${GRPC_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(HLL_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH)
+
+ifeq ($(enable_multiple_nodes), yes)
+  # GDS links to libevent
+  override CPPFLAGS := $(CPPFLAGS) -I$(EVENT_INCLUDE_PATH)
+endif
 
 ifeq ($(SUPPORT_HOTPATCH), yes)
   override CPPFLAGS := $(CPPFLAGS) -I$(LIBHOTPATCH_INCLUDE_PATH)
@@ -1071,7 +1077,7 @@ endif
 libpq = -L$(libpq_builddir) -lpq
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
+libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
 else
 libpq_ce = -L$(libpq_builddir) -lpq_ce
 endif

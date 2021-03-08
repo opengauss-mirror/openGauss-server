@@ -134,6 +134,90 @@ Datum pgxc_pool_reload(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
+static bool CheckRoleValid(const char *userName)
+{
+    if (userName != NULL && !OidIsValid(get_role_oid(userName, false))) {
+        ereport(WARNING, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", userName)));
+        return false;
+    }
+
+    return true;
+}
+
+static void CheckDBActivate(const char *userName, const char *dbName, Oid dbOid)
+{
+    if (dbName != NULL) {
+        int otherBackendsNum = 0, preparedXactsNum = 0;
+
+        if (CountOtherDBBackends(dbOid, &otherBackendsNum, &preparedXactsNum)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_IN_USE),
+                    errmsg("database \"%s\" is being accessed by other users", dbName),
+                    errdetail_busy_db(otherBackendsNum, preparedXactsNum)));
+        }
+    } else {
+        Oid roleId = get_role_oid(userName, false);
+        if (CountUserBackends(roleId))
+            ereport(
+                ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("role \"%s\" is being used by other users", userName)));
+    }
+}
+
+static void SendSignalToProcess(const char *dbName, Oid dbOid, const char *userName, Oid userOid)
+{
+    if ((dbName == NULL) && (userName == NULL)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("must define Database name or user name")));
+    }
+    if ((dbOid == InvalidOid) && (userOid == InvalidOid)) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("database oid and user oid are all wrong")));
+    }
+
+    int loop = 0;
+    int totalSessions = 0;
+    int countAcviteSessions = 0;
+    /* clear inner sessions(Autovacum and WDRXdb). */
+    if (dbName != NULL) {
+        int otherBackendsNum = 0;
+        int preparedXactsNum = 0;
+
+        if (CountOtherDBBackends(dbOid, &otherBackendsNum, &preparedXactsNum)) {
+            ereport(LOG, (errmsg("Autovacum and WDRXdb sessions are cleaned successfully")));
+        } else {
+            ereport(LOG, (errmsg("Autovacum and WDRXdb sessions no need to clean")));
+        }
+    }
+
+    CHECK_FOR_INTERRUPTS();
+
+    if (ENABLE_THREAD_POOL) {
+        /* clear active session in thread pool mode */
+        totalSessions = g_threadPoolControler->GetSessionCtrl()->CleanDBSessions(dbOid, userOid);
+        do {
+            countAcviteSessions = g_threadPoolControler->GetSessionCtrl()->CountDBSessionsNotCleaned(dbOid, userOid);
+            loop++;
+            pg_usleep(1000000);
+        } while ((countAcviteSessions > 0) && (loop < TIMEOUT_CLEAN_LOOP));
+        if (loop == TIMEOUT_CLEAN_LOOP) {
+            ereport(WARNING, (errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("clean active sessions in thread pool mode not completed, remains %d.", countAcviteSessions)));
+        }
+        ereport(LOG, (errmsg("clean %d sessions in thread pool mode", totalSessions - countAcviteSessions)));
+    }
+
+    /* clear active session in non-thread pool mode or HA connection */
+    loop = 0;
+    while ((CountSingleNodeActiveBackends(dbOid, userOid) > 0) && (loop < TIMEOUT_CLEAN_LOOP)) {
+        CancelSingleNodeBackends(dbOid, userOid, PROCSIG_RECOVERY_CONFLICT_DATABASE, true);
+        loop++;
+        pg_usleep(1000000);
+    }
+    if (loop == TIMEOUT_CLEAN_LOOP) {
+        ereport(WARNING, (errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("clean active sessions in non-thread pool mode not completed.")));
+    }
+    return;
+}
+
 /*
  * CleanConnection()
  *
@@ -180,123 +264,67 @@ Datum pgxc_pool_reload(PG_FUNCTION_ARGS)
  */
 void CleanConnection(CleanConnStmt* stmt)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-    Assert(false);
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-    return;
-#else
-    ListCell* nodelist_item = NULL;
-    List* co_list = NIL;
-    List* dn_list = NIL;
-    List* stmt_nodes = NIL;
-    char* dbname = stmt->dbname;
-    char* username = stmt->username;
-    bool is_coord = stmt->is_coord;
-    bool is_force = stmt->is_force;
-
-    /* Only a DB administrator can clean pooler connections */
-    if (!superuser())
-        ereport(
-            ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to clean pool connections")));
+    ListCell* nodelistItem = NULL;
+    char* dbName = stmt->dbname;
+    char* userName = stmt->username;
+    bool isForce = stmt->is_force;
+    bool isCheck = stmt->is_check;
+    Oid dbOid = InvalidOid;
+    Oid userOid = InvalidOid;
 
     /* Database name or user name is mandatory */
-    if (!dbname && !username)
+    if (dbName == NULL && userName == NULL) {
         ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("must define Database name or user name")));
+    }
 
-    /* Check if the Database exists by getting its Oid */
-    if (dbname && !OidIsValid(get_database_oid(dbname, true))) {
-        ereport(WARNING, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
-        return;
+    if (dbName != NULL) {
+        dbOid = get_database_oid(dbName, false);
+        /* Permission checks:
+         * 1. The database owner has only the permission to clean the specified database links.
+         */
+        AclResult aclresult = pg_database_aclcheck(dbOid, GetUserId(), ACL_ALTER | ACL_DROP);
+        if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(dbOid, GetUserId())) {
+            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE, dbName);
+        }
+    } else {
+        /* Permission checks:
+         * 2. Only the superuser has the permission to specify a specific user to clean.
+         */
+        if (!superuser()) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be system admin to clean pool connections")));
+        }
     }
 
     /* Check if role exists */
-    if (username && !OidIsValid(get_role_oid(username, false))) {
-        ereport(WARNING, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role \"%s\" does not exist", username)));
+    if (!CheckRoleValid(userName)) {
         return;
     }
-
-    /*
-     * FORCE is activated,
-     * Send a SIGTERM signal to all the processes and take a lock on Pooler
-     * to avoid backends to take new connections when cleaning.
-     * Only Disconnect is allowed.
-     */
-    if (is_force) {
-        int loop = 0;
-        int* proc_pids = NULL;
-        int num_proc_pids, count;
-
-        num_proc_pids = PoolManagerAbortTransactions(dbname, username, &proc_pids);
-
-        /*
-         * Watch the processes that received a SIGTERM.
-         * At the end of the timestamp loop, processes are considered as not finished
-         * and force the connection cleaning has failed
-         */
-
-        while (num_proc_pids > 0 && loop < TIMEOUT_CLEAN_LOOP) {
-            for (count = num_proc_pids - 1; count >= 0; count--) {
-                switch (kill(proc_pids[count], 0)) {
-                    case 0: /* Termination not done yet */
-                        break;
-
-                    default:
-                        /* Move tail pid in free space */
-                        proc_pids[count] = proc_pids[num_proc_pids - 1];
-                        num_proc_pids--;
-                        break;
-                }
-            }
-            pg_usleep(1000000);
-            loop++;
-        }
-
-        if (proc_pids)
-            pfree(proc_pids);
-
-        if (loop >= TIMEOUT_CLEAN_LOOP)
-            ereport(WARNING, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("All Transactions have not been aborted")));
+    if (userName != NULL) {
+        userOid = get_role_oid(userName, false);
+    }
+    // CHECK is activated
+    // Check if the database/user is being accessed by other users/sessions before drop it.
+    if (isCheck) {
+        CheckDBActivate(userName, dbName, dbOid);
     }
 
-    foreach (nodelist_item, stmt->nodes) {
-        char* node_name = strVal(lfirst(nodelist_item));
+    /* check Node name is valid or not */
+    foreach (nodelistItem, stmt->nodes) {
+        char* node_name = strVal(lfirst(nodelistItem));
         Oid nodeoid = get_pgxc_nodeoid(node_name);
-        if (!OidIsValid(nodeoid))
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("PGXC Node %s: object not defined", node_name)));
-
-        stmt_nodes = lappend_int(stmt_nodes, PGXCNodeGetNodeId(nodeoid, get_pgxc_nodetype(nodeoid)));
-    }
-
-    /* Build lists to be sent to Pooler Manager */
-    if (stmt->nodes && is_coord)
-        co_list = stmt_nodes;
-    else if (stmt->nodes && !is_coord)
-        dn_list = stmt_nodes;
-    else {
-        co_list = GetAllCoordNodes();
-        dn_list = GetAllDataNodes();
+        if (!OidIsValid(nodeoid)) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Node %s: object not defined", node_name)));
+        }
     }
 
     /*
-     * If force is launched, send a signal to all the processes
-     * that are in transaction and take a lock.
-     * Get back their process number and watch them locally here.
-     * Process are checked as alive or not with pg_usleep and when all processes are down
-     * go out of the control loop.
-     * If at the end of the loop processes are not down send an error to client.
-     * Then Make a clean with normal pool cleaner.
-     * Always release the lock when calling CLEAN CONNECTION.
+     * FORCE is activated
+     * Send a SIGTERM signal to all the processes in thread pool and HA session.
      */
-
-    /* Finish by contacting Pooler Manager */
-    PoolManagerCleanConnection(dn_list, co_list, dbname, username);
-
-    /* Clean up memory */
-    if (co_list)
-        list_free(co_list);
-    if (dn_list)
-        list_free(dn_list);
-#endif
+    if (isForce) {
+        SendSignalToProcess(dbName, dbOid, userName, userOid);
+    }
 }
 
 /*

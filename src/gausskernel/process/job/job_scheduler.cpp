@@ -339,6 +339,8 @@ NON_EXEC_STATIC void JobScheduleMain()
 
     /* Main loop */
     for (;;) {
+        /* close xlog file fd if any */
+        CloseXlogFilesAtThreadExit();
         struct timeval nap;
         TimestampTz current_time = 0;
         bool can_launch = false;

@@ -65,7 +65,6 @@
 #include "utils/syscache.h"
 #include "utils/xml.h"
 #include "executor/executor.h"
-#include "utils/globalpreparestmt.h"
 
 /* ===================== Static functions to init session ===================== */
 static bool InitSession(knl_session_context* sscxt);
@@ -460,11 +459,10 @@ void ThreadPoolWorker::DetachSessionFromThread()
         t_thrd.pgxact->vacuumFlags &= ~PROC_IS_REDIST;
         LWLockRelease(ProcArrayLock);
     }
-
-    if (ENABLE_DN_GPC) {
-        g_instance.prepare_cache->CleanSessionGPC(m_currentSession);
-    }
-    if (ENABLE_CN_GPC) {
+    if (ENABLE_GPC) {
+#ifdef ENABLE_MULTIPLE_NODES
+        CleanSessionGPCDetach(m_currentSession);
+#endif
         m_currentSession->pcache_cxt.gpc_in_ddl = false;
     }
     RestoreSessionVariable();
@@ -614,8 +612,10 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     pgstat_beshutdown_session(m_currentSession->session_ctr_index);
     localeconv_deinitialize_session();
 
-    /* clean gpc cn refcount and plancache in shared memory */
+    /* clean gpc refcount and plancache in shared memory */
     if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+        if (ENABLE_DN_GPC)
+            CleanSessGPCPtr(m_currentSession);
         CNGPCCleanUpSession();
     }
 

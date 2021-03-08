@@ -544,7 +544,7 @@ static ObjectAddress get_relation_by_qualified_name(
             if (relation->rd_rel->relkind != RELKIND_CONTQUERY)
                 ereport(ERROR,
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("\"%s\" is not a contquery", RelationGetRelationName(relation))));
+                        errmsg("\"%s\" is not a contview", RelationGetRelationName(relation))));
             break;
         case OBJECT_MATVIEW:
             if (relation->rd_rel->relkind != RELKIND_MATVIEW)

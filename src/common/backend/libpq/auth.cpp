@@ -737,12 +737,12 @@ void ClientAuthentication(Port* port)
 /*
  * Generate a string of fake salt bytes as user is not existed.
  */
-bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int salt_len)
+void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int salt_len)
 {
     SHA256_CTX2 ctx;
-    int combine_string_length = PREFIX_LENGTH + strlen(user_name);
+    int combine_string_length = POSTFIX_LENGTH + strlen(user_name);
     char *combine_string = (char*)palloc0(sizeof(char) * (combine_string_length + 1));
-    char prefix[PREFIX_LENGTH + 1] = {0};
+    char postfix[POSTFIX_LENGTH + 1] = {0};
     char superuser_name[NAMEDATALEN] = {0};
     unsigned char buf[SHA256_DIGEST_LENGTH] = {0};
     char encrypt_string[ENCRYPTED_STRING_LENGTH + 1] = {0};
@@ -752,16 +752,12 @@ bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 
     (void)GetSuperUserName((char*)superuser_name);
     superuser_stored_method = get_password_stored_method(superuser_name, encrypt_string, ENCRYPTED_STRING_LENGTH + 1);
-    if (superuser_stored_method != SHA256_PASSWORD && superuser_stored_method != COMBINED_PASSWORD) {
-        rc = memset_s(encrypt_string, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH);
+    if (superuser_stored_method == SHA256_PASSWORD || superuser_stored_method == COMBINED_PASSWORD) {
+        rc = strncpy_s(postfix, POSTFIX_LENGTH + 1, encrypt_string + SALT_STRING_LENGTH, POSTFIX_LENGTH);
         securec_check(rc, "\0", "\0");
-        pfree(combine_string);
-        return false;
     }
 
-    rc = strncpy_s(prefix, PREFIX_LENGTH + 1, encrypt_string + SALT_STRING_LENGTH, PREFIX_LENGTH);
-    securec_check(rc, "\0", "\0");
-    rcs = snprintf_s(combine_string, combine_string_length + 1, combine_string_length, "%s%s", prefix, user_name);
+    rcs = snprintf_s(combine_string, combine_string_length + 1, combine_string_length, "%s%s", user_name, postfix);
     securec_check_ss(rcs, "\0", "\0");
     SHA256_Init2(&ctx);
     SHA256_Update2(&ctx, (const uint8*)combine_string, combine_string_length);
@@ -773,7 +769,6 @@ bool GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
     rc = memset_s(combine_string, combine_string_length + 1, 0, combine_string_length);
     securec_check(rc, "\0", "\0");
     pfree(combine_string);
-    return true;
 }
 
 /*
@@ -826,11 +821,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
              * When login failed, let the server quit at the same place regardless of right or wrong
              * username. We construct a fake encrypted password here and send it the client.
              */
-            if (!GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the fake salt")));
-            }
+            GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
             retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
             if (retval != 1) {
                 ereport(ERROR,

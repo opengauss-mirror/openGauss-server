@@ -85,7 +85,11 @@ void usage(void)
         tmp = NULL;
     }
 
-    printf(_("gsql is the FusionInsight LibrA interactive terminal.\n\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("gsql is the GaussDB Kernel interactive terminal.\n\n"));
+#else
+    printf(_("gsql is the openGauss interactive terminal.\n\n"));
+#endif
     printf(_("Usage:\n"));
     printf(_("  gsql [OPTION]... [DBNAME [USERNAME]]\n\n"));
 
@@ -180,9 +184,14 @@ void usage(void)
     printf(_("  -U, --username=USERNAME  database user name (default: \"%s\")\n"), tmp);
     printf(_("  -W, --password=PASSWORD  the password of specified database user\n"));
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf(_("\nFor more information, type \"\\?\" (for internal commands) or \"\\help\" (for SQL\n"
-             "commands) from within gsql, or consult the gsql section in the FusionInsight LibrA\n"
+             "commands) from within gsql, or consult the gsql section in the GaussDB Kernel\n"
              "documentation.\n\n"));
+#else
+    printf(_("\nFor more information, type \"\\?\" (for internal commands) or \"\\help\" (for SQL\n"
+             "commands) from within gsql, or consult the gsql section in the openGauss documentation.\n\n"));
+#endif
     if (user != tmp)
         free(tmp);
     tmp = NULL;
@@ -207,7 +216,11 @@ void slashUsage(unsigned short int pager)
     /* if you add/remove a line here, change the row count above */
 
     fprintf(output, _("General\n"));
-    fprintf(output, _("  \\copyright             show FusionInsight LibrA usage and distribution terms\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    fprintf(output, _("  \\copyright             show GaussDB Kernel usage and distribution terms\n"));
+#else
+    fprintf(output, _("  \\copyright             show openGauss usage and distribution terms\n"));
+#endif
     fprintf(output, _("  \\g [FILE] or ;         execute query (and send results to file or |pipe)\n"));
     fprintf(output, _("  \\h(\\help) [NAME]              help on syntax of SQL commands, * for all commands\n"));
     fprintf(output, _("  \\parallel [on [num]|off] toggle status of execute (currently %s)\n"), ON(pset.parallel));

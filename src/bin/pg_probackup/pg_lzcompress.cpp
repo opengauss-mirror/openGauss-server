@@ -499,6 +499,102 @@ pglz_find_match(int16 *hstart, const char *input, const char *end,
 
 
 /* ----------
+ * compress -
+ *
+ * Compress the source directly into the output buffer.
+ * ----------
+ */
+static int32 compress(const char *source, int32 slen, char *dest,
+                      const PGLZ_Strategy *strategy,
+                      int32 good_match, int32 good_drop,
+                      int32 result_max, int mask)
+{
+    const char    *dp          = source;
+    const char    *dend        = source + slen;
+    unsigned char *bp = (unsigned char *) dest;
+    unsigned char *bstart = bp;
+    unsigned char ctrl_dummy   = 0;
+    unsigned char *ctrlp       = &ctrl_dummy;
+    unsigned char ctrlb        = 0;
+    unsigned char ctrl         = 0;
+    bool          found_match  = false;
+    bool          hist_recycle = false;
+    int           hist_next    = 1;
+    int32         match_len;
+    int32         match_off;
+    int32         result_size;
+
+    while (dp < dend)
+    {
+        /*
+         * If we already exceeded the maximum result size, fail.
+         *
+         * We check once per loop; since the loop body could emit as many as 4
+         * bytes (a control byte and 3-byte tag), PGLZ_MAX_OUTPUT() had better
+         * allow 4 slop bytes.
+         */
+        if (bp - bstart >= result_max)
+            return -1;
+
+        /*
+         * If we've emitted more than first_success_by bytes without finding
+         * anything compressible at all, fail.  This lets us fall out
+         * reasonably quickly when looking at incompressible input (such as
+         * pre-compressed data).
+         */
+        if (!found_match && bp - bstart >= strategy->first_success_by)
+            return -1;
+
+        /*
+         * Try to find a match in the history
+         */
+        if (pglz_find_match(hist_start, dp, dend, &match_len,
+                            &match_off, good_match, good_drop, mask))
+        {
+            /*
+             * Create the tag and add history entries for all matched
+             * characters.
+             */
+            pglz_out_tag(ctrlp, ctrlb, ctrl, bp, match_len, match_off);
+            while (match_len--)
+            {
+                pglz_hist_add(hist_start, hist_entries,
+                              hist_next, hist_recycle,
+                              dp, dend, mask);
+                dp++;            /* Do not do this ++ in the line above! */
+                /* The macro would do it four times - Jan.  */
+            }
+            found_match = true;
+        }
+        else
+        {
+            /*
+             * No match found. Copy one literal byte.
+             */
+            pglz_out_literal(ctrlp, ctrlb, ctrl, bp, *dp);
+            pglz_hist_add(hist_start, hist_entries,
+                          hist_next, hist_recycle,
+                          dp, dend, mask);
+            dp++;                /* Do not do this ++ in the line above! */
+            /* The macro would do it four times - Jan.  */
+        }
+    }
+
+    /*
+     * Write out the last control byte and check that we haven't overrun the
+     * output size allowed by the strategy.
+     */
+    *ctrlp = ctrlb;
+    result_size = bp - bstart;
+    if (result_size >= result_max)
+        return -1;
+
+    /* success */
+    return result_size;
+}
+
+
+/* ----------
  * pglz_compress -
  *
  *        Compresses source into dest using strategy. Returns the number of
@@ -599,100 +695,6 @@ pglz_compress(const char *source, int32 slen, char *dest,
                     result_max, mask);
 }
 
-/* ----------
- * compress -
- *
- * Compress the source directly into the output buffer.
- * ----------
- */
-static int32 compress(const char *source, int32 slen, char *dest,
-                      const PGLZ_Strategy *strategy,
-                      int32 good_match, int32 good_drop,
-                      int32 result_max, int mask)
-{
-    const char    *dp          = source;
-    const char    *dend        = source + slen;
-    unsigned char *bp = (unsigned char *) dest;
-    unsigned char *bstart = bp;
-    unsigned char ctrl_dummy   = 0;
-    unsigned char *ctrlp       = &ctrl_dummy;
-    unsigned char ctrlb        = 0;
-    unsigned char ctrl         = 0;
-    bool          found_match  = false;
-    bool          hist_recycle = false;
-    int           hist_next    = 1;
-    int32         match_len;
-    int32         match_off;
-    int32         result_size;
-
-    while (dp < dend)
-    {
-        /*
-         * If we already exceeded the maximum result size, fail.
-         *
-         * We check once per loop; since the loop body could emit as many as 4
-         * bytes (a control byte and 3-byte tag), PGLZ_MAX_OUTPUT() had better
-         * allow 4 slop bytes.
-         */
-        if (bp - bstart >= result_max)
-            return -1;
-
-        /*
-         * If we've emitted more than first_success_by bytes without finding
-         * anything compressible at all, fail.  This lets us fall out
-         * reasonably quickly when looking at incompressible input (such as
-         * pre-compressed data).
-         */
-        if (!found_match && bp - bstart >= strategy->first_success_by)
-            return -1;
-
-        /*
-         * Try to find a match in the history
-         */
-        if (pglz_find_match(hist_start, dp, dend, &match_len,
-                            &match_off, good_match, good_drop, mask))
-        {
-            /*
-             * Create the tag and add history entries for all matched
-             * characters.
-             */
-            pglz_out_tag(ctrlp, ctrlb, ctrl, bp, match_len, match_off);
-            while (match_len--)
-            {
-                pglz_hist_add(hist_start, hist_entries,
-                              hist_next, hist_recycle,
-                              dp, dend, mask);
-                dp++;            /* Do not do this ++ in the line above! */
-                /* The macro would do it four times - Jan.  */
-            }
-            found_match = true;
-        }
-        else
-        {
-            /*
-             * No match found. Copy one literal byte.
-             */
-            pglz_out_literal(ctrlp, ctrlb, ctrl, bp, *dp);
-            pglz_hist_add(hist_start, hist_entries,
-                          hist_next, hist_recycle,
-                          dp, dend, mask);
-            dp++;                /* Do not do this ++ in the line above! */
-            /* The macro would do it four times - Jan.  */
-        }
-    }
-
-    /*
-     * Write out the last control byte and check that we haven't overrun the
-     * output size allowed by the strategy.
-     */
-    *ctrlp = ctrlb;
-    result_size = bp - bstart;
-    if (result_size >= result_max)
-        return -1;
-
-    /* success */
-    return result_size;
-}
 
 /* ----------
  * pglz_decompress -

@@ -1,0 +1,3 @@
+#----pg_regress
+leak:regression_main
+leak:get_node_info_name

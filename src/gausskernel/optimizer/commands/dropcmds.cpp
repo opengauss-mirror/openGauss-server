@@ -23,6 +23,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_proc.h"
 #include "commands/defrem.h"
+#include "commands/trigger.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
@@ -119,6 +120,8 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                         errhint("Use DROP AGGREGATE to drop aggregate functions.")));
 
             CacheInvalidateFunction(funcOid);
+            /* send invalid message for for relation holding replaced function as trigger */
+            InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
             ReleaseSysCache(tup);
         }
 

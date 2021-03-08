@@ -25,7 +25,7 @@ include $(top_srcdir)/src/gausskernel/common.mk
 
 
 # bootscanner is compiled as part of bootparse
-bootparse.o: bootscanner.cpp
+bootparse.o: bootscanner.inc
 
 bootparse.cpp: bootparse.y $(top_builddir)/src/mtlocal.pl
 ifdef BISON
@@ -35,15 +35,15 @@ else
 	@$(missing) bison $< $@
 endif
 
-bootscanner.cpp: bootscanner.l $(top_builddir)/src/mtlocal.pl
+bootscanner.inc: bootscanner.l $(top_builddir)/src/mtlocal.pl
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
-	$(PERL) $(top_builddir)/src/mtlocal.pl $(srcdir)/bootscanner.cpp
-	sed -i 's/YY_NULL/YY_ZERO/g' bootscanner.cpp
+	$(PERL) $(top_builddir)/src/mtlocal.pl $(srcdir)/bootscanner.inc
+	sed -i 's/YY_NULL/YY_ZERO/g' bootscanner.inc
 else
 	@$(missing) flex $< $@
 endif
 
 
-# bootparse.cpp and bootscanner.cpp are in the distribution tarball, so
+# bootparse.cpp and bootscanner.inc are in the distribution tarball, so
 # they are not cleaned here.

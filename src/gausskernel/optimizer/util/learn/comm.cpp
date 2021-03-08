@@ -252,7 +252,6 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
         ClearRandKeyFile(&randFileContent);
         pfree(plainpwd);
         ereport(ERROR, (errmodule(MOD_OPT_AI), errmsg("Read from key file failed.")));
-        return plainpwd;
     }
     if (!DecryptInputKey(cipherFileContent.cipherkey, 
                          CIPHER_LEN, randFileContent.randkey, 
@@ -265,14 +264,13 @@ static GS_UCHAR* DecodeClientKey(StringInfo cahome)
         ClearRandKeyFile(&randFileContent);
         pfree(plainpwd);
         ereport(ERROR, (errmodule(MOD_OPT_AI), errmsg("decrypt input key failed.")));
-        return plainpwd;
         } 
     ClearCipherKeyFile(&cipherFileContent);
     ClearRandKeyFile(&randFileContent);
     return plainpwd;
 }
 
-static inline void CleanCertInfo(StringInfo str)
+static void CleanCertInfo(StringInfo str)
 {
     errno_t rc = memset_s(str->data, str->len, 0, str->len);
     securec_check(rc, "\0", "\0");

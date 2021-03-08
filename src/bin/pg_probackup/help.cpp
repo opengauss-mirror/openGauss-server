@@ -146,6 +146,7 @@ void help_pg_probackup(void)
     printf(_("                 [--compress-level=compress-level]\n"));
     printf(_("                 [--compress]\n"));
     printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
+    printf(_("                 [-t rwtimeout]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
@@ -405,6 +406,7 @@ static void help_backup(void)
     printf(_("                 [--compress-level=compress-level]\n"));
     printf(_("                 [--compress]\n"));
     printf(_("                 [-d dbname] [-h host] [-p port] [-U username] [-w] [-W password]\n"));
+    printf(_("                 [-t rw-timeout]\n"));
     printf(_("                 [--remote-proto=protocol] [--remote-host=destination]\n"));
     printf(_("                 [--remote-path=path] [--remote-user=username]\n"));
     printf(_("                 [--remote-port=port] [--ssh-options=ssh_options]\n"));
@@ -419,6 +421,7 @@ static void help_backup(void)
     printf(_("      --temp-slot                  use temporary replication slot\n"));
     printf(_("      --backup-pg-log              backup of '%s' directory\n"), PG_LOG_DIR);
     printf(_("  -j, --threads=threads_num        number of parallel threads\n"));
+    printf(_("  -t, --rw-timeout=rw-timeout      read-write timeout during idle connection\n"));
     printf(_("      --progress                   show progress\n"));
     printf(_("      --no-validate                disable validation after backup\n"));
     printf(_("      --skip-block-validation      set to validate only file-level checksum\n"));

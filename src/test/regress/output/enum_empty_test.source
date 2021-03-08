@@ -1,5 +1,6 @@
 \! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "wal_level=hot_standby"
 NOTICE: If you need to copy the data stream for WAL log archiving and standby machine. You must be set to the parameter with archive or hot_standby. If this parameter is setted to archive. The hot_standby must be setted to off, otherwise it will cause the database can not be started, at the same time the max_wal_senders must be set at least 1.
+--?realpath.*
 expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
 gs_guc set: wal_level=hot_standby: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
 

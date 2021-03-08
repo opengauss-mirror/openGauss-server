@@ -209,6 +209,7 @@ typedef struct {
 /* Function for RelationLocInfo building and management */
 extern void RelationBuildLocator(Relation rel);
 extern RelationLocInfo* GetRelationLocInfo(Oid relid);
+extern RelationLocInfo* TsGetRelationLocInfo(Oid relid);
 extern RelationLocInfo* GetRelationLocInfoDN(Oid relid);
 extern RelationLocInfo* CopyRelationLocInfo(RelationLocInfo* srcInfo);
 extern void FreeRelationLocInfo(RelationLocInfo* relationLocInfo);

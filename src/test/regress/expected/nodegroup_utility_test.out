@@ -51,10 +51,12 @@ truncate t1ng5678;
 -- #1 grant tables under schema
 GRANT ALL ON ALL TABLES IN SCHEMA public TO public;
 -- #2. vacuum catalog table
+set xc_maintenance_mode = on;
 vacuum full pg_class;
 vacuum pg_class;
 vacuum;
 vacuum full;
+set xc_maintenance_mode = off;
 -- will fail as we don't allow drop tables from different node group
 drop table t1ng1234, t1ng5678;
 ERROR:  NOT-SUPPORT: Not support DROP multiple objects different nodegroup

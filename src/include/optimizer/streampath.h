@@ -46,20 +46,17 @@ protected:
     RelOptInfo* m_rel;
 };
 
-class JoinPathGen : public PathGen {
+class JoinPathGenBase : public PathGen {
 public:
-    JoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
+    JoinPathGenBase(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
         SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
         Path* outer_path, Path* inner_path, Relids required_outer);
 
-   virtual ~JoinPathGen();
+    virtual ~JoinPathGenBase();
 
 protected:
     /* Init member variable. */
     void init();
-
-    /* Init if we need stream. */
-    void initDistribution();
 
     /* special process for list/range distributed table */
     void initRangeListDistribution();
@@ -74,40 +71,22 @@ protected:
     const bool is_param_path();
 
     /* Add join path to path list. */
-    void addJoinPath(Path* path, List* desired_key, bool exact_match);
+    virtual void addJoinPath(Path* path, List* desired_key, bool exact_match);
 
     /* Create stream path for join. */
     void addJoinStreamPath();
 
-    /* Add stream info for join. */
-    void addJoinStreamInfo();
-
     /* Add stream info for MPP structure. */
     void addStreamMppInfo();
-
-    /* Add stream info for multi node group execution. */
-    void addStreamNodeGroupInfo();
 
     /* Add stream info for parallel execution. */
     void addStreamParallelInfo();
 
-    /* Add stream info for skew optimization. */
-    void addStreamSkewInfo();
-
     /* Add parallel info for join. */
-    bool addJoinParallelInfo();
+    virtual bool addJoinParallelInfo();
 
     /* Set base stream info. */
     void setStreamBaseInfo(StreamType inner_type, StreamType outer_type, List* inner_keys, List* outer_keys);
-
-    /* Set stream info for multi nodegroup. */
-    bool setStreamNodeGroupInfo(bool stream_outer);
-
-    /* Set stream skew optimization info. */
-    uint32 setStreamSkewInfo();
-
-    /* Set stream parallel execution info. */
-    void setStreamParallelInfo(bool stream_outer, SmpStreamType sstype = PARALLEL_NONE);
 
     /* Check if we need local redistribute, */
     void parallelLocalRedistribute(bool* inner_can_local_distribute, bool* outer_can_local_distribute,
@@ -126,23 +105,23 @@ protected:
     /* Check if the replicate path can do redistribute. */
     bool isReplicateJoinCanRedistribute();
 
-    /* Create stream path for join. */
-    Path* streamSidePath(bool stream_outer);
-
     /* Create unique join path. */
     Path* makeJoinUniquePath(bool stream_outer, List* pathkeys);
 
     /* create a unique path for unique join with skewness at the no-unique side */
-    Path* makeJoinSkewUniquePath(bool stream_outer, List* pathkeys);
+    virtual Path* makeJoinSkewUniquePath(bool stream_outer, List* pathkeys);
 
     /* set distribute keys for join path. */
-    const bool setJoinDistributeKeys(JoinPath* joinpath, List* desired_key = NIL, bool exact_match = false);
+    virtual const bool setJoinDistributeKeys(JoinPath* joinpath, List* desired_key = NIL, bool exact_match = false);
 
     /* create a new stream info pair from the old one. */
     void newStreamInfoPair(StreamInfoPair* streamInfoPair);
 
-    /* Confirm the distribute keys in the target list of subpath. */
-    void confirmDistributeKeys(StreamInfo* sinfo);
+    /* Create stream path for join. */
+    virtual Path* streamSidePath(bool stream_outer);
+
+    /* Set stream parallel execution info. */
+    virtual void setStreamParallelInfo(bool stream_outer, SmpStreamType sstype = PARALLEL_NONE);
 
 protected:
     /* Join method. */
@@ -217,9 +196,6 @@ protected:
     /* Stream info list for the join. */
     List* m_streamInfoList;
 
-    /* Skew optimization info for join. */
-    JoinSkewInfo* m_skewInfo;
-
     /* Skew mutiple for inner redistribute. */
     double m_multipleInner;
 
@@ -255,12 +231,71 @@ protected:
 
     /* If we can broadcast the outer side. */
     bool m_canBroadcastOuter;
+};
+
+class JoinPathGen : public JoinPathGenBase {
+public:
+    JoinPathGen(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinType save_jointype,
+        SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, List* joinclauses, List* restrictinfo,
+        Path* outer_path, Path* inner_path, Relids required_outer);
+
+    virtual ~JoinPathGen();
+
+protected:
+    /* Init if we need stream. */
+    void initDistribution();
+
+    /* Add stream info for join. */
+    void addJoinStreamInfo();
+
+    /* Set stream parallel execution info. */
+    void setStreamParallelInfo(bool stream_outer, SmpStreamType sstype = PARALLEL_NONE);
+
+    /* Add parallel info for join. */
+    bool addJoinParallelInfo();
+
+    /* set distribute keys for join path. */
+    const bool setJoinDistributeKeys(JoinPath* joinpath, List* desired_key = NIL, bool exact_match = false);
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Init member variable. */
+    void init();
+
+    /* Check if we can create parallel join path. */
+    const bool isParallelEnable();
+
+    /* Add stream info for multi node group execution. */
+    void addStreamNodeGroupInfo();
+
+    /* Add stream info for MPP structure. */
+    void addStreamMppInfo();
+
+    /* Add stream info for skew optimization. */
+    void addStreamSkewInfo();
+
+    /* Set stream info for multi nodegroup. */
+    bool setStreamNodeGroupInfo(bool stream_outer);
+
+    /* Set stream skew optimization info. */
+    uint32 setStreamSkewInfo();
+
+    /* Confirm the distribute keys in the target list of subpath. */
+    void confirmDistributeKeys(StreamInfo* sinfo);
+
+    /* create a unique path for unique join with skewness at the no-unique side */
+    Path* makeJoinSkewUniquePath(bool stream_outer, List* pathkeys);
+
+    /* Create stream path for join. */
+    virtual Path* streamSidePath(bool stream_outer);
+protected:
+    /* Skew optimization info for join. */
+    JoinSkewInfo* m_skewInfo;
 
     /* If we need shuffle the inner side. */
     bool m_needShuffleInner;
 
     /* If we need shuffle the outer side. */
     bool m_needShuffleOuter;
+#endif
 };
 
 class HashJoinPathGen : public JoinPathGen {

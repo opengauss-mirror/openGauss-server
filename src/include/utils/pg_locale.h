@@ -52,7 +52,7 @@ extern void localeconv_deinitialize_session(void);
 
 extern void cache_locale_time(void);
 
-void freeLocaleCacheAtThreadExit(void);
+void freeLocaleCache(bool threadExit);
 
 /*
  * We define our own wrapper around locale_t so we can keep the same

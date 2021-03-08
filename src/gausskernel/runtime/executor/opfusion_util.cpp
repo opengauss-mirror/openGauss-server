@@ -687,7 +687,7 @@ bool checkDMLRelation(const Relation rel, const PlannedStmt *plannedstmt, bool i
     bool result = false;
     if (rel->rd_rel->relkind != RELKIND_RELATION || rel->rd_rel->relhasrules || rel->rd_rel->relhastriggers ||
         rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsColStore(rel) ||
-        RelationInRedistribute(rel) || plannedstmt->hasReturning) {
+        RelationIsTsStore(rel) || RelationInRedistribute(rel) || plannedstmt->hasReturning) {
         result = true;
     }
     if (isInsert) {

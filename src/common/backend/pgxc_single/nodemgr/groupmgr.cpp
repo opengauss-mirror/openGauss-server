@@ -1271,8 +1271,6 @@ void PgxcGroupAddNode(Oid group_oid, Oid nodeid)
         pfree_ext(gmember_ref);
     pfree_ext(gmember);
 
-    // Group has changed, so remove it's cache.
-    ngroup_info_hash_delete(group_oid);
 }
 
 /*
@@ -1314,8 +1312,6 @@ void PgxcGroupRemoveNode(Oid group_oid, Oid nodeid)
 
     ReleaseSysCache(tup);
 
-    // Group has changed, so remove it's cache.
-    ngroup_info_hash_delete(group_oid);
 }
 #pragma GCC diagnostic pop
 /*
@@ -2935,9 +2931,6 @@ static void PgxcGroupAddNodes(const char* group_name, List* nodes)
 
     PgxcChangeGroupMember(group_oid, gmember);
     pfree_ext(gmember);
-
-    // Group has changed, so remove it's cache.
-    ngroup_info_hash_delete(group_oid);
 }
 
 /*
@@ -3034,8 +3027,6 @@ static void PgxcGroupDeleteNodes(const char* group_name, List* nodes)
     PgxcChangeGroupMember(group_oid, gmember);
     pfree_ext(gmember);
 
-    // Group has changed, so remove it's cache.
-    ngroup_info_hash_delete(group_oid);
 }
 
 #ifdef ENABLE_MULTIPLE_NODES

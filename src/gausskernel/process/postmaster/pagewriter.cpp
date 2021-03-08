@@ -688,6 +688,7 @@ static int64 get_pagewriter_sleep_time()
     } else {
         time_diff = 0;
     }
+    time_diff = MIN(time_diff, u_sess->attr.attr_storage.pageWriterSleep);
     return time_diff;
 }
 

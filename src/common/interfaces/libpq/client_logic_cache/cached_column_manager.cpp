@@ -226,7 +226,11 @@ ICachedColumn *CachedColumnManager::create_cached_column(const char *column_key_
     const CachedColumnSetting *column_setting =
         CacheLoader::get_instance().get_column_setting_by_fqdn(column_key_name);
     if (column_setting) {
-        cached_column = new CachedColumn();
+        cached_column = new (std::nothrow) CachedColumn();
+        if (cached_column == NULL) {
+            fprintf(stderr, "failed to new CachedColumn object\n");
+            exit(EXIT_FAILURE);
+        }
         cached_column->add_executor(column_setting->get_executor());
     } else {
         fprintf(stderr, "failed to find in cache: %s\n", column_key_name);
@@ -371,18 +375,17 @@ bool CachedColumnManager::get_cached_columns(const DeleteStmt *delete_stmt, cons
     /*
      * delete from  table1 as a1 where a1.col1 = ...
      */
-    if (delete_stmt->relation->alias != NULL) {
-        char *alias_name = delete_stmt->relation->alias->aliasname;
-        for (size_t i = 0; i < tmp_cached_columns.size(); i++) {
-            ICachedColumn *alias_cached = new CachedColumn(tmp_cached_columns.at(i));
+    for (size_t i = 0; i < tmp_cached_columns.size(); i++) {
+        ICachedColumn *alias_cached = new (std::nothrow) CachedColumn(tmp_cached_columns.at(i));
+        if (alias_cached == NULL) {
+            fprintf(stderr, "failed to new CachedColumn object\n");
+            exit(EXIT_FAILURE);
+        }
+        if (delete_stmt->relation->alias != NULL) {
+            char *alias_name = delete_stmt->relation->alias->aliasname;
             alias_cached->set_table_name(alias_name);
-            cached_columns->push(alias_cached);
         }
-    } else {
-        for (size_t i = 0; i < tmp_cached_columns.size(); i++) {
-            ICachedColumn *alias_cached = new CachedColumn(tmp_cached_columns.at(i));
-            cached_columns->push(alias_cached);
-        }
+        cached_columns->push(alias_cached);
     }
     return true;
 }

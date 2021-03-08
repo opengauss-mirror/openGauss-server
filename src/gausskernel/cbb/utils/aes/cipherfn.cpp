@@ -743,7 +743,7 @@ bool gs_encrypt_aes_speed(GS_UCHAR* plaintext, GS_UCHAR* key, GS_UCHAR* cipherte
     /* the real encrypt operation */
     encryptstatus = aes128EncryptSpeed(plaintext, plainlen, key, init_rand, ciphertext, cipherlen);
     if (!encryptstatus) {
-        ereport(ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("aes128EncryptSpeedFailed!")));
+        ereport(WARNING, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("aes128EncryptSpeedFailed!")));
         return false;
     }
 
@@ -1280,6 +1280,10 @@ bool IsLegalPreix(const char* prefixStr)
 static void free_global_value(void)
 {
     GS_FREE(g_prefix);
+    if (g_key != NULL) {
+        errno_t rc = memset_s(g_key, strlen(g_key), 0, strlen(g_key));
+        securec_check_c(rc, "\0", "\0");
+    }
     GS_FREE(g_key);
     GS_FREE(g_vector);
 }
@@ -1364,6 +1368,7 @@ int encrypte_main(int argc, char* const argv[])
                 g_prefix = gs_strdup(optarg);
                 if (0 == strlen(g_prefix) || !IsLegalPreix(g_prefix)) {
                     (void)fprintf(stderr, _("%s: -f only be formed of 'a~z', 'A~Z', '0~9', '-', '_'\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1375,6 +1380,7 @@ int encrypte_main(int argc, char* const argv[])
                 // the length of g_vector must equal to 16
                 if (strlen(g_vector) != RANDOM_LEN) {
                     (void)fprintf(stderr, _("%s: the length of -v must equal to %d\n"), pgname, RANDOM_LEN);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1382,10 +1388,15 @@ int encrypte_main(int argc, char* const argv[])
                 break;
             }
             case 'k': {
+                if (g_key != NULL) {
+                    rc = memset_s(g_key, strlen(g_key), 0, strlen(g_key));
+                    securec_check_c(rc, "\0", "\0");
+                }
                 GS_FREE(g_key);
                 g_key = gs_strdup(optarg);
                 if (0 == strlen(optarg) || !mask_single_passwd(optarg)) {
-                    (void)fprintf(stderr, _("%s: mask passwd failed. optarg is null, or out of memory!\n"), pgname);
+                    (void)fprintf(stderr, _("%s: mask passwd failed. optarg is null or out of memory!\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1395,19 +1406,25 @@ int encrypte_main(int argc, char* const argv[])
             case 'B': {
                 GS_UCHAR* decoded_key = NULL;
                 GS_UINT32 decodelen = 0;
+                if (g_key != NULL) {
+                    rc = memset_s(g_key, strlen(g_key), 0, strlen(g_key));
+                    securec_check_c(rc, "\0", "\0");
+                }
                 GS_FREE(g_key);
 
                 decoded_key = (GS_UCHAR*)SEC_decodeBase64(optarg, &decodelen);
 
                 if (0 == strlen(optarg) || !mask_single_passwd(optarg)) {
-                    (void)fprintf(stderr, _("%s: mask base64 encoded key failed. optarg is null, or out of memory!\n"), 
+                    (void)fprintf(stderr, _("%s: mask base64 encoded key failed. optarg is null or out of memory!\n"), 
                         pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
 
                 if (decoded_key == NULL || decodelen == 0) {
                     (void)fprintf(stderr, _("%s: failed to decode base64 encoded key.\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1427,6 +1444,7 @@ int encrypte_main(int argc, char* const argv[])
 
                 if (decoded_vector == NULL || decodelen == 0) {
                     (void)fprintf(stderr, _("%s: failed to decode base64 encoded vector.\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1434,6 +1452,7 @@ int encrypte_main(int argc, char* const argv[])
                 if (decodelen != RANDOM_LEN) {
                     (void)fprintf(
                         stderr, _("%s: the decoded length of vector must be equal to %d.\n"), pgname, RANDOM_LEN);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1447,7 +1466,8 @@ int encrypte_main(int argc, char* const argv[])
                 GS_FREE(keyname);
                 keyname = gs_strdup(optarg);
                 if (keyname == NULL) {
-                    (void)fprintf(stderr, _("%s: Key name is wrrong,it must be usable!\n"), pgname);
+                    (void)fprintf(stderr, _("%s: Key name is wrong, it must be usable!\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1456,9 +1476,10 @@ int encrypte_main(int argc, char* const argv[])
             case 'U': {
                 GS_FREE(kmsurl);
                 kmsurl = gs_strdup(optarg);
-                if (kmsurl == NULL) {
+                if (strlen(kmsurl) == 0) {
                     (void)fprintf(
-                        stderr, _("%s: KMS url is wrrong,it must be an accessible network address.\n"), pgname);
+                        stderr, _("%s: KMS url is wrong, it must be an accessible network address.\n"), pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1467,10 +1488,11 @@ int encrypte_main(int argc, char* const argv[])
             case 'I': {
                 GS_FREE(tdealgo);
                 tdealgo = gs_strdup(optarg);
-                if (tdealgo == NULL || !is_prefix_in_key_mode(tdealgo)) {
+                if (!is_prefix_in_key_mode(tdealgo)) {
                     (void)fprintf(stderr,
-                        _("%s: Init TDE failed. optarg is wrrong, it must be SM4-CTR-128 or AES-CTR-128.\n"),
+                        _("%s: Init TDE failed. The algorithm is wrong, it must be SM4-CTR-128 or AES-CTR-128.\n"),
                         pgname);
+                    free_global_value();
                     do_advice();
                     exit(1);
                 }
@@ -1484,7 +1506,7 @@ int encrypte_main(int argc, char* const argv[])
     /* init the key */
     if (tdealgo != NULL) {
         if (keyname == NULL) {
-            (void)fprintf(stderr, _("%s: Init TDE failed.keyname is wrrong,you must add -N keyname.\n"), pgname);
+            (void)fprintf(stderr, _("%s: Init TDE failed. Key name is wrong, you must add -N keyname.\n"), pgname);
             do_advice();
             exit(1);
         }
@@ -1503,15 +1525,15 @@ int encrypte_main(int argc, char* const argv[])
         }
 
         if (!table_a_key.init_Key(tdealgo, keyname)) {
-            (void)fprintf(stderr, _("%s: Key inited error,please check net.\n"), pgname);
+            (void)fprintf(stderr, _("%s: Init key failed, please check net.\n"), pgname);
             do_advice();
             exit(1);
         }
 
         if (getAndCheckTranEncryptDEK() && trans_encrypt_dek != NULL) {
-            (void)fprintf(stdout, _("%s: Inited sucess!\n"), pgname);
+            (void)fprintf(stdout, _("%s: Init DEK succeeded.\n"), pgname);
         } else {
-            (void)fprintf(stderr, _("%s: The key value is fail,please check kms.\n"), pgname);
+            (void)fprintf(stderr, _("%s: Init DEK failed.\n"), pgname);
             exit(1);
         }
         exit(0);
@@ -1533,6 +1555,7 @@ int encrypte_main(int argc, char* const argv[])
         plaintext = (GS_UCHAR*)gs_strdup(argv[optind]);
         if (!mask_single_passwd(argv[optind])) {
             (void)fprintf(stderr, _("%s: mask plaintext failed. optarg is null, or out of memory!\n"), pgname);
+            free_global_value();
             do_advice();
             exit(1);
         }

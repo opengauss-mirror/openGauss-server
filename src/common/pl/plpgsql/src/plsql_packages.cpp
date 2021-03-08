@@ -91,8 +91,8 @@ Datum rawtohex(PG_FUNCTION_ARGS)
 /* report self-defined error: -20999 <= errorcode <=  -20000 */
 Datum report_application_error(PG_FUNCTION_ARGS)
 {
-#ifndef ENABLE_MULTIPLE_NODES
-        DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 #endif
     char* log = NULL;
     int errnum = 0;

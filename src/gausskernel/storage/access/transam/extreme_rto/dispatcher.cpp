@@ -429,6 +429,7 @@ static LogDispatcher *CreateDispatcher()
     newDispatcher->needImmediateCheckpoint = false;
     newDispatcher->needFullSyncCheckpoint = false;
     newDispatcher->smartShutdown = false;
+    newDispatcher->recoveryStop = false;
     return newDispatcher;
 }
 
@@ -1832,6 +1833,7 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
          errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, ready to stop redo workers, code: %d",
                 code)));
     if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readPageThd);
         PageRedoPipeline *pl = g_dispatcher->pageLines;
         /* send end mark */
         for (uint32 i = 0; i < g_dispatcher->pageLineNum; i++) {
@@ -1847,7 +1849,6 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
 
         WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.managerThd);
         WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readThd);
-        WaitPageRedoWorkerReachLastMark(g_dispatcher->readLine.readPageThd);
         WaitPageRedoWorkerReachLastMark(g_dispatcher->trxnLine.managerThd);
         LsnUpdate();
 #ifdef USE_ASSERT_CHECKING
@@ -2070,4 +2071,14 @@ void redo_get_wroker_statistic(uint32 *realNum, RedoWorkerStatsData *worker, uin
     SpinLockRelease(&(g_instance.comm_cxt.predo_cxt.destroy_lock));
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+
+void CheckCommittingCsnList()
+{
+    for (uint32 i = 0; i < g_dispatcher->allWorkersCnt; ++i) {
+        CleanUpMakeCommitAbort(reinterpret_cast<List *>(g_dispatcher->allWorkers[i]->committingCsnList));
+        g_dispatcher->allWorkers[i]->committingCsnList = NULL;
+    }
+}
+#endif
 }  // namespace extreme_rto

@@ -186,4 +186,163 @@ ON  tg_test1
 FOR EACH ROW
 EXECUTE PROCEDURE tri_insert_test2_func();
 insert into tg_test1 values(1,'a','2020-08-13 09:00:00', 1);  
-  
+
+--- prepare
+drop table if exists tt_in;
+drop table if exists tt_main;
+drop table if exists tt01;
+drop table if exists tt02;
+drop table if exists tt_sess;
+create table tt_in (id int,a date);
+create table tt_main (id int,a date);
+create table tt01(c1 int);
+create table tt02(c1 int, c2 int);
+create table tt_sess (id int,a date);
+
+--- case 1
+CREATE OR REPLACE PROCEDURE autonomous_tt_in_p_062(num1 int,num2 int)  AS 
+ DECLARE num3 int := 4;
+ PRAGMA AUTONOMOUS_TRANSACTION;
+ BEGIN
+ START TRANSACTION; 
+ SET local TRANSACTION ISOLATION LEVEL REPEATABLE READ; 
+ insert into tt_in select id,a from tt_main; 
+ commit;
+ END;
+ /
+ SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+start transaction ;
+insert into tt_main values(35,sysdate);
+select autonomous_tt_in_p_062(1,35);              
+COMMIT;
+ 
+ 
+--- case 2
+ CREATE FUNCTION ff2(v int, v2 int) RETURNS void AS $$
+    DECLARE
+PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+        INSERT INTO tt02 VALUES (v, v2);
+    END;
+$$ LANGUAGE plpgsql;
+select ff2(1,1);
+
+create or replace function perform_select(i int) returns integer
+LANGUAGE plpgsql
+as $$
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+
+perform *from tt01 where c1=i;
+return i;
+end;
+$$;
+select perform_select(1);
+
+--- case 3
+CREATE FUNCTION ff_into1(v int) RETURNS void AS $$
+DECLARE
+num int;
+PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+        select *from tt01 limit 1 into num;
+    END;
+$$ LANGUAGE plpgsql;
+select ff_into1(1);
+
+CREATE FUNCTION ff_into2(v int) RETURNS void AS $$
+DECLARE
+num int;
+PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+        execute 'select *from tt01 limit 1' into num;
+END;
+$$ LANGUAGE plpgsql;
+select ff_into2(1);
+
+--- case 4
+
+CREATE OR REPLACE FUNCTION autonomous_f_test(num1 int) RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+START TRANSACTION;
+insert into tt_sess values(1,2,3);
+commit;
+RETURN 42;
+END;
+$$;
+
+select autonomous_f_test(1);
+
+CREATE OR REPLACE FUNCTION autonomous_tt_sess_f_107(num1 int,num2 int) RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE
+num3 int := 4;
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN 
+	FOR i IN 0..9 LOOP    
+		START TRANSACTION;
+		insert into tt_sess values (1,sysdate); 
+		EXECUTE 'INSERT INTO tt_sess VALUES (' || num3+i::text || '，sysdate)';   
+		IF i % 2 = 0 THEN
+			COMMIT;    
+		ELSE
+			ROLLBACK;    
+		END IF;  
+	END LOOP;  
+	RETURN num1+num2+num3;
+END;
+$$;
+
+select autonomous_tt_sess_f_107(1,2);	
+
+
+
+CREATE OR REPLACE FUNCTION autonomous_e_test(num1 int) RETURNS integer LANGUAGE plpgsql AS $$
+DECLARE PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+BEGIN
+START TRANSACTION;
+insert into tt_sess values(1,2,3);
+commit;
+RETURN 42;
+EXCEPTION
+	WHEN OTHERS THEN
+		RAISE NOTICE 'exception happens';
+		return -1;
+END;		
+END;
+$$;
+
+select autonomous_e_test(1);
+
+CREATE FUNCTION ff_subblock() RETURNS void AS $$
+DECLARE
+num int;
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    BEGIN
+        insert into tt01 values(1);
+    END;
+    BEGIN
+        insert into tt01 values(2);
+    END;
+END;
+$$ LANGUAGE plpgsql;
+
+begin;
+insert into tt01 values(3);
+select ff_subblock();
+rollback;
+
+select* from tt01;
+
+--- clean
+drop table if exists tt_in;
+drop table if exists tt_main;
+drop table if exists tt01;
+drop table if exists tt02;
+drop table if exists tt_sess;
+
+
+

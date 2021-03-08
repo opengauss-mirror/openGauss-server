@@ -1696,6 +1696,14 @@ void AlterFunction(AlterFunctionStmt* stmt)
         UpdatePgObjectMtime(funcOid, OBJECT_TYPE_PROC);
     }
 
+    /*
+     * Send invalid message for for relation holding replaced function as trigger if 
+     * volatality or shippability changes.
+     */
+    if (shippable_item != NULL || volatility_item != NULL) {
+        InvalidRelcacheForTriggerFunction(funcOid, procForm->prorettype);
+    }
+
     heap_close(rel, NoLock);
     tableam_tops_free_tuple(tup);
 }

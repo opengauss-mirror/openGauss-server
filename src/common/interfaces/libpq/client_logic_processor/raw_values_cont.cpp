@@ -220,7 +220,11 @@ void RawValues::get_raw_values_from_nodetag(const Value *value, int &end, int lo
 }
 RawValue *RawValues::get_raw_values_from_ExprParts(const ExprParts *xpr, StatementData *statement_data, size_t offset)
 {
-    RawValue *raw_value = new RawValue(statement_data->conn);
+    RawValue *raw_value = new (std::nothrow) RawValue(statement_data->conn);
+    if (raw_value == NULL) {
+        fprintf(stderr, "failed to new RawValue object\n");
+        exit(EXIT_FAILURE);
+    }
     bool is_str = false;
     bool is_emptyb = false;
     errno_t rc = 0;

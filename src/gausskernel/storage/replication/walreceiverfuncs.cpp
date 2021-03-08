@@ -122,6 +122,7 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     ReplConnInfo *conninfo = NULL;
+    int checknum = MAX_REPLNODE_NUM;
 
     if (IS_DN_DUMMY_STANDYS_MODE()) {
         if (conn_target == REPCONNTARGET_PRIMARY) {
@@ -143,8 +144,30 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
             t_thrd.walreceiverfuncs_cxt.WalReplIndex = REPL_IDX_STANDBY;
         }
     }
+    SpinLockAcquire(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
+    knl_g_disconn_node_context_data connNode =
+        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+    SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
 
-    conninfo = GetRepConnArray(&t_thrd.walreceiverfuncs_cxt.WalReplIndex);
+    /*
+     * Skip other connections if you specify a connection host.
+     */
+    while (checknum--) {
+        conninfo = GetRepConnArray(&t_thrd.walreceiverfuncs_cxt.WalReplIndex);
+        if (connNode.conn_mode == SPECIFY_CONNECTION &&
+            (conninfo != NULL &&
+            strcmp(connNode.disable_conn_node_host, (char *)conninfo->remotehost) == 0) &&
+            connNode.disable_conn_node_port == conninfo->remoteport) {
+            break;
+        }
+
+        if (connNode.conn_mode != SPECIFY_CONNECTION) {
+            break;
+        }
+
+        t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
+    }
+
     if (conninfo != NULL) {
         int rcs = 0;
 
@@ -388,11 +411,6 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
 
     Lcrecptr = *recptr;
 
-    /*
-     * Enter this function means redo done, set redo finish to true.
-     */
-    knl_g_set_redo_finish_status(REDO_FINISH_STATUS_LOCAL | REDO_FINISH_STATUS_CM);
-    ereport(LOG, (errmsg("knl_g_set_redo_finish_status true in RequestXLogStreaming")));
     /*
      * We always start at the beginning of the segment. That prevents a broken
      * segment (i.e., with no records in the first half of a segment) from

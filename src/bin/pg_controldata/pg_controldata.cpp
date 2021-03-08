@@ -60,8 +60,12 @@ static void usage(const char* progname)
     printf(_("  -V, --version  output version information, then exit\n"));
     printf(_("  -?, --help     show this help, then exit\n"));
     printf(_("\nIf no data directory (DATADIR) is specified, "
-             "the environment variable PGDATA\nis used.\n\n"));
-    printf(_("Report bugs to <community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+             "the environment variable PGDATA\nis used.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+#endif
 }
 
 static const char* dbState(DBState state)

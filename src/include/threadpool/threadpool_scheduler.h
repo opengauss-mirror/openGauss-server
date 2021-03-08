@@ -32,7 +32,6 @@ public:
     int StartUp();
     void DynamicAdjustThreadPool();
     void GPCScheduleCleaner(int* gpc_count);
-    void CNGPCScheduleCleaner(int* gpc_count);
     void ShutDown() const;
     inline ThreadId GetThreadId()
     {
@@ -46,6 +45,7 @@ public:
     {
         return m_has_shutdown;
     }
+    MemoryContext m_gpcContext;
 private:
     void AdjustWorkerPool(int idx);
     void AdjustStreamPool(int idx);

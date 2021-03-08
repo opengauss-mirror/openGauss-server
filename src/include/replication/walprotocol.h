@@ -138,6 +138,7 @@ typedef struct ArchiveXlogMessage {
     uint term;
     int sub_term; 
     uint slice;
+    uint32 tli;
 } ArchiveXlogMessage;
 
 /*

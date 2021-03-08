@@ -35,11 +35,20 @@ typedef unsigned int Oid;
 typedef struct StatementData StatementData;
 class RawValuesList;
 
+enum DecryptDataRes {
+    DEC_DATA_SUCCEED = 0,
+    DEC_DATA_ERR,
+    INVALID_DATA_LEN,
+    DECRYPT_CEK_ERR,
+    DERIVE_CEK_ERR,
+    CLIENT_HEAP_ERR,
+};
+
 class ValuesProcessor {
 public:
     static bool process_values(StatementData *statement_data, const ICachedColumns *cached_columns,
         const size_t rows_count, RawValuesList *raw_values_list);
-    static bool deprocess_value(PGconn *conn, const unsigned char *processed_data, size_t processed_data_size,
+    static DecryptDataRes deprocess_value(PGconn *conn, const unsigned char *processed_data, size_t processed_data_size,
         int original_typeid, int format, unsigned char **plain_text, size_t &plain_text_size, bool is_default);
     
 private:

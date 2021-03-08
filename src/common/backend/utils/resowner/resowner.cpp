@@ -110,6 +110,11 @@ typedef struct ResourceOwnerData {
     int npartmaprefs;
     PartitionMap** partmaprefs;
     int maxpartmaprefs;
+
+    /* track global memory context */
+    int nglobalMemContext;
+    MemoryContext* globalMemContexts;
+    int maxGlobalMemContexts;
 } ResourceOwnerData;
 
 THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
@@ -375,6 +380,14 @@ static void ResourceOwnerReleaseInternal(
             if (isCommit)
                 PrintFileLeakWarning(owner->files[owner->nfiles - 1]);
             FileClose(owner->files[owner->nfiles - 1]);
+        }        
+        /* Ditto for global memory context */
+        while (owner->nglobalMemContext > 0) {
+            MemoryContext memContext = owner->globalMemContexts[owner->nglobalMemContext - 1];
+            if (isCommit)
+                PrintGMemContextLeakWarning(memContext);
+            MemoryContextDelete(memContext);
+            ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, memContext);
         }
 
         /* Clean up index scans too */
@@ -386,6 +399,39 @@ static void ResourceOwnerReleaseInternal(
         (*item->callback)(phase, isCommit, isTopLevel, item->arg);
 
     t_thrd.utils_cxt.CurrentResourceOwner = save;
+}
+
+static void ResourceOwnerFreeOwner(ResourceOwner owner)
+{
+    if (owner->buffers)
+        pfree(owner->buffers);
+    if (owner->catrefs)
+        pfree(owner->catrefs);
+    if (owner->catlistrefs)
+        pfree(owner->catlistrefs);
+    if (owner->relrefs)
+        pfree(owner->relrefs);
+    if (owner->partrefs)
+        pfree(owner->partrefs);
+    if (owner->planrefs)
+        pfree(owner->planrefs);
+    if (owner->tupdescs)
+        pfree(owner->tupdescs);
+    if (owner->snapshots)
+        pfree(owner->snapshots);
+    if (owner->files)
+        pfree(owner->files);
+    if (owner->dataCacheSlots)
+        pfree(owner->dataCacheSlots);
+    if (owner->metaCacheSlots)
+        pfree(owner->metaCacheSlots);
+    if (owner->pThdMutexs)
+        pfree(owner->pThdMutexs);
+    if (owner->partmaprefs)
+        pfree(owner->partmaprefs);
+    if (owner->fakepartrefs)
+        pfree(owner->fakepartrefs);
+    pfree(owner);
 }
 
 /*
@@ -437,33 +483,7 @@ void ResourceOwnerDelete(ResourceOwner owner)
     }
 
     /* And free the object. */
-    if (owner->buffers)
-        pfree(owner->buffers);
-    if (owner->catrefs)
-        pfree(owner->catrefs);
-    if (owner->catlistrefs)
-        pfree(owner->catlistrefs);
-    if (owner->relrefs)
-        pfree(owner->relrefs);
-    if (owner->partrefs)
-        pfree(owner->partrefs);
-    if (owner->planrefs)
-        pfree(owner->planrefs);
-    if (owner->tupdescs)
-        pfree(owner->tupdescs);
-    if (owner->snapshots)
-        pfree(owner->snapshots);
-    if (owner->files)
-        pfree(owner->files);
-    if (owner->dataCacheSlots)
-        pfree(owner->dataCacheSlots);
-    if (owner->metaCacheSlots)
-        pfree(owner->metaCacheSlots);
-    if (owner->pThdMutexs)
-        pfree(owner->pThdMutexs);
-    if (owner->partmaprefs)
-        pfree(owner->partmaprefs);
-    pfree(owner);
+    ResourceOwnerFreeOwner(owner);
 }
 
 /*
@@ -1642,4 +1662,54 @@ void ResourceOwnerForgetPartitionMapRef(ResourceOwner owner, PartitionMap* partm
     ereport(ERROR,
         (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
             errmsg("partition map reference is not owned by resource owner %s", owner->name)));
+}
+
+void ResourceOwnerRememberGMemContext(ResourceOwner owner, MemoryContext memcontext)
+{
+    Assert(owner->nglobalMemContext < owner->maxGlobalMemContexts);
+    owner->globalMemContexts[owner->nglobalMemContext] = memcontext;
+    owner->nglobalMemContext++;
+}
+
+void ResourceOwnerForgetGMemContext(ResourceOwner owner, MemoryContext memcontext)
+{
+    MemoryContext* gMemContexts = owner->globalMemContexts;
+    int num = owner->nglobalMemContext - 1;
+
+    for (int i = num; i >= 0; i--) {
+        if (memcontext == gMemContexts[i]) {
+            int j = i;
+            while (j < num) {
+                gMemContexts[j] = gMemContexts[j + 1];
+                j++;
+            }
+            owner->nglobalMemContext = num;
+            return;
+        }
+    }
+    return;
+}
+
+void ResourceOwnerEnlargeGMemContext(ResourceOwner owner)
+{
+    int newmax;
+
+    if (owner->nglobalMemContext < owner->maxGlobalMemContexts)
+        return; /* nothing to do */
+
+    if (owner->globalMemContexts == NULL) {
+        newmax = 2;
+        owner->globalMemContexts = (MemoryContext*)MemoryContextAlloc(
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), newmax * sizeof(MemoryContext));
+    } else {
+        newmax = owner->maxGlobalMemContexts * 2;
+        owner->globalMemContexts = (MemoryContext*)repalloc(owner->globalMemContexts, newmax * sizeof(MemoryContext));
+    }    
+    owner->maxGlobalMemContexts = newmax;
+}
+
+void PrintGMemContextLeakWarning(MemoryContext memcontext)
+{   
+    char *name = memcontext->name;
+    ereport(WARNING, (errmsg("global memory context: %s leak", name)));
 }

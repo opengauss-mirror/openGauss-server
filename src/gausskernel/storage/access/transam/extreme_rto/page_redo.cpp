@@ -48,8 +48,8 @@
 #include "storage/ipc.h"
 #include "storage/freespace.h"
 #include "storage/smgr.h"
+#include "storage/standby.h"
 #include "storage/pmsignal.h"
-
 #include "utils/guc.h"
 #include "utils/palloc.h"
 #include "portability/instr_time.h"
@@ -1240,6 +1240,7 @@ inline void InitXLogRecordReadBuffer(XLogReaderState **initreader)
     newxlogreader = NewReaderState(readstate);
     g_dispatcher->rtoXlogBufState.initreader = NULL;
     PutRecordToReadQueue(readstate);
+    SetCompletedReadEndPtr(g_redoWorker, readstate->ReadRecPtr, readstate->EndRecPtr);
     *initreader = newxlogreader;
 }
 
@@ -1254,11 +1255,10 @@ void StartupSendFowarder(RedoItem *item)
 
 void SendLsnFowarder()
 {
-    g_GlobalLsnForwarder.record.ReadRecPtr = t_thrd.xlog_cxt.ReadRecPtr;
-    g_GlobalLsnForwarder.record.EndRecPtr = t_thrd.xlog_cxt.EndRecPtr;
+    GetCompletedReadEndPtr(g_redoWorker, &g_GlobalLsnForwarder.record.ReadRecPtr, 
+        &g_GlobalLsnForwarder.record.EndRecPtr);
     g_GlobalLsnForwarder.record.refcount = get_real_recovery_parallelism() - XLOG_READER_NUM;
     g_GlobalLsnForwarder.record.isDecode = true;
-
     PutRecordToReadQueue(&g_GlobalLsnForwarder.record);
 }
 
@@ -1546,6 +1546,52 @@ void XLogForceFinish(XLogReaderState *xlogreader, TermFileData *term_file)
             (errcode(ERRCODE_LOG), errmsg("[ForceFinish]ArchiveXlogForForceFinishRedo in extremeRTO is over")));
 }
 
+
+
+static inline bool ReadPageWorkerStop()
+{
+    return g_dispatcher->recoveryStop;
+}
+
+void CleanUpReadPageWorkerQueue()
+{
+    SPSCBlockingQueue *queue = g_dispatcher->readLine.readPageThd->queue;
+    while (!SPSCBlockingQueueIsEmpty(queue)) {
+        XLogReaderState *xlogreader = reinterpret_cast<XLogReaderState *>(SPSCBlockingQueueTake(queue));
+        if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_redoEndMark.record)) || 
+            xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record)) ||
+            xlogreader == reinterpret_cast<XLogReaderState *>(&(g_cleanupMark.record))) {
+            if (xlogreader == reinterpret_cast<XLogReaderState *>(&(g_GlobalLsnForwarder.record))) {
+                pg_atomic_write_u32(&g_GlobalLsnForwarder.record.refcount, 0);
+            }
+            continue;
+        }
+
+        RedoItem *item = GetRedoItemPtr(xlogreader);
+        FreeRedoItem(item);
+    }
+}
+
+void ExtremeRtoStopHere()
+{
+    if ((get_real_recovery_parallelism() > 1) && (GetBatchCount() > 0)) {
+        g_dispatcher->recoveryStop = true;
+        CleanUpReadPageWorkerQueue();
+    }
+}
+
+void CheckToForcePushLsn(const XLogRecord *record)
+{
+    if (record == NULL) {
+        return;
+    }
+    if (record->xl_rmid == RM_BARRIER_ID && ((record->xl_info & ~XLR_INFO_MASK) == XLOG_BARRIER_CREATE)) {
+        PushToWorkerLsn(true);
+    } else {
+        PushToWorkerLsn(false);
+    }
+}
+
 /* read xlog for parellel */
 void XLogReadPageWorkerMain()
 {
@@ -1569,6 +1615,9 @@ void XLogReadPageWorkerMain()
     XLogRecord *record = XLogParallelReadNextRecord(xlogreader);
     while (record != NULL) {
         TermFileData term_file;
+        if (ReadPageWorkerStop()) {
+            break;
+        }
         newxlogreader = NewReaderState(xlogreader);
         PutRecordToReadQueue(xlogreader);
         xlogreader = newxlogreader;
@@ -1586,7 +1635,7 @@ void XLogReadPageWorkerMain()
             XLogForceFinish(xlogreader, &term_file);
         }
         record = XLogParallelReadNextRecord(xlogreader);
-        PushToWorkerLsn(false);
+        CheckToForcePushLsn(record);
         ADD_ABNORMAL_POSITION(8);
     }
 
@@ -1921,6 +1970,9 @@ int RedoMainLoop()
      */
     int exitCode = GetDispatcherExitCode();
     g_redoWorker->xlogInvalidPages = XLogGetInvalidPages();
+#ifndef ENABLE_MULTIPLE_NODES
+    g_redoWorker->committingCsnList = XLogReleaseAdnGetCommittingCsnList();
+#endif
 
     ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                   errmsg("worker[%d]: exitcode = %d, total elapsed = %ld", g_redoWorker->id, exitCode,

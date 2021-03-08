@@ -47,6 +47,7 @@ typedef struct heartbeat_state {
 
 extern void heartbeat_main(void);
 extern TimestampTz get_last_reply_timestamp(int replindex);
+extern void InitHeartbeatTimestamp();
 void heartbeat_shmem_init(void);
 Size heartbeat_shmem_size(void);
 

@@ -228,10 +228,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3; -- Check on tuple presence
@@ -262,10 +261,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3; -- Check on tuple presence
@@ -296,10 +294,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3; -- Check on tuple presence
@@ -330,10 +327,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 SELECT count(*), sum(a), avg(a) FROM xc_alter_table_3; -- Check on tuple presence
@@ -364,10 +360,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 -- Index and redistribution
@@ -400,10 +395,9 @@ SELECT b FROM xc_alter_table_3 WHERE a = 11;
 
 EXECUTE xc_alter_table_delete(11);
 SELECT b FROM xc_alter_table_3 WHERE a = 11 or a = 12;
-  b  
------
- nnn
-(1 row)
+ b 
+---
+(0 rows)
 
 EXECUTE xc_alter_table_delete(12);
 -- Add column on table

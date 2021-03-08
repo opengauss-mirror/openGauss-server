@@ -1853,7 +1853,7 @@ char* ReadStr(ArchiveHandle* AH)
     if (l < 0) {
         buf = NULL;
     } else {
-        buf = (char*)pg_malloc(l + 1);
+        buf = (char*)pg_malloc((unsigned int)l + 1);
         if ((*AH->ReadBufptr)(AH, (void*)buf, l) != (unsigned int)(l))
             exit_horribly(modulename, "unexpected end of file\n");
 
@@ -1940,7 +1940,13 @@ static int _discoverArchiveFormat(ArchiveHandle* AH)
          * NB: this code must agree with ReadHead().
          */
         AH->vmaj = fgetc(fh);
+        if (AH->vmaj == EOF) {
+            exit_horribly(modulename, "unexpected end of file\n");
+        }
         AH->vmin = fgetc(fh);
+        if (AH->vmin == EOF) {
+            exit_horribly(modulename, "unexpected end of file\n");
+        }
 
         /* Save these too... */
         AH->lookahead[AH->lookaheadLen++] = AH->vmaj;
@@ -1949,6 +1955,9 @@ static int _discoverArchiveFormat(ArchiveHandle* AH)
         /* Check header version; varies from V1.0 */
         if (AH->vmaj > 1 || ((AH->vmaj == 1) && (AH->vmin > 0))) { /* Version > 1.0 */
             AH->vrev = fgetc(fh);
+            if (AH->vrev == EOF) {
+                exit_horribly(modulename, "unexpected end of file\n");
+            }
             AH->lookahead[AH->lookaheadLen++] = AH->vrev;
         } else {
             AH->vrev = 0;
@@ -1958,16 +1967,25 @@ static int _discoverArchiveFormat(ArchiveHandle* AH)
         AH->version = ((AH->vmaj * 256 + AH->vmin) * 256 + AH->vrev) * 256 + 0;
 
         AH->intSize = fgetc(fh);
+        if ((int)AH->intSize == EOF) {
+            exit_horribly(modulename, "unexpected end of file\n");
+        }
         AH->lookahead[AH->lookaheadLen++] = AH->intSize;
 
         if (AH->version >= K_VERS_1_7) {
             AH->offSize = fgetc(fh);
+            if ((int)AH->offSize == EOF) {
+                exit_horribly(modulename, "unexpected end of file\n");
+            }
             AH->lookahead[AH->lookaheadLen++] = AH->offSize;
         } else {
             AH->offSize = AH->intSize;
         }
 
         AH->format = (ArchiveFormat)fgetc(fh);
+        if (AH->format == EOF) {
+            exit_horribly(modulename, "unexpected end of file\n");
+        }
         AH->lookahead[AH->lookaheadLen++] = AH->format;
     } else {
         /*
@@ -4697,7 +4715,8 @@ void decryptArchive(Archive* fout, const ArchiveFormat fmt)
     tempDecryptDir = NULL;
 }
 
-static bool decryptFromFile(FILE* source, unsigned char* Key, GS_UCHAR** decryptBuff, int* plainlen, bool* randget)
+static bool decryptFromFile(
+     FILE* source, unsigned char* Key, GS_UCHAR** decryptBuff, int* plainlen, bool* randget, GS_UINT32* decryptBufflen)
 {
     int nread = 0;
     int errnum;
@@ -4754,6 +4773,7 @@ static bool decryptFromFile(FILE* source, unsigned char* Key, GS_UCHAR** decrypt
             ciphertext = NULL;
             return false;
         }
+        *decryptBufflen = cipherlen;
 
         rc = memset_s(ciphertext, cipherlen, '\0', cipherlen);
         securec_check_c(rc, "\0", "\0");
@@ -4804,6 +4824,9 @@ void decryptSimpleFile(const char* fileName, const char* decryptedFileName, unsi
     int nwrite = 0;
     int plainlen = 0;
     bool randget = false;
+    int fd = 0;
+    GS_UINT32 decryptBufflen = 0;
+    errno_t rc = EOK;
 
     ddr_Assert(strncmp(fileName, decryptedFileName, strlen(fileName)) != 0);
 
@@ -4812,6 +4835,8 @@ void decryptSimpleFile(const char* fileName, const char* decryptedFileName, unsi
         exit_horribly(modulename, "could not open encrypt archive file.\n");
         return;
     }
+    fd = fileno(fr);
+    fchmod(fd, 0600);
 
     fw = fopen(decryptedFileName, PG_BINARY_W);
     if (fw == NULL) {
@@ -4821,19 +4846,21 @@ void decryptSimpleFile(const char* fileName, const char* decryptedFileName, unsi
     }
 
     while (!feof(fr)) {
-        if (!decryptFromFile(fr, Key, &outputptr, &plainlen, &randget)) {
+        if (!decryptFromFile(fr, Key, &outputptr, &plainlen, &randget, &decryptBufflen)) {
             fclose(fr);
             fclose(fw);
             exit_horribly(modulename, "Decryption failed.\n");
         }
 
-        if (NULL != outputptr) {
+        if (NULL != outputptr && decryptBufflen != 0) {
             nwrite = fwrite(outputptr, 1, plainlen, fw);
             if (nwrite != plainlen) {
                 fclose(fr);
                 fclose(fw);
                 exit_horribly(modulename, "could not write archive file.\n");
             }
+            rc = memset_s(outputptr, decryptBufflen, '\0', decryptBufflen);
+            securec_check_c(rc, "\0", "\0");
             free(outputptr);
             outputptr = NULL;
         }
@@ -4850,6 +4877,7 @@ bool getAESLabelFile(const char* dirName, const char* labelName, const char* fMo
 {
     char aesLabelFile[MAXPGPATH] = {0};
     FILE* fp = NULL;
+    int fd = 0;
 
     if (NULL == dirName) {
         return false;
@@ -4862,6 +4890,8 @@ bool getAESLabelFile(const char* dirName, const char* labelName, const char* fMo
     if (NULL == fp) {
         return false;
     }
+    fd = fileno(fp);
+    fchmod(fd, 0600);
 
     fclose(fp);
 

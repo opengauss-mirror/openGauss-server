@@ -194,4 +194,8 @@ extern bool pgxc_should_exec_br_trigger(Relation rel, int16 trigevent, EState* e
 extern bool pgxc_has_trigger_for_event(int16 tg_event, TriggerDesc* trigdesc);
 #endif
 
+extern void InvalidRelcacheForTriggerFunction(Oid funcoid, Oid returnType);
+
+extern void ResetTrigShipFlag();
+
 #endif /* TRIGGER_H */

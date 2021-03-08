@@ -24,12 +24,8 @@ typedef struct DatanodeStatement {
     int current_nodes_number; /* number of nodes where statement is active */
     int max_nodes_number;     /* maximum number of nodes where statement is active */
     int* dns_node_indices;    /* node ids where statement is active */
-    instr_time* last_used_time; /* for gpc, save time when use this statement to send msg to dn */
 } DatanodeStatement;
 #endif
-
-#define NEED_SEND_PARSE_AGAIN(last_used_time, cur_time) \
-    (INSTR_TIME_GET_DOUBLE(cur_time) - INSTR_TIME_GET_DOUBLE(last_used_time)) > ((double)MAX_PREPARE_WAIING_TIME / 2)
 
 /* Utility statements PREPARE, EXECUTE, DEALLOCATE, EXPLAIN EXECUTE */
 extern void PrepareQuery(PrepareStmt* stmt, const char* queryString);

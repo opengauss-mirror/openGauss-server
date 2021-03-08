@@ -484,7 +484,6 @@ endif
 	cp -d $(LZ4_LIB_PATH)/liblz4* '$(DESTDIR)$(libdir)/'
 	cp -d $(CJSON_LIB_PATH)/libcjson* '$(DESTDIR)$(libdir)/'
 	cp -d $(HLL_LIB_PATH)/libhll* '$(DESTDIR)$(libdir)/'
-	cp $(top_builddir)/../buildtools/server_key/* '$(DESTDIR)$(bindir)/'
 	cp $(PLJAVA_LIB_PATH)/* '$(DESTDIR)$(libdir)/'
 	cp $(PLJAVA_JAR_PATH)/$(JARPLJAVA) '$(DESTDIR)$(pkglibdir)/java/'
 	cp -r $(top_builddir)/../$(BUILD_TOOLS_PATH)/jdk8/jdk1.8.0_77/jre/* '$(DESTDIR)$(bindir)/../jre/'

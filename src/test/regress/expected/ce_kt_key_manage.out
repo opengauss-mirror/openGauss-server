@@ -1,7 +1,7 @@
 -- clean before test
 \! gs_ktool -d all
-NOTICE: failed to find existed log file, so we will create it.
-NOTICE: failed to find existed key store file, so we will create it.
+--?NOTICE: created new log file :.*
+--?NOTICE: created new key store file :.*
 DELETE ALL
 
 \! rm -rf export_import_ksf && mkdir export_import_ksf
@@ -17,17 +17,16 @@ GENERATE
 3
 -- generate cmk with set len
 \! gs_ktool -g -l 1
-GENERATE
-4
+ERROR: failed to check user input, the key len '1' should be in range [16, 112].
 \! gs_ktool -g -l 32
 GENERATE
-5
+4
 \! gs_ktool -g -l 99
 GENERATE
-6
+5
 \! gs_ktool -g -l 112
 GENERATE
-7
+6
 -- select cmk
 \! gs_ktool -s 1
 SELECT
@@ -41,11 +40,11 @@ SELECT
  -----------+------------+-----------------+-----------------+----------------
 --?          2 |         32 |.*
 (1 Rows)
-\! gs_ktool -s 7
+\! gs_ktool -s 6
 SELECT
      cmk id | cmk length | create date UTC | create time UTC | expired date UTC
  -----------+------------+-----------------+-----------------+----------------
---?          7 |        112 |.*
+--?          6 |        112 |.*
 (1 Rows)
 \! gs_ktool -s all
 SELECT ALL
@@ -54,23 +53,22 @@ SELECT ALL
 --?          1 |         32 |.*
 --?          2 |         32 |.*
 --?          3 |         32 |.*
---?          4 |          1 |.*
---?          5 |         32 |.*
---?          6 |         99 |.*
---?          7 |        112 |.*
-(7 Rows)
+--?          4 |         32 |.*
+--?          5 |         99 |.*
+--?          6 |        112 |.*
+(6 Rows)
 -- delete cmk (&& generate to be deleted)
 \! gs_ktool -d 3
 DELETE
 3
-\! gs_ktool -d 7
+\! gs_ktool -d 6
 DELETE
-7
+6
 \! gs_ktool -g && gs_ktool -d all
 GENERATE
-7
+6
 DELETE ALL
- 1 2 4 5 6 7
+ 1 2 4 5 6
 \! gs_ktool -g && gs_ktool -d all && gs_ktool -d all
 GENERATE
 1
@@ -91,36 +89,34 @@ GENERATE
 3
 -- export cmk
 \! gs_ktool -e -p gs_ktool_123
-WARNING：it is safer to enter password interactively than use '-p'.
+WARNING：it is safer to enter password interactively than use '-p'
 SAFE EXPORT
---?.*
+path configured in gs_ktool_conf.ini
 \! gs_ktool -e -f ./export_import_ksf/export_ksf_1.dat -p g...123..
-WARNING：it is safer to enter password interactively than use '-p'.
+WARNING：it is safer to enter password interactively than use '-p'
 SAFE EXPORT
 ./export_import_ksf/export_ksf_1.dat
 \! gs_ktool -e -f ./export_import_ksf/export_ksf_2.dat -p GGGGG...1
-WARNING：it is safer to enter password interactively than use '-p'.
+WARNING：it is safer to enter password interactively than use '-p'
 SAFE EXPORT
 ./export_import_ksf/export_ksf_2.dat
 -- import cmk
 \! gs_ktool -i -f ./export_import_ksf/export_ksf_2.dat -p GGGGG...1
-WARNING：it is safer to enter password interactively than use '-p'.
+WARNING：it is safer to enter password interactively than use '-p'
 SAFE IMPORT
 ./export_import_ksf/export_ksf_2.dat
      cmk id | cmk length | create date UTC | create time UTC | expired date UTC
  -----------+------------+-----------------+-----------------+----------------
---?          1 |         32 | .*
+--?          1 |         32 |.*
 --?          2 |         32 |.*
 --?          3 |         32 |.*
 (3 Rows)
 -- select rk
 \! gs_ktool -R -s
-SELECT ROOTKEY
  create date UTC | create time UTC | expired date UTC
  ----------------+-----------------+----------------
 --?.*
 \! gs_ktool -R -s
-SELECT ROOTKEY
  create date UTC | create time UTC | expired date UTC
  ----------------+-----------------+----------------
 --?.*
@@ -136,52 +132,51 @@ gs_ktool V1.0.0 || KMC V3.0.0.SPC005
 -- print help
 \! gs_ktool -h
 HELP
-Description gs_ktool is a CMK(Client Master Key) & RK(Root Key) management tool.
+Description: gs_ktool is a CMK(Client Master Key) & RK(Root Key) management tool.
 
 Usage:
-    ./gs_ktool [OPTION] [[CMK_ID] "all" [FILE] [FILE_PASSWD] ...]
+    gs_ktool [OPTION] [[CMK_ID] "all" [FILE] [FILE_PASSWD] ...]
 
 General options:
-    -v       --version             Select gs_ktool version.                
-    -h       --help                Select help info.                       
-    -u       --uninstall           Uninstall gs_ktool and delete all keys and files.
+    -v       Select gs_ktool version.                
+    -h/-?    Select help info.                       
 
 CMK management options:
-    -g       --generateCMK         Generate a CMK.                         
-    -d       --deleteCMK           Delete a CMK or delete all.             
-    -s       --selectCMK           Select a CMK info or select all.        
-    -e       --exportCMK           Export all CMKs to ksf, use '-f' to set export file, use '-p' to set password.
-    -i       --importCMK           Import all CMKs from ksf, use '-f' to specify import file, use '-p' to specify password.
-    -f       --file                Set or specify key store file while exporting or importing all keys.
-    -p       --password            Set or specify the passwd of key store file while exporting or importing all keys.
+    -g       Generate a CMK, can use '-l' to set key length.
+    -l       Set the key length while generating CMK.
+    -d       Delete specified CMK or delete all.     
+    -s       Select specified CMK info or select all.
+    -e       Export all CMKs to ksf, can use '-f' to set export file, can use '-p' to set password.
+    -i       Import all CMKs from ksf, should use '-f' to specify import file, can use '-p' to specify password.
+    -f       Set or specify key store file while exporting or importing all keys.
+    -p       Set or specify the password of key store file while exporting or importing all keys.
 
 RK management options:
-    -R -s    --selectRK            Select RK info.                         
-    -R -u    --updateRK            Update RK.                              
+    -R -s    Select RK info.                         
+    -R -u    Update RK.                              
 \! gs_ktool -?
-HELP
-Description gs_ktool is a CMK(Client Master Key) & RK(Root Key) management tool.
+Description: gs_ktool is a CMK(Client Master Key) & RK(Root Key) management tool.
 
 Usage:
-    ./gs_ktool [OPTION] [[CMK_ID] "all" [FILE] [FILE_PASSWD] ...]
+    gs_ktool [OPTION] [[CMK_ID] "all" [FILE] [FILE_PASSWD] ...]
 
 General options:
-    -v       --version             Select gs_ktool version.                
-    -h       --help                Select help info.                       
-    -u       --uninstall           Uninstall gs_ktool and delete all keys and files.
+    -v       Select gs_ktool version.                
+    -h/-?    Select help info.                       
 
 CMK management options:
-    -g       --generateCMK         Generate a CMK.                         
-    -d       --deleteCMK           Delete a CMK or delete all.             
-    -s       --selectCMK           Select a CMK info or select all.        
-    -e       --exportCMK           Export all CMKs to ksf, use '-f' to set export file, use '-p' to set password.
-    -i       --importCMK           Import all CMKs from ksf, use '-f' to specify import file, use '-p' to specify password.
-    -f       --file                Set or specify key store file while exporting or importing all keys.
-    -p       --password            Set or specify the passwd of key store file while exporting or importing all keys.
+    -g       Generate a CMK, can use '-l' to set key length.
+    -l       Set the key length while generating CMK.
+    -d       Delete specified CMK or delete all.     
+    -s       Select specified CMK info or select all.
+    -e       Export all CMKs to ksf, can use '-f' to set export file, can use '-p' to set password.
+    -i       Import all CMKs from ksf, should use '-f' to specify import file, can use '-p' to specify password.
+    -f       Set or specify key store file while exporting or importing all keys.
+    -p       Set or specify the password of key store file while exporting or importing all keys.
 
 RK management options:
-    -R -s    --selectRK            Select RK info.                         
-    -R -u    --updateRK            Update RK.                              
+    -R -s    Select RK info.                         
+    -R -u    Update RK.                              
 -- uninstall gs_ktool (cannot support to test this command)
 -- \! gs_ktool -u
 -- clean after test

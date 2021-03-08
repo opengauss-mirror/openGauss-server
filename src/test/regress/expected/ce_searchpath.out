@@ -8,7 +8,7 @@ GENERATE
 GENERATE
 2
 DROP CLIENT MASTER KEY IF EXISTS MyCMK CASCADE;
-NOTICE:  global setting "mycmk" does not exist
+NOTICE:  client master key "mycmk" does not exist
 DROP CLIENT MASTER KEY testns.MyCMKt CASCADE;
 ERROR:  schema "testns" does not exist
 CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
@@ -30,20 +30,20 @@ SELECT d FROM tbl2 WHERE c = 1;
 DROP TABLE tbl2;
 DROP SCHEMA testns;
 ERROR:  cannot drop schema testns because other objects depend on it
-DETAIL:  global setting: mycmkt depends on schema testns
-column setting: mycek depends on schema testns
-column setting: mycek2 depends on schema testns
-column setting: mycek3 depends on schema testns
+DETAIL:  client master key: mycmkt depends on schema testns
+column encryption key: mycek depends on schema testns
+column encryption key: mycek2 depends on schema testns
+column encryption key: mycek3 depends on schema testns
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 DROP SCHEMA testns CASCADE;
 NOTICE:  drop cascades to 4 other objects
-DETAIL:  drop cascades to global setting: mycmkt
-drop cascades to column setting: mycek
-drop cascades to column setting: mycek2
-drop cascades to column setting: mycek3
+DETAIL:  drop cascades to client master key: mycmkt
+drop cascades to column encryption key: mycek
+drop cascades to column encryption key: mycek2
+drop cascades to column encryption key: mycek3
 DROP TABLE tbl2;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-NOTICE:  drop cascades to column setting: mycek
+NOTICE:  drop cascades to column encryption key: mycek
 \! gs_ktool -d all
 DELETE ALL
  1 2

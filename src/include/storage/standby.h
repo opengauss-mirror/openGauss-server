@@ -90,6 +90,9 @@ extern void StandbyXlogStartup(void);
 extern void StandbyXlogCleanup(void);
 extern bool StandbySafeRestartpoint(void);
 extern bool RemoveCommittedCsnInfo(TransactionId xid);
+extern void *XLogReleaseAdnGetCommittingCsnList();
+extern void CleanUpMakeCommitAbort(List* committingCsnList);
+
 #endif
 typedef struct xl_running_xacts_old {
     int xcnt;                                       /* # of xact ids in xids[] */

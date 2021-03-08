@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS MyCMK1 CASCADE;
-NOTICE:  global setting "mycmk1" does not exist
+NOTICE:  client master key "mycmk1" does not exist
 -- create another user
 DROP ROLE IF EXISTS newuser;
 NOTICE:  role "newuser" does not exist, skipping
@@ -72,10 +72,10 @@ ERROR:  Permission denied to create role.
 -- create schema
 DROP SCHEMA IF EXISTS testns CASCADE;
 NOTICE:  drop cascades to 3 other objects
-DETAIL:  drop cascades to global setting: mycmk1
-drop cascades to column setting: mycek1
+DETAIL:  drop cascades to client master key: mycmk1
+drop cascades to column encryption key: mycek1
 drop cascades to table acltest1
-ERROR:  permission denied for column setting mycek1
+ERROR:  permission denied for column encryption key mycek1
 CREATE SCHEMA testns;
 ERROR:  permission denied for database regression
 SET search_path to testns;
@@ -114,8 +114,8 @@ RESET SESSION AUTHORIZATION;
 DROP TABLE acltest1;
 DROP SCHEMA IF EXISTS testns;
 ERROR:  cannot drop schema testns because other objects depend on it
-DETAIL:  global setting: mycmk1 depends on schema testns
-column setting: mycek1 depends on schema testns
+DETAIL:  client master key: mycmk1 depends on schema testns
+column encryption key: mycek1 depends on schema testns
 HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 REVOKE USAGE ON COLUMN_ENCRYPTION_KEY MyCEK1 FROM newuser1;
 REVOKE USAGE ON CLIENT_MASTER_KEY MyCMK1 FROM newuser1;

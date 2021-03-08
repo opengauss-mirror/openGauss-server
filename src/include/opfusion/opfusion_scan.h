@@ -108,6 +108,10 @@ public:
     
     Relation m_index; /* index relation */
 
+    Relation m_parentIndex; /* index parent relation in partiton */
+
+    Partition m_partIndex;
+
     Oid m_reloid; /* relation oid of range table */
 
     IndexScanDesc m_scandesc;

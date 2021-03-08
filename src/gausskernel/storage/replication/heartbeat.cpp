@@ -419,6 +419,24 @@ Size heartbeat_shmem_size(void)
     return size;
 }
 
+/*
+ * Reset heartbeat timestamp.
+ */ 
+void InitHeartbeatTimestamp()
+{
+    volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
+
+    SpinLockAcquire(&stat->mutex);
+    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (replconninfo == NULL) {
+            continue;
+        }
+        stat->channel_array[i].last_reply_timestamp = 0;
+    }
+    SpinLockRelease(&stat->mutex);
+}
+
 /* Allocate and initialize heartbeat shared memory */
 void heartbeat_shmem_init(void)
 {

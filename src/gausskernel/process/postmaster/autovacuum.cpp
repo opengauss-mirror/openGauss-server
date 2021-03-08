@@ -1293,7 +1293,7 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
     t_thrd.proc_cxt.MyStartTime = time(NULL);
 
     t_thrd.proc_cxt.MyProgName = "AutoVacWorker";
-    u_sess->attr.attr_common.application_name = pstrdup("AutoVacWorker");
+    u_sess->attr.attr_common.application_name = pstrdup(AUTO_VACUUM_WORKER);
 
     /* Identify myself via ps */
     init_ps_display("autovacuum worker process", "", "", "");
@@ -2698,6 +2698,10 @@ static void do_autovacuum(void)
             if (timeout_flag)
                 pgstat_report_autovac_timeout(vacObj->tab_oid, vacObj->parent_oid, tab->at_sharedrel);
 
+            /* for some cases, we could not response any signal here, so we need unblock signals */
+            gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+            (void)gs_signal_unblock_sigusr2();
+
             /* restart our transaction for the following operations */
             StartTransactionCommand();
             RESUME_INTERRUPTS();
@@ -3329,10 +3333,12 @@ bool IsAutoVacuumWorkerProcess(void)
     return t_thrd.role == AUTOVACUUM_WORKER;
 }
 
+const char* AUTO_VACUUM_WORKER = "AutoVacWorker";
+
 bool IsFromAutoVacWoker(void)
 {
     return (u_sess->attr.attr_common.application_name != NULL &&
-        strcmp(u_sess->attr.attr_common.application_name, "AutoVacWorker") == 0);
+        strcmp(u_sess->attr.attr_common.application_name, AUTO_VACUUM_WORKER) == 0);
 }
 
 /*

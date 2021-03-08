@@ -301,7 +301,7 @@ RC RedoLog::SerializeDropIndex(TxnDDLAccess::DDLAccess* ddlAccess, bool hasDML, 
     return status;
 }
 
-RC RedoLog::SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap)
+RC RedoLog::SerializeDDLs(IdxDDLAccessMap& idxDDLMap)
 {
     MOT::Index* index = nullptr;
     bool hasDML = (m_txn->m_accessMgr->m_rowCnt > 0 && !m_txn->m_isLightSession);
@@ -366,7 +366,7 @@ RC RedoLog::SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap)
     return RC_OK;
 }
 
-RC RedoLog::SerializeTransactionDMLs()
+RC RedoLog::SerializeDMLs()
 {
     RC status = RC_OK;
     TxnOrderedSet_t& orderedSet = m_txn->m_accessMgr->GetOrderedRowSet();
@@ -411,7 +411,7 @@ RC RedoLog::SerializeTransactionDMLs()
 RC RedoLog::SerializeTransaction()
 {
     IdxDDLAccessMap idxDDLMap;
-    RC status = SerializeTransactionDDLs(idxDDLMap);
+    RC status = SerializeDDLs(idxDDLMap);
     if (status != RC_OK) {
         MOT_LOG_ERROR("Failed to serialize DDLs: %d", status);
         return status;
@@ -422,7 +422,7 @@ RC RedoLog::SerializeTransaction()
         return RC_OK;
     }
 
-    status = SerializeTransactionDMLs();
+    status = SerializeDMLs();
     if (status != RC_OK) {
         MOT_LOG_ERROR("Failed to serialize DMLs: %d", status);
         return status;
@@ -463,24 +463,5 @@ void RedoLog::ResetBuffer()
             m_redoBuffer->Reset();
         }
     }
-}
-
-void RedoLog::WriteToInProcessTxns()
-{
-    uint32_t len = 0;
-    uint8_t* data = m_redoBuffer->Serialize(&len);
-    GetRecoveryManager()->ApplyLogSegmentFromData((char*)data, (size_t)len);
-    ResetBuffer();
-    m_flushed = true;
-}
-
-RC RedoLog::PrepareToInProcessTxns()
-{
-    RC status = SerializeTransaction();
-    if (status == RC_OK && (m_flushed || !m_redoBuffer->Empty())) {
-        RedoLogWriter::AppendPrepare(*m_redoBuffer, m_txn);
-        WriteToInProcessTxns();
-    }
-    return status;
 }
 }  // namespace MOT

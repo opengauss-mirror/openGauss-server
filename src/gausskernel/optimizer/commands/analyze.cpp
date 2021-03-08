@@ -363,7 +363,7 @@ void analyze_rel(Oid relid, VacuumStmt* vacstmt, BufferAccessStrategy bstrategy)
         onerel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(onerel->rd_rel->relnamespace)) {
             relation_close(onerel, NEED_EST_TOTAL_ROWS_DN(vacstmt) ? AccessShareLock : ShareUpdateExclusiveLock);
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
+                (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                     errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.", 
                        g_instance.attr.attr_common.PGXCNodeName)));
@@ -1157,17 +1157,26 @@ static BlockNumber estimate_tsstore_blocks(Relation rel, int attrCnt, double tot
  * get_non_leaf_pages
  * Given a perfect tree's leaf pages, estimate the number of non leaf pages.
  */
-static double get_non_leaf_pages(double leafPages, int totalWidth)
+static double get_non_leaf_pages(double leafPages, int totalWidth, bool hasToast)
 {
     double nonLeafPages = 0.0;
+
     /* Find number of branches */
-    double numOfBranches = (double)(BLCKSZ - sizeof(PageHeaderData)) * 100.0 / \
-        (BTREE_NONLEAF_FILLFACTOR * (double)totalWidth);
+    double numOfBranches = hasToast ? (double)TOAST_TUPLES_PER_PAGE : \
+        (double)(BLCKSZ - SizeOfPageHeaderData) * 100.0 / (BTREE_NONLEAF_FILLFACTOR * (double)totalWidth);
+
+    /* If we have more branches than leaf pages, return the meta page only */
+    if (numOfBranches <= 1) {
+        return 1.0;
+    }
+
+    /* Find number of non leaf pages by repeatly dividing the branch number */
     while (leafPages >= 1) {
         leafPages /= numOfBranches;
         nonLeafPages += ceil(leafPages);
     }
-    return nonLeafPages + 1.0;
+
+    return nonLeafPages + 1.0; /* return non leaf pages AND the meta page */
 }
 
 static BlockNumber estimate_psort_index_blocks(TupleDesc desc, double totalTuples)
@@ -1198,6 +1207,7 @@ static BlockNumber estimate_btree_index_blocks(TupleDesc desc, double totalTuple
     int attrCnt = desc->natts;
     Form_pg_attribute* attrs = desc->attrs;
     BlockNumber totalPages = 0;   /* returning block number */
+    bool hasToast = false;
 
     for (int attIdx = 0; attIdx < attrCnt; ++attIdx) {
         Form_pg_attribute thisatt = attrs[attIdx];
@@ -1208,21 +1218,28 @@ static BlockNumber estimate_btree_index_blocks(TupleDesc desc, double totalTuple
             "when setting the estimated output width of a base relation.");
     }
 
-    /* Use colstore estimation without GUC */
+    /* Use colstore estimation without SQL_BETA_FEATURE GUC */
     if (!ENABLE_SQL_BETA_FEATURE(PAGE_EST_OPT)) {
         return ceil(totalTuples / RelDefaultFullCuSize) * (RelDefaultFullCuSize * totalWidth / BLCKSZ);
+    }
+
+    /* For toasted relations, we need to estimate the total pages differently */
+    if (totalWidth >= (int)TOAST_TUPLE_TARGET) {
+        hasToast = true;
     }
 
     /*
      * Assume we have only one big balanced ternary tree for index from all datanodes. We estimate its leaf pages by:
      * Find a perfectly filled tree and divide it by its fill factor (default, 90).
+     * If the tree contains toast tuples, we use TOAST_TUPLES_PER_PAGE instead of totalWidth for estimation.
      */
-    double leafPages = ceil(ceil((totalWidth * totalTuples) / BLCKSZ) * 100.0 / (double)BTREE_DEFAULT_FILLFACTOR);
+    double leafPages = hasToast ? ceil(totalTuples / (double)TOAST_TUPLES_PER_PAGE) : \
+        ceil(ceil((totalWidth * totalTuples) / BLCKSZ) * 100.0 / (double)BTREE_DEFAULT_FILLFACTOR);
 
-    /* After we have the 'flawed' tree and its leaf pages, we can estimate its non leaf pages. */
-    double nonLeafPages = get_non_leaf_pages(leafPages, totalWidth);
+    /* After we have the 'flawed' tree and its leaf pages, we can estimate its non leaf pages */
+    double nonLeafPages = get_non_leaf_pages(leafPages, totalWidth, hasToast);
 
-    /* Sum up, apply the non-leaf fill factor */
+    /* Sum up, apply the non leaf fill factor */
     totalPages = ceil((leafPages + nonLeafPages * 100.0 / (double)BTREE_NONLEAF_FILLFACTOR) * table_factor);
 
     /* Print both original and optimized pages */
@@ -6452,6 +6469,11 @@ static BlockNumber GetOneRelNBlocks(
     return nblocks;
 }
 
+/*
+ * estimate_index_blocks
+ * This function estimates the number of blocks(pages) of the index.
+ * We assume that all non column stored relations are being stored as B-trees.
+ */
 static BlockNumber estimate_index_blocks(Relation rel, double totalTuples, double table_factor)
 {
     BlockNumber nblocks = 0;
@@ -6541,7 +6563,7 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
 
     /* Estimate table expansion factor */
     double table_factor = 1.0;
-    /* Compute table_factor with GUC PARAM_PATH_OPTIMIZATION on */
+    /* Compute table factor with GUC PARAM_PATH_OPTIMIZATION on */
     if (ENABLE_SQL_BETA_FEATURE(PARAM_PATH_OPT) && onerel && onerel->rd_rel) {
         BlockNumber pages = onerel->rd_rel->relpages;
         /* Reuse index estimation here (it is better to get the factor base on same kind of estimation) */

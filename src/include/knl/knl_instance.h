@@ -69,6 +69,7 @@
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
+const int MAX_GLOBAL_CACHEMEM_NUM = 8;
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -107,6 +108,7 @@ typedef struct knl_instance_attr {
 typedef struct knl_g_cache_context
 {
     MemoryContext global_cache_mem;
+    MemoryContext global_plancache_mem[MAX_GLOBAL_CACHEMEM_NUM];
 } knl_g_cache_context;
 
 typedef struct knl_g_cost_context {
@@ -192,9 +194,6 @@ typedef struct knl_g_stat_context {
     /* unique sql */
     MemoryContext UniqueSqlContext;
     HTAB* volatile UniqueSQLHashtbl;
-
-    /* hypothetical index */
-    MemoryContext HypopgContext;
 
     /* user logon/logout stat */
     MemoryContext InstrUserContext;
@@ -513,6 +512,8 @@ typedef struct knl_g_parallel_redo_context {
     pg_atomic_uint64 max_page_flush_lsn[NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS];
     pg_atomic_uint32 permitFinishRedo;
     pg_atomic_uint32 hotStdby;
+    volatile XLogRecPtr newestCheckpointLoc;
+    volatile CheckPoint newestCheckpoint;
     char* unali_buf; /* unaligned_buf */
     char* ali_buf;
 } knl_g_parallel_redo_context;
@@ -539,6 +540,7 @@ typedef struct knl_g_comm_context {
     /* connection handles at senders, for sending data through logic connection */
     struct local_senders* g_senders;
     bool g_delay_survey_switch;
+    uint64 g_delay_survey_start_time;
     /* the unix path to send startuppacket to postmaster */
     char* g_unix_path;
     HaShmemData* g_ha_shm_data;
@@ -700,6 +702,7 @@ typedef struct knl_g_archive_obs_context {
     volatile int obs_slot_idx;
     struct ReplicationSlot* archive_slot;
     volatile int obs_slot_num;
+    int sync_walsender_term;
 } knl_g_archive_obs_context;
 
 #ifdef ENABLE_MOT
@@ -707,6 +710,11 @@ typedef struct knl_g_mot_context {
     JitExec::JitExecMode jitExecMode;
 } knl_g_mot_context;
 #endif
+
+typedef struct knl_g_hypo_context {
+    MemoryContext HypopgContext;
+    List* hypo_index_list;
+} knl_g_hypo_context;
 
 typedef struct knl_instance_context {
     knl_virtual_role role;
@@ -742,7 +750,6 @@ typedef struct knl_instance_context {
     struct GlobalSeqInfoHashBucket global_seq[NUM_GS_PARTITIONS];
 
     struct GlobalPlanCache*   plan_cache;
-    struct GlobalPrepareStmt* prepare_cache;
 
     struct PROC_HDR* proc_base;
     slock_t proc_base_lock;
@@ -802,12 +809,16 @@ typedef struct knl_instance_context {
     knl_g_oid_nodename_mapping_cache oid_nodename_cache;
     knl_g_archive_obs_context archive_obs_cxt;
     struct HTAB* ngroup_hash_table;
+    knl_g_hypo_context hypo_cxt;
 } knl_instance_context;
 
+extern long random();
 extern void knl_instance_init();
 extern void knl_g_set_redo_finish_status(uint32 status);
+extern void knl_g_clear_local_redo_finish_status();
 extern bool knl_g_get_local_redo_finish_status();
 extern bool knl_g_get_redo_finish_status();
+extern void knl_g_cachemem_create();
 extern knl_instance_context g_instance;
 
 extern void add_numa_alloc_info(void* numaAddr, size_t length);
@@ -824,6 +835,8 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 
 #define ATOMIC_TRUE                     1
 #define ATOMIC_FALSE                    0
+
+#define GLOBAL_PLANCACHE_MEMCONTEXT  (g_instance.cache_cxt.global_plancache_mem[random() % MAX_GLOBAL_CACHEMEM_NUM])
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
 

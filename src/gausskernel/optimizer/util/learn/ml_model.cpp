@@ -175,6 +175,7 @@ Datum track_model_train_opt(PG_FUNCTION_ARGS)
     cJSON* jsonObj = cJSON_CreateObject();
     cJSON_AddStringToObject(jsonObj, "modelName", modelName);
     conninfo->json_string = pstrdup(cJSON_Print(jsonObj));
+    cJSON_Delete(jsonObj);
     if (!TryConnectRemoteServer(conninfo, &buf)) {
         pfree_ext(buf);
         ereport(ERROR,
@@ -203,6 +204,10 @@ Datum track_model_train_opt(PG_FUNCTION_ARGS)
     }
     ereport(INFO, (errmodule(MOD_OPT_AI),
                    errmsg("The training process of %s is recorded in the following file:", modelName)));
+    
+    pfree_ext(templateName);
+    pfree_ext(modelName);
+
     PG_RETURN_TEXT_P(cstring_to_text(buf));
 }
 
