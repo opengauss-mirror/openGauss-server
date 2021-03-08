@@ -293,9 +293,9 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
         XLogRecPtr lrEnd;
         do {
             GetReplayedRecPtrFromWorkers(&lrRead, &lrEnd);
-            if (XLByteLT(t_thrd.xlog_cxt.EndRecPtr, lrEnd)) {
-                lrEnd = t_thrd.xlog_cxt.EndRecPtr;
-                lrRead = t_thrd.xlog_cxt.ReadRecPtr;
+            if (XLByteLT(g_dispatcher->dispatchEndRecPtr, lrEnd)) {
+                lrEnd = g_dispatcher->dispatchEndRecPtr;
+                lrRead = g_dispatcher->dispatchReadRecPtr;
             }
             if (!XLByteEQ(oldReplayedPageLSN, lrEnd)) {
                 SetXLogReplayRecPtr(lrRead, lrEnd);
