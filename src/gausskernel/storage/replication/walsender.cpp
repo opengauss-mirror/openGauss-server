@@ -216,6 +216,9 @@ int WalSenderMain(void)
 {
     MemoryContext walsnd_context;
     int nRet = 0;
+    char* appName = NULL;
+    const char* appNameType = NULL;
+    size_t appNameSize;
 
     t_thrd.proc_cxt.MyProgName = "WalSender";
     if (RecoveryInProgress()) {
@@ -308,12 +311,20 @@ int WalSenderMain(void)
         SpinLockRelease(&walsnd->mutex);
 
         if (walsnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY) {
-            pgstat_report_appname("WalSender to Secondary");
+            appNameType = "WalSender to Secondary";
         } else if (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
-            pgstat_report_appname("WalSender to Build");
+            appNameType = "WalSender to Build";
         } else if (walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
-            pgstat_report_appname("WalSender to Standby");
+            appNameType = "WalSender to Standby";
         }
+
+        appNameSize = strlen(appNameType) + strlen(u_sess->attr.attr_common.application_name) + 3;
+        appName = (char*)palloc(appNameSize);
+        nRet = snprintf_s(appName, appNameSize, appNameSize - 1,
+                          "%s[%s]", appNameType, u_sess->attr.attr_common.application_name);
+        securec_check_ss(nRet, "\0", "\0");
+        pgstat_report_appname(appName);
+        pfree_ext(appName);
     }
 
     SyncRepInitConfig();
