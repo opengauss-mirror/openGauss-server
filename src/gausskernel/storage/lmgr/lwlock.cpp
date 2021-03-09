@@ -166,7 +166,10 @@ static const char *BuiltinTrancheNames[] = {
     "PLdebugger",
     "NGroupMappingLock",
     "MatviewSeqnoLock",
-    "IOStatLock"
+    "IOStatLock",
+    "WALFlushWait",
+    "WALBufferInitWait",
+    "WALInitSegment"
 };
 
 static void RegisterLWLockTranches(void);
@@ -381,6 +384,9 @@ int NumLWLocks(void)
 
     /* for prune dirty queue */
     numLocks += 1;
+
+    /* for WALFlushWait lock, WALBufferInitWait lock and WALInitSegment lock */
+    numLocks += 3;
 
     /*
      * Add any requested by loadable modules; for backwards-compatibility

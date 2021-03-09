@@ -1842,11 +1842,8 @@ static TransactionId RecordTransactionCommit(void)
          * We do not sleep if u_sess->attr.attr_storage.enableFsync is not turned on, nor if there are
          * fewer than u_sess->attr.attr_storage.CommitSiblings other backends with active transactions.
          */
-        if (u_sess->attr.attr_storage.CommitDelay > 0 && u_sess->attr.attr_storage.enableFsync &&
-            MinimumActiveBackends(u_sess->attr.attr_storage.CommitSiblings))
-            pg_usleep(u_sess->attr.attr_storage.CommitDelay);
-
-        XLogFlush(t_thrd.xlog_cxt.XactLastRecEnd);
+        /* Wait for local flush only when we don't wait for the remote server */
+        XLogWaitFlush(t_thrd.xlog_cxt.XactLastRecEnd);
 
         /* Now we may update the CLOG, if we wrote a COMMIT record above */
         if (markXidCommitted) {
@@ -1865,7 +1862,6 @@ static TransactionId RecordTransactionCommit(void)
          * Report the latest async commit LSN, so that the WAL writer knows to
          * flush this commit.
          */
-        XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
 
         /*
          * We must not immediately update the CLOG, since we didn't flush the

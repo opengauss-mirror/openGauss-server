@@ -1857,19 +1857,11 @@ void EndPrepare(GlobalTransaction gxact)
     }
 
     gxact->prepare_end_lsn = XLogInsert(RM_XACT_ID, XLOG_XACT_PREPARE);
-    XLogFlush(gxact->prepare_end_lsn);
+    XLogWaitFlush(gxact->prepare_end_lsn);
 
     /* If we crash now, we have prepared: WAL replay will fix things */
     /* Store record's start location to read that later on Commit */
     gxact->prepare_start_lsn = t_thrd.xlog_cxt.ProcLastRecPtr;
-
-    /*
-     * Wake up all walsenders to send WAL up to the PREPARE record immediately
-     * if replication is enabled
-     */
-    if (g_instance.attr.attr_storage.max_wal_senders > 0) {
-        WalSndWakeup();
-    }
 
     /*
      * Mark the prepared transaction as valid.	As soon as xact.c marks
@@ -3391,7 +3383,7 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
      * a contradiction)
      */
     /* Flush XLOG to disk */
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     /*
      * Wake up all walsenders to send WAL up to the COMMIT PREPARED record
@@ -3475,7 +3467,7 @@ static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, Tra
     }
 
     /* Always flush, since we're about to remove the 2PC state file */
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     /*
      * Wake up all walsenders to send WAL up to the ABORT PREPARED record

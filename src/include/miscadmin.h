@@ -342,6 +342,7 @@ typedef enum {
     BgWriterProcess,
     CheckpointerProcess,
     WalWriterProcess,
+    WalWriterAuxiliaryProcess,
     WalReceiverProcess,
     WalRcvWriterProcess,
     DataReceiverProcess,
@@ -385,6 +386,7 @@ typedef enum {
 #define AmMulitBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess)
 #define AmCheckpointerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CheckpointerProcess)
 #define AmWalWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterProcess)
+#define AmWalWriterAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterAuxiliaryProcess)
 #define AmWalReceiverProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalReceiverProcess)
 #define AmWalReceiverWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalRcvWriterProcess)
 #define AmDataReceiverProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == DataReceiverProcess)

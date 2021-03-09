@@ -541,6 +541,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  wait_dummy_time                   | integer |      | 1       | 2147483647
  wal_block_size                    | integer |      | 8192    | 8192
  wal_buffers                       | integer | 8kB  | -1      | 262143
+ wal_file_init_num                 | integer |      | 1       | 2147483647
  wal_keep_segments                 | integer |      | 2       | 2147483647
  wal_level                         | enum    |      |         | 
  wal_log_hints                     | bool    |      |         | 
@@ -553,12 +554,14 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  walsender_max_send_size           | integer | kB   | 8       | 2147483647
  wal_sender_timeout                | integer | ms   | 0       | 2147483647
  wal_sync_method                   | enum    |      |         | 
+ wal_writer_cpu                    | integer |      | -1      | 1023
  wal_writer_delay                  | integer | ms   | 1       | 10000
  wdr_snapshot_interval             | integer | min  | 10      | 60
  wdr_snapshot_query_timeout        | integer | s    | 100     | 2147483647
  wdr_snapshot_retention_days       | integer |      | 1       | 8
  work_mem                          | integer | kB   | 64      | 2147483647
  xc_maintenance_mode               | bool    |      |         | 
+ xlog_idle_flushes_before_sleep    | int64   |      | 0       | 576460752303423487
  xloginsert_locks                  | integer |      | 1       | 1000
  xmlbinary                         | enum    |      |         | 
  xmloption                         | enum    |      |         | 

@@ -61,7 +61,10 @@ typedef struct knl_instance_attr_storage {
     int max_prepared_xacts;
     int max_locks_per_xact;
     int max_predicate_locks_per_xact;
+    int64 xlog_idle_flushes_before_sleep;
     int num_xloginsert_locks;
+    int wal_writer_cpu;
+    int wal_file_init_num;
     int XLOGbuffers;
     int max_wal_senders;
     int max_replication_slots;

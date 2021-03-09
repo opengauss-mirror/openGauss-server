@@ -133,6 +133,7 @@ typedef struct knl_g_pid_context {
     ThreadId* PageWriterPID;
     ThreadId CheckpointerPID;
     ThreadId WalWriterPID;
+    ThreadId WalWriterAuxiliaryPID;
     ThreadId WalReceiverPID;
     ThreadId WalRcvWriterPID;
     ThreadId DataReceiverPID;
@@ -672,11 +673,38 @@ typedef struct knl_g_oid_nodename_mapping_cache
     pthread_mutex_t s_mutex;
 } knl_g_oid_nodename_mapping_cache;
 
+typedef struct WalInsertStatusEntry WALInsertStatusEntry;
+typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
+typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
+typedef struct WALInitSegLockPadded WALInitSegLockPadded;
 typedef struct knl_g_conn_context {
     volatile int CurConnCount;
     volatile int CurCMAConnCount;
     slock_t ConnCountLock;
 } knl_g_conn_context;
+
+typedef struct knl_g_wal_context {
+    /* Start address of WAL insert status table that contains WAL_INSERT_STATUS_ENTRIES entries */
+    WALInsertStatusEntry* walInsertStatusTable;
+    WALFlushWaitLockPadded* walFlushWaitLock;
+    WALBufferInitWaitLockPadded* walBufferInitWaitLock;
+    WALInitSegLockPadded* walInitSegLock;
+    volatile bool isWalWriterUp;
+    XLogRecPtr  flushResult;
+    XLogRecPtr  sentResult;
+    pthread_mutex_t flushResultMutex;
+    pthread_cond_t flushResultCV;
+    int XLogFlusherCPU;
+    volatile bool isWalWriterSleeping;
+    pthread_mutex_t criticalEntryMutex;
+    pthread_cond_t criticalEntryCV;
+    volatile uint32 walWaitFlushCount; /* only for xlog statistics use */
+    volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
+    int lastWalStatusEntryFlushed;
+    volatile int lastLRCScanned;
+    volatile int lastLRCFlushed;
+    int num_locks_in_group;
+} knl_g_wal_context;
 
 typedef struct GlobalSeqInfoHashBucket {
     DList* shb_list;
@@ -773,6 +801,7 @@ typedef struct knl_instance_context {
     MemoryContext error_context;
     MemoryContext signal_context;
     MemoryContext increCheckPoint_context;
+    MemoryContext wal_context;
     MemoryContext account_context;
     MemoryContextGroup* mcxt_group;
 
@@ -791,6 +820,7 @@ typedef struct knl_instance_context {
     struct knl_g_dw_context dw_batch_cxt;
     struct knl_g_dw_context dw_single_cxt;
     knl_g_shmem_context shmem_cxt;
+    knl_g_wal_context wal_cxt;
     knl_g_executor_context exec_cxt;
     knl_g_heartbeat_context heartbeat_cxt;
     knl_g_rto_context rto_cxt;

@@ -1345,7 +1345,7 @@ void PageListBackWrite(uint32 *buf_list, int32 nbufs, uint32 flags = 0, SMgrRela
              * changes they describe do.
              */
             recptr = BufferGetLSN(bufHdr);
-            XLogFlush(recptr);
+            XLogWaitFlush(recptr);
 
             /*
              * Now it's safe to write the buffer. The io_in_progress
@@ -4088,7 +4088,7 @@ void FlushBuffer(void *buf, SMgrRelation reln, ReadBufferMethod flushmethod)
     if (force_finish_enabled()) {
         update_max_page_flush_lsn(bufferinfo.lsn, t_thrd.proc_cxt.MyProcPid, false);
     }
-    XLogFlush(bufferinfo.lsn, logicalpage);
+    XLogWaitFlush(bufferinfo.lsn);
 
     /*
      * Now it's safe to write buffer to disk. Note that no one else should

@@ -358,7 +358,7 @@ uint64 get_dirty_page_queue_tail()
 #if defined(__x86_64__) || defined(__aarch64__)
     uint128_u compare;
     compare = atomic_compare_and_swap_u128((uint128_u*)&g_instance.ckpt_cxt_ctl->dirty_page_queue_reclsn);
-    // return the dirty page queue tail
+    /* return the dirty page queue tail */
     return compare.u64[1];
 #else
     uint64 tail;

@@ -145,6 +145,7 @@
 #include "postmaster/twophasecleaner.h"
 #include "postmaster/licensechecker.h"
 #include "postmaster/walwriter.h"
+#include "postmaster/walwriterauxiliary.h"
 #include "postmaster/lwlockmonitor.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
@@ -2713,19 +2714,17 @@ static int ServerLoop(void)
                 IsRemoteReadModeOn() && get_cur_repl_num())
                 g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
         }
-
-        /* WalWriter in standby is to help WalRevWriter thread. So just keep up with WalRcvWriterPID */
-#ifdef ENABLE_MULTIPLE_NODES
+        /*
+         * Likewise, if we have lost the walwriter process, try to start a new
+         * one.  But this is needed only in normal operation (else we cannot
+         * be writing any new WAL).
+         */
         if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN) {
-#else
-        if (g_instance.pid_cxt.WalWriterPID == 0 && (pmState == PM_RUN ||
-            ((pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.WalRcvWriterPID != 0 &&
-              t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE))) {
-#endif
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
-            ereport(LOG,
-                (errmsg("ServerLoop create WalWriter(%lu) for pmState:%u, ServerMode:%u.",
-                    g_instance.pid_cxt.WalWriterPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
+        }
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && pmState == PM_RUN) {
+            g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
         }
 
         /*
@@ -4092,6 +4091,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.WalWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterPID, SIGHUP);
 
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGHUP);
+
         if (g_instance.pid_cxt.WalRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGHUP);
 
@@ -4448,6 +4450,10 @@ static void pmdie(SIGNAL_ARGS)
                  */
                 g_threadPoolControler->ShutDownThreads();
             }
+			
+            if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0) {
+                signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+            }
 
             if (pmState == PM_RECOVERY) {
                 /*
@@ -4626,6 +4632,9 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
 
+                if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                    signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
                 if (g_instance.pid_cxt.CBMWriterPID != 0) {
                     Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
@@ -4800,6 +4809,9 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                 StopAliveBuildSender();
+
+                if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                    signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
                 pmState = PM_WAIT_BACKENDS;
             }
@@ -4996,6 +5008,9 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.WalWriterPID == 0)
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+
+            if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
+                g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
 
             if (g_instance.pid_cxt.CBMWriterPID == 0 && !dummyStandbyMode &&
                 u_sess->attr.attr_storage.enable_cbm_tracking)
@@ -5246,6 +5261,20 @@ static void reaper(SIGNAL_ARGS)
 
             if (!EXIT_STATUS_0(exitstatus))
                 HandleChildCrash(pid, exitstatus, _("WAL writer process"));
+
+            continue;
+        }
+
+        /*
+         * Was it the wal file creator?  Normal exit can be ignored; we'll start a
+         * new one at the next iteration of the postmaster's main loop, if
+         * necessary.	Any other exit condition is treated as a crash.
+         */
+        if (pid == g_instance.pid_cxt.WalWriterAuxiliaryPID) {
+            g_instance.pid_cxt.WalWriterAuxiliaryPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus))
+                HandleChildCrash(pid, exitstatus, _("WAL file creator process"));
 
             continue;
         }
@@ -5641,6 +5670,8 @@ static const char* GetProcName(ThreadId pid)
         return "checkpointer process";
     else if (pid == g_instance.pid_cxt.WalWriterPID)
         return "WAL writer process";
+    else if (pid == g_instance.pid_cxt.WalWriterAuxiliaryPID)
+        return "WAL file creator process";
     else if (pid == g_instance.pid_cxt.WalReceiverPID)
         return "WAL receiver process";
     else if (pid == g_instance.pid_cxt.WalRcvWriterPID)
@@ -6005,7 +6036,8 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
             g_instance.pid_cxt.BgWriterPID == 0 && g_instance.pid_cxt.StatementPID == 0 &&
             (g_instance.pid_cxt.CheckpointerPID == 0 || !g_instance.fatal_error) &&
-            g_instance.pid_cxt.WalWriterPID == 0 && g_instance.pid_cxt.AutoVacPID == 0 &&
+            g_instance.pid_cxt.WalWriterPID == 0 && g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 &&
+            g_instance.pid_cxt.AutoVacPID == 0 &&
             g_instance.pid_cxt.WLMCollectPID == 0 && g_instance.pid_cxt.WLMMonitorPID == 0 &&
             g_instance.pid_cxt.WLMArbiterPID == 0 && g_instance.pid_cxt.CPMonitorPID == 0 &&
             g_instance.pid_cxt.PgJobSchdPID == 0 && g_instance.pid_cxt.CBMWriterPID == 0 &&
@@ -6142,6 +6174,7 @@ static void PostmasterStateMachine(void)
             Assert(g_instance.pid_cxt.BgWriterPID == 0);
             Assert(g_instance.pid_cxt.CheckpointerPID == 0);
             Assert(g_instance.pid_cxt.WalWriterPID == 0);
+            Assert(g_instance.pid_cxt.WalWriterAuxiliaryPID == 0);
             Assert(g_instance.pid_cxt.AutoVacPID == 0);
             Assert(g_instance.pid_cxt.PgJobSchdPID == 0);
             Assert(g_instance.pid_cxt.CBMWriterPID == 0);
@@ -7151,16 +7184,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.status == NoShutdown) {
         PMUpdateDBStateLSN();
         ereport(LOG, (errmsg("set lsn after recovery done in gaussdb state file")));
-
-#ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.WalWriterPID == 0 && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
-            (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
-            g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
-            ereport(LOG,
-                (errmsg("sigusr1_handler create WalWriter(%lu) after local recovery is done. pmState:%u, ServerMode:%u",
-                    g_instance.pid_cxt.WalWriterPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
-        }
-#endif
     }
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_WAITING)) {
         PMUpdateDBState(WAITING_STATE, get_cur_mode(), get_cur_repl_num());
@@ -9584,6 +9607,9 @@ static void SetAuxType()
         case WALWRITER:
             t_thrd.bootstrap_cxt.MyAuxProcType = WalWriterProcess;
             break;
+        case WALWRITERAUXILIARY:
+            t_thrd.bootstrap_cxt.MyAuxProcType = WalWriterAuxiliaryProcess;
+            break;
         case WALRECEIVER:
             t_thrd.bootstrap_cxt.MyAuxProcType = WalReceiverProcess;
             break;
@@ -9817,12 +9843,15 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case WALWRITER:
             /* don't set signals, walwriter has its own agenda */
-#ifndef ENABLE_MULTIPLE_NODES
-            /* walwriter thead only do pre init xlog file, need not init xlog access */
-            if (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE)
-#endif
             InitXLOGAccess();
             WalWriterMain();
+            proc_exit(1); /* should never return */
+            break;
+
+        case WALWRITERAUXILIARY:
+            /* don't set signals, walwriterauxiliary has its own agenda */
+            InitXLOGAccess();
+            WalWriterAuxiliaryMain();
             proc_exit(1); /* should never return */
             break;
 
@@ -10091,6 +10120,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case BGWRITER:
         case CHECKPOINT_THREAD:
         case WALWRITER:
+        case WALWRITERAUXILIARY:
         case WALRECEIVER:
         case WALRECWRITE:
         case DATARECIVER:
@@ -10485,6 +10515,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<TRACK_STMT_CLEANER>, TRACK_STMT_CLEANER, "TrackStmtClean", "track stmt clean worker" },
     { GaussDbThreadMain<CHECKPOINT_THREAD>, CHECKPOINT_THREAD, "checkpointer", "checkpointer" },
     { GaussDbThreadMain<WALWRITER>, WALWRITER, "WALwriter", "WAL writer" },
+    { GaussDbThreadMain<WALWRITERAUXILIARY>, WALWRITERAUXILIARY, "WALwriteraux", "WAL writer auxiliary" },
     { GaussDbThreadMain<WALRECEIVER>, WALRECEIVER, "WALreceiver", "WAL receiver" },
     { GaussDbThreadMain<WALRECWRITE>, WALRECWRITE, "WALrecwriter", "WAL receive writer" },
     { GaussDbThreadMain<DATARECIVER>, DATARECIVER, "datareceiver", "data receiver" },
