@@ -356,6 +356,8 @@ static LogDispatcher *CreateDispatcher()
     newDispatcher->totalCostTime = 0;
     newDispatcher->txnCostTime = 0;
     newDispatcher->pprCostTime = 0;
+    newDispatcher->dispatchReadRecPtr = 0;
+    newDispatcher->dispatchEndRecPtr = 0;
     return newDispatcher;
 }
 
@@ -550,6 +552,9 @@ void DispatchRedoRecordToFile(XLogReaderState *record, List *expectedTLIs, Times
             isNeedFullSync = DispatchDefaultRecord(record, expectedTLIs, recordXTime);
             isNeedFullSync = true;
         }
+
+        g_dispatcher->dispatchReadRecPtr = record->ReadRecPtr;
+        g_dispatcher->dispatchEndRecPtr = record->EndRecPtr;
 
         if (isNeedFullSync)
             ProcessPendingRecords(true);
