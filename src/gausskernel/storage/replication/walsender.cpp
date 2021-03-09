@@ -3137,7 +3137,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
              * work to do, continue to loop.
              */
             if (XLogNeedsFlush(WriteRqstPtr)) {
-                XLogFlush(WriteRqstPtr);
+                XLogWaitFlush(WriteRqstPtr);
                 ereport(LOG,
                         (errmsg("the latest WAL flush to %X/%X.", (uint32)(WriteRqstPtr >> 32), (uint32)WriteRqstPtr)));
             } else {

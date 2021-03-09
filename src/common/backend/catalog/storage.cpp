@@ -743,7 +743,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
          * contain entries for the non-existent heap pages.
          */
         if (fsm || vm)
-            XLogFlush(lsn);
+            XLogWaitFlush(lsn);
     }
 
     if (!RELATION_IS_GLOBAL_TEMP(rel)) {
@@ -816,7 +816,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
          * contain entries for the non-existent heap pages.
          */
         if (fsm || vm)
-            XLogFlush(lsn);
+            XLogWaitFlush(lsn);
     }
 
     /* Lock RelFileNode to control concurrent with Catchup Thread */

@@ -88,6 +88,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender_private.h"
 #include "replication/walsender.h"
+#include "replication/walprotocol.h"
 #include "replication/obswalreceiver.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/fd.h"
@@ -116,6 +117,9 @@
 #include "gssignal/gs_signal.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include <sched.h>
+#include <utmpx.h>
+#include <time.h>
 
 #ifdef ENABLE_MOT
 #include "storage/mot/mot_fdw.h"
@@ -155,6 +159,7 @@
 #define MaxMacAddrList 10
 
 const int SIZE_OF_UINT64 = 8;
+const int SIZE_OF_UINT32 = 4;
 const int SIZE_OF_TWO_UINT64 = 16;
 const int XLOG_LSN_SWAP = 32;
 const char *DemoteModeDescs[] = { "unknown", "smart", "fast", "immediate" };
@@ -273,7 +278,8 @@ typedef struct XLogCtlInsert {
      * rather than XLogRecPtrs (see XLogBytePosToRecPtr()).
      */
     uint64 CurrBytePos;
-    uint64 PrevBytePos;
+    uint32 PrevByteSize;
+    int32 CurrLRC;
 
 #if (!defined __x86_64__) && (!defined __aarch64__)
     slock_t insertpos_lck; /* protects CurrBytePos and PrevBytePos */
@@ -486,6 +492,12 @@ void update_dirty_page_queue_rec_lsn(XLogRecPtr current_insert_lsn, bool need_im
 #define XLogRecPtrToBufIdx(recptr) (((recptr) / XLOG_BLCKSZ) % (t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck + 1))
 
 /*
+ * Return the previous xlblock[i] mapped to the same page
+ */
+#define XLogPrevBlockInBufPage(recptr) \
+    (((recptr) < (XLogRecPtr)(XLOG_BLCKSZ * (t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck + 1))) ? 0 : (XLogRecPtr)((recptr) - XLOG_BLCKSZ * (t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck + 1)))
+
+/*
  * These are the number of bytes in a WAL page and segment usable for WAL data.
  */
 #define UsableBytesInPage (XLOG_BLCKSZ - SizeOfXLogShortPHD)
@@ -515,6 +527,10 @@ typedef struct XLogSwitchInfo {
 } XLogSwitchInfo;
 
 volatile bool IsPendingXactsRecoveryDone = false;
+
+static void XLogFlushCore(XLogRecPtr WriteRqstPtr);
+static void XLogSelfFlush(void);
+static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage, XLogRecPtr CurrPos, int currLRC);
 
 static void XLogArchiveNotify(const char *xlog);
 static void XLogArchiveNotifySeg(XLogSegNo segno);
@@ -592,22 +608,19 @@ static void ShutdownReadFileFacility(void);
 static void SetDummyStandbyEndRecPtr(XLogReaderState *xlogreader);
 
 /* XLOG scaling: start */
-static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata, XLogRecPtr StartPos,
-                                XLogRecPtr EndPos);
-static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr);
-static bool ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr, bool isupgrade = false);
-static XLogRecPtr WaitXLogInsertionsToFinish(XLogRecPtr upto);
+static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData* rdata, XLogRecPtr StartPos,
+    XLogRecPtr EndPos, int32 *const currlrc_ptr);
+static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr* StartPos, XLogRecPtr* EndPos, XLogRecPtr* PrevPtr,
+    int32 *const currlrc_ptr);
+static bool ReserveXLogSwitch(XLogRecPtr* StartPos, XLogRecPtr* EndPos, XLogRecPtr* PrevPtr, bool isupgrade = false);
+static void StartSuspendWalInsert(int32 *const lastlrc_ptr);
+static void StopSuspendWalInsert(int32 lastlrc);
 
 template <bool isGroupInsert>
 static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc = NULL);
 static XLogRecPtr XLogBytePosToRecPtr(uint64 bytepos);
 static XLogRecPtr XLogBytePosToEndRecPtr(uint64 bytepos);
 static uint64 XLogRecPtrToBytePos(XLogRecPtr ptr);
-
-static void WALInsertLockAcquire(void);
-static void WALInsertLockAcquireExclusive(void);
-static void WALInsertLockRelease(void);
-static void WALInsertLockUpdateInsertingAt(XLogRecPtr insertingAt);
 
 static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn, bool isupgrade);
 
@@ -623,12 +636,12 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
 #ifdef __aarch64__
 static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn);
 
-static void XLogInsertRecordNolock(XLogRecData *rdata, PGPROC *proc, XLogRecPtr StartPos, XLogRecPtr EndPos,
-                                   XLogRecPtr PrevPos);
-static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, uint64 *StartBytePos, uint64 *EndBytePos,
-                                          uint64 *PrevBytePos);
-static void CopyXLogRecordToWALForGroup(int write_len, XLogRecData *rdata, XLogRecPtr StartPos, XLogRecPtr EndPos,
-                                        PGPROC *proc);
+static void XLogInsertRecordNolock(XLogRecData* rdata, PGPROC* proc, XLogRecPtr StartPos, XLogRecPtr EndPos,
+    XLogRecPtr PrevPos, int32 *const currlrc_ptr);
+static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, uint64* StartBytePos, uint64* EndBytePos,
+    uint64* PrevBytePos, int32 *const currlrc_ptr);
+static void CopyXLogRecordToWALForGroup(int write_len, XLogRecData* rdata, XLogRecPtr StartPos, XLogRecPtr EndPos,
+    PGPROC* proc, int32 *const currlrc_ptr);
 
 static void WakeUpProc(uint32 wakeidx)
 {
@@ -647,6 +660,169 @@ static void WakeUpProc(uint32 wakeidx)
     }
 }
 
+static void XLogInsertRecordGroupLeader(PGPROC *leader, uint64 *end_byte_pos_ptr, int32 *const currlrc_ptr)
+{
+    uint32 record_size;
+    uint64 prev_byte_pos = 0;
+    uint64 start_byte_pos = 0;
+    uint64 end_byte_pos = 0;
+    int32 current_lrc = 0;
+    uint64 dirty_page_queue_lsn = 0;
+
+    *leader->xlogGroupRedoRecPtr = t_thrd.shemem_ptr_cxt.XLogCtl->Insert.RedoRecPtr;
+
+    /*
+     * In some cases, some xlog records about full page write are not needed to write to buffer,
+     * so reserving space for these xlog records is not needed.
+     */
+    *leader->xlogGroupDoPageWrites = (t_thrd.shemem_ptr_cxt.XLogCtl->Insert.fullPageWrites ||
+        t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites);
+
+    bool flag = (leader->xlogGroupfpw_lsn != InvalidXLogRecPtr) &&
+        (leader->xlogGroupfpw_lsn <= *leader->xlogGroupRedoRecPtr) &&
+        *leader->xlogGroupDoPageWrites;
+    if (unlikely(flag)) {
+        leader->xlogGroupReturntRecPtr = InvalidXLogRecPtr;
+        leader->xlogGroupIsFPW = true;
+    }
+
+    record_size = MAXALIGN(((XLogRecord *)(leader->xlogGrouprdata->data))->xl_tot_len);
+    Assert(record_size != 0);
+
+    if (likely(record_size != 0)) {
+        ReserveXLogInsertByteLocation(record_size, record_size, &start_byte_pos,
+            &end_byte_pos, &prev_byte_pos, &current_lrc);
+        dirty_page_queue_lsn = start_byte_pos;
+    }
+
+    /* insert the leader WAL first */
+    if (unlikely(leader->xlogGroupIsFPW)) {
+        leader->xlogGroupIsFPW = false;
+    } else {
+        XLogInsertRecordNolock(leader->xlogGrouprdata, leader, XLogBytePosToRecPtr(start_byte_pos),
+            XLogBytePosToEndRecPtr(start_byte_pos +
+                MAXALIGN(((XLogRecord *)(leader->xlogGrouprdata->data))->xl_tot_len)),
+            XLogBytePosToRecPtr(prev_byte_pos), &current_lrc);
+    }
+
+    if (dirty_page_queue_lsn != 0) {
+        update_dirty_page_queue_rec_lsn(XLogBytePosToRecPtr(dirty_page_queue_lsn));
+    }
+
+    if (end_byte_pos_ptr != NULL) {
+        *end_byte_pos_ptr = end_byte_pos;
+    }
+
+    if (currlrc_ptr != NULL) {
+        *currlrc_ptr = current_lrc;
+    }
+}
+
+static void XLogInsertRecordGroupFollowers(PGPROC *leader, const uint32 head, uint64 *end_byte_pos_ptr,
+    int32 *const currlrc_ptr)
+{
+    uint32 nextidx;
+    uint32 total_size = 0;
+    uint32 record_size = 0;
+    PGPROC *follower = NULL;
+    uint64 start_byte_pos = 0;
+    uint64 end_byte_pos = 0;
+    uint64 prev_byte_pos = 0;
+    int32 current_lrc = 0;
+    uint64 dirty_page_queue_lsn = 0;
+
+    /* Walk the list and update the status of all xloginserts. */
+    nextidx = head;
+    while (nextidx != (uint32)(leader->pgprocno)) {
+        follower = g_instance.proc_base_all_procs[nextidx];
+        *follower->xlogGroupRedoRecPtr = t_thrd.shemem_ptr_cxt.XLogCtl->Insert.RedoRecPtr;
+
+        /* 
+         * In some cases, some xlog records about full page write are not needed to
+         * write to buffer, so reserving space for these xlog records is not needed.
+         */
+        *follower->xlogGroupDoPageWrites = (t_thrd.shemem_ptr_cxt.XLogCtl->Insert.fullPageWrites ||
+            t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites);
+
+        bool flag = (follower->xlogGroupfpw_lsn != InvalidXLogRecPtr) &&
+            (follower->xlogGroupfpw_lsn <= *follower->xlogGroupRedoRecPtr) &&
+            *follower->xlogGroupDoPageWrites;
+        if (unlikely(flag)) {
+            follower->xlogGroupReturntRecPtr = InvalidXLogRecPtr;
+            follower->xlogGroupIsFPW = true;
+            nextidx = pg_atomic_read_u32(&follower->xlogGroupNext);
+            continue;
+        }
+
+        record_size = MAXALIGN(((XLogRecord *)(follower->xlogGrouprdata->data))->xl_tot_len);
+        Assert(record_size != 0);
+        /* Calculate total size in the group. */
+        total_size += record_size;
+        /* Move to next proc in list. */
+        nextidx = pg_atomic_read_u32(&follower->xlogGroupNext);
+    }
+
+    if (likely(total_size != 0)) {
+        ReserveXLogInsertByteLocation(total_size, record_size, &start_byte_pos, &end_byte_pos, &prev_byte_pos,
+            &current_lrc);
+        dirty_page_queue_lsn = start_byte_pos;
+    }
+
+    nextidx = head;
+    /* The lead thread insert xlog records in the group one by one. */
+    while (nextidx != (uint32)(leader->pgprocno)) {
+        follower = g_instance.proc_base_all_procs[nextidx];
+
+        if (unlikely(follower->xlogGroupIsFPW)) {
+            nextidx = pg_atomic_read_u32(&follower->xlogGroupNext);
+            follower->xlogGroupIsFPW = false;
+            continue;
+        }
+        XLogInsertRecordNolock(follower->xlogGrouprdata, follower, XLogBytePosToRecPtr(start_byte_pos),
+            XLogBytePosToEndRecPtr(start_byte_pos +
+                MAXALIGN(((XLogRecord *)(follower->xlogGrouprdata->data))->xl_tot_len)),
+            XLogBytePosToRecPtr(prev_byte_pos), &current_lrc);
+        prev_byte_pos = start_byte_pos;
+        start_byte_pos += MAXALIGN(((XLogRecord *)(follower->xlogGrouprdata->data))->xl_tot_len);
+        /* Move to next proc in list. */
+        nextidx = pg_atomic_read_u32(&follower->xlogGroupNext);
+    }
+
+    if (dirty_page_queue_lsn != 0) {
+        update_dirty_page_queue_rec_lsn(XLogBytePosToRecPtr(dirty_page_queue_lsn));
+    }
+
+    if (end_byte_pos_ptr != NULL) {
+        *end_byte_pos_ptr = end_byte_pos;
+    }
+    if (currlrc_ptr != NULL) {
+        *currlrc_ptr = current_lrc;
+    }
+}
+
+static void XLogReportCopyLocation(const int32 current_lrc, const uint64 end_byte_pos)
+{
+    bool stop = true;
+    uint32 current_entry = current_lrc & (WAL_INSERT_STATUS_ENTRIES - 1);
+    volatile WALInsertStatusEntry *status_entry_ptr = 
+        &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(current_entry)];
+    
+    if (g_instance.wal_cxt.isWalWriterUp != 0) {
+        do {
+            stop = (status_entry_ptr->LRC == current_lrc &&
+                (status_entry_ptr->status == WAL_NOT_COPIED));
+        } while (!stop);
+    } else {
+        while (status_entry_ptr->LRC != current_lrc) {
+           XLogSelfFlush();
+        }
+     }
+
+    (void)pg_atomic_exchange_u64(&status_entry_ptr->endLSN, XLogBytePosToEndRecPtr(end_byte_pos));
+    pg_memory_barrier();
+    status_entry_ptr->status = WAL_COPIED;
+}
+
 /*
  * @Description: Insert an XLOG record represented by an already-constructed chain of data
  * chunks. some threads in one xlog insert lock can be inserted in a group.
@@ -659,8 +835,10 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
     PGPROC *proc = t_thrd.proc;
     uint32 head = 0;
     uint32 nextidx = 0;
-    uint32 wakeidx = 0;
-    int groupnum = (proc->pgprocno / g_instance.shmem_cxt.numaNodeNum) % (g_instance.xlog_cxt.num_locks_in_group);
+    int32 current_lrc_leader = 0;
+    int32 current_lrc = 0;
+    uint64 end_byte_pos_leader = 0;
+    uint64 end_byte_pos = 0;
 
     /* cross-check on whether we should be here or not */
     if (unlikely(!XLogInsertAllowed())) {
@@ -681,11 +859,13 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
     proc->xlogGroupTimeLineID = t_thrd.xlog_cxt.ThisTimeLineID;
     proc->xlogGroupDoPageWrites = &t_thrd.xlog_cxt.doPageWrites;
 
+    int groupnum = (proc->pgprocno / g_instance.shmem_cxt.numaNodeNum) % (g_instance.wal_cxt.num_locks_in_group);
+
     nextidx = pg_atomic_read_u32(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[groupnum].l.xlogGroupFirst);
     while (true) {
         pg_atomic_write_u32(&proc->xlogGroupNext, nextidx);
 
-        /* ensure all previous writes are visible before follower continues. */
+        /* Ensure all previous writes are visible before follower continues. */
         pg_write_barrier();
 
         if (pg_atomic_compare_exchange_u32(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[groupnum].l.xlogGroupFirst,
@@ -724,105 +904,48 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
         return proc->xlogGroupReturntRecPtr;
     }
 
-    WALInsertLockAcquire();
+    /* I am the leader; Let me insert my own WAL first. */
+    PGPROC *leader = t_thrd.proc;
+    XLogInsertRecordGroupLeader(leader, &end_byte_pos_leader, &current_lrc_leader);
+    XLogReportCopyLocation(current_lrc_leader, end_byte_pos_leader);
 
     /*
-     * Now that we've got the lock, clear the list of processes waiting for
-     * group xlog insert, saving a pointer to the head of the list.
+     * Clear the list of processes waiting for group xlog insert, saving a pointer to the head of the list.
      * Trying to pop elements one at a time could lead to an ABA problem.
      */
     head = pg_atomic_exchange_u32(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[groupnum].l.xlogGroupFirst,
                                   INVALID_PGPROCNO);
-    nextidx = head;
-    /* Remember head of list so we can perform wakeups after dropping lock. */
-    wakeidx = nextidx;
 
-    /* Walk the list and update the status of all xloginserts. */
-    uint32 totalsize = 0;
-    uint32 recordsize = 0;
-    PGPROC *localProc = NULL;
-    /* calculate total size in the group. */
-    while (nextidx != INVALID_PGPROCNO) {
-        localProc = g_instance.proc_base_all_procs[nextidx];
-
-        if (*localProc->xlogGroupRedoRecPtr != t_thrd.shemem_ptr_cxt.XLogCtl->Insert.RedoRecPtr) {
-            *localProc->xlogGroupRedoRecPtr = t_thrd.shemem_ptr_cxt.XLogCtl->Insert.RedoRecPtr;
-        }
-
-        // In some cases, some xlog records about full page write are not needed to write to buffer,
-        // so reserving space for these xlog records is not needed.
-        *localProc->xlogGroupDoPageWrites = (t_thrd.shemem_ptr_cxt.XLogCtl->Insert.fullPageWrites ||
-                                             t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites);
-        if (unlikely(localProc->xlogGroupfpw_lsn != InvalidXLogRecPtr &&
-            localProc->xlogGroupfpw_lsn <= *localProc->xlogGroupRedoRecPtr &&
-            *localProc->xlogGroupDoPageWrites)) {
-            localProc->xlogGroupReturntRecPtr = InvalidXLogRecPtr;
-            localProc->xlogGroupIsFPW = true;
-            nextidx = pg_atomic_read_u32(&localProc->xlogGroupNext);
-            continue;
-        }
-
-        recordsize = MAXALIGN(((XLogRecord *)(localProc->xlogGrouprdata->data))->xl_tot_len);
-        Assert(recordsize != 0);
-        totalsize += recordsize;
-        /* Move to next proc in list. */
-        nextidx = pg_atomic_read_u32(&localProc->xlogGroupNext);
-    }
-
-    if (localProc != proc) {
-        ereport(PANIC, (errmsg("the proc group is corrupted, the head is %u, the wakeidx is %u", head, wakeidx)));
-    }
-
-    uint64 StartBytePos = 0;
-    uint64 EndBytePos = 0;
-    uint64 PrevBytePos = 0;
-    uint64 DirtyPageQueueLSN = 0;
-    if (likely(totalsize != 0)) {
-        ReserveXLogInsertByteLocation(totalsize, recordsize, &StartBytePos, &EndBytePos, &PrevBytePos);
-        DirtyPageQueueLSN = StartBytePos;
-    }
-
-    nextidx = head;
-    localProc = NULL;
-    /* The lead thread insert xlog records in the group one by one. */
-    while (nextidx != INVALID_PGPROCNO) {
-        localProc = g_instance.proc_base_all_procs[nextidx];
-
-        if (unlikely(localProc->xlogGroupIsFPW)) {
-            nextidx = pg_atomic_read_u32(&localProc->xlogGroupNext);
-            localProc->xlogGroupIsFPW = false;
-            continue;
-        }
-        XLogInsertRecordNolock(localProc->xlogGrouprdata, localProc, XLogBytePosToRecPtr(StartBytePos),
-                               XLogBytePosToEndRecPtr(
-                                   StartBytePos +
-                                   MAXALIGN(((XLogRecord *)(localProc->xlogGrouprdata->data))->xl_tot_len)),
-                               XLogBytePosToRecPtr(PrevBytePos));
-        PrevBytePos = StartBytePos;
-        StartBytePos += MAXALIGN(((XLogRecord *)(localProc->xlogGrouprdata->data))->xl_tot_len);
-        /* Move to next proc in list. */
-        nextidx = pg_atomic_read_u32(&localProc->xlogGroupNext);
-    }
-
-    if (localProc != proc) {
-        ereport(PANIC, (errmsg("the proc group is corrupted, the head is %u, the wakeidx is %u", head, wakeidx)));
-    }
-
-    /* We're done with the lock now. */
-    WALInsertLockRelease();
-
-    if (DirtyPageQueueLSN != 0) {
-        update_dirty_page_queue_rec_lsn(XLogBytePosToRecPtr(DirtyPageQueueLSN));
+    bool has_follower = (head != (uint32)(leader->pgprocno));
+    if (has_follower) {
+        /* I have at least one follower and I will next insert their WAL for them. */
+        XLogInsertRecordGroupFollowers(leader, head, &end_byte_pos, &current_lrc);
     }
 
     /*
-     * Now that we've released the lock, go back and wake everybody up.  We
-     * don't do this under the lock so as to keep lock hold times to a
-     * minimum.
+     * Wake all waiting threads up.
      */
-    WakeUpProc(wakeidx);
+    WakeUpProc(head);
+
+    /*
+     * Examine the entry's LRC and status all together to make sure the writer already
+     * finishes updating this entry and this entry is now owned by this thread
+     *
+     * If the status entry is owned by this thread, update it with the copied xlog record's
+     * end LSN and set the WAL copy status to WAL_COPIED to signal copy completion as well
+     */
+    if (has_follower) {
+        XLogReportCopyLocation(current_lrc, end_byte_pos);
+    }
+
+    if (g_instance.wal_cxt.isWalWriterSleeping) {
+        pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
+        pthread_cond_signal(&g_instance.wal_cxt.criticalEntryCV);
+        pthread_mutex_unlock(&g_instance.wal_cxt.criticalEntryMutex);
+    }
 
     END_CRIT_SECTION();
+
     return proc->xlogGroupReturntRecPtr;
 }
 
@@ -836,7 +959,7 @@ static XLogRecPtr XLogInsertRecordGroup(XLogRecData *rdata, XLogRecPtr fpw_lsn)
  * @in PrevPos: the prev LSN postion.
  */
 static void XLogInsertRecordNolock(XLogRecData *rdata, PGPROC *proc, XLogRecPtr StartPos, XLogRecPtr EndPos,
-                                   XLogRecPtr PrevPos)
+                                   XLogRecPtr PrevPos, int32 *const currlrc_ptr)
 {
     XLogRecord *rechdr = (XLogRecord *)rdata->data;
     rechdr->xl_prev = PrevPos;
@@ -860,7 +983,7 @@ static void XLogInsertRecordNolock(XLogRecData *rdata, PGPROC *proc, XLogRecPtr 
      * All the record data, including the header, is now ready to be
      * inserted. Copy the record in the space reserved.
      */
-    CopyXLogRecordToWALForGroup(rechdr->xl_tot_len, rdata, StartPos, EndPos, proc);
+    CopyXLogRecordToWALForGroup(rechdr->xl_tot_len, rdata, StartPos, EndPos, proc, currlrc_ptr);
 
     CopyTransactionIdLoggedIfAny((TransactionState)proc->xlogGroupCurrentTransactionState);
     END_CRIT_SECTION();
@@ -911,14 +1034,10 @@ static void XLogInsertRecordNolock(XLogRecData *rdata, PGPROC *proc, XLogRecPtr 
  * @out EndBytePos: the end position of the WAL.
  * @out PrevBytePos: the previous position of the WAL.
  */
-static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, uint64 *StartBytePos, uint64 *EndBytePos,
-                                          uint64 *PrevBytePos)
+static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, uint64* StartBytePos, uint64* EndBytePos,
+    uint64* PrevBytePos, int32 *const currlrc_ptr)
 {
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
-    uint64 startbytepos;
-    uint64 endbytepos;
-    uint64 prevbytepos;
-    uint64 laststartbytepos;
 
     size = MAXALIGN(size);
 
@@ -936,28 +1055,48 @@ static void ReserveXLogInsertByteLocation(uint32 size, uint32 lastRecordSize, ui
      * X bytes from WAL is almost as simple as "CurrBytePos += X".
      */
 #if defined(__x86_64__) || defined(__aarch64__)
-    uint128_u exchange;
-    uint128_u current;
-    uint128_u compare = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos);
-    Assert(sizeof(Insert->CurrBytePos) == 8);
-    Assert(sizeof(Insert->PrevBytePos) == 8);
+    union Union128 compare;
+    union Union128 exchange;
+    union Union128 current;
 
+    compare.value = atomic_compare_and_swap_u128((volatile uint128_u *)&Insert->CurrBytePos);
+
+    Assert(sizeof(Insert->CurrBytePos) == SIZE_OF_UINT64);
+    Assert(sizeof(Insert->PrevByteSize) == SIZE_OF_UINT32);
+    Assert(sizeof(Insert->CurrLRC) == SIZE_OF_UINT32);
 loop:
-    startbytepos = compare.u64[0];
-    endbytepos = startbytepos + size;
-    laststartbytepos = endbytepos - lastRecordSize;
+    /*
+     * |CurrBytePos			|bytePos	  | CurrLRC
+     * ------------------------+------------ +-----------
+     * |64 bits				|32 bits	  |32 bits
+     */
 
-    exchange.u64[0] = endbytepos;
-    exchange.u64[1] = laststartbytepos;
-
-    current = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos, compare, exchange);
-    if (!UINT128_IS_EQUAL(compare, current)) {
-        UINT128_COPY(compare, current);
+    /*
+     * Suspend WAL insert threads when currlrc equals WAL_COPY_SUSPEND
+     */
+    if (unlikely(compare.struct128.LRC == WAL_COPY_SUSPEND)) {
+        compare.value = atomic_compare_and_swap_u128((volatile uint128_u *)&Insert->CurrBytePos);
         goto loop;
     }
-    prevbytepos = compare.u64[1];
 
+    /* increment currlrc by 1 and store it back to the global LRC for the next record */
+
+    exchange.struct128.currentBytePos = compare.struct128.currentBytePos + size;
+    exchange.struct128.byteSize = lastRecordSize;
+    exchange.struct128.LRC = (compare.struct128.LRC + 1) & 0x7FFFFFFF;
+
+    current.value = atomic_compare_and_swap_u128((volatile uint128_u *)&Insert->CurrBytePos, compare.value,
+        exchange.value);
+
+    if (!UINT128_IS_EQUAL(compare.value, current.value)) {
+        UINT128_COPY(compare.value, current.value);
+        goto loop;
+    }
 #else
+    uint64 startbytepos;
+    uint64 endbytepos;
+    uint64 prevbytepos;
+
     SpinLockAcquire(&Insert->insertpos_lck);
 
     startbytepos = Insert->CurrBytePos;
@@ -967,10 +1106,11 @@ loop:
     Insert->PrevBytePos = endbytepos - lastRecordSize;
 
     SpinLockRelease(&Insert->insertpos_lck);
-#endif /* __x86_64__ */
-    *StartBytePos = startbytepos;
-    *EndBytePos = endbytepos;
-    *PrevBytePos = prevbytepos;
+#endif /* __x86_64__ || __aarch64__ */
+    *currlrc_ptr = compare.struct128.LRC;
+    *StartBytePos = compare.struct128.currentBytePos;
+    *EndBytePos = exchange.struct128.currentBytePos;
+    *PrevBytePos = compare.struct128.currentBytePos - compare.struct128.byteSize;
 }
 
 /*
@@ -983,7 +1123,7 @@ loop:
  * @in proc: the waiting proc.
  */
 static void CopyXLogRecordToWALForGroup(int write_len, XLogRecData *rdata, XLogRecPtr StartPos, XLogRecPtr EndPos,
-                                        PGPROC *proc)
+                                        PGPROC *proc, int32 *const currlrc_ptr)
 {
     char *currpos = NULL;
     uint32 freespace;
@@ -991,6 +1131,12 @@ static void CopyXLogRecordToWALForGroup(int write_len, XLogRecData *rdata, XLogR
     XLogRecPtr CurrPos;
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
+
+    /*
+     * The following 2 variables are used to handle large records
+     */
+    uint32 startBufPageIdx = XLogRecPtrToBufIdx(StartPos);
+    int numHitsOnStartPage = 1;
 
     /* Get a pointer to the right place in the right WAL buffer to start inserting to. */
     CurrPos = StartPos;
@@ -1019,6 +1165,15 @@ static void CopyXLogRecordToWALForGroup(int write_len, XLogRecData *rdata, XLogR
             rdata_len -= freespace;
             written += freespace;
             CurrPos += freespace;
+
+            /*
+             * We hit the page we start from within the same copy. We must initiate
+             * a flush without updating WAL copy status entry or we will be stuck
+             */
+            if (unlikely(XLogRecPtrToBufIdx(CurrPos) == startBufPageIdx)) {
+                numHitsOnStartPage++;
+                XLogSelfFlushWithoutStatus(numHitsOnStartPage, CurrPos, *currlrc_ptr);
+            }
 
             /*
              * Get pointer to beginning of next page, and set the xlp_rem_len
@@ -1091,8 +1246,10 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
     XLogRecord *rechdr = (XLogRecord *)rdata->data;
     pg_crc32c rdata_crc; /* pg_crc32c as same as pg_crc32 */
     bool inserted = false;
+    bool stop = true;
     XLogRecPtr StartPos = InvalidXLogRecPtr;
     XLogRecPtr EndPos = InvalidXLogRecPtr;
+    int32 currlrc = 0;
 
     bool isLogSwitch =
         ((isupgrade ? ((XLogRecordOld *)rechdr)->xl_rmid : ((XLogRecord *)rechdr)->xl_rmid) == RM_XLOG_ID &&
@@ -1140,9 +1297,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
      */
     START_CRIT_SECTION();
     if (isLogSwitch) {
-        WALInsertLockAcquireExclusive();
-    } else {
-        WALInsertLockAcquire();
+        StartSuspendWalInsert(&currlrc);
     }
 
     /*
@@ -1164,8 +1319,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
     t_thrd.xlog_cxt.doPageWrites = (Insert->fullPageWrites || Insert->forcePageWrites);
 
     if (fpw_lsn != InvalidXLogRecPtr && fpw_lsn <= t_thrd.xlog_cxt.RedoRecPtr && t_thrd.xlog_cxt.doPageWrites) {
-        // Oops, some buffer now needs to be backed up that the caller didn't back up.  Start over.
-        WALInsertLockRelease();
+        /* Oops, some buffer now needs to be backed up that the caller didn't back up.  Start over. */
         END_CRIT_SECTION();
         return InvalidXLogRecPtr;
     }
@@ -1186,12 +1340,16 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
             rechdr->xl_prev = tmp_xl_prev;
         }
     } else {
-        ReserveXLogInsertLocation(rechdr->xl_tot_len, &StartPos, &EndPos, &rechdr->xl_prev);
+        ReserveXLogInsertLocation(rechdr->xl_tot_len, &StartPos, &EndPos, &rechdr->xl_prev, &currlrc);
         inserted = true;
     }
 
     if (inserted) {
-        // Now that xl_prev has been filled in, calculate CRC of the record header.
+        uint32 current_entry = currlrc & (WAL_INSERT_STATUS_ENTRIES - 1);
+        volatile WALInsertStatusEntry *status_entry_ptr =
+            &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(current_entry)];
+
+        /* Now that xl_prev has been filled in, calculate CRC of the record header. */
         rdata_crc = (isupgrade ? ((XLogRecordOld *)rechdr)->xl_crc : ((XLogRecord *)rechdr)->xl_crc);
 
         if (isupgrade) {
@@ -1209,7 +1367,48 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
          * All the record data, including the header, is now ready to be
          * inserted. Copy the record in the space reserved.
          */
-        CopyXLogRecordToWAL(rechdr->xl_tot_len, isLogSwitch, rdata, StartPos, EndPos);
+        CopyXLogRecordToWAL(rechdr->xl_tot_len, isLogSwitch, rdata, StartPos, EndPos, &currlrc);
+
+        /*
+         * Examine the entry's LRC and status all together to make sure the writer already
+         * finishes updating this entry and this entry is now owned by this thread
+         *
+         * If the status entry is owned by this thread, update it with the copied xlog record's
+         * end LSN and set the WAL copy status to WAL_COPIED to signal copy completion as well
+         *
+         * XLog switch already handles its flush in CopyXLogRecordToWAL so here we only
+         * update the WAL copy status for the non switch records
+         */
+        if (!isLogSwitch) {
+            if (g_instance.wal_cxt.isWalWriterUp) {
+                do {
+                    stop = (status_entry_ptr->LRC == currlrc && (status_entry_ptr->status == WAL_NOT_COPIED));
+                } while (!stop);
+            } else {
+                while (status_entry_ptr->LRC != currlrc) {
+                    XLogSelfFlush();
+                }
+            }
+
+            /*
+             * We now own this status entry
+             * Update status_entry_ptr->endLSN with an atomic call to prevent half updated value being
+             * read by the writer. The writer should use atomic read
+             * The 2nd CAS call should succeed in updating the value since this thread is the only
+             * one updating this field at this moment
+             */
+            (void)pg_atomic_exchange_u64(&status_entry_ptr->endLSN, EndPos);
+
+            pg_memory_barrier();
+
+            status_entry_ptr->status = WAL_COPIED;
+        }
+
+        if (g_instance.wal_cxt.isWalWriterSleeping) {
+            pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
+            pthread_cond_signal(&g_instance.wal_cxt.criticalEntryCV);
+            pthread_mutex_unlock(&g_instance.wal_cxt.criticalEntryMutex);
+        }
     } else {
         /*
          * This was an xlog-switch record, but the current insert location was
@@ -1218,8 +1417,14 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
          */
     }
 
-    // Done! Let others know that we're finished.
-    WALInsertLockRelease();
+    /* Done! Let others know that we're finished. */
+    if (isLogSwitch) {
+        /*
+         * Swap the recorded LRC back into the shared memory location after adding 1
+         * for the next WAL insert thread to pick up
+         */
+        StopSuspendWalInsert(currlrc);
+    }
     MarkCurrentTransactionIdLoggedIfAny();
     END_CRIT_SECTION();
 
@@ -1251,7 +1456,7 @@ static XLogRecPtr XLogInsertRecordSingle(XLogRecData *rdata, XLogRecPtr fpw_lsn,
      */
     if (isLogSwitch) {
         TRACE_POSTGRESQL_XLOG_SWITCH();
-        XLogFlush(EndPos);
+        XLogWaitFlush(EndPos);
 
         /*
          * Even though we reserved the rest of the segment for us, which is
@@ -1357,12 +1562,10 @@ XLogRecPtr XLogInsertRecord(XLogRecData *rdata, XLogRecPtr fpw_lsn, bool isupgra
  * NB: The space calculation here must match the code in CopyXLogRecordToWAL,
  * where we actually copy the record to the reserved space.
  */
-static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecPtr *PrevPtr)
+static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr* StartPos, XLogRecPtr* EndPos, XLogRecPtr* PrevPtr,
+    int32 *const currlrc_ptr)
 {
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
-    uint64 startbytepos;
-    uint64 endbytepos;
-    uint64 prevbytepos;
 
     size = MAXALIGN(size);
 
@@ -1380,29 +1583,49 @@ static void ReserveXLogInsertLocation(uint32 size, XLogRecPtr *StartPos, XLogRec
      * X bytes from WAL is almost as simple as "CurrBytePos += X".
      */
 #if defined(__x86_64__) || defined(__aarch64__)
-    uint128_u compare;
-    uint128_u exchange;
-    uint128_u current;
+    union Union128 compare;
+    union Union128 exchange;
+    union Union128 current;
 
-    compare = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos);
+    compare.value = atomic_compare_and_swap_u128((uint128_u *)&Insert->CurrBytePos);
     Assert(sizeof(Insert->CurrBytePos) == SIZE_OF_UINT64);
-    Assert(sizeof(Insert->PrevBytePos) == SIZE_OF_UINT64);
+    Assert(sizeof(Insert->PrevByteSize) == SIZE_OF_UINT32);
+    Assert(sizeof(Insert->CurrLRC) == SIZE_OF_UINT32);
 
 loop1:
-    startbytepos = compare.u64[0];
-    endbytepos = startbytepos + size;
+    /*
+     * |CurrBytePos 		   |bytePos 	 | CurrLRC
+     * ------------------------+------------ +-----------
+     * |64 bits                |32 bits      |32 bits
+     */
 
-    exchange.u64[0] = endbytepos;
-    exchange.u64[1] = startbytepos;
-
-    current = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos, compare, exchange);
-    if (!UINT128_IS_EQUAL(compare, current)) {
-        UINT128_COPY(compare, current);
+    /*
+     * Suspend WAL insert threads when currlrc equals WAL_COPY_SUSPEND
+     */
+    if (unlikely(compare.struct128.LRC == WAL_COPY_SUSPEND)) {
+        compare.value = atomic_compare_and_swap_u128((volatile uint128_u *)&Insert->CurrBytePos);
+        pg_usleep(1);
         goto loop1;
     }
-    prevbytepos = compare.u64[1];
+
+    /* increment currlrc by 1 and store it back to the global LRC for the next record */
+
+    exchange.struct128.currentBytePos = compare.struct128.currentBytePos + size;
+    exchange.struct128.byteSize = size;
+    exchange.struct128.LRC = (compare.struct128.LRC + 1) & 0x7FFFFFFF;
+
+    current.value = atomic_compare_and_swap_u128((volatile uint128_u *)&Insert->CurrBytePos, compare.value,
+        exchange.value);
+    if (!UINT128_IS_EQUAL(compare.value, current.value)) {
+        UINT128_COPY(compare.value, current.value);
+        goto loop1;
+    }
 
 #else
+    uint64 startbytepos;
+    uint64 endbytepos;
+    uint64 prevbytepos;
+
     SpinLockAcquire(&Insert->insertpos_lck);
 
     startbytepos = Insert->CurrBytePos;
@@ -1413,17 +1636,10 @@ loop1:
 
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__|| __aarch64__ */
-    *StartPos = XLogBytePosToRecPtr(startbytepos);
-    *EndPos = XLogBytePosToEndRecPtr(endbytepos);
-    *PrevPtr = XLogBytePosToRecPtr(prevbytepos);
-
-    /*
-     * Check that the conversions between "usable byte positions" and
-     * XLogRecPtrs work consistently in both directions.
-     */
-    Assert(XLogRecPtrToBytePos(*StartPos) == startbytepos);
-    Assert(XLogRecPtrToBytePos(*EndPos) == endbytepos);
-    Assert(XLogRecPtrToBytePos(*PrevPtr) == prevbytepos);
+    *currlrc_ptr = compare.struct128.LRC;
+    *StartPos = XLogBytePosToRecPtr(compare.struct128.currentBytePos);
+    *EndPos = XLogBytePosToEndRecPtr(exchange.struct128.currentBytePos);
+    *PrevPtr = XLogBytePosToRecPtr(compare.struct128.currentBytePos - compare.struct128.byteSize);
 }
 
 /*
@@ -1440,7 +1656,8 @@ static bool ReserveXLogSwitch(XLogRecPtr *StartPos, XLogRecPtr *EndPos, XLogRecP
     volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     uint64 startbytepos;
     uint64 endbytepos;
-    uint64 prevbytepos;
+    uint32 prevbytesize;
+    int32 currlrc;
     uint32 size = isupgrade ? MAXALIGN(SizeOfXLogRecordOld) : MAXALIGN(SizeOfXLogRecord);
     XLogRecPtr ptr;
     uint32 segleft;
@@ -1488,7 +1705,8 @@ loop:
     }
 
     endbytepos = startbytepos + size;
-    prevbytepos = compare.u64[1];
+    prevbytesize = compare.u32[2];
+    currlrc = (int32)compare.u32[3];
 
     *StartPos = XLogBytePosToRecPtr(startbytepos);
     *EndPos = XLogBytePosToEndRecPtr(endbytepos);
@@ -1501,7 +1719,9 @@ loop:
     }
 
     exchange.u64[0] = endbytepos;
-    exchange.u64[1] = startbytepos;
+    size = (uint32)(endbytepos - startbytepos);
+    exchange.u64[1] = (uint64)size;
+    exchange.u32[3] = currlrc;
 
     current = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos, compare, exchange);
     if (!UINT128_IS_EQUAL(compare, current)) {
@@ -1536,7 +1756,7 @@ loop:
     }
 
     endbytepos = startbytepos + size;
-    prevbytepos = Insert->PrevBytePos;
+    prevbytesize = startbytepos - Insert->PrevByteSize;
 
     *StartPos = XLogBytePosToRecPtr(startbytepos);
     *EndPos = XLogBytePosToEndRecPtr(endbytepos);
@@ -1548,27 +1768,140 @@ loop:
         endbytepos = XLogRecPtrToBytePos(*EndPos);
     }
     Insert->CurrBytePos = endbytepos;
-    Insert->PrevBytePos = startbytepos;
+    Insert->PrevByteSize = size;
 
     SpinLockRelease(&Insert->insertpos_lck);
 #endif /* __x86_64__ || __aarch64__ */
 
-    *PrevPtr = XLogBytePosToRecPtr(prevbytepos);
+    *PrevPtr = XLogBytePosToRecPtr(startbytepos - prevbytesize);
 
     Assert((*EndPos) % XLOG_SEG_SIZE == 0);
     Assert(XLogRecPtrToBytePos(*EndPos) == endbytepos);
     Assert(XLogRecPtrToBytePos(*StartPos) == startbytepos);
-    Assert(XLogRecPtrToBytePos(*PrevPtr) == prevbytepos);
+    Assert(XLogRecPtrToBytePos(*PrevPtr) == (startbytepos - prevbytesize));
 
     return true;
+}
+
+static void StartSuspendWalInsert(int32 *const lastlrc_ptr)
+{
+    volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
+    uint64 startbytepos;
+    uint32 prevbytesize;
+    int32  currlrc;
+    int32  ientry;
+    volatile WALInsertStatusEntry *entry;
+    uint128_u compare;
+    uint128_u exchange;
+    uint128_u current;
+
+    compare = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos);
+    Assert(sizeof(Insert->CurrBytePos) == 8);
+    Assert(sizeof(Insert->PrevByteSize) == 4);
+    Assert(sizeof(Insert->CurrLRC) == 4);
+
+loop:
+    /*
+     * |CurrBytePos            |PrevByteSize | CurrLRC
+     * ------------------------+------------ +-----------
+     * |64 bits                |32 bits      |32 bits
+     */
+
+    startbytepos = compare.u64[0];
+    prevbytesize = compare.u32[2];
+    currlrc = (int32)compare.u32[3];
+
+    /*
+     * if WAL Insert threads are already suspended, wait
+     */
+    if (unlikely(currlrc == WAL_COPY_SUSPEND)) {
+        compare = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos);
+        goto loop;
+    }
+
+    /*
+     * Return the last LRC
+     */
+    *lastlrc_ptr = currlrc;
+
+    currlrc = WAL_COPY_SUSPEND;
+
+    /*
+     * Swap in currlrc to suspend WAL copy threads but keep startbytepos and prevbytesize
+     * as it is
+     */
+    exchange.u64[0] = startbytepos;
+    exchange.u32[2] = prevbytesize;
+    exchange.u32[3] = currlrc;
+
+    current = atomic_compare_and_swap_u128((uint128_u*)&Insert->CurrBytePos, compare, exchange);
+    if (!UINT128_IS_EQUAL(compare, current)) {
+        UINT128_COPY(compare, current);
+        goto loop;
+    }
+
+    /*
+     * Wait for the WAL copy thread obtaining the "*lastlrc_ptr - 1" to finish
+     * *lastlrc_ptr is the LRC for the next WAL insert thread to acquire
+     * I probably should give it a better name other than "lastlrc_ptr" that is
+     * somewhat misleading but I am trying to say that is the last LRC stored
+     * in the shared memory before we swap in WAL_COPY_SUSPEND
+     * The last working WAL insert thread should be holding "*lastlrc_ptr - 1"
+     */
+    int ilrc = (*lastlrc_ptr - 1) & 0x7FFFFFFF;
+    ientry = ilrc & (WAL_INSERT_STATUS_ENTRIES - 1);
+    entry = &g_instance.wal_cxt.walInsertStatusTable[ientry];
+
+    /*
+     * Wait if the WAL copy thread obtaining the "*lastlrc_ptr - 1" didn't finish.
+     */
+    bool stop = true;
+    while (stop) {
+        if (!g_instance.wal_cxt.isWalWriterUp) {
+            XLogSelfFlush();
+        }
+
+        /*
+         * Wait till the Wal writer scans to "*lastlrc_ptr - 1"
+         * except that there is nobody before me after StartupXLOG
+         * this edge case needs to be excluded can be identified by:
+         *
+         * (*lastlrc_ptr == 0 && entry->endLSN == 0)
+         *
+         * if the current LRC  is 0 and the endLSN corresponding to the LRC before
+         * the current LRC is also 0 then we know there is nobody doing the WAL
+         * insert till this point. We need to also check entry->endLSN because we
+         * need to consider the 31bit LRC wrap-around  
+         */
+        stop = ((*lastlrc_ptr != 0 || entry->endLSN != 0) && (g_instance.wal_cxt.lastLRCScanned != ilrc));
+    }
+
+    return;
+}
+
+/*
+ * This function must be called by whoever successfully suspended all WAL insert threads or
+ * it will be a disaster
+ */
+static void StopSuspendWalInsert(int32 lastlrc)
+{
+    volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
+
+    /*
+     * Since I already suspend all other WAL copy threads,
+     * it is safe to do a direct 32 bit value assignment
+     */
+    Insert->CurrLRC = lastlrc;
+
+    return;
 }
 
 /*
  * Subroutine of XLogInsert.  Copies a WAL record to an already-reserved
  * area in the WAL.
  */
-static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rdata, XLogRecPtr StartPos,
-                                XLogRecPtr EndPos)
+static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData* rdata, XLogRecPtr StartPos,
+    XLogRecPtr EndPos, int32 *const currlrc_ptr)
 {
     char *currpos = NULL;
     uint32 freespace;
@@ -1576,6 +1909,12 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
     XLogRecPtr CurrPos;
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
+    bool stop = true;
+    /*
+     * The following 2 variables are used to handle large records
+     */
+    uint32 startBufPageIdx = XLogRecPtrToBufIdx(StartPos);
+    int numHitsOnStartPage = 1;
 
     /*
      * Get a pointer to the right place in the right WAL buffer to start
@@ -1609,6 +1948,15 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
             rdata_len -= freespace;
             written += freespace;
             CurrPos += freespace;
+
+            /*
+             * We hit the page we start from within the same copy. We must initiate
+             * a flush without updating WAL copy status entry or we will be stuck
+             */
+            if (unlikely(XLogRecPtrToBufIdx(CurrPos) == startBufPageIdx)) {
+                numHitsOnStartPage++;
+                XLogSelfFlushWithoutStatus(numHitsOnStartPage, CurrPos, *currlrc_ptr);
+            }
 
             /*
              * Get pointer to beginning of next page, and set the xlp_rem_len
@@ -1659,6 +2007,7 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
      * someone else) does XLogWrite(), it can really write out all the zeros.
      */
     if (isLogSwitch && CurrPos % XLOG_SEG_SIZE != 0) {
+        int currlrc = *currlrc_ptr;
         /* An xlog-switch record doesn't contain any data besides the header */
         Assert(write_len == SizeOfXLogRecord || write_len == SizeOfXLogRecordOld);
 
@@ -1671,242 +2020,86 @@ static void CopyXLogRecordToWAL(int write_len, bool isLogSwitch, XLogRecData *rd
         /* Use up all the remaining space on the first page */
         CurrPos += freespace;
 
+        /*
+         * When inserting XLOG switch, we communicate with the WAL writer
+         * page by page
+         */
         while (CurrPos < EndPos) {
-            /* initialize the next page (if not initialized already) */
-            WALInsertLockUpdateInsertingAt(CurrPos);
-            pgstat_report_waitevent(WAIT_EVENT_WAL_BUFFER_FULL);
-            AdvanceXLInsertBuffer<false>(CurrPos, false);
-            pgstat_report_waitevent(WAIT_EVENT_END);
+            uint32 current_entry = currlrc & (WAL_INSERT_STATUS_ENTRIES - 1);
+            WALInsertStatusEntry *status_entry_ptr =
+                &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(current_entry)];
+
             CurrPos += XLOG_BLCKSZ;
+
+            /* 
+             * Initialize the WAL buffer page if needed
+             * Please note that endPtr passed into XLogWaitBufferInit is the LSN currently tagged
+             * on the buffer page we want
+             */
+            int idx = (int)XLogRecPtrToBufIdx(CurrPos);
+            XLogRecPtr endPtr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[idx];
+            XLogRecPtr expectedEndPtr = CurrPos + XLOG_BLCKSZ - CurrPos % XLOG_BLCKSZ;
+            if (expectedEndPtr != endPtr) {
+                pgstat_report_waitevent(WAIT_EVENT_WAL_BUFFER_FULL);
+                XLogRecPtr waitEndPtr = XLogPrevBlockInBufPage(expectedEndPtr);
+                XLogWaitBufferInit(waitEndPtr);
+                pgstat_report_waitevent(WAIT_EVENT_END);
+            }
+            /*
+             * Update the WAL copy status entry to trigger flush
+             *
+             * First we wait to own a WAL copy status entry assigned
+             * to us if the WAL writer is alive
+             *
+             * If the wal writer is not up for the xlog flush job, we need to invoke XLogBackgroundFlush
+             * ourselves to push the status array recycling.
+             */
+            if (g_instance.wal_cxt.isWalWriterUp) {
+                do {
+                    stop = (status_entry_ptr->LRC == currlrc && (status_entry_ptr->status == WAL_NOT_COPIED));
+                } while (!stop);
+            } else if (status_entry_ptr->LRC != currlrc) {
+                /*
+                 * Here we don't need to loop on XLogSelfFlush to ensure our stuff is
+                 * flushed because:
+                 * 1) I am an XLog switch so I already called StartSuspendWalInsert to suspend
+                 *    all other XLog insert accesses and the flush function already scanned till
+                 *    the LRC right before the suspended LRC
+                 * 2) XLog switch is inserted and flushed page by page sequentially 
+                 */
+                 XLogSelfFlush();
+            }
+
+            /*
+             * We own the entry so we don't expect need to loop the CAS call
+             * The CAS call here is to protext reads in the WAL writer thread
+             */
+            (void)pg_atomic_exchange_u64(&status_entry_ptr->endLSN, CurrPos);
+            pg_memory_barrier();
+            status_entry_ptr->status = WAL_COPIED;
+            /*
+             * Trigger a flush if WAL writer thread is not up yet
+             */
+            if (!g_instance.wal_cxt.isWalWriterUp) {
+                /*
+                 * Here we don't need to loop on XLogSelfFlush to ensure our stuff is
+                 * flushed because:
+                 * 1) I am an XLog switch so I already called StartSuspendWalInsert to suspend
+                 *    all other XLog insert accesses and the flush function already scanned till
+                 *    the LRC right before the suspended LRC
+                 * 2) XLog switch is inserted and flushed page by page sequentially 
+                 */
+                XLogSelfFlush();
+            }
+            currlrc = (currlrc + 1) & 0x7FFFFFFF;
         }
+        *currlrc_ptr = currlrc;
     }
 
     if (CurrPos != EndPos) {
         ereport(PANIC, (errmsg("space reserved for WAL record does not match what was written")));
     }
     pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
-}
-
-/*
- * Allocate a slot for insertion.
- *
- * In exclusive mode, all slots are reserved for the current process. That
- * blocks all concurrent insertions.
- */
-static void WALInsertLockAcquire()
-{
-    bool immed = false;
-
-    /*
-     * It doesn't matter which of the WAL insertion locks we acquire, so try
-     * the one we used last time.  If the system isn't particularly busy, it's
-     * a good bet that it's still available, and it's good to have some
-     * affinity to a particular lock so that you don't unnecessarily bounce
-     * cache lines between processes when there's no contention.
-     *
-     * If this is the first time through in this backend, pick a lock
-     * (semi-)randomly.  This allows the locks to be used evenly if you have a
-     * lot of very short connections.
-     */
-    if (t_thrd.xlog_cxt.lockToTry == -1) {
-        t_thrd.xlog_cxt.lockToTry = (t_thrd.proc->pgprocno / g_instance.shmem_cxt.numaNodeNum) %
-                                    (g_instance.xlog_cxt.num_locks_in_group);
-    }
-    t_thrd.xlog_cxt.MyLockNo = t_thrd.xlog_cxt.lockToTry;
-
-    // The insertingAt value is initially set to 0, as we don't know our insert location yet.
-    immed = LWLockAcquire(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[t_thrd.xlog_cxt.MyLockNo].l.lock,
-                          LW_EXCLUSIVE);
-#ifndef __aarch64__
-    if (!immed) {
-        /*
-         * If we couldn't get the lock immediately, try another lock next
-         * time.  On a system with more insertion locks than concurrent
-         * inserters, this causes all the inserters to eventually migrate to a
-         * lock that no-one else is using.  On a system with more inserters
-         * than locks, it still helps to distribute the inserters evenly
-         * across the locks.
-         */
-        t_thrd.xlog_cxt.lockToTry = (t_thrd.xlog_cxt.lockToTry + 1) % (g_instance.xlog_cxt.num_locks_in_group);
-    }
-#endif
-}
-
-/*
- * Wait for the given slot to become free, or for its xlogInsertingAt location
- * to change to something else than 'waitptr'. In other words, wait for the
- * inserter using the given slot to finish its insertion, or to at least make
- * some progress.
- */
-static void WALInsertLockAcquireExclusive(void)
-{
-    int i;
-
-    /*
-     * When holding all the locks, we only update the last lock's insertingAt
-     * indicator.  The others are set to 0xFFFFFFFFFFFFFFFF, which is higher
-     * than any real XLogRecPtr value, to make sure that no-one blocks waiting
-     * on those.
-     */
-    int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
-    for (int processorIndex = 0; processorIndex < nNumaNodes; processorIndex++) {
-        int limit = ((processorIndex < (nNumaNodes - 1)) ? g_instance.xlog_cxt.num_locks_in_group
-                                                            : (g_instance.xlog_cxt.num_locks_in_group - 1));
-        for (i = 0; i < limit; i++) {
-            WALInsertLock *pInsertLock = &t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l;
-            LWLockAcquire(&pInsertLock->lock, LW_EXCLUSIVE);
-            LWLockUpdateVar(&pInsertLock->lock, &pInsertLock->insertingAt, PG_UINT64_MAX);
-        }
-    }
-    /* Variable value reset to 0 at release */
-    LWLockAcquire(
-        &t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[nNumaNodes - 1][g_instance.xlog_cxt.num_locks_in_group - 1].l.lock,
-        LW_EXCLUSIVE);
-
-    t_thrd.xlog_cxt.holdingAllLocks = true;
-}
-
-/*
- * Wake up all processes waiting for us with WaitOnSlot(). Sets our
- * xlogInsertingAt value to EndPos, without releasing the slot.
- */
-static void WALInsertLockRelease(void)
-{
-    if (t_thrd.xlog_cxt.holdingAllLocks) {
-        int i;
-        int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
-        for (int processorIndex = 0; processorIndex < nNumaNodes; processorIndex++) {
-            for (i = 0; i < g_instance.xlog_cxt.num_locks_in_group; i++) {
-                LWLockReleaseClearVar(&t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l.lock,
-                                      &t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l.insertingAt, 0);
-            }
-        }
-        t_thrd.xlog_cxt.holdingAllLocks = false;
-    } else {
-        LWLockReleaseClearVar(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[t_thrd.xlog_cxt.MyLockNo].l.lock,
-                              &t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[t_thrd.xlog_cxt.MyLockNo].l.insertingAt,
-                              0);
-    }
-}
-
-/*
- * Update our insertingAt value, to let others know that we've finished
- * inserting up to that point.
- */
-static void WALInsertLockUpdateInsertingAt(XLogRecPtr insertingAt)
-{
-    if (t_thrd.xlog_cxt.holdingAllLocks) {
-        /*
-         * We use the last lock to mark our actual position, see comments in
-         * WALInsertLockAcquireExclusive.
-         */
-        int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
-        WALInsertLock *pInsertLock =
-            &t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[nNumaNodes - 1][g_instance.xlog_cxt.num_locks_in_group - 1].l;
-        LWLockUpdateVar(&pInsertLock->lock, &pInsertLock->insertingAt, insertingAt);
-    } else {
-        LWLockUpdateVar(&t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[t_thrd.xlog_cxt.MyLockNo].l.lock,
-                        &t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks[t_thrd.xlog_cxt.MyLockNo].l.insertingAt,
-                        insertingAt);
-    }
-}
-
-/*
- * Wait for any WAL insertions < upto to finish.
- *
- * Returns the location of the oldest insertion that is still in-progress.
- * Any WAL prior to that point has been fully copied into WAL buffers, and
- * can be flushed out to disk. Because this waits for any insertions older
- * than 'upto' to finish, the return value is always >= 'upto'.
- *
- * Note: When you are about to write out WAL, you must call this function
- * *before* acquiring WALWriteLock, to avoid deadlocks. This function might
- * need to wait for an insertion to finish (or at least advance to next
- * uninitialized page), and the inserter might need to evict an old WAL buffer
- * to make room for a new one, which in turn requires WALWriteLock.
- */
-static XLogRecPtr WaitXLogInsertionsToFinish(XLogRecPtr upto)
-{
-    uint64 bytepos;
-    XLogRecPtr reservedUpto;
-    XLogRecPtr finishedUpto;
-    volatile XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
-    int i;
-
-    if (t_thrd.proc == NULL) {
-        ereport(PANIC, (errmsg("cannot wait without a PGPROC structure")));
-    }
-
-    /* Read the current insert position */
-#if defined(__x86_64__) || defined(__aarch64__)
-    bytepos = pg_atomic_barrier_read_u64((uint64*)&Insert->CurrBytePos);
-#else
-    SpinLockAcquire(&Insert->insertpos_lck);
-    bytepos = Insert->CurrBytePos;
-    SpinLockRelease(&Insert->insertpos_lck);
-#endif
-    reservedUpto = XLogBytePosToEndRecPtr(bytepos);
-
-    /*
-     * No-one should request to flush a piece of WAL that hasn't even been
-     * reserved yet. However, it can happen if there is a block with a bogus
-     * LSN on disk, for example. XLogFlush checks for that situation and
-     * complains, but only after the flush. Here we just assume that to mean
-     * that all WAL that has been reserved needs to be finished. In this
-     * corner-case, the return value can be smaller than 'upto' argument.
-     */
-    if (upto > reservedUpto) {
-        ereport(LOG, (errmsg("request to flush past end of generated WAL; request %X/%X, currpos %X/%X",
-                             (uint32)(upto >> 32), (uint32)upto, (uint32)(reservedUpto >> 32), (uint32)reservedUpto)));
-        upto = reservedUpto;
-    }
-
-    /*
-     * finishedUpto is our return value, indicating the point upto which
-     * all the WAL insertions have been finished. Initialize it to the head
-     * of reserved WAL, and as we iterate through the insertion slots, back it
-     * out for any insertion that's still in progress.
-     */
-    finishedUpto = reservedUpto;
-
-    /* Loop through all the slots, sleeping on any in-progress insert older than 'upto'. */
-    int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
-    for (int processorIndex = 0; processorIndex < nNumaNodes; processorIndex++) {
-        for (i = 0; i < g_instance.xlog_cxt.num_locks_in_group; i++) {
-            XLogRecPtr insertingat = InvalidXLogRecPtr;
-
-            do {
-                /*
-                 * See if this insertion is in progress. LWLockWait will wait for
-                 * the lock to be released, or for the 'value' to be set by a
-                 * LWLockUpdateVar call.  When a lock is initially acquired, its
-                 * value is 0 (InvalidXLogRecPtr), which means that we don't know
-                 * where it's inserting yet.  We will have to wait for it.  If
-                 * it's a small insertion, the record will most likely fit on the
-                 * same page and the inserter will release the lock without ever
-                 * calling LWLockUpdateVar.  But if it has to sleep, it will
-                 * advertise the insertion point with LWLockUpdateVar before
-                 * sleeping.
-                 */
-                WALInsertLock *pInsertLock = &t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l;
-                if (LWLockWaitForVar(&pInsertLock->lock, &pInsertLock->insertingAt, insertingat, &insertingat)) {
-                    /* the lock was free, so no insertion in progress */
-                    insertingat = InvalidXLogRecPtr;
-                    break;
-                }
-
-                /*
-                 * This insertion is still in progress. Have to wait, unless the
-                 * inserter has proceeded past 'upto'.
-                 */
-            } while (insertingat < upto);
-
-            if (insertingat != InvalidXLogRecPtr && insertingat < finishedUpto) {
-                finishedUpto = insertingat;
-            }
-        }
-    }
-    return finishedUpto;
 }
 
 /*
@@ -1971,10 +2164,14 @@ static char *GetXLogBuffer(XLogRecPtr ptr, PGPROC *proc)
 
     endptr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[idx];
     if (expectedEndPtr != endptr) {
-        // Let others know that we're finished inserting the record up to the page boundary.
-        WALInsertLockUpdateInsertingAt(expectedEndPtr - XLOG_BLCKSZ);
         pgstat_report_waitevent(WAIT_EVENT_WAL_BUFFER_FULL);
-        AdvanceXLInsertBuffer<isGroupInsert>(ptr, false, proc);
+        /*
+         * We need to wait for the background flush to flush till the endptr
+         * The background flush will also initialize the flushed pages
+         * with new pages
+         */
+        XLogRecPtr waitEndPtr = XLogPrevBlockInBufPage(expectedEndPtr);
+        XLogWaitBufferInit(waitEndPtr);
 
         pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -2377,7 +2574,6 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *p
     XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
     int nextidx;
     XLogRecPtr OldPageRqstPtr;
-    XLogwrtRqst WriteRqst;
     XLogRecPtr NewPageEndPtr = InvalidXLogRecPtr;
     XLogRecPtr NewPageBeginPtr;
     XLogPageHeader NewPage;
@@ -2401,74 +2597,20 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *p
 
     LWLockAcquire(WALBufMappingLock, LW_EXCLUSIVE);
 
-    /* Now that we have the lock, check if someone initialized the page already. */
-    while (upto >= t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo || opportunistic) {
-        nextidx = XLogRecPtrToBufIdx(t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo);
+    nextidx = (int)XLogRecPtrToBufIdx(t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo);
+    /*
+     * Get ending-offset of the buffer page we need to replace (this may
+     * be zero if the buffer hasn't been used yet).  Fall through if it's
+     * already written out.
+     */
+    OldPageRqstPtr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[nextidx];
 
-        /*
-         * Get ending-offset of the buffer page we need to replace (this may
-         * be zero if the buffer hasn't been used yet).  Fall through if it's
-         * already written out.
-         */
-        OldPageRqstPtr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[nextidx];
-        if (LogwrtResultPtr->Write < OldPageRqstPtr) {
-            /*
-             * Nope, got work to do. If we just want to pre-initialize as much
-             * as we can without flushing, give up now.
-             */
-            if (opportunistic) {
-                break;
-            }
-
-            /* Before waiting, get info_lck and update LogwrtResult */
-            {
-                /* use volatile pointer to prevent code rearrangement */
-                XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-                SpinLockAcquire(&xlogctl->info_lck);
-                if (xlogctl->LogwrtRqst.Write < OldPageRqstPtr) {
-                    xlogctl->LogwrtRqst.Write = OldPageRqstPtr;
-                }
-                *LogwrtResultPtr = xlogctl->LogwrtResult;
-                SpinLockRelease(&xlogctl->info_lck);
-            }
-
-            /*
-             * Now that we have an up-to-date LogwrtResult value, see if we
-             * still need to write it or if someone else already did.
-             */
-            if (LogwrtResultPtr->Write < OldPageRqstPtr) {
-                /*
-                 * Must acquire write lock. Release WALBufMappingLock first,
-                 * to make sure that all insertions that we need to wait for
-                 * can finish (up to this same position). Otherwise we risk
-                 * deadlock.
-                 */
-                LWLockRelease(WALBufMappingLock);
-
-                WaitXLogInsertionsToFinish(OldPageRqstPtr);
-
-                LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
-
-                *LogwrtResultPtr = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtResult;
-                if (LogwrtResultPtr->Write >= OldPageRqstPtr) {
-                    /* OK, someone wrote it already */
-                    LWLockRelease(WALWriteLock);
-                } else {
-                    /* Have to write it ourselves */
-                    TRACE_POSTGRESQL_WAL_BUFFER_WRITE_DIRTY_START();
-                    WriteRqst.Write = OldPageRqstPtr;
-                    WriteRqst.Flush = 0;
-                    XLogWrite(WriteRqst, false);
-                    LWLockRelease(WALWriteLock);
-                    TRACE_POSTGRESQL_WAL_BUFFER_WRITE_DIRTY_DONE();
-                }
-                /* Re-acquire WALBufMappingLock and retry */
-                LWLockAcquire(WALBufMappingLock, LW_EXCLUSIVE);
-                continue;
-            }
-        }
-
-        // Now the next buffer slot is free and we can set it up to be the next output page.
+    /*
+     * Now that we have the lock, check if someone initialized the page
+     * already.
+     */
+    while (upto >= OldPageRqstPtr) {
+        /* Now the next buffer slot is free and we can set it up to be the next output page. */
         NewPageBeginPtr = t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo;
         NewPageEndPtr = NewPageBeginPtr + XLOG_BLCKSZ;
 
@@ -2523,8 +2665,13 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC *p
 
         *((volatile XLogRecPtr *)&t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[nextidx]) = NewPageEndPtr;
         t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo = NewPageEndPtr;
+
+        nextidx = (int)XLogRecPtrToBufIdx(t_thrd.shemem_ptr_cxt.XLogCtl->InitializedUpTo);
+        OldPageRqstPtr = t_thrd.shemem_ptr_cxt.XLogCtl->xlblocks[nextidx];
+
         npages++;
     }
+
     LWLockRelease(WALBufMappingLock);
 
 #ifdef WAL_DEBUG
@@ -2586,6 +2733,7 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
     int npages = 0;
     int startidx = 0;
     uint32 startoffset = 0;
+    Size actualBytes;
 
     /* We should always be inside a critical section here */
     Assert(t_thrd.int_cxt.CritSectionCount > 0);
@@ -2647,6 +2795,15 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
             use_existent = true;
             t_thrd.xlog_cxt.openLogFile = XLogFileInit(t_thrd.xlog_cxt.openLogSegNo, &use_existent, true);
             t_thrd.xlog_cxt.openLogOff = 0;
+
+            /*
+             * Unlock WalAuxiliary thread to init new xlog segment if we are running out
+             * of xlog segments.
+             */
+            if (!use_existent) {
+                g_instance.wal_cxt.globalEndPosSegNo = t_thrd.xlog_cxt.openLogSegNo;
+                WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
+            }
         }
 
         /* Make sure we have the current logfile open */
@@ -2674,8 +2831,7 @@ static void XLogWrite(const XLogwrtRqst &WriteRqst, bool flexible)
         finishing_seg = !ispartialpage && (startoffset + npages * XLOG_BLCKSZ) >= XLogSegSize;
 
         if (last_iteration || curridx == t_thrd.shemem_ptr_cxt.XLogCtl->XLogCacheBlck || finishing_seg) {
-            /* record redo write bytes and elapsed time. */
-            Size actualBytes;
+            /* record elapsed time */
             instr_time startTime;
             instr_time endTime;
             PgStat_Counter elapsedTime;
@@ -3123,256 +3279,85 @@ void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force)
     LWLockRelease(ControlFileLock);
 }
 
-/*
- * Ensure that all XLOG data through the given position is flushed to disk.
- *
- * NOTE: this differs from XLogWrite mainly in that the WALWriteLock is not
- * already held, and we try to avoid acquiring it if possible.
- */
-void XLogFlush(XLogRecPtr record, bool LogicalPage)
+void XLogWaitFlush(XLogRecPtr recptr)
 {
-    XLogRecPtr WriteRqstPtr;
-    XLogwrtRqst WriteRqst;
-
-    gstrace_entry(GS_TRC_ID_XLogFlush);
     /*
-     * During REDO, we are reading not writing WAL.  Therefore, instead of
-     * trying to flush the WAL, we should update minRecoveryPoint instead. We
-     * test XLogInsertAllowed(), not InRecovery, because we need checkpointer
-     * to act this way too, and because when it tries to write the
-     * end-of-recovery checkpoint, it should indeed flush.
+     * During REDO, we are reading not writing WAL.
+     *
+     * Test XLogInsertAllowed() instead of RecoveryInProgress(). XLogInsertAllowed()
+     * allows WAL writing at the end of recovery by setting a thread local variable
+     * if this thread local variable is not set, it returns RecoveryInProgress() 
+     *
+     * The checkpointer acts this way as well - when it tries to write
+     * end-of-recovery checkpoint, this function should indeed flush
+     *
+     * During recovery, if the caller thread does not set allow XLogInsert, only
+     * update minRecoveryPoint and return
      */
     if (!XLogInsertAllowed()) {
         if (g_supportHotStandby) {
-            UpdateMinRecoveryPoint(record, false);
+            UpdateMinRecoveryPoint(recptr, false);
         }
-        gstrace_exit(GS_TRC_ID_XLogFlush);
         return;
     }
 
-    /*
-     * Pagewriter main thread call XLogFlush before divide dirty page tp sub thread,
-     * update the page_writer_xlog_flush_loc, so pagewriter only need compare with
-     * page_writer_xlog_flush_loc to reduce the competition for locks in XLogFlush.
-     */
-    if (t_thrd.pagewriter_cxt.pagewriter_id >= 0) {
-        if (XLByteLE(record, g_instance.ckpt_cxt_ctl->page_writer_xlog_flush_loc)) {
-            gstrace_exit(GS_TRC_ID_XLogFlush);
-            return;
+    volatile XLogRecPtr flushTo = gs_compare_and_swap_u64(&g_instance.wal_cxt.flushResult, 0, 0);
+
+    while (XLByteLT(flushTo, recptr)) {
+        if (!g_instance.wal_cxt.isWalWriterUp) {
+            XLogSelfFlush();
+        } else if (LWLockAcquireOrWait(g_instance.wal_cxt.walFlushWaitLock->l.lock, LW_EXCLUSIVE)) {
+            PGSemaphoreLock(&g_instance.wal_cxt.walFlushWaitLock->l.sem, true);
+            LWLockRelease(g_instance.wal_cxt.walFlushWaitLock->l.lock);
         }
+        flushTo = pg_atomic_barrier_read_u64(&g_instance.wal_cxt.flushResult);
     }
 
-    /* Quick exit if already known flushed */
-    if (XLByteLE(record, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-        gstrace_exit(GS_TRC_ID_XLogFlush);
-        return;
+    return;
+}
+
+void XLogWaitBufferInit(XLogRecPtr recptr)
+{
+    volatile XLogRecPtr sentTo = gs_compare_and_swap_u64(&g_instance.wal_cxt.sentResult, 0, 0);
+    while (XLByteLT(sentTo, recptr)) {
+        if (!g_instance.wal_cxt.isWalWriterUp) {
+            XLogSelfFlush();
+        } else if (LWLockAcquireOrWait(g_instance.wal_cxt.walBufferInitWaitLock->l.lock, LW_EXCLUSIVE)) {
+            PGSemaphoreLock(&g_instance.wal_cxt.walBufferInitWaitLock->l.sem, true);
+            LWLockRelease(g_instance.wal_cxt.walBufferInitWaitLock->l.lock);
+        }
+        sentTo = gs_compare_and_swap_u64(&g_instance.wal_cxt.sentResult, 0, 0);
     }
 
-#ifdef WAL_DEBUG
-    if (u_sess->attr.attr_storage.XLOG_DEBUG) {
-        ereport(LOG, (errmsg("xlog flush request %X/%X; write %X/%X; flush %X/%X", (uint32)(record >> 32),
-                             (uint32)record, (uint32)(t_thrd.xlog_cxt.LogwrtResult->Write >> 32),
-                             (uint32)t_thrd.xlog_cxt.LogwrtResult->Write,
-                             (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
-                             (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush)));
-    }
-#endif
+    return;
+}
 
+static void XLogFlushCore(XLogRecPtr WriteRqstPtr)
+{
     START_CRIT_SECTION();
 
-    /*
-     * Since fsync is usually a horribly expensive operation, we try to
-     * piggyback as much data as we can on each fsync: if we see any more data
-     * entered into the xlog buffer, we'll write and fsync that too, so that
-     * the final value of LogwrtResult.Flush is as large as possible. This
-     * gives us some chance of avoiding another fsync immediately after.
-     * Initialize to given target; may increase below */
-    WriteRqstPtr = record;
+    XLogwrtRqst WriteRqst;
 
-    /* Now wait until we get the write lock, or someone else does the flush for us. */
-    for (;;) {
-#ifdef ENABLE_DISTRIBUTE_TEST
-        if (TEST_STUB(DN_XLOGFLUSH, stub_sleep_emit)) {
-            ereport(get_distribute_test_param()->elevel,
-                    (errmsg("sleep_emit happen during xlog flush  time:%ds, stub_name:%s",
-                            get_distribute_test_param()->sleep_time, get_distribute_test_param()->test_stub_name)));
-        }
-#endif
-
-        /* use volatile pointer to prevent code rearrangement */
-        XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-        XLogRecPtr insertpos;
-
-        /* read LogwrtResult and update local state */
-        SpinLockAcquire(&xlogctl->info_lck);
-        if (XLByteLT(WriteRqstPtr, xlogctl->LogwrtRqst.Write)) {
-            WriteRqstPtr = xlogctl->LogwrtRqst.Write;
-        }
-        *t_thrd.xlog_cxt.LogwrtResult = xlogctl->LogwrtResult;
-        SpinLockRelease(&xlogctl->info_lck);
-
-        /* done already? */
-        if (XLByteLE(record, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-            break;
-        }
-
-        /*
-         * Before actually performing the write, wait for all in-flight
-         * insertions to the pages we're about to write to finish.
-         */
-        insertpos = WaitXLogInsertionsToFinish(WriteRqstPtr);
-
-        /*
-         * Try to get the write lock. If we can't get it immediately, wait
-         * until it's released, and recheck if we still need to do the flush
-         * or if the backend that held the lock did it for us already. This
-         * helps to maintain a good rate of group committing when the system
-         * is bottlenecked by the speed of fsyncing.
-         */
-        if (!LWLockAcquireOrWait(WALWriteLock, LW_EXCLUSIVE)) {
-            /*
-             * The lock is now free, but we didn't acquire it yet. Before we
-             * do, loop back to check if someone else flushed the record for
-             * us already.
-             */
-            continue;
-        }
-        /* Got the lock */
-        *t_thrd.xlog_cxt.LogwrtResult = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtResult;
-        if (XLByteLE(record, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-            LWLockRelease(WALWriteLock);
-            break;
-        }
-
-        /*
-         * Sleep before flush! By adding a delay here, we may give further
-         * backends the opportunity to join the backlog of group commit
-         * followers; this can significantly improve transaction throughput,
-         * at the risk of increasing transaction latency.
-         *
-         * We do not sleep if enableFsync is not turned on, nor if there are
-         * fewer than CommitSiblings other backends with active transactions.
-         */
-        if (u_sess->attr.attr_storage.CommitDelay > 0 && u_sess->attr.attr_storage.enableFsync &&
-            MinimumActiveBackends(u_sess->attr.attr_storage.CommitSiblings)) {
-            pg_usleep(u_sess->attr.attr_storage.CommitDelay);
-
-            /*
-             * Re-check how far we can now flush the WAL. It's generally not
-             * safe to call WaitXLogInsetionsToFinish while holding
-             * WALWriteLock, because an in-progress insertion might need to
-             * also grab WALWriteLock to make progress. But we know that all
-             * the insertions up to insertpos have already finished, because
-             * that's what the earlier WaitXLogInsertionsToFinish() returned.
-             * We're only calling it again to allow insertpos to be moved
-             * further forward, not to actually wait for anyone.
-             */
-            insertpos = WaitXLogInsertionsToFinish(insertpos);
-        }
-        /* try to write/flush later additions to XLOG as well */
-        WriteRqst.Write = insertpos;
-        WriteRqst.Flush = insertpos;
-        XLogWrite(WriteRqst, false);
-
-        LWLockRelease(WALWriteLock);
-        /* done */
-        break;
-    }
-
+    WriteRqst.Write = WriteRqstPtr;
+    WriteRqst.Flush = WriteRqstPtr;
+    XLogWrite(WriteRqst, false);
     END_CRIT_SECTION();
+
+    pg_memory_barrier();
 
     /* wake up walsenders now that we've released heavily contended locks */
     WalSndWakeupProcessRequests();
 
     /*
-     * If we still haven't flushed to the request point then we have a
-     * problem; most likely, the requested flush point is past end of XLOG.
-     * This has been seen to occur when a disk page has a corrupted LSN.
-     *
-     * Formerly we treated this as a PANIC condition, but that hurts the
-     * system's robustness rather than helping it: we do not want to take down
-     * the whole system due to corruption on one data page.  In particular, if
-     * the bad page is encountered again during recovery then we would be
-     * unable to restart the database at all!  (This scenario actually
-     * happened in the field several times with 7.1 releases.)	As of 8.4, bad
-     * LSNs encountered during recovery are UpdateMinRecoveryPoint's problem;
-     * the only time we can reach here during recovery is while flushing the
-     * end-of-recovery checkpoint record, and we don't expect that to have a
-     * bad LSN.
-     *
-     * Note that for calls from xact.c, the ERROR will be promoted to PANIC
-     * since xact.c calls this routine inside a critical section.  However,
-     * calls from bufmgr.c are not within critical sections and so we will not
-     * force a restart for a bad LSN on a data page.
+     * Wake up waiting commit threads to check on the latest LSN flushed.
      */
-    if (XLByteLT(t_thrd.xlog_cxt.LogwrtResult->Flush, record)) {
-        if (LogicalPage) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_CASE_NOT_FOUND),
-                     errmsg("xlog flush request %X/%X is not satisfied --- flushed only to %X/%X",
-                            (uint32)(record >> 32), (uint32)record, (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
-                            (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush)));
-        } else {
-            ereport(WARNING,
-                    (errmsg("xlog flush request %X/%X is not satisfied --- flushed only to %X/%X",
-                            (uint32)(record >> 32), (uint32)record, (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
-                            (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush)));
-        }
-    }
-    gstrace_exit(GS_TRC_ID_XLogFlush);
-}
+    (void)pg_atomic_exchange_u64((uint64 *)&g_instance.wal_cxt.flushResult,
+        t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtResult.Flush);
 
-/*
- * Invoke XLogFileInit to create XLog files according to advance_xlog_file_num GUC.
- *
- * This is invoked by XLogBackgroundFlush to reduce time cost during XLogWrite.
- */
-bool PreInitXlogFileInternal(XLogRecPtr requestLsn)
-{
-    /* The last processed xlog lsn. */
-    static XLogRecPtr lastWriteLsn = 0;
-    /* The next segment to be created. */
-    static XLogSegNo nextSegNo = 0;
-
-    if (requestLsn < lastWriteLsn) { /* switch over. need reset */
-        ereport(WARNING,
-            (errmsg("PreInitXlogFileInternal need reset. requestLsn: %X/%X; lastWriteLsn: %X/%X",
-                (uint32)(requestLsn >> 32),
-                (uint32)requestLsn,
-                (uint32)(lastWriteLsn >> 32),
-                (uint32)lastWriteLsn)));
-        lastWriteLsn = requestLsn;
-        nextSegNo = 0;
-    } else if (requestLsn < lastWriteLsn + XLOG_SEG_SIZE) {
-        /* If the requestLsn is not more than one segement, skip! */
-        return false;
-    } else {
-        lastWriteLsn = requestLsn;
-    }
-
-    /* Start to pre-init xlog segment. */
-    XLogSegNo reqSegNo;
-    XLByteToPrevSeg(requestLsn, reqSegNo);
-    /* If the request pos is bigger, start from the segment next to requestLsn. */
-    if (nextSegNo <= reqSegNo) {
-        nextSegNo = reqSegNo + 1;
-    }
-    XLogSegNo targetSegNo = reqSegNo + g_instance.attr.attr_storage.advance_xlog_file_num;
-    for (; nextSegNo <= targetSegNo; nextSegNo++) {
-        bool use_existent = true;
-        int lf = XLogFileInit(nextSegNo, &use_existent, true);
-        if (!use_existent)
-            ereport(DEBUG1,
-                (errmsg("PreInitXlogFileInternal new nextSegNo: %X/%X ThisTimeLineID: %u, RecoveryTargetTLI: %u",
-                    (uint32)(nextSegNo >> 32),
-                    (uint32)nextSegNo,
-                    t_thrd.shemem_ptr_cxt.XLogCtl->ThisTimeLineID,
-                    t_thrd.shemem_ptr_cxt.XLogCtl->RecoveryTargetTLI)));
-        if (lf >= 0)
-            close(lf);
-    }
-
-    return true;
+    /*
+     * Notifity commit agents to wake up and check latest flushResult
+     */
+    WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
 }
 
 /*
@@ -3394,110 +3379,218 @@ bool PreInitXlogFileInternal(XLogRecPtr requestLsn)
  */
 bool XLogBackgroundFlush(void)
 {
-    /* Process standby xlog pre-init */
-    if (g_instance.attr.attr_storage.advance_xlog_file_num > 0 &&
-        t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
-        (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY) && t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone) {
-        XLogRecPtr curMaxLsn = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.redoPf.local_max_lsn);
-        return PreInitXlogFileInternal(curMaxLsn);
-    }
+    XLogRecPtr WriteRqstPtr = InvalidXLogRecPtr;
+    XLogRecPtr InitializeRqstPtr = InvalidXLogRecPtr;
+    int start_entry_idx, curr_entry_idx, next_entry_idx, entry_idx;
+    volatile WALInsertStatusEntry *start_entry_ptr;
+    volatile WALInsertStatusEntry *curr_entry_ptr;
+    volatile WALInsertStatusEntry *next_entry_ptr;
+    WALInsertStatusEntry *status_entry_ptr;
+    uint32 entry_count = 0;
 
-    /* Process primary xlog */
-    if (pmState != PM_RUN) {
+    /*    
+     * During REDO, we are reading not writing WAL.
+     *
+     * Test XLogInsertAllowed(), not RecoveryInProgress. XLogInsertAllowed()
+     * allows WAL writing at the end of recovery by setting a thread local variable
+     * if this thread local variable is not set, it returns RecoveryInProgress() 
+     *
+     * The checkpointer acts this way as well - when it tries to write
+     * end-of-recovery checkpoint, this function should indeed flush.
+     */
+    if (!XLogInsertAllowed()) {
         return false;
-    }
-
-    XLogRecPtr WriteRqstPtr;
-    bool flexible = true;
-    bool wrote_something = false;
-
-    /* XLOG doesn't need flushing during recovery */
-    if (RecoveryInProgress()) {
-        return false;
-    }
-
-    /* read LogwrtResult and update local state */
-    {
-        /* use volatile pointer to prevent code rearrangement */
-        XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-
-        SpinLockAcquire(&xlogctl->info_lck);
-        *t_thrd.xlog_cxt.LogwrtResult = xlogctl->LogwrtResult;
-        WriteRqstPtr = xlogctl->LogwrtRqst.Write;
-        SpinLockRelease(&xlogctl->info_lck);
-    }
-
-    /* Initialize xlog files in advance */
-    if (g_instance.attr.attr_storage.advance_xlog_file_num > 0) {
-        wrote_something = PreInitXlogFileInternal(WriteRqstPtr);
-    }
-
-    /* back off to last completed page boundary */
-    WriteRqstPtr -= WriteRqstPtr % XLOG_BLCKSZ;
-
-    /* if we have already flushed that far, consider async commit records */
-    if (XLByteLE(WriteRqstPtr, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-        /* use volatile pointer to prevent code rearrangement */
-        XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-
-        SpinLockAcquire(&xlogctl->info_lck);
-        WriteRqstPtr = xlogctl->asyncXactLSN;
-        SpinLockRelease(&xlogctl->info_lck);
-        flexible = false; /* ensure it all gets written */
     }
 
     /*
-     * If already known flushed, we're done. Just need to check if we are
-     * holding an open file handle to a logfile that's no longer in use,
-     * preventing the file from being deleted.
+     *  Entry #:                  g_instance.wal_cxt.walInsertStatusTable
+     *                            +---------------+--------+-------+
+     *  0:                        |               |        |       |
+     *                            +---------------+--------+-------+
+     *                            ......
+     *                            +---------------+--------+-------+
+     *  *lastWalStatusEntry+1:    |               |        |COPIED | <--- while loop start here till hit a hole or
+     *                            +---------------+--------+-------+      and older LRC
+     *                            ......                    COPIED
+     *                            +---------------+--------+-------+
+     *  prev_entry:               |   endLSN(N-1) |LRC(N-1)|COPIED |  <== curr_entry_ptr <--- flush till here
+     *                            +---------------+--------+-------+
+     *  curr_entry_idx:           |   endLSN(N)   |LRC(N)  |NOT_CP |  <== next_entry_ptr
+     *                            +---------------+--------+-------+
+     *  next_entry_idx:           |   endLSN(N+1) |LRC(N+1)|COPIED |
+     *                            +---------------+--------+-------+
+     *                            ......
+     *                            +---------------+--------+-------+
+     *  WAL_INSERT_STATUS_ENTRIES:|               |        |       |
+     *  - 1                       +---------------+--------+-------+
+     *
      */
-    if (XLByteLE(WriteRqstPtr, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-        if (t_thrd.xlog_cxt.openLogFile >= 0) {
-            if (!XLByteInPrevSeg(t_thrd.xlog_cxt.LogwrtResult->Write, t_thrd.xlog_cxt.openLogSegNo)) {
-                XLogFileClose();
-            }
-        }
-        return wrote_something;
+
+    start_entry_idx = GET_NEXT_STATUS_ENTRY(g_instance.wal_cxt.lastWalStatusEntryFlushed);
+    start_entry_ptr = &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(start_entry_idx)];
+
+    /*
+     * Bail out if the very first entry is not copied.
+     */
+    if (start_entry_ptr->status != WAL_COPIED) {
+        return false;
     }
+
+    next_entry_idx = start_entry_idx;
+    next_entry_ptr = start_entry_ptr;
+    do {
+        curr_entry_ptr = next_entry_ptr;
+        curr_entry_idx = next_entry_idx;
+        next_entry_idx = GET_NEXT_STATUS_ENTRY(curr_entry_idx);
+        next_entry_ptr = &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(next_entry_idx)];
+        entry_count++;
+
+        Assert(curr_entry_ptr->status == WAL_COPIED);
+
+        /*
+         * Flush if we have accumulate enough bytes or till the LSN in the entry before
+         * an entry associated with the first uncopied record found in the current loop.
+         */
+        if (next_entry_ptr->status == WAL_NOT_COPIED) {
+            break;
+        }
+    } while (((curr_entry_ptr->LRC + 1) & 0x7FFFFFFF) == next_entry_ptr->LRC);
+
+    g_instance.wal_cxt.lastWalStatusEntryFlushed = curr_entry_idx;
+    g_instance.wal_cxt.lastLRCScanned = curr_entry_ptr->LRC;
+
+    WriteRqstPtr = (XLogRecPtr)pg_atomic_barrier_read_u64(&curr_entry_ptr->endLSN);
 
 #ifdef WAL_DEBUG
     if (u_sess->attr.attr_storage.XLOG_DEBUG) {
-        ereport(LOG, (errmsg("xlog bg flush request %X/%X; write %X/%X; flush %X/%X", (uint32)(WriteRqstPtr >> 32),
-                             (uint32)WriteRqstPtr, (uint32)(t_thrd.xlog_cxt.LogwrtResult->Write >> 32),
-                             (uint32)t_thrd.xlog_cxt.LogwrtResult->Write,
-                             (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
-                             (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush)));
+        ereport(LOG,
+            (errmsg("xlog bg flush request %X/%X; write %X/%X; flush %X/%X",
+                (uint32)(WriteRqstPtr >> 32),
+                (uint32)WriteRqstPtr,
+                (uint32)(t_thrd.xlog_cxt.LogwrtResult->Write >> 32),
+                (uint32)t_thrd.xlog_cxt.LogwrtResult->Write,
+                (uint32)(t_thrd.xlog_cxt.LogwrtResult->Flush >> 32),
+                (uint32)t_thrd.xlog_cxt.LogwrtResult->Flush)));
     }
 #endif
 
-    START_CRIT_SECTION();
+    XLogFlushCore(WriteRqstPtr);
 
-    /* now wait for any in-progress insertions to finish and get write lock */
-    WaitXLogInsertionsToFinish(WriteRqstPtr);
-    LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
-    *t_thrd.xlog_cxt.LogwrtResult = t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtResult;
-    if (!XLByteLE(WriteRqstPtr, t_thrd.xlog_cxt.LogwrtResult->Flush)) {
-        XLogwrtRqst WriteRqst;
-
-        WriteRqst.Write = WriteRqstPtr;
-        WriteRqst.Flush = WriteRqstPtr;
-        XLogWrite(WriteRqst, flexible);
-        wrote_something = true;
-    }
-    LWLockRelease(WALWriteLock);
-
-    END_CRIT_SECTION();
-
-    /* wake up walsenders now that we've released heavily contended locks */
-    WalSndWakeupProcessRequests();
+    g_instance.wal_cxt.lastLRCFlushed = curr_entry_ptr->LRC;
 
     /*
-     * Great, done. To take some work off the critical path, try to initialize
-     * as many of the no-longer-needed WAL buffers for future use as we can.
+     * Update LRC and status in the status entry that is already flushed (from start to current entry).
+     * All WAL insert threads need to examine both of the LRC and the status
+     * fiels before copying its endLSN and set status to WAL_COPIED in this
+     * entry. This is to ensure it truly owns this entry, i.e., the writer thread
+     * finishes updating the entry.
      */
-    AdvanceXLInsertBuffer<false>(InvalidXLogRecPtr, true);
+    entry_idx = start_entry_idx - 1;
+    do {
+        /*
+         * Increment entry_idx by 1 and wrap the result around WAL_INSERT_STATUS_ENTRIES.
+         */
+        entry_idx = GET_NEXT_STATUS_ENTRY(entry_idx);
+        status_entry_ptr = &g_instance.wal_cxt.walInsertStatusTable[GET_STATUS_ENTRY_INDEX(entry_idx)];
+        status_entry_ptr->LRC = (status_entry_ptr->LRC + WAL_INSERT_STATUS_ENTRIES) & 0x7FFFFFFF;
+        /* Reset the status to WAL_NOT_COPIED for the flushed entries. */
+        status_entry_ptr->status = WAL_NOT_COPIED;
+    } while (entry_idx != curr_entry_idx);
 
-    return wrote_something;
+    InitializeRqstPtr = g_instance.wal_cxt.flushResult - g_instance.wal_cxt.flushResult % XLOG_BLCKSZ;
+
+    if (InitializeRqstPtr != InvalidXLogRecPtr && XLByteLT(g_instance.wal_cxt.sentResult, InitializeRqstPtr)) {
+        AdvanceXLInsertBuffer<false>(InitializeRqstPtr, false);
+
+        (void)pg_atomic_exchange_u64((uint64 *)&g_instance.wal_cxt.sentResult, InitializeRqstPtr);
+
+        WakeupWalSemaphore(&g_instance.wal_cxt.walBufferInitWaitLock->l.sem);
+    }
+
+    return true;
+}
+
+/*
+ * This function calls XLogBackgroundFlush ONCE when no one else is
+ * doing it
+ * The caller of this function should loop on this function to make
+ * sure the LSN the caller waiting on is indeed flushed
+ */
+static void XLogSelfFlush(void)
+{
+    /*
+     * The current callers of this function all check whether
+     * the WAL writer is present, but as a generic function,
+     * it should also does the check.
+     */
+    if (g_instance.wal_cxt.isWalWriterUp) {
+        return;
+    }
+
+    /*
+     * We only try self-flush when nobody else is already doing it
+     */
+    if (LWLockAcquireOrWait(WALWriteLock, LW_EXCLUSIVE)) {
+        XLogBackgroundFlush();
+        LWLockRelease(WALWriteLock);
+    }
+
+    return;
+}
+
+/*
+ * This function is called by CopyXLogRecordToWAL or CopyXLogRecordToWALForGroup
+ * when large records ( > wal buffer size ) are copied to WAL.
+ *
+ * During copying such a large record, we will wrap around the wal buffer and
+ * access the page the large record starts from at least twice. When an agent
+ * hits the start page again, the agent needs to initiate a full wal buffer
+ * flush or it will get stuck - it has no more buffer page to use but
+ * the wal writer cannot flush for this agent because the wal writer should only
+ * flush when a status entry is updated but this agent cannot update its status
+ * entry before it finishes copying its record.
+ * 
+ * This function should not change the wal copy status entries. 
+ *
+ * numHitsOnStartPage - the 2nd hit on the start page needs to wait for all
+ *                      potential concurrent flushes to finish while the
+ *                      subsequent hits on the start page don't 
+ * CurrPos - The requested LSN
+ * currLRC - need this to calculate the previous LRC for use to wait for
+ */
+static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage,
+		XLogRecPtr currPos, int currLRC)
+{
+    /*
+     * I only needs to wait for the wal writer or other agents'
+     * flushes (when wal writer is absent) to finish when I hit
+     * the start page the 2nd time within one WAL copy because
+     * after that the wal flush is blocked by me
+     */
+    if (numHitsOnStartPage == 2) {
+        int prevLRC = (currLRC - 1) & 0x7FFFFFFF;
+        while (g_instance.wal_cxt.lastLRCFlushed != prevLRC) {
+            if (!g_instance.wal_cxt.isWalWriterUp) {
+                XLogSelfFlush();
+            }
+            pg_usleep(1);
+        }
+    }
+
+    /*
+     * To this point, we are the one holding up the wal writer or
+     * anyone that does the flush but we will still get the write
+     * lock to be safe since acquiring a lock without contention
+     * doesn't hurt performance here
+     */
+    LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
+    XLogFlushCore(currPos);
+    LWLockRelease(WALWriteLock);
+    
+    XLogRecPtr initializeRqstPtr = currPos - currPos % XLOG_BLCKSZ;
+    AdvanceXLInsertBuffer<false>(initializeRqstPtr, false);
+    (void)pg_atomic_exchange_u64((uint64 *)&g_instance.wal_cxt.sentResult, initializeRqstPtr);
+    WakeupWalSemaphore(&g_instance.wal_cxt.walBufferInitWaitLock->l.sem);
 }
 
 /*
@@ -3738,6 +3831,24 @@ void XLogFileCutPage(char *buffer, uint32 bufLen, uint32 cpyLen)
     }
 }
 
+void XLogMultiFileInit(int advance_xlog_file_num)
+{
+    XLogSegNo startSegNo, nextSegNo, target;
+    int lf;
+    bool use_existent;
+
+    g_xlog_stat_shared->walAuxWakeNum++;
+
+    startSegNo = g_instance.wal_cxt.globalEndPosSegNo + 1;
+    target = startSegNo + advance_xlog_file_num - 1;
+    for (nextSegNo = startSegNo; nextSegNo <= target; nextSegNo++) {
+        use_existent = true;
+        lf = XLogFileInit(nextSegNo, &use_existent, true);
+        if (lf >= 0) {
+            close(lf);
+        }
+    }
+}
 /*
  * Create a new XLOG file segment by copying a pre-existing one.
  *
@@ -6467,14 +6578,11 @@ void XLOGShmemInit(void)
     errno_t errorno = EOK;
 
     int nNumaNodes = g_instance.shmem_cxt.numaNodeNum;
-    if (nNumaNodes == 0) {
-        ereport(PANIC, (errmsg("nNumaNodes is zero.")));
-    }
     if (!IsUnderPostmaster && g_instance.attr.attr_storage.num_xloginsert_locks % nNumaNodes != 0) {
         ereport(PANIC,
                 (errmsg("XLOGShmemInit num_xloginsert_locks should be multiple of NUMA node number in the system.")));
     }
-    g_instance.xlog_cxt.num_locks_in_group = g_instance.attr.attr_storage.num_xloginsert_locks / nNumaNodes;
+    g_instance.wal_cxt.num_locks_in_group = g_instance.attr.attr_storage.num_xloginsert_locks / nNumaNodes;
 
     t_thrd.shemem_ptr_cxt.ControlFile = (ControlFileData *)ShmemInitStruct("Control File", sizeof(ControlFileData),
                                                                            &foundCFile);
@@ -6514,7 +6622,7 @@ void XLOGShmemInit(void)
         palloc0(nNumaNodes * sizeof(WALInsertLockPadded *) + PG_CACHE_LINE_SIZE));
 #ifdef __USE_NUMA
     if (nNumaNodes > 1) {
-        size_t allocSize = sizeof(WALInsertLockPadded) * g_instance.xlog_cxt.num_locks_in_group + PG_CACHE_LINE_SIZE;
+        size_t allocSize = sizeof(WALInsertLockPadded) * g_instance.wal_cxt.num_locks_in_group + PG_CACHE_LINE_SIZE;
         for (int i = 0; i < nNumaNodes; i++) {
             char *pInsertLock = (char *)numa_alloc_onnode(allocSize, i);
             if (pInsertLock == NULL) {
@@ -6537,7 +6645,7 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.LocalGroupWALInsertLocks = t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[0];
 
     for (int processorIndex = 0; processorIndex < nNumaNodes; processorIndex++) {
-        for (i = 0; i < g_instance.xlog_cxt.num_locks_in_group; i++) {
+        for (i = 0; i < g_instance.wal_cxt.num_locks_in_group; i++) {
             LWLockInitialize(&t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l.lock,
                              LWTRANCHE_WAL_INSERT);
             t_thrd.shemem_ptr_cxt.GlobalWALInsertLocks[processorIndex][i].l.insertingAt = InvalidXLogRecPtr;
@@ -7958,7 +8066,12 @@ static void EndRedoXlog()
         EndDispatcherContext();
     }
     ResourceManagerStop();
-    XLogFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
+    XLogWaitFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
+}
+
+int XLogSemas(void)
+{
+    return 4 + 2 * g_instance.attr.attr_storage.max_wal_senders;
 }
 
 /*
@@ -8022,6 +8135,52 @@ void CheckForRestartPoint()
 }
 
 /*
+ * When adding or decreasing semaphores used by xlog in the following function
+ * please update XLogSemas accordingly
+ */
+void InitWalSemaphores()
+{
+    /* Create a memory context and allocate semaphores used by wal writer. */
+    g_instance.wal_context = AllocSetContextCreate(g_instance.instance_context, "WalContext", ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
+    MemoryContext old_context = MemoryContextSwitchTo(g_instance.wal_context);
+
+    /*
+     * Lock structure used for XLog local flush notification
+     */
+    g_instance.wal_cxt.walFlushWaitLock = (WALFlushWaitLockPadded *)palloc(sizeof(WALFlushWaitLockPadded) * 2);
+    g_instance.wal_cxt.walFlushWaitLock = (WALFlushWaitLockPadded *)TYPEALIGN(sizeof(WALFlushWaitLockPadded),
+        g_instance.wal_cxt.walFlushWaitLock);
+    g_instance.wal_cxt.walFlushWaitLock->l.lock = LWLockAssign(LWTRANCHE_WAL_FLUSH_WAIT);
+    PGSemaphoreCreate(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
+    PGSemaphoreReset(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
+
+    /*
+     * Lock structure used for WAL buffer initialization notification
+     */
+    g_instance.wal_cxt.walBufferInitWaitLock =
+        (WALBufferInitWaitLockPadded *)palloc(sizeof(WALBufferInitWaitLockPadded) * 2);
+    g_instance.wal_cxt.walBufferInitWaitLock =
+        (WALBufferInitWaitLockPadded *)TYPEALIGN(sizeof(WALBufferInitWaitLockPadded),
+            g_instance.wal_cxt.walBufferInitWaitLock);
+    g_instance.wal_cxt.walBufferInitWaitLock->l.lock = LWLockAssign(LWTRANCHE_WAL_BUFFER_INIT_WAIT);
+    PGSemaphoreCreate(&g_instance.wal_cxt.walBufferInitWaitLock->l.sem);
+    PGSemaphoreReset(&g_instance.wal_cxt.walBufferInitWaitLock->l.sem);
+
+    /*
+     * Lock structure used for XLog init-ahead notification
+     */
+    g_instance.wal_cxt.walInitSegLock = (WALInitSegLockPadded *)palloc(sizeof(WALInitSegLockPadded) * 2);
+    g_instance.wal_cxt.walInitSegLock = (WALInitSegLockPadded *)TYPEALIGN(sizeof(WALInitSegLockPadded),
+        g_instance.wal_cxt.walInitSegLock);
+    g_instance.wal_cxt.walInitSegLock->l.lock = LWLockAssign(LWTRANCHE_WAL_INIT_SEGMENT);
+    PGSemaphoreCreate(&g_instance.wal_cxt.walInitSegLock->l.sem);
+    PGSemaphoreReset(&g_instance.wal_cxt.walInitSegLock->l.sem);
+
+    (void)MemoryContextSwitchTo(old_context);
+}
+
+/*
  * This must be called ONCE during postmaster or standalone-backend startup
  */
 void StartupXLOG(void)
@@ -8065,6 +8224,33 @@ void StartupXLOG(void)
     g_instance.comm_cxt.predo_cxt.redoPf.recovery_done_ptr = 0;
     g_instance.comm_cxt.predo_cxt.redoPf.redo_done_time = 0;
     pg_atomic_write_u32(&(g_instance.comm_cxt.localinfo_cxt.is_finish_redo), 0);
+
+    /*
+     * Initialize WAL insert status array and the flush index - lastWalStatusEntryFlushed.
+     */
+    if (g_instance.wal_cxt.walInsertStatusTable == NULL) {
+        MemoryContext old_context = MemoryContextSwitchTo(g_instance.wal_context);
+
+        g_instance.wal_cxt.walInsertStatusTable =
+            (WALInsertStatusEntry *)palloc(sizeof(WALInsertStatusEntry) * (WAL_INSERT_STATUS_ENTRIES + 1));
+        g_instance.wal_cxt.walInsertStatusTable = (WALInsertStatusEntry *)TYPEALIGN(sizeof(WALInsertStatusEntry),
+            g_instance.wal_cxt.walInsertStatusTable);
+
+        (void)MemoryContextSwitchTo(old_context);
+    }
+
+    errorno = memset_s(g_instance.wal_cxt.walInsertStatusTable,
+        sizeof(WALInsertStatusEntry) * WAL_INSERT_STATUS_ENTRIES, 0,
+        sizeof(WALInsertStatusEntry) * WAL_INSERT_STATUS_ENTRIES);
+    securec_check(errorno, "", "");
+
+    for (int i = 0; i < WAL_INSERT_STATUS_ENTRIES; i++) {
+        g_instance.wal_cxt.walInsertStatusTable[i].LRC = i;
+    }
+
+    g_instance.wal_cxt.lastWalStatusEntryFlushed = -1;
+    g_instance.wal_cxt.lastLRCScanned = WAL_SCANNED_LRC_INIT;
+    g_instance.wal_cxt.lastLRCFlushed = WAL_SCANNED_LRC_INIT;
 
     /*
      * Read control file and check XLOG status looks valid.
@@ -9306,8 +9492,9 @@ void StartupXLOG(void)
     t_thrd.xlog_cxt.openLogFile = XLogFileOpen(t_thrd.xlog_cxt.openLogSegNo);
     t_thrd.xlog_cxt.openLogOff = 0;
     Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
-    Insert->PrevBytePos = XLogRecPtrToBytePos(t_thrd.xlog_cxt.LastRec);
     Insert->CurrBytePos = XLogRecPtrToBytePos(EndOfLog);
+    Insert->PrevByteSize = XLogRecPtrToBytePos(EndOfLog) - XLogRecPtrToBytePos(t_thrd.xlog_cxt.LastRec);
+    Insert->CurrLRC = 0;
 
     /*
      * Tricky point here: readBuf contains the *last* block that the LastRec
@@ -9350,6 +9537,14 @@ void StartupXLOG(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtRqst.Write = EndOfLog;
     t_thrd.shemem_ptr_cxt.XLogCtl->LogwrtRqst.Flush = EndOfLog;
     g_instance.comm_cxt.predo_cxt.redoPf.primary_flush_ptr = EndOfLog;
+
+    /*
+     * Prepare WAL buffer and other variables for WAL writing before any 
+     * call to LocalSetXLogInsertAllowed() calls that enables WAL writing
+     */
+    g_instance.wal_cxt.flushResult = EndOfLog;
+    AdvanceXLInsertBuffer<false>(EndOfLog, false, NULL);
+    g_instance.wal_cxt.sentResult = EndOfLog;
 
     /* add switch at old version xlog page */
     if ((EndOfLog % XLOG_BLCKSZ != 0) && ((XLogPageHeader)xlogreader->readBuf)->xlp_magic == XLOG_PAGE_MAGIC_OLD) {
@@ -10199,7 +10394,7 @@ XLogRecPtr GetInsertRecPtr(void)
 XLogRecPtr GetFlushRecPtr(void)
 {
     /* use volatile pointer to prevent code rearrangement */
-    XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
+    volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
     XLogRecPtr recptr;
 
     SpinLockAcquire(&xlogctl->info_lck);
@@ -10433,6 +10628,7 @@ void CreateCheckPoint(int flags)
     XLogRecPtr curInsert;
     VirtualTransactionId *vxids = NULL;
     int nvxids = 0;
+    int32 lastlrc = 0;
     errno_t errorno = EOK;
     XLogRecPtr curMinRecLSN = InvalidXLogRecPtr;
     bool doFullCheckpoint = !ENABLE_INCRE_CKPT;
@@ -10523,7 +10719,7 @@ void CreateCheckPoint(int flags)
     }
 #endif
 
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
 
     curInsert = XLogBytePosToRecPtr(Insert->CurrBytePos);
 
@@ -10555,7 +10751,7 @@ void CreateCheckPoint(int flags)
                 CallCheckpointCallback(EVENT_CHECKPOINT_ABORT, 0);
             }
 #endif
-            WALInsertLockRelease();
+            StopSuspendWalInsert(lastlrc);
             LWLockRelease(CheckpointLock);
             END_CRIT_SECTION();
             smgrsync_with_absorption();
@@ -10600,7 +10796,7 @@ void CreateCheckPoint(int flags)
         }
 
         if (XLByteEQ(curMinRecLSN, g_instance.ckpt_cxt_ctl->ckpt_current_redo_point)) {
-            WALInsertLockRelease();
+            StopSuspendWalInsert(lastlrc);
             LWLockRelease(CheckpointLock);
             END_CRIT_SECTION();
 
@@ -10700,7 +10896,7 @@ void CreateCheckPoint(int flags)
      * Now we can release WAL insert lock, allowing other xacts to proceed
      * while we are flushing disk buffers.
      */
-    WALInsertLockRelease();
+    StopSuspendWalInsert(lastlrc);
 
     /* Update the info_lck-protected copy of RedoRecPtr as well */
     SpinLockAcquire(&xlogctl->info_lck);
@@ -10908,7 +11104,7 @@ void CreateCheckPoint(int flags)
     }
     recptr = XLogInsert(RM_XLOG_ID, shutdown ? XLOG_CHECKPOINT_SHUTDOWN : XLOG_CHECKPOINT_ONLINE);
 
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     /*
      * We mustn't write any new WAL after a shutdown checkpoint, or it will be
@@ -11309,6 +11505,7 @@ bool CreateRestartPoint(int flags)
     CheckPoint lastCheckPoint;
     XLogSegNo _logSegNo;
     TimestampTz xtime;
+    int32 lastlrc = 0;
     errno_t errorno = EOK;
     bool recoveryInProgress = true;
     bool doFullCkpt = !ENABLE_INCRE_CKPT;
@@ -11407,12 +11604,12 @@ bool CreateRestartPoint(int flags)
      * during recovery this is just pro forma, because no WAL insertions are
      * happening.
      */
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
     xlogctl->Insert.RedoRecPtr = lastCheckPoint.redo;
 #ifdef ENABLE_MOT
     CallCheckpointCallback(EVENT_CHECKPOINT_SNAPSHOT_READY, lastCheckPointRecPtr);
 #endif
-    WALInsertLockRelease();
+    StopSuspendWalInsert(lastlrc);
 
     /* Also update the info_lck-protected copy */
     SpinLockAcquire(&xlogctl->info_lck);
@@ -11850,7 +12047,7 @@ static void XLogReportParameters(void)
             XLogRegisterData((char *)&xlrec, sizeof(xlrec));
 
             recptr = XLogInsert(RM_XLOG_ID, XLOG_PARAMETER_CHANGE);
-            XLogFlush(recptr);
+            XLogWaitFlush(recptr);
         }
 
         LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
@@ -11873,6 +12070,7 @@ static void XLogReportParameters(void)
 void UpdateFullPageWrites(void)
 {
     XLogCtlInsert *Insert = &t_thrd.shemem_ptr_cxt.XLogCtl->Insert;
+    int32 lastlrc = 0;
 
     /*
      * Do nothing if full_page_writes has not been changed.
@@ -11898,9 +12096,9 @@ void UpdateFullPageWrites(void)
      * flag.
      */
     if (u_sess->attr.attr_storage.fullPageWrites) {
-        WALInsertLockAcquireExclusive();
+        StartSuspendWalInsert(&lastlrc);
         Insert->fullPageWrites = true;
-        WALInsertLockRelease();
+        StopSuspendWalInsert(lastlrc);
     }
 
     /*
@@ -11915,9 +12113,9 @@ void UpdateFullPageWrites(void)
     }
 
     if (!u_sess->attr.attr_storage.fullPageWrites) {
-        WALInsertLockAcquireExclusive();
+        StartSuspendWalInsert(&lastlrc);
         Insert->fullPageWrites = false;
-        WALInsertLockRelease();
+        StopSuspendWalInsert(lastlrc);
     }
     END_CRIT_SECTION();
 }
@@ -12654,6 +12852,7 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
     FILE *fp = NULL;
     StringInfoData labelfbuf;
     StringInfoData tblspc_mapfbuf;
+    int32 lastlrc = 0;
     errno_t errorno = EOK;
 
     gstrace_entry(GS_TRC_ID_do_pg_start_backup);
@@ -12711,10 +12910,10 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
      * We must hold WALInsertLock to change the value of forcePageWrites, to
      * ensure adequate interlocking against XLogInsertRecord().
      */
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
     if (exclusive) {
         if (t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup) {
-            WALInsertLockRelease();
+            StopSuspendWalInsert(lastlrc);
             ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("a backup is already in progress"), errhint("Run pg_stop_backup() and try again.")));
         }
@@ -12727,7 +12926,7 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
     } else {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = true;
     }
-    WALInsertLockRelease();
+    StopSuspendWalInsert(lastlrc);
 
     /* Ensure we release forcePageWrites if fail below */
     PG_ENSURE_ERROR_CLEANUP(pg_start_backup_callback, (Datum)BoolGetDatum(exclusive));
@@ -12841,12 +13040,12 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
              * taking a checkpoint right after another is not that expensive
              * either because only few buffers have been dirtied yet.
              */
-            WALInsertLockAcquireExclusive();
+            StartSuspendWalInsert(&lastlrc);
             if (XLByteLT(t_thrd.shemem_ptr_cxt.XLogCtl->Insert.lastBackupStart, startpoint)) {
                 t_thrd.shemem_ptr_cxt.XLogCtl->Insert.lastBackupStart = startpoint;
                 gotUniqueStartpoint = true;
             }
-            WALInsertLockRelease();
+            StopSuspendWalInsert(lastlrc);
         } while (!gotUniqueStartpoint);
 
         XLByteToSeg(startpoint, _logSegNo);
@@ -12966,9 +13165,10 @@ char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfi
 static void pg_start_backup_callback(int code, Datum arg)
 {
     bool exclusive = DatumGetBool(arg);
+    int32 lastlrc = 0;
 
     /* Update backup counters and forcePageWrites on failure */
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
     if (exclusive) {
         Assert(t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup);
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup = false;
@@ -12981,7 +13181,7 @@ static void pg_start_backup_callback(int code, Datum arg)
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups == 0) {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = false;
     }
-    WALInsertLockRelease();
+    StopSuspendWalInsert(lastlrc);
 }
 
 /*
@@ -13015,6 +13215,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
     char *remaining = NULL;
     char *ptr = NULL;
     uint32 hi, lo;
+    int32 lastlrc = 0;
     errno_t errorno = EOK;
 
     gstrace_entry(GS_TRC_ID_do_pg_stop_backup);
@@ -13050,7 +13251,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
     /*
      * OK to update backup counters and forcePageWrites
      */
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
     if (exclusive) {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup = false;
     } else {
@@ -13068,8 +13269,8 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups == 0) {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = false;
     }
-	u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
-    WALInsertLockRelease();
+    u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
+    StopSuspendWalInsert(lastlrc);
 
     if (exclusive) {
         /*
@@ -13221,7 +13422,7 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
         struct stat statbuf;
 
         /* stoppoint need to flush */
-        XLogFlush(stoppoint);
+        XLogWaitFlush(stoppoint);
         if (stat(fileName, &statbuf)) {
             if (errno != ENOENT) {
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", fileName)));
@@ -13375,7 +13576,9 @@ void do_pg_abort_backup(void)
     if (u_sess->proc_cxt.sessionBackupState != SESSION_BACKUP_NON_EXCLUSIVE)
         return;
 
-    WALInsertLockAcquireExclusive();
+    int32 lastlrc = 0;
+
+    StartSuspendWalInsert(&lastlrc);
     Assert(t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups > 0);
     t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups--;
 
@@ -13385,7 +13588,7 @@ void do_pg_abort_backup(void)
     }
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 
-    WALInsertLockRelease();
+    StopSuspendWalInsert(lastlrc);
 }
 
 /*
@@ -13596,19 +13799,18 @@ static void AbortExcluseBackupCallback(int code, Datum arg)
     if (u_sess->proc_cxt.sessionBackupState != SESSION_BACKUP_EXCLUSIVE) {
         return;
     }
+    int32 lastlrc = 0;
 
     /* Update backup counters and forcePageWrites on failure */
-    WALInsertLockAcquireExclusive();
+    StartSuspendWalInsert(&lastlrc);
     Assert(t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup);
     t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup = false;
-
     if (!t_thrd.shemem_ptr_cxt.XLogCtl->Insert.exclusiveBackup &&
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups == 0) {
         t_thrd.shemem_ptr_cxt.XLogCtl->Insert.forcePageWrites = false;
     }
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
-    WALInsertLockRelease();
-
+    StopSuspendWalInsert(lastlrc);
     if (strcmp(u_sess->attr.attr_common.application_name, "gs_roach") != 0) {
         (void)unlink(BACKUP_LABEL_FILE);
     }
@@ -13769,7 +13971,7 @@ XLogRecPtr enable_delay_ddl_recycle(void)
 
     LWLockAcquire(CBMParseXlogLock, LW_EXCLUSIVE);
 
-#if defined(__x86_64__) || defined (__aarch64__)
+#if defined(__x86_64__) || defined(__aarch64__)
     uint64 current_bytepos = pg_atomic_barrier_read_u64((uint64*)&Insert->CurrBytePos);
     curDelayRange.startLSN = XLogBytePosToEndRecPtr(current_bytepos);
 #else
@@ -13778,7 +13980,7 @@ XLogRecPtr enable_delay_ddl_recycle(void)
     SpinLockRelease(&Insert->insertpos_lck);
 #endif
 
-    XLogFlush(curDelayRange.startLSN);
+    XLogWaitFlush(curDelayRange.startLSN);
 
     advanceXlogPtrToNextPageIfNeeded(&(curDelayRange.startLSN));
 
@@ -13912,7 +14114,7 @@ void disable_delay_ddl_recycle(XLogRecPtr barrierLSN, bool isForce, XLogRecPtr *
     SpinLockRelease(&Insert->insertpos_lck);
 #endif
 
-    XLogFlush(delayRange.endLSN);
+    XLogWaitFlush(delayRange.endLSN);
 
     advanceXlogPtrToNextPageIfNeeded(&(delayRange.endLSN));
 
@@ -13994,7 +14196,7 @@ XLogRecPtr enable_delay_ddl_recycle_with_slot(const char* slotname)
     SpinLockRelease(&Insert->insertpos_lck);
 #endif
 
-    XLogFlush(delay_start_lsn);
+    XLogWaitFlush(delay_start_lsn);
 
     advanceXlogPtrToNextPageIfNeeded(&delay_start_lsn);
 
@@ -14060,7 +14262,7 @@ void disable_delay_ddl_recycle_with_slot(const char* slotname, XLogRecPtr *start
     SpinLockRelease(&Insert->insertpos_lck);
 #endif
 
-    XLogFlush(delay_end_lsn);
+    XLogWaitFlush(delay_end_lsn);
 
     advanceXlogPtrToNextPageIfNeeded(&delay_end_lsn);
 
@@ -15381,7 +15583,6 @@ static void HandleCascadeStandbyPromote(XLogRecPtr* recptr)
                          GetRepConntarget(),
                          u_sess->attr.attr_storage.PrimarySlotName);
 }
-
 
 void CheckMaxPageFlushLSN(XLogRecPtr reqLsn)
 {
@@ -16866,7 +17067,7 @@ void SetDelayXlogRecycle(bool toDelay, bool isRedo)
         XLogBeginInsert();
         XLogRegisterData((char *)(&toDelay), sizeof(toDelay));
         recptr = XLogInsert(RM_XLOG_ID, XLOG_DELAY_XLOG_RECYCLE);
-        XLogFlush(recptr);
+        XLogWaitFlush(recptr);
         END_CRIT_SECTION();
     }
     ereport(DEBUG5, (errmsg("set delay xlog recycle to %s", toDelay ? "true" : "false")));
