@@ -724,7 +724,7 @@
 ./share/postgresql/postgres.bki
 ./share/llvmir/GaussDB_expr.ir
 ./share/sslcert/gsql/openssl.cnf
-./share/sslcert/gds/openssl.cnf
+./share/sslcert/om/openssl.cnf
 ./share/sslcert/grpc/openssl.cnf
 ./share/sslcert/etcd/openssl.cnf
 ./lib/libsimsearch/
