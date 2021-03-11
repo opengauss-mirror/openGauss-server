@@ -3059,8 +3059,8 @@ static void InitConfigureNamesBool()
             check_adio_debug_guc,
             NULL,
             NULL},
-
-        {{"enable_adio_function", PGC_POSTMASTER, DEVELOPER_OPTIONS, gettext_noop("Enable adio function."), NULL},
+        /* This is a beta feature, set it to PGC_INTERNAL, so user can't configure it */
+        {{"enable_adio_function", PGC_INTERNAL, DEVELOPER_OPTIONS, gettext_noop("Enable adio function."), NULL},
             &g_instance.attr.attr_storage.enable_adio_function,
             false,
             check_adio_function_guc,
