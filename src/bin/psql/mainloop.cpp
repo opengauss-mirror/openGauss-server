@@ -148,11 +148,6 @@ int MainLoop(FILE* source, char* querystring)
     }
     pset.lineno = 0;
 
-    if (pset.cur_cmd_interactive) {
-        const char* val = GetVariable(pset.vars, "HISTSIZE");
-        setHistSize("HISTSIZE", val, val == NULL);
-    }
-
     /* Create working state */
     scan_state = psql_scan_create();
 

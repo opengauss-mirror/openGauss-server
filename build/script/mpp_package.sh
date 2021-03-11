@@ -682,7 +682,7 @@ function install_gaussdb()
     echo "Begin configure." >> "$LOG_FILE" 2>&1
     chmod 755 configure
 
-    shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylibs_path} --enable-thread-safety --without-readline --without-zlib"
+    shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylibs_path} --enable-thread-safety --with-readline --without-zlib"
     if [ "$product_mode"x == "multiple"x ]; then
         if [ "$version_mode"x == "release"x ]; then
             ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}"  CC="${USE_CCACHE}g++" ${ENABLE_CCACHE} --enable-multiple-nodes $extra_config_opt >> "$LOG_FILE" 2>&1
