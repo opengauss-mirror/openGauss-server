@@ -552,7 +552,7 @@ use_workload_manager = on		# Enables workload manager in the system.
 # AUTOVACUUM PARAMETERS
 #------------------------------------------------------------------------------
 
-#autovacuum = off			# Enable autovacuum subprocess?  default value is 'off'
+#autovacuum = off			# Enable autovacuum subprocess?  default value is 'on'
 					# requires track_counts to also be on.
 #log_autovacuum_min_duration = -1	# -1 disables, 0 logs all actions and
 					# their durations, > 0 logs only
