@@ -793,7 +793,7 @@ audit_enabled = on
 #audit_function_exec = 0
 #audit_copy_exec = 0
 #audit_set_parameter = 1		# whether audit set parameter operation
-#enable_performace_data = normal #Choose which style to print the explain info, normal,pretty,summary,run
+#Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal
 #------------------------------------------------------------------------------
 # CUSTOMIZED OPTIONS
