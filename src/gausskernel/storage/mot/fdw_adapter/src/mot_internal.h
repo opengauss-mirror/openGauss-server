@@ -261,7 +261,7 @@ public:
 
     // data conversion
     static void DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* data);
-    static void DatumToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+    static void DatumToMOTKey(MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len,
         KEY_OPER oper, uint8_t fill = 0x00);
     static void MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uint8_t* data, Datum* value, bool* is_null);
 
@@ -315,13 +315,13 @@ private:
 
     static void ValidateCreateIndex(IndexStmt* index, MOT::Table* table, MOT::TxnManager* txn);
 
-    static void VarcharToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+    static void VarcharToMOTKey(MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len,
         KEY_OPER oper, uint8_t fill);
-    static void FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
-    static void NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
-    static void TimestampToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
-    static void TimestampTzToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
-    static void DateToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void FloatToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data);
+    static void NumericToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data);
+    static void TimestampToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data);
+    static void TimestampTzToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data);
+    static void DateToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data);
 };
 
 inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id = 0)

@@ -935,10 +935,10 @@ static void VarLenFieldType(
     }
 }
 
-static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TYPES& type, int16* typeLen, bool& isBlob)
+static MOT::RC TableFieldType(
+    const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TYPES& type, int16* typeLen, Oid& typoid, bool& isBlob)
 {
     MOT::RC res = MOT::RC_OK;
-    Oid typoid;
     Type tup;
     Form_pg_type typeDesc;
     int32_t colLen;
@@ -1210,7 +1210,8 @@ void MOTAdaptor::AddTableColumns(MOT::Table* table, List *tableElts, bool& hasBl
             break;
         }
 
-        MOT::RC res = TableFieldType(colDef, colType, &typeLen, isBlob);
+        Oid typoid = InvalidOid;
+        MOT::RC res = TableFieldType(colDef, colType, &typeLen, typoid, isBlob);
         if (res != MOT::RC_OK) {
             delete table;
             table = nullptr;
@@ -1264,7 +1265,8 @@ void MOTAdaptor::AddTableColumns(MOT::Table* table, List *tableElts, bool& hasBl
                 }
             }
         }
-        res = table->AddColumn(colDef->colname, typeLen, colType, colDef->is_not_null);
+
+        res = table->AddColumn(colDef->colname, typeLen, colType, colDef->is_not_null, typoid);
         if (res != MOT::RC_OK) {
             delete table;
             table = nullptr;
@@ -1724,7 +1726,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
                 }
 
                 DatumToMOTKey(col,
-                    expr,
+                    expr->resultType,
                     val,
                     desc->attrs[orgCols[i] - 1]->atttypid,
                     buf + offset,
@@ -1948,26 +1950,25 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
 }
 
 inline void MOTAdaptor::VarcharToMOTKey(
-    MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
+    MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
-    if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
-        bool noValue = false;
-        switch (expr->resultType) {
-            case BYTEAOID:
-            case TEXTOID:
-            case VARCHAROID:
-            case CLOBOID:
-            case BPCHAROID:
-                break;
-            default:
-                noValue = true;
-                errno_t erc = memset_s(data, len, 0x00, len);
-                securec_check(erc, "\0", "\0");
-                break;
-        }
-        if (noValue) {
-            return;
-        }
+    bool noValue = false;
+    switch (datumType) {
+        case BYTEAOID:
+        case TEXTOID:
+        case VARCHAROID:
+        case CLOBOID:
+        case BPCHAROID:
+            break;
+        default:
+            noValue = true;
+            errno_t erc = memset_s(data, len, 0x00, len);
+            securec_check(erc, "\0", "\0");
+            break;
+    }
+
+    if (noValue) {
+        return;
     }
 
     bytea* txt = DatumGetByteaP(datum);
@@ -1984,13 +1985,13 @@ inline void MOTAdaptor::VarcharToMOTKey(
             size -= 1;
         } else {
             // switch to equal
-            if (type == BPCHAROID) {
+            if (colType == BPCHAROID) {
                 fill = 0x20;  // space ' ' == 0x20
             } else {
                 fill = 0x00;
             }
         }
-    } else if (type == BPCHAROID) {  // handle padding for blank-padded type
+    } else if (colType == BPCHAROID) {  // handle padding for blank-padded type
         fill = 0x20;
     }
     col->PackKey(data, (uintptr_t)src, size, fill);
@@ -2000,25 +2001,21 @@ inline void MOTAdaptor::VarcharToMOTKey(
     }
 }
 
-inline void MOTAdaptor::FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+inline void MOTAdaptor::FloatToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
-    if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
-        if (expr->resultType == FLOAT8OID) {
-            MOT::DoubleConvT dc;
-            MOT::FloatConvT fc;
-            dc.m_r = (uint64_t)datum;
-            fc.m_v = (float)dc.m_v;
-            uint64_t u = (uint64_t)fc.m_r;
-            col->PackKey(data, u, col->m_size);
-        } else {
-            col->PackKey(data, datum, col->m_size);
-        }
+    if (datumType == FLOAT8OID) {
+        MOT::DoubleConvT dc;
+        MOT::FloatConvT fc;
+        dc.m_r = (uint64_t)datum;
+        fc.m_v = (float)dc.m_v;
+        uint64_t u = (uint64_t)fc.m_r;
+        col->PackKey(data, u, col->m_size);
     } else {
         col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+inline void MOTAdaptor::NumericToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
     Numeric n = DatumGetNumeric(datum);
     char buf[DECIMAL_MAX_SIZE];
@@ -2027,83 +2024,71 @@ inline void MOTAdaptor::NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum
     col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
 }
 
-inline void MOTAdaptor::TimestampToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+inline void MOTAdaptor::TimestampToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
-    if (expr != nullptr) {
-        if (expr->resultType == TIMESTAMPTZOID) {
-            Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
-            col->PackKey(data, result, col->m_size);
-        } else if (expr->resultType == DATEOID) {
-            Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
-            col->PackKey(data, result, col->m_size);
-        } else {
-            col->PackKey(data, datum, col->m_size);
-        }
+    if (datumType == TIMESTAMPTZOID) {
+        Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
+        col->PackKey(data, result, col->m_size);
+    } else if (datumType == DATEOID) {
+        Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
+        col->PackKey(data, result, col->m_size);
     } else {
         col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::TimestampTzToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+inline void MOTAdaptor::TimestampTzToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
-    if (expr != nullptr) {
-        if (expr->resultType == TIMESTAMPOID) {
-            TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
-            col->PackKey(data, result, col->m_size);
-        } else if (expr->resultType == DATEOID) {
-            TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
-            col->PackKey(data, result, col->m_size);
-        } else {
-            col->PackKey(data, datum, col->m_size);
-        }
+    if (datumType == TIMESTAMPOID) {
+        TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
+        col->PackKey(data, result, col->m_size);
+    } else if (datumType == DATEOID) {
+        TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
+        col->PackKey(data, result, col->m_size);
     } else {
         col->PackKey(data, datum, col->m_size);
     }
 }
 
-inline void MOTAdaptor::DateToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+inline void MOTAdaptor::DateToMOTKey(MOT::Column* col, Oid datumType, Datum datum, uint8_t* data)
 {
-    if (expr != nullptr) {
-        if (expr->resultType == TIMESTAMPOID) {
-            DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
-            col->PackKey(data, result, col->m_size);
-        } else if (expr->resultType == TIMESTAMPTZOID) {
-            DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
-            col->PackKey(data, result, col->m_size);
-        } else {
-            col->PackKey(data, datum, col->m_size);
-        }
+    if (datumType == TIMESTAMPOID) {
+        DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
+        col->PackKey(data, result, col->m_size);
+    } else if (datumType == TIMESTAMPTZOID) {
+        DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
+        col->PackKey(data, result, col->m_size);
     } else {
         col->PackKey(data, datum, col->m_size);
     }
 }
 
 void MOTAdaptor::DatumToMOTKey(
-    MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
+    MOT::Column* col, Oid datumType, Datum datum, Oid colType, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
     EnsureSafeThreadAccessInline();
-    switch (type) {
+    switch (colType) {
         case BYTEAOID:
         case TEXTOID:
         case VARCHAROID:
         case CLOBOID:
         case BPCHAROID:
-            VarcharToMOTKey(col, expr, datum, type, data, len, oper, fill);
+            VarcharToMOTKey(col, datumType, datum, colType, data, len, oper, fill);
             break;
         case FLOAT4OID:
-            FloatToMOTKey(col, expr, datum, data);
+            FloatToMOTKey(col, datumType, datum, data);
             break;
         case NUMERICOID:
-            NumericToMOTKey(col, expr, datum, data);
+            NumericToMOTKey(col, datumType, datum, data);
             break;
         case TIMESTAMPOID:
-            TimestampToMOTKey(col, expr, datum, data);
+            TimestampToMOTKey(col, datumType, datum, data);
             break;
         case TIMESTAMPTZOID:
-            TimestampTzToMOTKey(col, expr, datum, data);
+            TimestampTzToMOTKey(col, datumType, datum, data);
             break;
         case DATEOID:
-            DateToMOTKey(col, expr, datum, data);
+            DateToMOTKey(col, datumType, datum, data);
             break;
         default:
             col->PackKey(data, datum, col->m_size);

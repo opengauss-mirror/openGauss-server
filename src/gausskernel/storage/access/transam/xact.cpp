@@ -7807,7 +7807,7 @@ bool IsPGEngineUsed()
 }
 
 /*
- * Check if we are using PG storage engine in parent transaction.
+ * Check if we are using MOT storage engine in parent transaction.
  */
 bool IsMOTEngineUsedInParentTransaction()
 {

@@ -384,7 +384,7 @@ bool ConfigManager::ReloadConfig(bool ignoreErrors /* = true */)
 
     // print loaded configuration
     LogLevel logLevel = LogLevel::LL_TRACE;
-    GetLayeredConfigTree()->GetUserConfigValue("Log/cfg_startup_log_level", logLevel, false);
+    GetLayeredConfigTree()->GetUserConfigValue("Log.cfg_startup_log_level", logLevel, false);
     if (MOT_CHECK_LOG_LEVEL(logLevel)) {
         GetLayeredConfigTree()->Print(logLevel);
     }

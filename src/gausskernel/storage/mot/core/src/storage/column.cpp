@@ -127,6 +127,7 @@ Column::Column()
     securec_check(erc, "\0", "\0");
     erc = memset_s(&(this->m_type), sizeof(this->m_type), 0, sizeof(this->m_type));
     securec_check(erc, "\0", "\0");
+    this->m_envelopeType = 0;
 }
 
 Column::~Column()

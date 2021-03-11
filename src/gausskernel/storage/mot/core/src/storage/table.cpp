@@ -652,7 +652,8 @@ bool Table::CreateMultipleRows(size_t numRows, Row* rows[])
     return res;
 }
 
-RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull)
+RC Table::AddColumn(
+    const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull, unsigned int envelopeType)
 {
     // validate input parameters
     if (!colName || type >= MOT_CATALOG_FIELD_TYPES::MOT_TYPE_UNKNOWN)
@@ -695,6 +696,7 @@ RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES 
     m_columns[m_fieldCnt]->m_id = m_fieldCnt;
     m_columns[m_fieldCnt]->m_offset = m_tupleSize;
     m_columns[m_fieldCnt]->m_isNotNull = isNotNull;
+    m_columns[m_fieldCnt]->m_envelopeType = envelopeType;
     m_columns[m_fieldCnt]->SetKeySize();
 
     m_tupleSize += size;
@@ -817,7 +819,8 @@ size_t Table::SerializeItemSize(Column* column)
     size_t ret = SerializableARR<char, Column::MAX_COLUMN_NAME_LEN>::SerializeSize(column->m_name) +
                  SerializablePOD<uint64_t>::SerializeSize(column->m_size) +
                  SerializablePOD<MOT_CATALOG_FIELD_TYPES>::SerializeSize(column->m_type) +
-                 SerializablePOD<bool>::SerializeSize(column->m_isNotNull);
+                 SerializablePOD<bool>::SerializeSize(column->m_isNotNull) +
+                 SerializablePOD<unsigned int>::SerializeSize(column->m_envelopeType);  // required for MOT JIT
     return ret;
 }
 
@@ -830,6 +833,7 @@ char* Table::SerializeItem(char* dataOut, Column* column)
     dataOut = SerializablePOD<uint64_t>::Serialize(dataOut, column->m_size);
     dataOut = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Serialize(dataOut, column->m_type);
     dataOut = SerializablePOD<bool>::Serialize(dataOut, column->m_isNotNull);
+    dataOut = SerializablePOD<unsigned int>::Serialize(dataOut, column->m_envelopeType);  // required for MOT JIT
     return dataOut;
 }
 
@@ -839,6 +843,7 @@ char* Table::DeserializeMeta(char* dataIn, CommonColumnMeta& meta)
     dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, meta.m_size);
     dataIn = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Deserialize(dataIn, meta.m_type);
     dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_isNotNull);
+    dataIn = SerializablePOD<unsigned int>::Deserialize(dataIn, meta.m_envelopeType);  // required for MOT JIT
     return dataIn;
 }
 
@@ -1110,7 +1115,7 @@ void Table::Deserialize(const char* in)
     CommonColumnMeta col;
     for (uint32_t i = 0; i < saveFieldCount; i++) {
         dataIn = DeserializeMeta(dataIn, col);
-        if (AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull) != RC_OK) {
+        if (AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull, col.m_envelopeType) != RC_OK) {
             MOT_LOG_ERROR("Table::deserialize - failed to add column %u", i);
             return;
         }
