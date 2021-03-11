@@ -1229,17 +1229,12 @@ do_gucset(const char *action_type, const char *data_dir)
                 to_generatenewline(optconf_line, newconf_line, config_param[i], config_value[i], optvalue_len);
             } else {
                 /*
-                 * if parameter as value is NULL; consider it as UNSET (i.e to default value)
-                 *  which means comment the configuration parameter
+                 * if parameter value is NULL; not consider it as UNSET,
+                 * which means maintain the configuration parameter, and
+                 * there will be prompts telling the user to assign a value.
                  */
-                //line is commented
-                if (isOptLineCommented(optconf_line)) {
-                    rc = strncpy_s(newconf_line, MAX_PARAM_LEN*2, optconf_line, (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
-                    securec_check_c(rc, "\0", "\0");
-                } else {
-                    nRet = snprintf_s(newconf_line, MAX_PARAM_LEN*2, MAX_PARAM_LEN*2 - 1, "#%s", optconf_line);
-                    securec_check_ss_c(nRet, "\0", "\0");
-                }
+                write_stderr(_("ERROR: %s parameters value is expected\n"), config_param[i]);
+                return FAILURE;
             }
             updateoradd = UPDATE_PARAMETER;
         } else {
