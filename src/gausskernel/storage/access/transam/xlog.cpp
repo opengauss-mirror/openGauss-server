@@ -7718,6 +7718,13 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
         return false;
     }
 
+    /* the walreceiver process is started behind here,
+     * ensure that the walreceiver process has been started,
+     * otherwise, the stream replication will be disconnected */
+    if (g_instance.pid_cxt.WalReceiverPID == 0) {
+        return false;
+    }
+
     /*
      * Is it a COMMIT record?
      * We deliberately choose not to delay aborts since they have no effect on
