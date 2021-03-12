@@ -1077,7 +1077,7 @@ endif
 libpq = -L$(libpq_builddir) -lpq
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
+libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
 else
 libpq_ce = -L$(libpq_builddir) -lpq_ce
 endif
