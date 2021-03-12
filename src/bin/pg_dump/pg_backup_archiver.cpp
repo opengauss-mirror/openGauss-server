@@ -136,6 +136,7 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
 static char* replace_line_endings(const char* str);
 static void _doSetFixedOutputState(ArchiveHandle* AH);
 static void _doSetSessionAuth(ArchiveHandle* AH, const char* user);
+static void _doResetSessionAuth(ArchiveHandle* AH);
 static void _doSetWithOids(ArchiveHandle* AH, const bool withOids);
 static void _reconnectToDB(ArchiveHandle* AH, const char* dbname);
 static void _becomeUser(ArchiveHandle* AH, const char* user);
@@ -2606,6 +2607,9 @@ static void _doSetFixedOutputState(ArchiveHandle* AH)
  */
 static void _doSetSessionAuth(ArchiveHandle* AH, const char* user)
 {
+    if (RestoringToDB(AH)) {
+        _doResetSessionAuth(AH);
+    }
     PQExpBuffer cmd = createPQExpBuffer();
     char* rolepassword = NULL;
 
@@ -2641,6 +2645,29 @@ static void _doSetSessionAuth(ArchiveHandle* AH, const char* user)
 
     (void)destroyPQExpBuffer(cmd);
 }
+
+/*
+ * Issue a RESET SESSION AUTHORIZATION command. Only used before _doSetSessionAuth when gs_restoring.
+ */
+static void _doResetSessionAuth(ArchiveHandle* AH) {
+    PQExpBuffer cmd = createPQExpBuffer();
+    (void)appendPQExpBuffer(cmd, "RESET SESSION AUTHORIZATION;");
+    if (RestoringToDB(AH)) {
+        PGresult* res = NULL;
+
+        res = PQexec(AH->connection, cmd->data);
+        if ((res == NULL) || PQresultStatus(res) != PGRES_COMMAND_OK)
+            /* NOT warn_or_exit_horribly... use -O instead to skip this. */
+            exit_horribly(modulename, "could not reset session: %s", PQerrorMessage(AH->connection));
+        PQclear(res);
+    } else {
+        // not used
+        (void)ahprintf(AH, "%s\n\n", cmd->data);
+    }
+
+    (void)destroyPQExpBuffer(cmd);
+}
+
 
 /*
  * Issue a SET default_with_oids command.  Caller is responsible
