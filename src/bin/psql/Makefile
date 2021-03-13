@@ -24,7 +24,7 @@ SGMLDIR= $(top_builddir)/doc/src/sgml
 override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE $(CPPFLAGS)
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-CPPFLAGS += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o:
@@ -72,7 +72,7 @@ all: submake-aes gsql
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+libpq_pgport += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/lib/elog/elog.a:

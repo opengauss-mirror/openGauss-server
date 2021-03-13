@@ -29,7 +29,7 @@ override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_h
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/src/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 endif
 
@@ -175,7 +175,7 @@ endif
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 all: gs_ktool all-lib-depends
 gs_ktool:
-	$(MAKE) -C $(top_builddir)/src/bin/gs_ktool
+	$(MAKE) -C $(top_builddir)/src/distribute/bin/gs_ktool
 else
 all: all-lib-depends
 endif
