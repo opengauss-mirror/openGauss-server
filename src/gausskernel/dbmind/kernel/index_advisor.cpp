@@ -281,7 +281,7 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
     // Format the returned result, e.g., 'table1, "(col1,col2),(col3)"'.
     int array_len = g_table_list == NIL ? 0 : g_table_list->length;
     *len = array_len;
-    SuggestedIndex *array = (SuggestedIndex *)palloc(sizeof(SuggestedIndex) * array_len);
+    SuggestedIndex *array = (SuggestedIndex *)palloc0(sizeof(SuggestedIndex) * array_len);
     errno_t rc = EOK;
     item = NULL;
     int i = 0;
@@ -659,7 +659,7 @@ Oid find_table_oid(List *list, const char *table_name)
  */
 void generate_final_index(TableCell *table, Oid table_oid)
 {
-    char *suggested_index = (char *)palloc(NAMEDATALEN);
+    char *suggested_index = (char *)palloc0(NAMEDATALEN);
     ListCell *index = NULL;
     errno_t rc = EOK;
     int i = 0;
@@ -667,7 +667,7 @@ void generate_final_index(TableCell *table, Oid table_oid)
     // concatenate the candidate indexes into a string
     foreach (index, table->index) {
         char *index_name = ((IndexCell *)lfirst(index))->index_name;
-        if (strlen(index_name) > NAMEDATALEN - strlen(suggested_index) - 1) {
+        if (strlen(index_name) + strlen(suggested_index) + 1 > NAMEDATALEN) {
             break;
         }
         if (i == 0) {
@@ -693,7 +693,7 @@ void generate_final_index(TableCell *table, Oid table_oid)
     }
 
     // check the existed indexes
-    char *existed_index = (char *)palloc(NAMEDATALEN);
+    char *existed_index = (char *)palloc0(NAMEDATALEN);
     List *indexes = get_table_indexes(table_oid);
     index = NULL;
 
@@ -848,7 +848,7 @@ void parse_join_tree(JoinExpr *join_tree)
 void add_join_cond(TableCell *begin_table, char *begin_field, TableCell *end_table, char *end_field)
 {
     JoinCell *join_cond = NULL;
-    join_cond = (JoinCell *)palloc(sizeof(*join_cond));
+    join_cond = (JoinCell *)palloc0(sizeof(*join_cond));
     join_cond->field = begin_field;
     join_cond->table = end_table->table_name;
     join_cond->table_field = end_field;
@@ -955,14 +955,14 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
     }
 
     char *op_type = strVal(linitial(op));
-    char *field_expr = (char *)palloc(MAX_QUERY_LEN);
-    char *field_value = (char *)palloc(MAX_QUERY_LEN);
+    char *field_expr = (char *)palloc0(MAX_QUERY_LEN);
+    char *field_value = (char *)palloc0(MAX_QUERY_LEN);
     ListCell *item = NULL;
     int i = 0;
 
     // get field values
     foreach (item, lfield_values) {
-        char *str = (char *)palloc(MAX_QUERY_LEN);
+        char *str = (char *)palloc0(MAX_QUERY_LEN);
         field_value_trans(str, (A_Const *)lfirst(item));
         if (i == 0) {
             rc = strcpy_s(field_value, MAX_QUERY_LEN, str);
@@ -1002,7 +1002,7 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
 
     uint4 cardinality = calculate_field_cardinality(table_name, field_expr);
     if (cardinality > CARDINALITY_THRESHOLD) {
-        IndexCell *index = (IndexCell *)palloc(sizeof(*index));
+        IndexCell *index = (IndexCell *)palloc0(sizeof(*index));
         index->index_name = index_name;
         index->cardinality = cardinality;
         index->op = op_type;
@@ -1173,7 +1173,7 @@ TableCell *find_or_create_tblcell(char *table_name, char *alias_name)
 
     // create a new table
     TableCell *new_table = NULL;
-    new_table = (TableCell *)palloc(sizeof(*new_table));
+    new_table = (TableCell *)palloc0(sizeof(*new_table));
     new_table->table_name = table_name;
     new_table->alias_name = alias_name;
     new_table->index = NIL;
@@ -1307,7 +1307,7 @@ void add_index_from_join(TableCell *table, char *index_name)
         }
     }
 
-    IndexCell *index = (IndexCell *)palloc(sizeof(*index));
+    IndexCell *index = (IndexCell *)palloc0(sizeof(*index));
     index->index_name = index_name;
     index->cardinality = 0;
     index->op = NULL;
@@ -1473,7 +1473,7 @@ void add_index_from_group_order(TableCell *table, List *clause, List *target_lis
             break;
         fields = ((ColumnRef *)node)->fields;
         index_name = find_field_name(fields);
-        IndexCell *index = (IndexCell *)palloc(sizeof(*index));
+        IndexCell *index = (IndexCell *)palloc0(sizeof(*index));
         index->index_name = index_name;
         index->cardinality = 0;
         index->op = NULL;
