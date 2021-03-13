@@ -55,6 +55,7 @@
 #include "bin/elog.h"
 #include "openssl/rand.h"
 
+#include "common/config/cm_config.h"
 #if defined(__CYGWIN__)
 #include <sys/cygwin.h>
 #include <windows.h>
@@ -218,8 +219,6 @@ char* g_prefix = NULL;
 // whether change the value of synchronous_standby_names
 bool g_need_changed = true;
 char* g_local_instance_path = NULL;
-// the logical cluster name
-char* g_lcname = NULL;
 
 typedef struct {
     char** nodename_array;
@@ -244,10 +243,7 @@ gucInfo* g_real_gucInfo = NULL;
 /* expect result */
 gucInfo* g_expect_gucInfo = NULL;
 
-/* the local node name and idx  */
-uint32 g_local_node_idx = 0;
 uint32 g_local_dn_idx = 0;
-char* g_local_node_name = NULL;
 char* g_current_data_dir = NULL;
 
 void* pg_malloc(size_t size);
@@ -318,7 +314,6 @@ bool allocate_memory_list();
 extern int init_gauss_cluster_config(void);
 extern char* get_AZ_value(char* value, const char* data_dir);
 extern bool get_hostname_or_ip(char* out_name, size_t name_len);
-extern int checkPath(const char* fileName);
 
 #ifdef __cplusplus
 }
@@ -390,6 +385,7 @@ bool allocate_memory_list()
     securec_check_ss_c(rc, "\0", "\0");
 
     if (checkPath(guc_file) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), guc_file, strerror(errno));
         return false;
     }
     /* maybe fail because of privilege*/
@@ -797,7 +793,9 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
     }
     ret = strcpy_s(newpath, sizeof(newpath), path);
     canonicalize_path(newpath);
-    (void)checkPath(newpath);
+    if (checkPath(newpath) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), newpath, strerror(errno));
+    }
 
     if (lstat(newpath, &statbuf) != 0) {
         fp = fopen(newpath, PG_BINARY_W);
@@ -2254,7 +2252,7 @@ int main(int argc, char** argv)
         config_value = ((char**)pg_malloc_zero(arraysize * sizeof(char*)));
     }
     if (false == allocate_memory_list()) {
-        write_stderr(_("ERROR:: Failed to allocate memory to list.\n"));
+        write_stderr(_("ERROR: Failed to allocate memory to list.\n"));
         exit(1);
     }
 

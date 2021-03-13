@@ -40,7 +40,6 @@
 const int CLUSTER_CONFIG_SUCCESS = 0;
 const int CLUSTER_CONFIG_ERROR = 1;
 #define LOOP_COUNT 3
-#define MAX_REALPATH_LEN 4096
 #define DOUBLE_PRECISE 0.000000001
 #define MAX_HOST_NAME_LENGTH 255
 #define LARGE_INSTANCE_NUM 2
@@ -57,6 +56,17 @@ const int CLUSTER_CONFIG_ERROR = 1;
         }                       \
     } while (0)
 
+#define PROCESS_STATUS(status)                                                  \
+    do {                                                                        \
+        if (status == OUT_OF_MEMORY) {                                    \
+            write_stderr("Failed: out of memory\n");                            \
+            exit(1);                                                            \
+        }                                                                       \
+        if (status == OPEN_FILE_ERROR) {                                  \
+            write_stderr("Failed: cannot find the expected data dir\n");        \
+            exit(1);                                                            \
+        }                                                                       \
+    } while (0)
 
 const int GTM_INSTANCE_LEN = 3;  // eg: one
 const int CN_INSTANCE_LEN = 7;   // eg: cn_5001
@@ -105,10 +115,6 @@ extern gucInfo* g_real_gucInfo;
 /* expect result */
 extern gucInfo* g_expect_gucInfo;
 
-/* the local node name and idx  */
-extern uint32 g_local_node_idx;
-extern char* g_local_node_name;
-
 extern char gucconf_file[MAXPGPATH];
 extern int config_param_number;
 extern char** config_param;
@@ -134,7 +140,6 @@ extern char** cmagent_guc_info;
 extern char** gtm_guc_info;
 extern char** lc_guc_info;
 extern const char* progname;
-extern char* g_lcname;
 
 /* status which perform remote connection */
 extern bool g_remote_connection_signal;
@@ -307,7 +312,6 @@ int get_all_cmserver_num();
 int get_all_cmagent_num();
 int get_all_cndn_num();
 int get_all_gtm_num();
-char* get_nodename_list_by_AZ(char* AZName, const char* data_dir);
 char* get_AZ_value(const char* value, const char* data_dir);
 char* get_AZname_by_nodename(char* nodename);
 
@@ -1237,56 +1241,6 @@ bool get_env_value(const char* env_var, char* output_env_value, size_t env_var_v
 
 /*
  ******************************************************************************
- Function    : checkPath
- Description :
- Input       : fileName
- Output      : None
- Return      : None
- ******************************************************************************
-*/
-int checkPath(const char* fileName)
-{
-    char* retVal = NULL;
-    char realFileName[MAX_REALPATH_LEN + 1] = {0};
-    retVal = realpath(fileName, realFileName);
-    if (NULL == retVal) {
-        write_stderr(_("realpath(%s) failed : %s!\n"), fileName, gs_strerror(errno));
-        return -1;
-    }
-    return 0;
-}
-
-static bool has_static_config()
-{
-    char path[MAXPGPATH];
-    char gausshome[MAXPGPATH] = {0};
-    int nRet = 0;
-    struct stat statbuf;
-
-    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
-        return false;
-
-    check_env_value(gausshome);
-    if (NULL != g_lcname) {
-        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.%s", gausshome, g_lcname, STATIC_CONFIG_FILE);
-    } else {
-        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
-    }
-    securec_check_ss_c(nRet, "\0", "\0");
-
-    if (checkPath(path) != 0) {
-        return false;
-    }
-
-    if (lstat(path, &statbuf) == 0) {
-        return true;
-    }
-
-    return false;
-}
-
-/*
- ******************************************************************************
  Function    : process_cluster_guc_option
  Description :
  Input       : nodename -
@@ -1536,6 +1490,7 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
     const int az1_index = 0;
     const int az2_index = 1;
     const int az3_index = 2;
+    int resultStatus = 0;
 
     // init tmp az string, array which storage az string
     nRet = memset_s(tmp, MAX_VALUE_LEN, '\0', MAX_VALUE_LEN);
@@ -1635,7 +1590,8 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
     array[1] = NULL;
     array[2] = NULL;
 
-    array[0] = get_nodename_list_by_AZ(azList[0], data_dir);
+    resultStatus = get_nodename_list_by_AZ(azList[0], data_dir, &array[0]);
+    PROCESS_STATUS(resultStatus);
     // input az name is incorrect
     if (NULL == array[0]) {
         (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
@@ -1647,7 +1603,8 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
     len += strlen(array[0]) + 1;
 
     if ('\0' != azList[1][0]) {
-        array[1] = get_nodename_list_by_AZ(azList[1], data_dir);
+        resultStatus = get_nodename_list_by_AZ(azList[1], data_dir, &array[1]);
+        PROCESS_STATUS(resultStatus);
         // input az name is incorrect
         if (NULL == array[1]) {
             (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
@@ -1660,7 +1617,8 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
     }
 
     if ('\0' != azList[2][0]) {
-        array[2] = get_nodename_list_by_AZ(azList[2], data_dir);
+        resultStatus = get_nodename_list_by_AZ(azList[2], data_dir, &array[2]);
+        PROCESS_STATUS(resultStatus);
         // input az name is incorrect
         if (NULL == array[2]) {
             (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
@@ -1717,11 +1675,7 @@ int get_nodename_number_from_nodelist(const char* namelist)
 {
     char* ptr = NULL;
     char* outer_ptr = NULL;
-#ifdef ENABLE_MULTIPLE_NODES
     char delims[] = ",";
-#else
-    char delims[] = "_";
-#endif
     size_t len = 0;
     int count = 0;
     char* buffer = NULL;
@@ -1892,6 +1846,7 @@ char* get_AZ_value(const char* value, const char* data_dir)
     char delims[] = ",";
     char* vptr = NULL;
     char emptyvalue[] = "''";
+    int resultStatus = 0;
     bool isNodeName = false;
 
     if (az1 != NULL) {
@@ -1991,32 +1946,29 @@ char* get_AZ_value(const char* value, const char* data_dir)
 
     if (NULL == nodenameList) {
         // try dn
-        nodenameList = get_nodename_list_by_AZ(az1, data_dir);
+        resultStatus = get_nodename_list_by_AZ(az1, data_dir, &nodenameList);
+        PROCESS_STATUS(resultStatus);
         if (nodenameList == NULL) {
             goto failed;
         }
-        nodenameList[strlen(nodenameList)] = ',';
 
-        len = strlen(q);
+        len = strlen(q) + 1;
         s = (char *)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(s, len + 1, len, "%s", q);
+        nRet = snprintf_s(s, len, len - 1, "%s", q);
         securec_check_ss_c(nRet, s, "\0");
 
         vptr = strtok_r(s, delims, &vouter_ptr);
         while (vptr != NULL) {
             p = vptr;
-            int len_p = strlen(p) + 1;
-            char *temp = (char *)pg_malloc_zero(len_p * sizeof(char));
-            nRet = snprintf_s(temp, len_p + 1, len_p, "%s,", p);
-            securec_check_ss_c(nRet, temp, "\0");
 
-            if (strstr(nodenameList, temp) == NULL) {
+            if (!contain_nodename(nodenameList, p)) {
                 goto failed;
             }
             vptr = strtok_r(NULL, delims, &vouter_ptr);
         }
 
         GS_FREE(s);
+        len = strlen(nodenameList);
         nRet = snprintf_s(nodenameList, len + 1, len, "%s", q);
         securec_check_ss_c(nRet, nodenameList, "\0");
     } else if ('\0' == nodenameList[0]) {
@@ -2180,13 +2132,17 @@ void do_command_in_local_node(int type, char* indatadir)
             check_env_value(datadir);
         }
         /* process the PGDATA / GTMDATA */
-        (void)checkPath(datadir);
+        if (checkPath(datadir) != 0) {
+            write_stderr(_("realpath(%s) failed : %s!\n"), datadir, strerror(errno));
+        }
         save_expect_instance_info(datadir);
         if (FAILURE == do_local_guc_command(type, datadir))
             return;
     } else {
         /* process the -D option */
-        (void)checkPath(indatadir);
+        if (checkPath(indatadir) != 0) {
+            write_stderr(_("realpath(%s) failed : %s!\n"), indatadir, strerror(errno));
+        }
         save_expect_instance_info(indatadir);
         if (FAILURE == do_local_guc_command(type, indatadir))
             return;
