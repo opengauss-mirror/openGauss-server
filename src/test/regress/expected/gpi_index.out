@@ -119,11 +119,12 @@ select * from gpi_index_test where a < 200 and b > 190 order by a;
 -- multi column index with global index
 create index gpi_index_test_global_a_b on gpi_index_test(a,b) global;
 explain (costs off) select * from gpi_index_test where a = 200 and b = 100;
-                          QUERY PLAN                          
---------------------------------------------------------------
- Index Scan using gpi_index_test_global_a_b on gpi_index_test
-   Index Cond: ((a = 200) AND (b = 100))
-(2 rows)
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Index Scan using gpi_index_test_global_b on gpi_index_test
+   Index Cond: (b = 100)
+   Filter: (a = 200)
+(3 rows)
 
 select * from gpi_index_test where a = 100 and b = 100 order by a;
   a  |  b  |       c        
@@ -432,19 +433,17 @@ select count(*) from gpi_index_test as t1 NATURAL inner join gpi_index_test1 t2 
 (1 row)
 
 explain (costs off) select * from gpi_index_test t1 full join gpi_index_test1 t2 on t1.b >= t2.a where t1.b < 200 and t2.a = 50 and t1.a = 100;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
  Nested Loop
-   Join Filter: (t1.b >= t2.a)
-   ->  Partition Iterator
-         Iterations: 1
-         ->  Partitioned Index Scan using gpi_index_test_local_a on gpi_index_test t1
-               Index Cond: (a = 100)
-               Filter: (b < 200)
-               Selected Partitions:  2
    ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
          Index Cond: (a = 50)
-(10 rows)
+   ->  Bitmap Heap Scan on gpi_index_test t1
+         Recheck Cond: ((b >= t2.a) AND (b < 200))
+         Filter: (a = 100)
+         ->  Bitmap Index Scan on gpi_index_test_global_b
+               Index Cond: ((b >= t2.a) AND (b < 200))
+(8 rows)
 
 select * from gpi_index_test t1 full join gpi_index_test1 t2 on t1.b >= t2.a where t1.b < 200 and t2.a = 50 and t1.a = 100;
   a  |  b  |       c        | a  | b  |       c        
@@ -470,15 +469,15 @@ select count(*) from gpi_index_test t1 left join gpi_index_test1 t2 on (t1.b >= 
 (1 row)
 
 explain (costs off) select * from gpi_index_test t1 right join gpi_index_test1 t2 on (t1.b >= t2.a and (t1.a < 60 or t2.b != 30)) where t1.b < 200 and t2.a < 100;
-                                 QUERY PLAN                                  
------------------------------------------------------------------------------
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
  Nested Loop
    Join Filter: ((t1.b >= t2.a) AND ((t1.a < 60) OR (t2.b <> 30)))
-   ->  Index Scan using gpi_index_test_global_b on gpi_index_test t1
-         Index Cond: (b < 200)
+   ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
+         Index Cond: (a < 100)
    ->  Materialize
-         ->  Index Scan using gpi_index_test1_global_a on gpi_index_test1 t2
-               Index Cond: (a < 100)
+         ->  Index Scan using gpi_index_test_global_b on gpi_index_test t1
+               Index Cond: (b < 200)
 (7 rows)
 
 select count(*) from gpi_index_test t1 left join gpi_index_test1 t2 on (t1.b >= t2.a and (t1.a != 60 or t1.b != 30)) where t1.b < 200 and t2.a < 100;
