@@ -17515,6 +17515,7 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
     int remoteservice_len = strlen("remoteservice");
     int local_heartbeat_len = strlen("localheartbeatport");
     int remote_heartbeat_len = strlen("remoteheartbeatport");
+    int cascadeLen = strlen("iscascade");
 
     errno_t errorno = EOK;
 
@@ -17687,6 +17688,16 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
 
                 if (isdigit(*iter)) {
                     repl[parsed].remoteheartbeatport = atoi(iter);
+                }
+            }
+
+            /* is a cascade standby */
+            iter = strstr(token, "iscascade");
+            if (NULL != iter) {
+                iter += cascadeLen;
+
+                if (strstr(iter, "true") != NULL) {
+                    repl[parsed].isCascade = true;
                 }
             }
 
