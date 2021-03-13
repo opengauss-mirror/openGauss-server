@@ -63,9 +63,6 @@
 #include "securec_check.h"
 #include "port.h"
 
-#define STATIC_CONFIG_FILE "cluster_static_config"
-#define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"
-
 #define MAX_VALUE_LEN 1024
 #define MAX_PARAM_LEN 1024
 #define CLUSTER_CONFIG_SUCCESS 0
@@ -75,8 +72,6 @@
 #define STADARD_SSH_PORT 22
 
 #define STD_FORMAT_ARG_POSITION 2
-
-#define CASCADE_STANDBY_TYPE 3
 
 extern char** cndn_param;
 extern char** cmserver_param;
@@ -93,7 +88,6 @@ extern int cmserver_param_number;
 extern int cmagent_param_number;
 extern int gtm_param_number;
 extern int lc_param_number;
-extern uint32 g_local_node_idx;
 extern uint32 g_local_dn_idx;
 extern char* g_current_data_dir;
 
@@ -144,7 +138,6 @@ int get_all_cmserver_num();
 int get_all_cmagent_num();
 int get_all_cndn_num();
 int get_all_gtm_num();
-char* get_nodename_list_by_AZ(const char* AZName, const char* data_dir);
 char* get_AZname_by_nodename(const char* nodename);
 int find_gucoption_available(
     const char** optlines, const char* opt_name, int* name_offset, int* name_len, int* value_offset, int* value_len);
@@ -153,18 +146,10 @@ char** readfile(const char* path, int reserve_num_lines);
 void freefile(char** lines);
 
 extern bool get_env_value(const char* env_var, char* output_env_value, size_t env_var_value_len);
-extern int checkPath(const char* fileName);
 void* pg_malloc_memory(size_t size);
 extern char* xstrdup(const char* s);
-extern char* g_lcname;
-extern char* g_local_node_name;
 extern char* g_local_instance_path;
 extern void check_env_value(const char* input_env_value);
-
-typedef struct AZ_Info {
-    char* nodeName;
-    uint32 azPriority;
-} AZList;
 
 /* 
  ******************************************************************************
@@ -487,161 +472,6 @@ char* get_AZname_by_nodename(const char* nodename)
     }
     return azName;
 }
-/*
- ******************************************************************************
- Function    : get_nodename_list_by_AZ
- Description : get node name list by azName, don't include local node
- Input       : AZName -
- Output      : nodename list
- Return      : None
- ******************************************************************************
-*/
-char* get_nodename_list_by_AZ(const char* AZName, const char* data_dir)
-{
-    uint32 nodeidx = 0;
-    uint32 count = 0;
-    uint32 len = 0;
-    uint32 i = 0;
-    uint32 j = 0;
-    AZList* azList = NULL;
-    uint32 tmpAZPriority = 0;
-    char* tmpNodeName = NULL;
-    size_t buflen = 1;
-    char* buffer = NULL;
-    int nRet = 0;
-    size_t curlen = 0;
-
-    // get the node number which in azName
-    for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
-        if (strcmp(g_node[nodeidx].azName, AZName) == 0) {
-            count++;
-        }
-    }
-    // maybe the AZName is incorrect, so return null
-    if (count < 1) {
-        return NULL;
-    }
-
-    // init azList, i must less than count
-    azList = (AZList*)malloc(sizeof(AZList) * count);
-    if (NULL == azList) {
-        write_stderr("Failed: out of memory\n");
-        exit(1);
-    }
-
-    dataNodeInfo* dni = NULL;
-    {
-        uint32 idx = 0;
-        for (idx = 0; idx < g_currentNode->datanodeCount; idx++) {
-            dataNodeInfo* dni_tmp = &(g_currentNode->datanode[idx]);
-            if (strcmp(dni_tmp->datanodeLocalDataPath, data_dir) == 0) {
-                dni = dni_tmp;
-                break;
-            }
-        }
-    }
-
-    if (dni == NULL) {
-        write_stderr("Failed: cannot find the expected data dir\n");
-        exit(1);
-    }
-
-    for (nodeidx = 0, i = 0; nodeidx < g_node_num; nodeidx++) {
-        staticNodeConfig* dest = &(g_node[nodeidx]);
-        bool get_dn_in_same_shard = false;
-
-        if (nodeidx != g_local_node_idx && strcmp(dest->azName, AZName) == 0) {
-            uint32 l = 0;
-            for (l = 0; l < dest->datanodeCount && !get_dn_in_same_shard; l++) {
-                dataNodeInfo* dn = &(dest->datanode[l]);
-                int n = 0;
-
-                if (dn->datanodeId == 0)
-                    continue;
-
-                if (dn->datanodeRole == CASCADE_STANDBY_TYPE)
-                    continue;
-
-                for (n = 0; n < CM_MAX_DATANODE_STANDBY_NUM && !get_dn_in_same_shard; n++) {
-                    peerDatanodeInfo* peer_datanode = &(dn->peerDatanodes[n]);
-                    if (strlen(peer_datanode->datanodePeerHAIP[0]) == 0)
-                        continue;
-
-                    if (strcmp(peer_datanode->datanodePeerHAIP[0], dni->datanodeLocalHAIP[0]) == 0 &&
-                        peer_datanode->datanodePeerHAPort == dni->datanodeLocalHAPort) {
-                        char dn_instance_id[64] = {0};
-                        int nRet = snprintf_s(dn_instance_id,
-                            sizeof(dn_instance_id) / sizeof(char),
-                            sizeof(dn_instance_id) / sizeof(char) - 1,
-                            "dn_%4u",
-                            dn->datanodeId);
-                        securec_check_ss_c(nRet, "\0", "\0");
-                        azList[i].nodeName = xstrdup(dn_instance_id);
-                        azList[i].azPriority = dest->azPriority;
-                        buflen += strlen(azList[i].nodeName) + 1;
-                        i++;
-                        get_dn_in_same_shard = true;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // the real node name number
-    len = i;
-    // sort by azPriority asc
-    for (i = 0; len > 0 && i < len - 1; i++) {
-        for (j = 0; len > 0 && j < len - i - 1; j++) {
-            if (azList[j].azPriority > azList[j + 1].azPriority) {
-                // swap azPriority
-                tmpAZPriority = azList[j].azPriority;
-                azList[j].azPriority = azList[j + 1].azPriority;
-                azList[j + 1].azPriority = tmpAZPriority;
-                // swap nodename
-                tmpNodeName = xstrdup(azList[j].nodeName);
-                free(azList[j].nodeName);
-                azList[j].nodeName = NULL;
-                azList[j].nodeName = xstrdup(azList[j + 1].nodeName);
-                free(azList[j + 1].nodeName);
-                azList[j + 1].nodeName = NULL;
-                azList[j + 1].nodeName = xstrdup(tmpNodeName);
-                GS_FREE(tmpNodeName);
-            }
-        }
-    }
-
-    // Exclude the local node name and output the remaining information
-    buffer = (char*)malloc(sizeof(char) * (buflen + 1));
-    if (NULL == buffer) {
-        write_stderr("Failed: out of memory\n");
-        exit(1);
-    }
-    nRet = memset_s(buffer, buflen + 1, 0, buflen + 1);
-    securec_check_c(nRet, buffer, "\0");
-
-    for (i = 0; i < len; i++) {
-        if (strcmp(g_local_node_name, azList[i].nodeName) == 0) {
-            continue;
-        }
-        // the type like this: node1,node2,
-        nRet = snprintf_s(buffer + curlen, (buflen + 1 - curlen), (buflen - curlen), "%s,", azList[i].nodeName);
-        securec_check_ss_c(nRet, buffer, "\0");
-        curlen = curlen + nRet;
-    }
-    // skip the last character ','
-    if (strlen(buffer) >= 1) {
-        buffer[strlen(buffer) - 1] = '\0';
-    }
-
-    // free AZList
-    for (i = 0; i < len; i++) {
-        GS_FREE(azList[i].nodeName);
-    }
-    GS_FREE(azList);
-
-    return buffer;
-}
 
 /*
  ******************************************************************************
@@ -767,50 +597,6 @@ int32 get_local_gtm_name(char* instancename)
     return CLUSTER_CONFIG_ERROR;
 }
 
-int get_dynamic_dn_role(void)
-{
-    char path[MAXPGPATH];
-    char gausshome[MAXPGPATH] = {0};
-    int nRet = 0;
-    FILE* fp = NULL;
-    char line_info[MAXPGPATH] = {0};
-    char* node_name = nullptr;
-    char* dn_role = nullptr;
-    uint32 nodeidx = 0;
-    struct stat statbuf;
-
-    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
-        return 1;
-
-    check_env_value(gausshome);
-
-    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, DYNAMIC_DNROLE_FILE);
-    securec_check_ss_c(nRet, "\0", "\0");
-
-    if (lstat(path, &statbuf) != 0) {
-        return 0;
-    }
-
-    fp = fopen(path, "r");
-    if (fp == NULL) {
-        write_stderr("ERROR: Failed to open file\"%s\"\n", path);
-        return 1;
-    }
-
-    while ((fgets(line_info, 1023 - 1, fp)) != NULL) {
-        line_info[(int)strlen(line_info) - 1] = '\0';
-        node_name = strtok_r(line_info, "=", &dn_role);
-        for (nodeidx = 0; node_name && (nodeidx < g_node_num); nodeidx++) {
-            if (strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name)) == 0) {
-                g_node[nodeidx].datanode[0].datanodeRole = (uint32)atoi(dn_role);
-            }
-        }
-    }
-
-    (void)fclose(fp);
-    return 0;
-}
-
 /*
  ******************************************************************************
  Function    : init_gauss_cluster_config
@@ -849,6 +635,7 @@ int init_gauss_cluster_config(void)
     securec_check_ss_c(nRet, "\0", "\0");
 
     if (checkPath(path) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), path, strerror(errno));
         return 1;
     }
 
@@ -933,6 +720,7 @@ int save_guc_para_info()
     securec_check_ss_c(rc, "\0", "\0");
 
     if (checkPath(guc_file) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), guc_file, strerror(errno));
         return FAILURE;
     }
     /* maybe fail because of privilege */
