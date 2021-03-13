@@ -353,10 +353,15 @@ Oid GetRelOidForPartitionTable(Scan scan, const Relation rel, ParamListInfo para
 }
 
 /* init the index in construct */
-Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition* partIndex, Relation* parentIndex)
+Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition* partIndex, Relation* parentIndex, Relation rel)
 {
     *parentIndex = relation_open(parentIndexOid, AccessShareLock);
-    Oid partIndexOid = getPartitionIndexOid(parentIndexOid, partOid);
+    Oid partIndexOid;
+    if (list_length(rel->rd_indexlist) == 1) {
+        partIndexOid = lfirst_oid(rel->rd_indexlist->head);
+    } else {
+        partIndexOid = getPartitionIndexOid(parentIndexOid, partOid);
+    }
     *partIndex = partitionOpen(*parentIndex, partIndexOid, AccessShareLock);
     Relation index = partitionGetRelation(*parentIndex, *partIndex);
     return index;
@@ -481,7 +486,7 @@ void IndexScanFusion::Init(long max_rows)
 
         /* get partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex, m_rel);
     } else {
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
@@ -682,7 +687,7 @@ IndexOnlyScanFusion::IndexOnlyScanFusion(IndexOnlyScan* node, PlannedStmt* plans
 
         /* get Partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex, m_rel);
     } else {
         m_reloid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
         m_index = index_open(m_node->indexid, AccessShareLock);
@@ -721,7 +726,7 @@ void IndexOnlyScanFusion::Init(long max_rows)
 
         /* get partition index */
         Oid parentIndexOid = m_node->indexid;
-        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex);
+        m_index = InitPartitionIndexInFusion(parentIndexOid, m_reloid, &m_partIndex, &m_parentIndex, m_rel);
     } else {
         m_rel = heap_open(m_reloid, AccessShareLock);
         m_index = index_open(m_node->indexid, AccessShareLock);
