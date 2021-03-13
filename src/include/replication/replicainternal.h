@@ -111,6 +111,7 @@ typedef struct replconninfo {
     int remoteport;
     int remoteservice;
     int remoteheartbeatport;
+    bool isCascade;
 } ReplConnInfo;
 
 /*

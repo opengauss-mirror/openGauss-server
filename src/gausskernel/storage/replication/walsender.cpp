@@ -4388,20 +4388,33 @@ bool WalSndQuorumInProgress(int type)
 bool WalSndAllInProgress(int type)
 {
     int i;
+    int num = 0;
+    int allNum = 0;
+
+    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
+        /* not contains cascade standby in primary */
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL &&
+            !t_thrd.postmaster_cxt.ReplConnArray[i]->isCascade) {
+            allNum++;
+        }
+    }
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
         SpinLockAcquire(&walsnd->mutex);
-        if (walsnd->pid == 0 && ((walsnd->sendRole & type) == walsnd->sendRole) &&
+        if (walsnd->pid != 0 && walsnd->pid != t_thrd.proc_cxt.MyProcPid &&
+            ((walsnd->sendRole & type) == walsnd->sendRole) &&
             walsnd->sentPtr > 0) {
-            SpinLockRelease(&walsnd->mutex);
-            return false;
+            num++;
         }
         SpinLockRelease(&walsnd->mutex);
     }
-
-    return true;
+    if (num >= allNum) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 /*
