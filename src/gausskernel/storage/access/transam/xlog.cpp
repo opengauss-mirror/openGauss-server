@@ -4847,6 +4847,10 @@ static void UpdateLastRemovedPtr(const char *filename)
  */
 static void RemoveOldXlogFiles(XLogSegNo segno, XLogRecPtr endptr)
 {
+    if (segno == 0) {
+        return;
+    }
+
     DIR *xldir = NULL;
     struct dirent *xlde = NULL;
     char lastoff[MAXFNAMELEN];
