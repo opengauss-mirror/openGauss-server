@@ -933,10 +933,7 @@ void LogicalAdvanceConnect()
                       "%s dbname=replication replication=true "
                       "fallback_application_name=%s "
                       "connect_timeout=%d",
-                      conninfo,
-                      (u_sess->attr.attr_common.application_name &&
-                      strlen(u_sess->attr.attr_common.application_name) > 0) ?
-                      u_sess->attr.attr_common.application_name : "pg_recvlogical_sender",
+                      conninfo, "DRS_sender",
                       u_sess->attr.attr_storage.wal_receiver_connect_timeout);
     securec_check_ss(nRet, "", "");
 
@@ -946,7 +943,7 @@ retry:
     if (PQstatus(t_thrd.walsender_cxt.advancePrimaryConn) != CONNECTION_OK) {
         if (++count < retryNum) {
             ereport(LOG,
-                (errmsg("pg_recvlogical_sender could not connect to the remote server, "
+                (errmsg("DRS_sender could not connect to the remote server, "
                         "the connection info :%s : %s",
                         conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
 
@@ -958,7 +955,7 @@ retry:
             goto retry;
         }
         ereport(FATAL,
-            (errmsg("pg_recvlogical_sender could not connect to the remote server, "
+            (errmsg("DRS_sender could not connect to the remote server, "
                      "we have tried %d times, the connection info :%s : %s",
                      count, conninfo, PQerrorMessage(t_thrd.walsender_cxt.advancePrimaryConn))));
     }
