@@ -1252,6 +1252,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
                     pages_fetched, min_IO_cost)));
     }
 
+    min_IO_cost = Min(min_IO_cost, max_IO_cost);
     /*
      * Now interpolate based on estimated index order correlation to get total
      * disk I/O cost for main table accesses.
