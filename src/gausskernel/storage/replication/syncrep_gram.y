@@ -157,8 +157,8 @@ create_syncrep_config(const char *num_sync, List *members, uint8 syncrep_method)
 		/* we do not need free "*" because it is not from palloc */
 		if (strcmp(standbyName, "*") != 0) {
 			pfree(lfirst(tmp));
-			pfree(tmp);
 		}
+		pfree(tmp);
 	}
 	if (members != NULL) {
 		pfree(members);
