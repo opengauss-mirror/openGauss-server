@@ -418,11 +418,7 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby)
     if (slot == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("replication slot \"%s\" does not exist", name)));
     if (active) {
-        if ((slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
-#ifndef ENABLE_MULTIPLE_NODES
-            && !RecoveryInProgress()
-#endif
-            )
+        if (slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
             ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("replication slot \"%s\" is already active", name)));
         else {
             ereport(WARNING,
