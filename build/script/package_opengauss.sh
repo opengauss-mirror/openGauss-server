@@ -295,15 +295,9 @@ function install_gaussdb()
 #######################################################################
 function copy_files_list()
 {
-    for element in $(ls $1)
+    for file in $(echo $1)
     do
-        dir_or_file=$1"/"$element
-        if [ -d "$dir_or_file" ]
-        then
-            copy_files_list $dir_or_file $2
-        else
-            tar -cpf - $file  | ( cd $2; tar -xpf -  )
-        fi
+        tar -cpf - $file  | ( cd $2; tar -xpf -  )
     done
 }
 
@@ -313,10 +307,7 @@ function copy_files_list()
 function target_file_copy()
 {
     cd ${BUILD_DIR}
-    for file in $(echo $1)
-    do
-        copy_files_list $file $2
-    done
+    copy_files_list "$1" $2
 
     cp ${SCRIPT_DIR}/version.cfg ${BUILD_DIR}/temp
     if [ $? -ne 0 ]; then
@@ -356,10 +347,7 @@ function target_file_copy()
 function target_file_copy_for_non_server()
 {
     cd ${BUILD_DIR}
-    for file in $(echo $1)
-    do
-        copy_files_list $file $2
-    done
+    copy_files_list "$1" $2
 }
 
 #######################################################################
