@@ -187,8 +187,13 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
     if (stmt->ismove)
         dest = None_Receiver;
 
+    bool savedIsAllowCommitRollback;
+    bool needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedIsAllowCommitRollback, STP_XACT_OPEN_FOR);
+
     /* Do it */
     nprocessed = PortalRunFetch(portal, stmt->direction, stmt->howMany, dest);
+
+    stp_reset_xact_state_and_err_msg(savedIsAllowCommitRollback, needResetErrMsg);
 
     /* Return command status if wanted */
     if (completionTag != NULL) {
