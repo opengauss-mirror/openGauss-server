@@ -3,10 +3,8 @@ select pg_typeof('vasya'), 'vasya' is of (unknown);
 
 explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1);
 explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
-explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
 select 1 where 'vasya' = (select 'vasya' as col1);
 select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
-select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
 
 explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) order by col1;
 explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1;
@@ -66,7 +64,7 @@ INSERT INTO test_unknown(a, b) VALUES (1, 'beijing');
 INSERT INTO test_unknown(a, b) VALUES (1, 'beijing') LIMIT 1;
 INSERT INTO test_unknown(a, b) VALUES (2, 'shenzhen'),  (3, 'shanghai');
 INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1 LIMIT 1;
-INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian';
 TABLE test_unknown ORDER BY a;
 
 TRUNCATE test_unknown;
@@ -74,7 +72,7 @@ INSERT INTO test_unknown(a, b) VALUES (1, 'beijing');
 INSERT INTO test_unknown(a, b) VALUES (1, 'beijing') LIMIT 1;
 INSERT INTO test_unknown(a, b) VALUES (2, 'shenzhen'),  (3, 'shanghai');
 INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1 LIMIT 1;
-INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian';
 
 TABLE test_unknown ORDER BY a;
 

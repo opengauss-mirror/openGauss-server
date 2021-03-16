@@ -28,8 +28,8 @@ select * from test_tb where name is null;
 (1 row)
 
 drop table test_tb;
--- select * from ( select 'NULL' from dual);
-select * from ( select 'NULL' from dual) as a;
+-- select * from ( select 'NULL');
+select * from ( select 'NULL') as a;
  ?column? 
 ----------
  NULL
@@ -89,49 +89,49 @@ select ltrim('abc', 'a') is not null;
 
 /* The following case depence on nvl which is added by GuassDB */
 /* expect is null */
-select nvl(ltrim(NULL), 'is null') from dual;
+select nvl(ltrim(NULL), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim(''), 'is null') from dual;
+select nvl(ltrim(''), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim('', 'ab'), 'is null') from dual;
+select nvl(ltrim('', 'ab'), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim(NULL, 'ab'), 'is null') from dual;
+select nvl(ltrim(NULL, 'ab'), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim('ab', ''), 'is null') from dual;
+select nvl(ltrim('ab', ''), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim('ab', NULL), 'is null') from dual;
+select nvl(ltrim('ab', NULL), 'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim('ab', 'ab'),  'is null') from dual;
+select nvl(ltrim('ab', 'ab'),  'is null');
    nvl   
 ---------
  is null
 (1 row)
 
-select nvl(ltrim('abc', 'a'),  'is not null') from dual; -- return bc
+select nvl(ltrim('abc', 'a'),  'is not null'); -- return bc
  nvl 
 -----
  bc
@@ -445,13 +445,13 @@ select * from test_table where regexp_like(name, NULL, 'i'); -- return null
 (0 rows)
 
 drop table test_table;
-select nvl(regexp_substr('This is test',''), 'This is NULL') from dual; -- return This is NULL
+select nvl(regexp_substr('This is test',''), 'This is NULL'); -- return This is NULL
      nvl      
 --------------
  This is NULL
 (1 row)
 
-select nvl(regexp_substr('This is test',NULL), 'This is NULL') from dual; -- return This is NULL
+select nvl(regexp_substr('This is test',NULL), 'This is NULL'); -- return This is NULL
      nvl      
 --------------
  This is NULL

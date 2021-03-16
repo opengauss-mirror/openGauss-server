@@ -15,7 +15,7 @@ SELECT INTERVAL '1.5 weeks' AS "Ten days twelve hours";
 SELECT INTERVAL '1.5 months' AS "One month 15 days";
 SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 --check interval concat null
-SELECT '' || INTERVAL '10 years -11 month -12 days +13:14' AS "9 years..." from dual;
+SELECT '' || INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 
 CREATE TABLE INTERVAL_TBL (f1 interval);
 
@@ -197,7 +197,7 @@ SELECT interval '1 2.3456' minute to second(2);
 SELECT interval '1 2:03.5678' minute to second(2);
 SELECT interval '1 2:03:04.5678' minute to second(2);
 --check interval concat with null
-SELECT interval '1 2:03:04.5678' minute to second(2) || '' from dual;
+SELECT interval '1 2:03:04.5678' minute to second(2) || '';
 
 -- test casting to restricted precision (bug #14479)
 SELECT f1, 

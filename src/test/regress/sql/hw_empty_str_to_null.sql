@@ -18,8 +18,8 @@ insert into test_tb values (1, '');
 select * from test_tb where name is null;
 drop table test_tb;
 
--- select * from ( select 'NULL' from dual);
-select * from ( select 'NULL' from dual) as a;
+-- select * from ( select 'NULL');
+select * from ( select 'NULL') as a;
 
 /*
  * function test
@@ -37,14 +37,14 @@ select ltrim('abc', 'a') is not null;
 
 /* The following case depence on nvl which is added by GuassDB */
 /* expect is null */
-select nvl(ltrim(NULL), 'is null') from dual;
-select nvl(ltrim(''), 'is null') from dual;
-select nvl(ltrim('', 'ab'), 'is null') from dual;
-select nvl(ltrim(NULL, 'ab'), 'is null') from dual;
-select nvl(ltrim('ab', ''), 'is null') from dual;
-select nvl(ltrim('ab', NULL), 'is null') from dual;
-select nvl(ltrim('ab', 'ab'),  'is null') from dual;
-select nvl(ltrim('abc', 'a'),  'is not null') from dual; -- return bc
+select nvl(ltrim(NULL), 'is null');
+select nvl(ltrim(''), 'is null');
+select nvl(ltrim('', 'ab'), 'is null');
+select nvl(ltrim(NULL, 'ab'), 'is null');
+select nvl(ltrim('ab', ''), 'is null');
+select nvl(ltrim('ab', NULL), 'is null');
+select nvl(ltrim('ab', 'ab'),  'is null');
+select nvl(ltrim('abc', 'a'),  'is not null'); -- return bc
 
 
 /* expect t */
@@ -117,8 +117,8 @@ select * from test_table where regexp_like(name,'', 'i');  ---return null
 select * from test_table where regexp_like(name, NULL, 'i'); -- return null
 drop table test_table;
 
-select nvl(regexp_substr('This is test',''), 'This is NULL') from dual; -- return This is NULL
-select nvl(regexp_substr('This is test',NULL), 'This is NULL') from dual; -- return This is NULL
+select nvl(regexp_substr('This is test',''), 'This is NULL'); -- return This is NULL
+select nvl(regexp_substr('This is test',NULL), 'This is NULL'); -- return This is NULL
 
 
 select concat(NULL, NULL) is null;

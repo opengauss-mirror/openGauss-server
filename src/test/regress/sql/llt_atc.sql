@@ -1,6 +1,6 @@
 -- add test case into 'case DCH_RRRR' and 'case DCH_RR' in DCH_from_char function, then the function adjust_partial_year_to_current_year will covered:
-select to_date('06-JAN-40 00:00:00','DD-MON-RRRR HH24:MI:SS') from dual;
-select to_date('01/05/81','dd/mm/rr') from dual;
+select to_date('06-JAN-40 00:00:00','DD-MON-RRRR HH24:MI:SS');
+select to_date('01/05/81','dd/mm/rr');
 
 -- add test case for float4_to_char function
 select to_char(0.15::float4);

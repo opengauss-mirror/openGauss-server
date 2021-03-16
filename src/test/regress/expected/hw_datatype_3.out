@@ -853,7 +853,7 @@ HINT:  Perhaps you need a different "datestyle" setting.
 drop table date_smalldate;
 --INTERAL TO NUMERIC
 create table test_num(mynum numeric);
-select to_date('2013-03-14 14:27:00','YYYY-MM-DD HH24:MI:SS') - to_date('2013-3-1 9:00:00','YYYY-MM-DD HH24:MI:SS') from dual;
+select to_date('2013-03-14 14:27:00','YYYY-MM-DD HH24:MI:SS') - to_date('2013-3-1 9:00:00','YYYY-MM-DD HH24:MI:SS');
          ?column?          
 ---------------------------
  @ 13 days 5 hours 27 mins
@@ -882,7 +882,7 @@ select floor(mynum) from test_num order by 1;
 (2 rows)
 
 drop table test_num;
-select floor(interval '2 days 09:33:00') from dual;
+select floor(interval '2 days 09:33:00');
  floor 
 -------
      2
