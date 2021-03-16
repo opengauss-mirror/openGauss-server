@@ -758,3 +758,5 @@ test: leaky_function_operator
 # gs_guc test
 # ----------
 #test: gs_guc
+
+test: smp

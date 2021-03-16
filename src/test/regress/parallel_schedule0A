@@ -521,4 +521,4 @@ test: llvm_vecsort llvm_vecsort2
 
 test: udf_crem create_c_function
 
-
+test: smp

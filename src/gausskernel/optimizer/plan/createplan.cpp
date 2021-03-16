@@ -9282,7 +9282,27 @@ static List* add_agg_node_to_tlist(List* remote_tlist, Node* expr, Index ressort
     }
     return remote_tlist;
 }
+#ifndef ENABLE_MULTIPLE_NODES
+static bool check_median_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    } else if (IsA(node, Aggref)) {
+        Aggref* agg_node = (Aggref*)node;
+        /* 5555 and 5556 is median's fn oid */
+        if (agg_node->aggfnoid == 5555 || agg_node->aggfnoid == 5556) {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "median aggregate is not supported in stream plan");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            mark_stream_unsupport();
+        }
+        return false;
+    }
 
+    return expression_tree_walker(node, (bool (*)())check_median_walker, context);
+}
+#endif
 /*
  * process_agg_targetlist
  * The function scans the targetlist to check if the we can push anything
@@ -9321,18 +9341,7 @@ List* process_agg_targetlist(PlannerInfo* root, List** local_tlist)
         foreign_qual_context context;
 
 #ifndef ENABLE_MULTIPLE_NODES
-        /* smp do not support median aggregate */
-        if (IsA(expr, Aggref)) {
-            Aggref* agg_node = (Aggref*)expr;
-            /* 5556 is median's fn oid */
-            if (agg_node->aggfnoid == 5556) {
-                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "median aggregate is not supported in stream plan");
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                mark_stream_unsupport();
-            }
-        }
+        check_median_walker(expr, NULL);
 #endif
 
         foreign_qual_context_init(&context);
