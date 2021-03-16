@@ -4344,9 +4344,6 @@ static void pmdie(SIGNAL_ARGS)
             if (g_instance.pid_cxt.DataReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.DataReceiverPID, SIGTERM);
 
-            if (g_instance.pid_cxt.HeartbeatPID != 0)
-                signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
-
             if (g_instance.pid_cxt.FaultMonitorPID != 0)
                 signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
 
@@ -5211,6 +5208,9 @@ static void reaper(SIGNAL_ARGS)
                  */
                 SignalChildren(SIGUSR2);
 
+                if (g_instance.pid_cxt.HeartbeatPID != 0)
+                    signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
+
                 pmState = PM_SHUTDOWN_2;
 
                 /*
@@ -6042,9 +6042,8 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.WLMArbiterPID == 0 && g_instance.pid_cxt.CPMonitorPID == 0 &&
             g_instance.pid_cxt.PgJobSchdPID == 0 && g_instance.pid_cxt.CBMWriterPID == 0 &&
             g_instance.pid_cxt.SnapshotPID == 0 && g_instance.pid_cxt.PercentilePID == 0 &&
-            g_instance.pid_cxt.RemoteServicePID == 0 && g_instance.pid_cxt.HeartbeatPID == 0 &&
-            g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
-            g_instance.pid_cxt.BarrierCreatorPID == 0 &&
+            g_instance.pid_cxt.RemoteServicePID == 0 && g_instance.pid_cxt.AshPID == 0 &&
+            g_instance.pid_cxt.CsnminSyncPID == 0 && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
             streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
@@ -6141,7 +6140,8 @@ static void PostmasterStateMachine(void)
          */
         if (g_instance.pid_cxt.PgArchPID == 0 && CountChildren(BACKEND_TYPE_ALL) == 0 &&
             g_instance.pid_cxt.WalReceiverPID == 0 && g_instance.pid_cxt.WalRcvWriterPID == 0 &&
-            g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0) {
+            g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
+            g_instance.pid_cxt.HeartbeatPID == 0) {
             pmState = PM_WAIT_DEAD_END;
         }
     }
