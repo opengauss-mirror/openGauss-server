@@ -238,61 +238,61 @@ select numtodsinterval(-.1500321234,'second');
 (1 row)
 
 --boundary test
-SELECT numtodsinterval(-2147483648, 'DAY')from dual;
+SELECT numtodsinterval(-2147483648, 'DAY');
          numtodsinterval         
 ---------------------------------
  --2147483648 00:00:00.000000000
 (1 row)
 
-SELECT numtodsinterval(-2147483648, 'HOUR')from dual;
+SELECT numtodsinterval(-2147483648, 'HOUR');
         numtodsinterval        
 -------------------------------
  -089478485 08:00:00.000000000
 (1 row)
 
-SELECT numtodsinterval(-2147483648, 'MINUTE')from dual;
+SELECT numtodsinterval(-2147483648, 'MINUTE');
         numtodsinterval        
 -------------------------------
  -001491308 02:08:00.000000000
 (1 row)
 
-SELECT numtodsinterval(-2147483648, 'SECOND')from dual;
+SELECT numtodsinterval(-2147483648, 'SECOND');
         numtodsinterval        
 -------------------------------
  -000024855 03:14:08.000000000
 (1 row)
 
-SELECT numtodsinterval(2147483647, 'DAY')from dual;
+SELECT numtodsinterval(2147483647, 'DAY');
         numtodsinterval         
 --------------------------------
  +2147483647 00:00:00.000000000
 (1 row)
 
-SELECT numtodsinterval(999999999.99999999999, 'DAY')from dual;
+SELECT numtodsinterval(999999999.99999999999, 'DAY');
         numtodsinterval        
 -------------------------------
  +999999999 23:59:59.999999000
 (1 row)
 
-SELECT numtodsinterval(2147483647, 'HOUR')from dual;
+SELECT numtodsinterval(2147483647, 'HOUR');
         numtodsinterval        
 -------------------------------
  +089478485 07:00:00.000000000
 (1 row)
 
-SELECT numtodsinterval(2147483647, 'MINUTE')from dual;
+SELECT numtodsinterval(2147483647, 'MINUTE');
         numtodsinterval        
 -------------------------------
  +001491308 02:07:00.000000000
 (1 row)
 
-SELECT numtodsinterval(2147483647, 'SECOND')from dual;
+SELECT numtodsinterval(2147483647, 'SECOND');
         numtodsinterval        
 -------------------------------
  +000024855 03:14:07.000000000
 (1 row)
 
-SELECT numtodsinterval(123456789.123456789, 'DAY')from dual;
+SELECT numtodsinterval(123456789.123456789, 'DAY');
         numtodsinterval        
 -------------------------------
  +123456789 02:57:46.666570000

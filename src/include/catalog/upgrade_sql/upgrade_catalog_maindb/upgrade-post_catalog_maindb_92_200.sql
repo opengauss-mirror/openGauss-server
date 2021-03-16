@@ -10810,13 +10810,6 @@ DECLARE
     END;
 $$LANGUAGE plpgsql NOT FENCED;
 
-CREATE OR REPLACE FUNCTION report_application_error(
-    IN log text,
-    IN code integer default null
-)RETURNS void
-AS '$libdir/plpgsql','report_application_error'
-LANGUAGE C VOLATILE NOT FENCED;
-
 --Test distribute situation
 create or replace function table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')

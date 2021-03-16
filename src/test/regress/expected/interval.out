@@ -53,7 +53,7 @@ SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 (1 row)
 
 --check interval concat null
-SELECT '' || INTERVAL '10 years -11 month -12 days +13:14' AS "9 years..." from dual;
+SELECT '' || INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
             9 years...            
 ----------------------------------
  9 years 1 mon -12 days +13:14:00
@@ -715,7 +715,7 @@ SELECT interval '1 2:03:04.5678' minute to second(2);
 (1 row)
 
 --check interval concat with null
-SELECT interval '1 2:03:04.5678' minute to second(2) || '' from dual;
+SELECT interval '1 2:03:04.5678' minute to second(2) || '';
      ?column?      
 -------------------
  1 day 02:03:04.57

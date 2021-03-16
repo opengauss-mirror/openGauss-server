@@ -9,7 +9,7 @@ AS
 		RETURN;
     END;
 /
-SELECT test_return(1) from dual;
+SELECT test_return(1);
  test_return 
 -------------
            2
@@ -48,7 +48,7 @@ AS
 		RETURN j;
     END;
 /
-SELECT test_return1(1) from dual;
+SELECT test_return1(1);
  test_return1 
 --------------
             2
@@ -123,7 +123,7 @@ AS
 		RETURN 'abc';
     END;
 /
-SELECT test_return5(1) from dual;
+SELECT test_return5(1);
  test_return5 
 --------------
  abc
@@ -610,7 +610,7 @@ AS
 		RETURN;
     END;
 /
-SELECT test_return(1) from dual;
+SELECT test_return(1);
  test_return 
 -------------
            2
@@ -649,7 +649,7 @@ AS
 		RETURN j;
     END;
 /
-SELECT test_return1(1) from dual;
+SELECT test_return1(1);
  test_return1 
 --------------
             2
@@ -724,7 +724,7 @@ AS
 		RETURN 'abc';
     END;
 /
-SELECT test_return5(1) from dual;
+SELECT test_return5(1);
  test_return5 
 --------------
  abc

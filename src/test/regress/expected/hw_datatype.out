@@ -336,7 +336,7 @@ BEGIN
 	raise info'TEST CHAR VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('abc'::clob) from dual;
+select TEST_FUNC('abc'::clob);
 INFO:  TEST CHAR VALUE IS abc
 CONTEXT:  referenced column: test_func
  test_func 
@@ -344,7 +344,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('abc'::varchar2) from dual;
+select TEST_FUNC('abc'::varchar2);
 INFO:  TEST CHAR VALUE IS abc
 CONTEXT:  referenced column: test_func
  test_func 
@@ -359,7 +359,7 @@ BEGIN
 	raise info'TEST VARCHAR VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('abc'::clob) from dual;
+select TEST_FUNC('abc'::clob);
 INFO:  TEST VARCHAR VALUE IS abc
 CONTEXT:  referenced column: test_func
  test_func 
@@ -367,7 +367,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC(123) from dual;
+select TEST_FUNC(123);
 INFO:  TEST VARCHAR VALUE IS 123
 CONTEXT:  referenced column: test_func
  test_func 
@@ -375,7 +375,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('123'::integer) from dual;
+select TEST_FUNC('123'::integer);
 INFO:  TEST VARCHAR VALUE IS 123
 CONTEXT:  referenced column: test_func
  test_func 
@@ -383,7 +383,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('abc'::raw) from dual;
+select TEST_FUNC('abc'::raw);
 INFO:  TEST VARCHAR VALUE IS 0ABC
 CONTEXT:  referenced column: test_func
  test_func 
@@ -391,7 +391,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('abc'::char) from dual;
+select TEST_FUNC('abc'::char);
 INFO:  TEST VARCHAR VALUE IS a
 CONTEXT:  referenced column: test_func
  test_func 
@@ -399,7 +399,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('2012-08-01 11:23:45'::timestamp) from dual; --with timezone?
+select TEST_FUNC('2012-08-01 11:23:45'::timestamp); --with timezone?
 INFO:  TEST VARCHAR VALUE IS 2012-08-01 11:23:45
 CONTEXT:  referenced column: test_func
  test_func 
@@ -407,7 +407,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC(interval '1 18:00:00' day to second) from dual;
+select TEST_FUNC(interval '1 18:00:00' day to second);
 INFO:  TEST VARCHAR VALUE IS @ 1 day 18 hours
 CONTEXT:  referenced column: test_func
  test_func 
@@ -415,7 +415,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('1 day 18:00:00') from dual;
+select TEST_FUNC('1 day 18:00:00');
 INFO:  TEST VARCHAR VALUE IS 1 day 18:00:00
 CONTEXT:  referenced column: test_func
  test_func 
@@ -430,7 +430,7 @@ BEGIN
 	raise info'TEST CLOB VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('abc'::char) from dual;
+select TEST_FUNC('abc'::char);
 INFO:  TEST CLOB VALUE IS a
 CONTEXT:  referenced column: test_func
  test_func 
@@ -438,7 +438,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('abc'::varchar2) from dual;
+select TEST_FUNC('abc'::varchar2);
 INFO:  TEST CLOB VALUE IS abc
 CONTEXT:  referenced column: test_func
  test_func 
@@ -453,7 +453,7 @@ BEGIN
 	raise info'TEST INTEGER VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('123'::char(3)) from dual;
+select TEST_FUNC('123'::char(3));
 INFO:  TEST INTEGER VALUE IS 123
 CONTEXT:  referenced column: test_func
  test_func 
@@ -461,7 +461,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('123'::varchar2) from dual;
+select TEST_FUNC('123'::varchar2);
 INFO:  TEST INTEGER VALUE IS 123
 CONTEXT:  referenced column: test_func
  test_func 
@@ -476,7 +476,7 @@ BEGIN
 	raise info'TEST TIMESTAMP VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('2012-08-01 11:23:45'::char(20)) from dual;
+select TEST_FUNC('2012-08-01 11:23:45'::char(20));
 INFO:  TEST TIMESTAMP VALUE IS 2012-08-01 11:23:45
 CONTEXT:  referenced column: test_func
  test_func 
@@ -484,7 +484,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('2012-08-01 11:23:45'::varchar2) from dual;
+select TEST_FUNC('2012-08-01 11:23:45'::varchar2);
 INFO:  TEST TIMESTAMP VALUE IS 2012-08-01 11:23:45
 CONTEXT:  referenced column: test_func
  test_func 
@@ -499,7 +499,7 @@ BEGIN
 	raise info'TEST INTERVAL VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('1 day 18:00:00'::char(20)) from dual;
+select TEST_FUNC('1 day 18:00:00'::char(20));
 INFO:  TEST INTERVAL VALUE IS @ 1 day 18 hours
 CONTEXT:  referenced column: test_func
  test_func 
@@ -507,7 +507,7 @@ CONTEXT:  referenced column: test_func
  
 (1 row)
 
-select TEST_FUNC('1 day 18:00:00'::varchar2) from dual;
+select TEST_FUNC('1 day 18:00:00'::varchar2);
 INFO:  TEST INTERVAL VALUE IS @ 1 day 18 hours
 CONTEXT:  referenced column: test_func
  test_func 
@@ -2010,28 +2010,28 @@ select 2 > '15'::text;
 
 SELECT pg_catalog.array_dims(' '::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims(' '::anyarray)) AS b
-FROM dual;
+;
 ERROR:  array value must start with "{" or dimension information
 LINE 1: SELECT pg_catalog.array_dims(' '::anyarray) AS a
                                      ^
 CONTEXT:  referenced column: a
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text)) AS b
-FROM dual;
+;
 ERROR:  array value must start with "{" or dimension information
 LINE 1: SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) A...
                                           ^
 CONTEXT:  referenced column: a
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text,' '::text)) AS b
-FROM dual;
+;
 ERROR:  array value must start with "{" or dimension information
 LINE 1: SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''...
                                           ^
 CONTEXT:  referenced column: a
 SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims('{1,2,3}'::anyarray)) AS b
-FROM dual;
+;
 ERROR:  array value must start with "{" or dimension information
 LINE 1: SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
                                      ^

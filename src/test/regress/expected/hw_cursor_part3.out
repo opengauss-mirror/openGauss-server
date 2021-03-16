@@ -230,7 +230,7 @@ b varchar;
 sql_srt varchar(100);
 cursor c1 is  select c1,c2 from cursor_vl_tb10 order by 1,2;
 begin 
-sql_srt :='insert into cursor_vl_tb10(c1,c2) select :1,:1+1 from dual;';
+sql_srt :='insert into cursor_vl_tb10(c1,c2) select :1,:1+1;';
 while a1 > 0  loop
 execute immediate sql_srt using IN a1;
 a1:=a1-1;
