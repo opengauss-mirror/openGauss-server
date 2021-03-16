@@ -170,6 +170,8 @@ EState* CreateExecutorState(void)
     estate->es_material_of_subplan = NIL;
     estate->es_recursive_next_iteration = false;
 
+    estate->pruningResult = NULL;
+
     /*
      * Return the executor state structure
      */

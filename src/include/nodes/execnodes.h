@@ -573,6 +573,8 @@ typedef struct EState {
 #ifdef ENABLE_MOT
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
+
+    PruningResult* pruningResult;
 } EState;
 
 /*

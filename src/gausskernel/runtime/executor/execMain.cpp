@@ -1448,6 +1448,10 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     }
     planstate = ExecInitNode(plan, estate, eflags);
 
+    if (estate->pruningResult) {
+        destroyPruningResult(estate->pruningResult);
+        estate->pruningResult = NULL;
+    }
     /*
      * Get the tuple descriptor describing the type of tuples to return.
      */
