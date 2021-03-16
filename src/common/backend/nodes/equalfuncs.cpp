@@ -1882,6 +1882,18 @@ static bool _equalAlterRlsPolicyStmt(const AlterRlsPolicyStmt* a, const AlterRls
     return true;
 }
 
+static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* a, const CreateWeakPasswordDictionaryStmt* b)
+{
+    COMPARE_NODE_FIELD(weak_password_string_list);
+
+    return true;
+}
+
+static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
+{
+    return true;
+}
+
 static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* b)
 {
     COMPARE_STRING_FIELD(trigname);
@@ -3359,6 +3371,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterRlsPolicyStmt:
             retval = _equalAlterRlsPolicyStmt((AlterRlsPolicyStmt*)a, (AlterRlsPolicyStmt*)b);
+            break;
+        case T_CreateWeakPasswordDictionaryStmt:
+            retval = _equalCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)a, (CreateWeakPasswordDictionaryStmt*)b);
+            break;
+        case T_DropWeakPasswordDictionaryStmt:
+            retval = _equalDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)a, (DropWeakPasswordDictionaryStmt*)b);
             break;
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);

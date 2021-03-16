@@ -23475,7 +23475,7 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
         bool nulls[Natts_gs_global_config] = {false};
-        const char* pwd = (const char *)(lfirst(pwd_obj));
+        const char* pwd = (const char *)(((Value*)lfirst(pwd_obj))->val.str);
         if (password_contain_space(pwd)) {
             continue;
         }
