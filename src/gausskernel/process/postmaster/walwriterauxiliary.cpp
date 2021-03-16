@@ -187,6 +187,13 @@ void WalWriterAuxiliaryMain(void)
     (void)gs_signal_unblock_sigusr2();
 
     /*
+     * Use the recovery target timeline ID during recovery
+     */
+    if (RecoveryInProgress()) {
+        t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
+    }
+
+    /*
      * Advertise our latch that backends can use to wake us up while we're
      * sleeping.
      */
@@ -199,9 +206,11 @@ void WalWriterAuxiliaryMain(void)
      * Loop forever
      */
     for (;;) {
-        if (g_instance.wal_cxt.isWalWriterUp) {
-            PGSemaphoreLock(&g_instance.wal_cxt.walInitSegLock->l.sem, true);
-        }
+        long cur_timeout = u_sess->attr.attr_storage.WalWriterDelay;
+        int rc = 0;
+
+        /* Clear any already-pending wakeups */
+        ResetLatch(&t_thrd.proc->procLatch);
 
         /*
          * Process any requests or signals received recently.
@@ -216,7 +225,24 @@ void WalWriterAuxiliaryMain(void)
             proc_exit(0); /* done */
         }
 
-        XLogMultiFileInit(g_instance.attr.attr_storage.wal_file_init_num);
+        if (g_instance.wal_cxt.isWalWriterUp) {
+            PGSemaphoreLock(&g_instance.wal_cxt.walInitSegLock->l.sem, true);
+            PreInitXlogFileForPrimary(g_instance.attr.attr_storage.wal_file_init_num);
+        } else {
+            if (g_instance.attr.attr_storage.advance_xlog_file_num > 0 &&
+                t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+                (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY) &&
+                IsRecoveryDone()) {
+                XLogRecPtr curMaxLsn = pg_atomic_read_u64(&g_instance.comm_cxt.predo_cxt.redoPf.local_max_lsn);
+                PreInitXlogFileForStandby(curMaxLsn);
+            }
+        }
+
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
+
+        if (rc & WL_POSTMASTER_DEATH) {
+            gs_thread_exit(1);
+        }
     }
 }
 

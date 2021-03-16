@@ -2723,8 +2723,13 @@ static int ServerLoop(void)
             g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
         }
 
-        if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && pmState == PM_RUN) {
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && (pmState == PM_RUN ||
+            ((pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.WalRcvWriterPID != 0 &&
+              t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE))) {
             g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
+            ereport(LOG,
+                (errmsg("ServerLoop create WalWriterAuxiliary(%lu) for pmState:%u, ServerMode:%u.",
+                    g_instance.pid_cxt.WalWriterAuxiliaryPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
         }
 
         /*
@@ -7185,6 +7190,15 @@ static void sigusr1_handler(SIGNAL_ARGS)
         PMUpdateDBStateLSN();
         ereport(LOG, (errmsg("set lsn after recovery done in gaussdb state file")));
     }
+
+    if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
+        g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
+        ereport(LOG,
+            (errmsg("sigusr1_handler create WalWriterAuxiliary(%lu) after local recovery is done. pmState:%u, ServerMode:%u",
+                g_instance.pid_cxt.WalWriterAuxiliaryPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
+    }
+
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_WAITING)) {
         PMUpdateDBState(WAITING_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
@@ -9850,7 +9864,6 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case WALWRITERAUXILIARY:
             /* don't set signals, walwriterauxiliary has its own agenda */
-            InitXLOGAccess();
             WalWriterAuxiliaryMain();
             proc_exit(1); /* should never return */
             break;

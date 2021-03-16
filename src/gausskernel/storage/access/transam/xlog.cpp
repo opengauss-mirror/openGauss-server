@@ -3831,7 +3831,55 @@ void XLogFileCutPage(char *buffer, uint32 bufLen, uint32 cpyLen)
     }
 }
 
-void XLogMultiFileInit(int advance_xlog_file_num)
+bool PreInitXlogFileForStandby(XLogRecPtr requestLsn)
+{
+    /* The last processed xlog lsn. */
+    static XLogRecPtr lastWriteLsn = 0;
+    /* The next segment to be created. */
+    static XLogSegNo nextSegNo = 0;
+
+    if (requestLsn < lastWriteLsn) { /* switch over. need reset */
+        ereport(WARNING,
+            (errmsg("PreInitXlogFileForStandby need reset. requestLsn: %X/%X; lastWriteLsn: %X/%X",
+                (uint32)(requestLsn >> 32),
+                (uint32)requestLsn,
+                (uint32)(lastWriteLsn >> 32),
+                (uint32)lastWriteLsn)));
+        lastWriteLsn = requestLsn;
+        nextSegNo = 0;
+    } else if (requestLsn < lastWriteLsn + XLOG_SEG_SIZE) {
+        /* If the requestLsn is not more than one segement, skip! */
+        return false;
+    } else {
+        lastWriteLsn = requestLsn;
+    }
+
+    /* Start to pre-init xlog segment. */
+    XLogSegNo reqSegNo;
+    XLByteToPrevSeg(requestLsn, reqSegNo);
+    /* If the request pos is bigger, start from the segment next to requestLsn. */
+    if (nextSegNo <= reqSegNo) {
+        nextSegNo = reqSegNo + 1;
+    }
+    XLogSegNo targetSegNo = reqSegNo + g_instance.attr.attr_storage.advance_xlog_file_num;
+    for (; nextSegNo <= targetSegNo; nextSegNo++) {
+        bool use_existent = true;
+        int lf = XLogFileInit(nextSegNo, &use_existent, true);
+        if (!use_existent)
+            ereport(DEBUG1,
+                (errmsg("PreInitXlogFileForStandby new nextSegNo: %X/%X ThisTimeLineID: %u, RecoveryTargetTLI: %u",
+                    (uint32)(nextSegNo >> 32),
+                    (uint32)nextSegNo,
+                    t_thrd.shemem_ptr_cxt.XLogCtl->ThisTimeLineID,
+                    t_thrd.shemem_ptr_cxt.XLogCtl->RecoveryTargetTLI)));
+        if (lf >= 0)
+            close(lf);
+    }
+
+    return true;
+}
+
+void PreInitXlogFileForPrimary(int advance_xlog_file_num)
 {
     XLogSegNo startSegNo, nextSegNo, target;
     int lf;

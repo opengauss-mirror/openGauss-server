@@ -303,14 +303,13 @@ typedef struct XLogwrtResult {
     XLogRecPtr Flush; /* last byte + 1 flushed */
 } XLogwrtResult;
 
-extern void XLogMultiFileInit(int advance_xlog_file_num);
-
 typedef struct TermFileData {
     uint32 term;
     bool finish_redo;
 } TermFileData;
 
-extern void XLogMultiFileInit(int advance_xlog_file_num);
+extern bool PreInitXlogFileForStandby(XLogRecPtr requestLsn);
+extern void PreInitXlogFileForPrimary(int advance_xlog_file_num);
 extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool isupgrade = false);
 extern void XLogWaitFlush(XLogRecPtr recptr);
 extern void XLogWaitBufferInit(XLogRecPtr recptr);
