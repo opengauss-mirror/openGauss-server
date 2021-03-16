@@ -2836,7 +2836,14 @@ static int ServerLoop(void)
             g_instance.pid_cxt.CPMonitorPID = initialize_util_thread(WLM_CPMONITOR);
 
         /* If we have lost the twophase cleaner, try to start a new one */
-        if (IS_PGXC_COORDINATOR && u_sess->attr.attr_common.upgrade_mode != 1 &&
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            u_sess->attr.attr_common.upgrade_mode != 1 &&
             g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && pmState == PM_RUN)
             g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
 
@@ -5065,7 +5072,14 @@ static void reaper(SIGNAL_ARGS)
                 t_thrd.postmaster_cxt.audit_primary_start = false;
             }
 
-            if (IS_PGXC_COORDINATOR && u_sess->attr.attr_common.upgrade_mode != 1 &&
+            if (
+#ifdef ENABLE_MULTIPLE_NODES
+                IS_PGXC_COORDINATOR &&
+#else
+                (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+                 t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+                u_sess->attr.attr_common.upgrade_mode != 1 &&
                 g_instance.pid_cxt.TwoPhaseCleanerPID == 0)
                 g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
 

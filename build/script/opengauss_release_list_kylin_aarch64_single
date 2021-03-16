@@ -16,6 +16,7 @@
 ./bin/gs_basebackup
 ./bin/gs_probackup
 ./bin/encrypt
+./bin/gs_clean
 ./bin/openssl
 ./bin/gs_restore
 ./bin/gs_cgroup
