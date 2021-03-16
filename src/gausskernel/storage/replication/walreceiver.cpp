@@ -828,6 +828,12 @@ static void WalRcvDie(int code, Datum arg)
         PQfreemem(t_thrd.libwalreceiver_cxt.recvBuf);
         t_thrd.libwalreceiver_cxt.recvBuf = NULL;
     }
+
+    /* reset conn_channel */
+    errno_t rc = memset_s((void*)&walrcv->conn_channel,
+        sizeof(walrcv->conn_channel), 0, sizeof(walrcv->conn_channel));
+    securec_check_c(rc, "\0", "\0");
+
     ereport(LOG, (errmsg("walreceiver thread shut down")));
 }
 
