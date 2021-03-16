@@ -786,6 +786,10 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
         PruningResult* resultPlan = NULL;
         if (plan->scan.pruningInfo->expr) {
             resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, currentRelation);
+            if (estate->pruningResult) {
+                destroyPruningResult(estate->pruningResult);
+            }
+            estate->pruningResult = resultPlan;
         } else {
             resultPlan = plan->scan.pruningInfo;
         }
