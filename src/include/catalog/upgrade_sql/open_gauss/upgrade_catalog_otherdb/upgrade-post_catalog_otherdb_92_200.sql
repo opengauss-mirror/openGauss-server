@@ -8781,8 +8781,7 @@ DECLARE
     query_str_do_revoke text;
     BEGIN
         query_str_create_table := 'CREATE TABLE public.pgxc_copy_error_log
-                            (relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)
-                            DISTRIBUTE BY hash(begintime)';
+                            (relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)';
         EXECUTE query_str_create_table;
 
         query_str_create_index := 'CREATE INDEX copy_error_log_relname_idx ON public.pgxc_copy_error_log(relname)';
