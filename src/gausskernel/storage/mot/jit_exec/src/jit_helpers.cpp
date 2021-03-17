@@ -449,9 +449,9 @@ void buildDatumKey(
         securec_check(erc, "\0", "\0");
     } else {
         MOTAdaptor::DatumToMOTKey(column,
-            NULL,
-            value,
             (Oid)value_type,
+            value,
+            column->m_envelopeType,
             key->GetKeyBuf() + offset,
             column->m_size,
             KEY_OPER::READ_KEY_EXACT,

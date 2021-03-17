@@ -634,7 +634,8 @@ public:
      * @param type The type name of the column.
      * @return RC error code.
      */
-    RC AddColumn(const char* col_name, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull = false);
+    RC AddColumn(const char* col_name, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull = false,
+        unsigned int envelopeType = 0);
 
     /**
      * @brief Modifies the size of a column. This may be required for supporting ALTER TABLE.
@@ -952,6 +953,8 @@ public:
         MOT_CATALOG_FIELD_TYPES m_type;
 
         bool m_isNotNull;
+
+        unsigned int m_envelopeType;  // required for MOT JIT
     };
 
     /**

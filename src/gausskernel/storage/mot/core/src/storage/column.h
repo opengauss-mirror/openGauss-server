@@ -162,6 +162,9 @@ public:
 
     /** @var Column does not allow null values. */
     bool m_isNotNull;
+
+    /** @var Envelope column type. */
+    unsigned int m_envelopeType;
 };
 
 // derived column classes

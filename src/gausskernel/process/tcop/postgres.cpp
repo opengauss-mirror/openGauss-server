@@ -251,6 +251,9 @@ static int errdetail_recovery_conflict(void);
 static bool IsTransactionExitStmt(Node* parsetree);
 static bool IsTransactionExitStmtList(List* parseTrees);
 static bool IsTransactionStmtList(List* parseTrees);
+#ifdef ENABLE_MOT
+static bool IsTransactionPrepareStmt(const Node* parsetree);
+#endif
 static void drop_unnamed_stmt(void);
 static void SigHupHandler(SIGNAL_ARGS);
 static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list);
@@ -2420,6 +2423,12 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                     errmsg("SubTransaction is not supported for memory table")));
         }
 
+        if (IsTransactionPrepareStmt(parsetree) && (IsMOTEngineUsed() || IsMixedEngineUsed())) {
+            /* Explicit prepare transaction is not supported for memory table */
+            ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
+                    errmsg("Explicit prepare transaction is not supported for memory table")));
+        }
+
         /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
                 (querytree_list != NULL && CheckMotIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
@@ -4100,14 +4109,22 @@ static void exec_bind_message(StringInfo input_message)
 #ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed()) {
         ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                errmsg("Cross storage engine transaction is not supported")));
+            errmsg("Cross storage engine transaction is not supported")));
+    }
 
     /* block MOT engine queries in sub-transactions */
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed())
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
         ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                errmsg("SubTransaction is not supported for memory table")));
+            errmsg("SubTransaction is not supported for memory table")));
+    }
+
+    if (IsTransactionPrepareStmt(psrc->raw_parse_tree) && (IsMOTEngineUsed() || IsMixedEngineUsed())) {
+        /* Explicit prepare transaction is not supported for memory table */
+        ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
+            errmsg("Explicit prepare transaction is not supported for memory table")));
+    }
 
     /*
      * MOT JIT Execution:
@@ -5359,6 +5376,19 @@ static bool IsTransactionStmtList(List* parseTrees)
     }
     return false;
 }
+
+#ifdef ENABLE_MOT
+static bool IsTransactionPrepareStmt(const Node* parsetree)
+{
+    if (parsetree && IsA(parsetree, TransactionStmt)) {
+        TransactionStmt* stmt = (TransactionStmt*)parsetree;
+        if (stmt->kind == TRANS_STMT_PREPARE) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 /* Release any existing unnamed prepared statement */
 static void drop_unnamed_stmt(void)
