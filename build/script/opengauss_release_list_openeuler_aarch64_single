@@ -13,6 +13,7 @@
 ./bin/gs_initdb
 ./bin/gs_guc
 ./bin/encrypt
+./bin/gs_clean
 ./bin/openssl
 ./bin/gs_restore
 ./bin/gs_cgroup

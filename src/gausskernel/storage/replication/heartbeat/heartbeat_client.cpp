@@ -28,6 +28,7 @@
 #include "replication/heartbeat/libpq/libpq-fe.h"
 #include "replication/heartbeat/heartbeat_conn.h"
 #include "replication/heartbeat/heartbeat_client.h"
+#include "replication/walreceiver.h"
 
 using namespace PureLibpq;
 
@@ -42,6 +43,42 @@ HeartbeatClient::~HeartbeatClient()
     DisConnect();
 }
 
+
+struct replconninfo* GetHeartBeatServerConnInfo(void)
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+
+    if (walrcv->pid == 0) {
+        return NULL;
+    }
+
+    /* conn_channel will be set after walreceiver connected to upstream */
+    if (*walrcv->conn_channel.localhost == '\0' ||
+        *walrcv->conn_channel.remotehost == '\0') {
+        return NULL;
+    }
+
+    struct replconninfo *conninfo = NULL;
+
+    for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
+        conninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (conninfo == NULL) {
+            continue;
+        }
+
+        /* find target conninfo by conn_channel */
+        if (strcmp(conninfo->remotehost, (char*)walrcv->conn_channel.remotehost) == 0 &&
+            conninfo->remoteport == walrcv->conn_channel.remoteport &&
+            conninfo->remoteservice == walrcv->conn_channel.remoteservice) {
+            return conninfo;
+        }
+    }
+
+    return NULL;
+}
+
+const int SLEEP_TIME = 1;
+
 bool HeartbeatClient::Connect()
 {
     if (isConnect_) {
@@ -53,9 +90,12 @@ bool HeartbeatClient::Connect()
     PurePort *port = NULL;
     int rcs = 0;
     int remotePort = -1;
-    for (int i = START_REPLNODE_NUM; i < MAX_REPLNODE_NUM; i++) {
-        conninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+    int i = 0;
+    while (i < MAX_REPLNODE_NUM) {
+        conninfo = GetHeartBeatServerConnInfo();
         if (conninfo == NULL) {
+            (void)sleep(SLEEP_TIME);
+            i++;
             continue;
         }
 
