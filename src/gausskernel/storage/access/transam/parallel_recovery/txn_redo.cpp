@@ -302,7 +302,7 @@ void ApplyReadyTxnLogRecords(TxnRedoWorker *worker, bool forceAll)
                 oldReplayedPageLSN = lrEnd;
             }
             RedoInterruptCallBack();
-        } while (forceAll && XLByteLT(lrEnd, t_thrd.xlog_cxt.EndRecPtr));
+        } while (forceAll && XLByteLT(lrEnd, g_dispatcher->dispatchEndRecPtr));
     }
 
     worker->procHead = item;
