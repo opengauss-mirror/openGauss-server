@@ -10758,60 +10758,7 @@ end;
 $$language plpgsql NOT FENCED;
 
 --Test distribute situation
-create or replace function table_skewness(table_name text, column_name text,
-                        OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
-RETURNS setof record
-AS $$
-DECLARE
-    tolal_num text;
-    row_data record;
-    execute_query text;
-    dist_type text;
-    num int :=0;
-    sqltmp text;
-    BEGIN
-        sqltmp := 'select count(*) from pg_attribute join pg_class on pg_attribute.attrelid = pg_class.oid where pg_class.relname =' || quote_literal(table_name) ||' and pg_attribute.attname = ' ||quote_literal($2);
-        EXECUTE immediate sqltmp into num;
-        if num = 0 then
-            return;
-        end if;
-        -- make sure not to affect the logic for non-range/list distribution tables
-        EXECUTE immediate 'select a.pclocatortype from (pgxc_class a join pg_class b on a.pcrelid = b.oid join pg_namespace c on c.oid = b.relnamespace)
-                            where b.relname = quote_ident(:1) and c.nspname in (select unnest(current_schemas(false)))' into dist_type using table_name;
-        if dist_type <> 'G' and dist_type <> 'L' then
-            dist_type = 'H'; -- dist type used to be hardcoded as 'H'
-        end if;
-
-        if row_num = 0 then
-            EXECUTE 'select count(1) from ' || $1 into tolal_num;
-            execute_query = 'select seqNum, count(1) as num
-                            from (select pg_catalog.table_data_skewness(row(' || $2 ||'), ''' || dist_type || ''') as seqNum from ' || $1 ||
-                            ') group by seqNum order by num DESC';
-        else
-            tolal_num = row_num;
-            execute_query = 'select seqNum, count(1) as num
-                            from (select pg_catalog.table_data_skewness(row(' || $2 ||'), ''' || dist_type || ''') as seqNum from ' || $1 ||
-                            ' limit ' || row_num ||') group by seqNum order by num DESC';
-        end if;
-
-        if tolal_num = 0 then
-            seqNum = 0;
-            Num = 0;
-            Ratio = ROUND(0, 3) || '%';
-            return;
-        end if;
-
-        for row_data in EXECUTE execute_query loop
-            seqNum = row_data.seqNum;
-            Num = row_data.num;
-            Ratio = ROUND(row_data.num / tolal_num * 100, 3) || '%';
-            RETURN next;
-        end loop;
-    END;
-$$LANGUAGE plpgsql NOT FENCED;
-
---Test distribute situation
-create or replace function table_skewness(table_name text, column_name text,
+create or replace function pg_catalog.table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
 RETURNS setof record
 AS $$
