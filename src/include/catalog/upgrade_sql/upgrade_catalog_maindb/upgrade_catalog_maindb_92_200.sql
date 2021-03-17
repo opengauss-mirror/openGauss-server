@@ -2287,7 +2287,7 @@ WHERE totalsize > 0;
 
 GRANT SELECT ON TABLE pg_catalog.pgxc_get_table_skewness TO PUBLIC;
 
-create or replace function table_skewness(table_name text, column_name text,
+create or replace function pg_catalog.table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
 RETURNS setof record
 AS $$
