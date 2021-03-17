@@ -63,7 +63,7 @@ returns integer
 language plpgsql 
 as $$ declare 
 begin
-create temp table test_create_tmp  as (select sysdate as s from dual);
+create temp table test_create_tmp  as (select sysdate as s);
 ret :=0;
 end $$
 ;
@@ -146,12 +146,12 @@ returns integer
 language plpgsql 
 as $$ declare 
 begin
-create temp table test_create_tmp  as (select sysdate as s from dual);
+create temp table test_create_tmp  as (select sysdate as s);
 ret :=0;
 insert into test_create_tmp_no_exit values (2);
 exception
 when others then
-create temp table test_create_tmp  as (select sysdate as s from dual);
+create temp table test_create_tmp  as (select sysdate as s);
 ret :=1;
 end $$
 ;

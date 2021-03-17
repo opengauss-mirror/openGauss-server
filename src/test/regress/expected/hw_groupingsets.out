@@ -2671,7 +2671,7 @@ explain (format JSON) select a, b, c from vec_t1 group by rollup(a, b, c);
 explain (format YAML) select a, b, c from vec_t1 group by rollup(a, b, c);
 \o
 drop table vec_t1;
-select 1 a,2,count(*) from dual group by cube(1,2) having count(*)=1 order by 1, 2;  
+select 1 a,2,count(*) group by cube(1,2) having count(*)=1 order by 1, 2;  
  a | ?column? | count 
 ---+----------+-------
  1 |        2 |     1
