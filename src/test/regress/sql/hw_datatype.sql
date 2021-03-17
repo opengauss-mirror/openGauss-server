@@ -964,13 +964,13 @@ select 2 > '15'::text;
 
 SELECT pg_catalog.array_dims(' '::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims(' '::anyarray)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text,' '::text)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims('{1,2,3}'::anyarray)) AS b
-FROM dual;
+;

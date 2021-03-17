@@ -40,11 +40,9 @@ explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1
    Output: 1
    One-Time Filter: ('vasya'::text = $0)
    InitPlan 1 (returns $0)
-     ->  Subquery Scan on dual
+     ->  Result
            Output: 'vasya'::text
-           ->  Result
-                 Output: 'X'::text
-(8 rows)
+(6 rows)
 
 select 1 where 'vasya' = (select 'vasya' as col1);
  ?column? 
