@@ -11416,3 +11416,6 @@ SELECT
 FROM
 	pg_shseclabel l
 	JOIN pg_authid rol ON l.classoid = rol.tableoid AND l.objoid = rol.oid;
+
+CREATE OR REPLACE VIEW pg_catalog.gs_session_memory_context AS SELECT * FROM pv_session_memory_detail();
+CREATE OR REPLACE VIEW pg_catalog.gs_thread_memory_context AS SELECT * FROM pv_thread_memory_detail();
