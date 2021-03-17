@@ -6868,9 +6868,10 @@ CreateWeakPasswordDictionaryStmt:
 
 opt_vals:               WITH VALUES                                            {}
                        | /*EMPTY*/                                             {}
+			   ;
 
-weak_password_string_list:  '(' password_string ')'                                 { $$ = list_make1($2);  }
-                       | weak_password_string_list ',' '(' password_string ')'      { $$ = lappend($1, $4); } 
+weak_password_string_list:  '(' password_string ')'                                 { $$ = list_make1(makeString($2)); }
+                       | weak_password_string_list ',' '(' password_string ')'      { $$ = lappend($1, makeString($4)); } 
                ;
 
 /*****************************************************************************

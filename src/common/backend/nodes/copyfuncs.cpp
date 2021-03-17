@@ -5355,6 +5355,22 @@ static CreateRlsPolicyStmt* _copyCreateRlsPolicyStmt(const CreateRlsPolicyStmt* 
     return newnode;
 }
 
+static CreateWeakPasswordDictionaryStmt* _copyCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* from)
+{
+    CreateWeakPasswordDictionaryStmt* newnode = makeNode(CreateWeakPasswordDictionaryStmt);
+
+    COPY_NODE_FIELD(weak_password_string_list);
+
+    return newnode;
+}
+
+static DropWeakPasswordDictionaryStmt* _copyDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* from)
+{
+    DropWeakPasswordDictionaryStmt* newnode = makeNode(DropWeakPasswordDictionaryStmt);
+
+    return newnode;
+}
+
 static AlterRlsPolicyStmt* _copyAlterRlsPolicyStmt(const AlterRlsPolicyStmt* from)
 {
     AlterRlsPolicyStmt* newnode = makeNode(AlterRlsPolicyStmt);
@@ -6808,6 +6824,12 @@ void* copyObject(const void* from)
             break;
         case T_ReindexStmt:
             retval = _copyReindexStmt((ReindexStmt*)from);
+            break;
+        case T_CreateWeakPasswordDictionaryStmt:
+            retval = _copyCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)from);
+            break;
+        case T_DropWeakPasswordDictionaryStmt:
+            retval = _copyDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)from);
             break;
         case T_CheckPointStmt:
             retval = (void*)makeNode(CheckPointStmt);
