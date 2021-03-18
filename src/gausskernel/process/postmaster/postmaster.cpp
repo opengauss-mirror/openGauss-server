@@ -4055,7 +4055,14 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.StartupPID, SIGHUP);
 
 #ifdef PGXC /* PGXC_COORD */
-        if (IS_PGXC_COORDINATOR && g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
             signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGHUP);
 
         if (GTM_LITE_CN && g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -5554,7 +5561,14 @@ static void reaper(SIGNAL_ARGS)
         }
 
         /* Was it the twophasecleaner? If so, try to handle */
-        if (IS_PGXC_COORDINATOR && pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
             g_instance.pid_cxt.TwoPhaseCleanerPID = 0;
 
             if (!EXIT_STATUS_0(exitstatus))
