@@ -60,6 +60,7 @@ static void HandleStreamSigjmp();
 static void execute_stream_plan(StreamProducer* producer);
 static void execute_stream_end(StreamProducer* producer);
 static void StreamQuitAndClean(int code, Datum arg);
+static void ResetStreamWorkerInfo();
 
 /* ----------------------------------------------------------------
  * StreamMain
@@ -106,6 +107,10 @@ int StreamMain()
     
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
+
+    if (IS_THREAD_POOL_STREAM) {
+        ResetStreamWorkerInfo();
+    }
 
     while (true) {
         if (IS_THREAD_POOL_STREAM) {
@@ -636,6 +641,12 @@ void SetStreamWorkerInfo(StreamProducer* proObj)
     u_sess->stream_cxt.global_obj = u_sess->stream_cxt.producer_obj->getNodeGroup();
     u_sess->stream_cxt.global_obj->setStopFlagPoint(
         u_sess->stream_cxt.producer_obj->getNodeGroupIdx(), &u_sess->exec_cxt.executor_stop_flag);
+}
+
+static void ResetStreamWorkerInfo()
+{
+    u_sess->stream_cxt.producer_obj = NULL;
+    u_sess->stream_cxt.global_obj = NULL;
 }
 
 static void StoreStreamSyncParam(StreamSyncParam *syncParam)

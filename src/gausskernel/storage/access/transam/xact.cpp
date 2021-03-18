@@ -56,6 +56,7 @@
 #include "commands/trigger.h"
 #include "commands/sequence.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "distributelayer/streamCore.h"
 #include "distributelayer/streamMain.h"
 #include "executor/lightProxy.h"
 #include "executor/spi.h"
@@ -4120,6 +4121,13 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
     flush_plog();
 #ifdef ENABLE_MULTIPLE_NODES
     closeAllVfds();
+#endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /* mark that stream query quits in error, to avoid stream threads not quit while PortalDrop */
+    if (u_sess->stream_cxt.global_obj != NULL) {
+        u_sess->stream_cxt.global_obj->MarkStreamQuitStatus(STREAM_ERROR);
+    }
 #endif
 
     s->savepointList = NULL;
