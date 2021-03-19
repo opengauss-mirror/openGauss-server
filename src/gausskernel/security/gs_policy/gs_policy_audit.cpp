@@ -912,7 +912,7 @@ void drop_audit_policy(DropAuditPolicyStmt *stmt)
     /* save Mng logs */
     ListCell* policy_obj = NULL;
     foreach (policy_obj, stmt->policy_names) {
-        const char* polname = (const char *)(lfirst(policy_obj));
+        const char* polname = (const char *)(((Value*)lfirst(policy_obj))->val.str);
         char buff[512] = {0};
         char user_name[USERNAME_LEN] = {0};
         char session_ip[MAX_IP_LEN] = {0};
@@ -928,7 +928,7 @@ void drop_audit_policy(DropAuditPolicyStmt *stmt)
     }
 
     foreach (policy_obj, stmt->policy_names) {
-        const char* polname = (const char *)(lfirst(policy_obj));
+        const char* polname = (const char *)(((Value*)lfirst(policy_obj))->val.str);
         gs_stl::gs_set<long long> ids;
         drop_policy_by_name<Form_gs_auditing_policy>(GsAuditingPolicyRelationId, polname, &ids);
         if (ids.empty()) {

@@ -1007,7 +1007,7 @@ void drop_policy_label(DropPolicyLabelStmt *stmt)
     Relation labels_relation;
 
     foreach(label_obj, stmt->label_names) {
-        const char* label_name = (const char *)(lfirst(label_obj));
+        const char *label_name = (const char *)(((Value*)lfirst(label_obj))->val.str);
 
         char buff[MAX_MSG_BUFF_SIZE] = {0};
         char user_name[USERNAME_LEN] = {0};
@@ -1028,7 +1028,7 @@ void drop_policy_label(DropPolicyLabelStmt *stmt)
     load_existing_labels(labels_relation, &existing_labels);
 
     foreach (label_obj, stmt->label_names) {
-        const char *label_name = (const char *)(lfirst(label_obj));
+        const char *label_name = (const char *)(((Value*)lfirst(label_obj))->val.str);
         /* first check whether such label exists */
         policy_labels_map::iterator it = existing_labels.find(label_name);
         if (it == existing_labels.end()) {

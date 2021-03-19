@@ -13802,11 +13802,11 @@ filter_paren:
 policy_filters_list:
         policy_filter_name
             {
-                $$ = list_make1($1);
+                $$ = list_make1(makeString($1));
             }
         | policy_filters_list ',' policy_filter_name
             {
-                $$ = lappend($1, $3);
+                $$ = lappend($1, makeString($3));
             }
         ;
 
@@ -14020,8 +14020,8 @@ DropAuditPolicyStmt:
                 }
         ;
 policy_names_list:
-        policy_name { $$ = list_make1($1); }
-        | policy_names_list ',' policy_name { $$ = lappend($1, $3); }
+        policy_name { $$ = list_make1(makeString($1)); }
+        | policy_names_list ',' policy_name { $$ = lappend($1, makeString($3)); }
         ;
 
 /*****************************************************************************
@@ -14493,8 +14493,8 @@ DropPolicyLabelStmt:
         ;
 
 policy_labels_list:
-        policy_label_name { $$ = list_make1($1); }
-        | policy_labels_list ',' policy_label_name { $$ =  lappend($1, $3); }
+        policy_label_name { $$ = list_make1(makeString($1)); }
+        | policy_labels_list ',' policy_label_name { $$ =  lappend($1, makeString($3)); }
         ;
 
 /*****************************************************************************

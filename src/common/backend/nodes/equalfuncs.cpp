@@ -1882,6 +1882,101 @@ static bool _equalAlterRlsPolicyStmt(const AlterRlsPolicyStmt* a, const AlterRls
     return true;
 }
 
+static bool _equalCreatePolicyLabelStmt(const CreatePolicyLabelStmt* a, const CreatePolicyLabelStmt* b)
+{
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_STRING_FIELD(label_type);
+    COMPARE_STRING_FIELD(label_name);
+    COMPARE_NODE_FIELD(label_items);
+    return true;
+}
+static bool _equalAlterPolicyLabelStmt(const AlterPolicyLabelStmt* a, const AlterPolicyLabelStmt* b)
+{
+    COMPARE_STRING_FIELD(stmt_type);
+    COMPARE_STRING_FIELD(label_name);
+    COMPARE_NODE_FIELD(label_items);
+    return true;
+}
+static bool _equalDropPolicyLabelStmt(const DropPolicyLabelStmt* a, const DropPolicyLabelStmt* b)
+{
+    COMPARE_SCALAR_FIELD(if_exists);
+    COMPARE_NODE_FIELD(label_names);
+    return true;
+}
+static bool _equalCreateAuditPolicyStmt(const CreateAuditPolicyStmt* a, const CreateAuditPolicyStmt* b)
+{
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_STRING_FIELD(policy_type);
+    COMPARE_STRING_FIELD(policy_name);
+    COMPARE_NODE_FIELD(policy_targets);
+    COMPARE_NODE_FIELD(policy_filters);
+    COMPARE_SCALAR_FIELD(policy_enabled);
+    return true;
+}
+static bool _equalAlterAuditPolicyStmt(const AlterAuditPolicyStmt* a, const AlterAuditPolicyStmt* b)
+{
+    COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_STRING_FIELD(policy_name);
+    COMPARE_STRING_FIELD(policy_action);
+    COMPARE_STRING_FIELD(policy_type);
+    COMPARE_NODE_FIELD(policy_items);
+    COMPARE_NODE_FIELD(policy_filters);
+    COMPARE_STRING_FIELD(policy_comments);
+    COMPARE_NODE_FIELD(policy_enabled);
+    return true;
+}
+static bool _equalDropAuditPolicyStmt(const DropAuditPolicyStmt* a, const DropAuditPolicyStmt* b)
+{
+    COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_NODE_FIELD(policy_names);
+    return true;
+}
+static bool _equalCreateMaskingPolicyStmt(const CreateMaskingPolicyStmt* a, const CreateMaskingPolicyStmt* b)
+{
+    COMPARE_SCALAR_FIELD(if_not_exists);
+    COMPARE_STRING_FIELD(policy_name);
+    COMPARE_NODE_FIELD(policy_data);
+    COMPARE_NODE_FIELD(policy_condition);
+    COMPARE_NODE_FIELD(policy_filters);
+    COMPARE_SCALAR_FIELD(policy_enabled);
+    return true;
+}
+static bool _equalAlterMaskingPolicyStmt(const AlterMaskingPolicyStmt* a, const AlterMaskingPolicyStmt* b)
+{
+    COMPARE_STRING_FIELD(policy_name);
+    COMPARE_STRING_FIELD(policy_action);
+    COMPARE_NODE_FIELD(policy_items);
+    COMPARE_NODE_FIELD(policy_condition);
+    COMPARE_NODE_FIELD(policy_filters);
+    COMPARE_STRING_FIELD(policy_comments);
+    COMPARE_NODE_FIELD(policy_enabled);
+    return true;
+}
+static bool _equalDropMaskingPolicyStmt(const DropMaskingPolicyStmt* a, const DropMaskingPolicyStmt* b)
+{
+    COMPARE_SCALAR_FIELD(if_exists);
+    COMPARE_NODE_FIELD(policy_names);
+    return true;
+}
+static bool _equalMaskingPolicyCondition(const MaskingPolicyCondition* a, const MaskingPolicyCondition* b)
+{
+    COMPARE_NODE_FIELD(fqdn);
+    COMPARE_STRING_FIELD(_operator);
+    COMPARE_NODE_FIELD(arg);
+    return true;
+}
+static bool _equalPolicyFilterNode(const PolicyFilterNode* a, const PolicyFilterNode* b)
+{
+    COMPARE_STRING_FIELD(node_type);
+    COMPARE_STRING_FIELD(op_value);
+    COMPARE_STRING_FIELD(filter_type);
+    COMPARE_NODE_FIELD(values);
+    COMPARE_SCALAR_FIELD(has_not_operator);
+    COMPARE_NODE_FIELD(left);
+    COMPARE_NODE_FIELD(right);
+    return true;
+}
+
 static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* a, const CreateWeakPasswordDictionaryStmt* b)
 {
     COMPARE_NODE_FIELD(weak_password_string_list);
@@ -3371,6 +3466,39 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterRlsPolicyStmt:
             retval = _equalAlterRlsPolicyStmt((AlterRlsPolicyStmt*)a, (AlterRlsPolicyStmt*)b);
+            break;
+        case T_CreatePolicyLabelStmt:
+            retval = _equalCreatePolicyLabelStmt((CreatePolicyLabelStmt*)a, (CreatePolicyLabelStmt*)b);
+            break;
+        case T_AlterPolicyLabelStmt:
+            retval = _equalAlterPolicyLabelStmt((AlterPolicyLabelStmt*)a, (AlterPolicyLabelStmt*)b);
+            break;
+        case T_DropPolicyLabelStmt:
+            retval = _equalDropPolicyLabelStmt((DropPolicyLabelStmt*)a, (DropPolicyLabelStmt*)b);
+            break;
+        case T_CreateAuditPolicyStmt:
+            retval = _equalCreateAuditPolicyStmt((CreateAuditPolicyStmt*)a, (CreateAuditPolicyStmt*)b);
+            break;
+        case T_AlterAuditPolicyStmt:
+            retval = _equalAlterAuditPolicyStmt((AlterAuditPolicyStmt*)a, (AlterAuditPolicyStmt*)b);
+            break;
+        case T_DropAuditPolicyStmt:
+            retval = _equalDropAuditPolicyStmt((DropAuditPolicyStmt*)a, (DropAuditPolicyStmt*)b);
+            break;
+        case T_CreateMaskingPolicyStmt:
+            retval = _equalCreateMaskingPolicyStmt((CreateMaskingPolicyStmt*)a, (CreateMaskingPolicyStmt*)b);
+            break;
+        case T_AlterMaskingPolicyStmt:
+            retval = _equalAlterMaskingPolicyStmt((AlterMaskingPolicyStmt*)a, (AlterMaskingPolicyStmt*)b);
+            break;
+        case T_DropMaskingPolicyStmt:
+            retval = _equalDropMaskingPolicyStmt((DropMaskingPolicyStmt*)a, (DropMaskingPolicyStmt*)b);
+            break;
+        case T_MaskingPolicyCondition:
+            retval = _equalMaskingPolicyCondition((MaskingPolicyCondition*)a, (MaskingPolicyCondition*)b);
+            break;
+        case T_PolicyFilterNode:
+            retval = _equalPolicyFilterNode((PolicyFilterNode*)a, (PolicyFilterNode*)b);
             break;
         case T_CreateWeakPasswordDictionaryStmt:
             retval = _equalCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)a, (CreateWeakPasswordDictionaryStmt*)b);
