@@ -238,7 +238,7 @@ void WalWriterAuxiliaryMain(void)
             }
         }
 
-        rc = WaitLatch(&t_thrd.proc->procLatch, WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
 
         if (rc & WL_POSTMASTER_DEATH) {
             gs_thread_exit(1);
