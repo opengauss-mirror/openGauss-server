@@ -4058,9 +4058,6 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (
 #ifdef ENABLE_MULTIPLE_NODES
             IS_PGXC_COORDINATOR &&
-#else
-            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
-             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
             g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
             signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGHUP);
@@ -4644,6 +4641,9 @@ static void ProcessDemoteRequest(void)
                     Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.BgWriterPID, SIGTERM);
                 }
+                if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+                    signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
+
                 /* and the walwriter too */
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
@@ -4714,6 +4714,9 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.HeartbeatPID != 0)
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
+
+            if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+                signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
 
             if (g_instance.pid_cxt.WLMCollectPID != 0) {
                 WLMProcessThreadShutDown();
@@ -5564,9 +5567,6 @@ static void reaper(SIGNAL_ARGS)
         if (
 #ifdef ENABLE_MULTIPLE_NODES
             IS_PGXC_COORDINATOR &&
-#else
-            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
-             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
             pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
             g_instance.pid_cxt.TwoPhaseCleanerPID = 0;
