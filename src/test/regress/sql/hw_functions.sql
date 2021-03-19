@@ -106,16 +106,16 @@ select numtodsinterval(-0.1,'HOUR');
 select numtodsinterval(150032,'second');
 select numtodsinterval(-.1500321234,'second');
 --boundary test
-SELECT numtodsinterval(-2147483648, 'DAY')from dual;
-SELECT numtodsinterval(-2147483648, 'HOUR')from dual;
-SELECT numtodsinterval(-2147483648, 'MINUTE')from dual;
-SELECT numtodsinterval(-2147483648, 'SECOND')from dual;
-SELECT numtodsinterval(2147483647, 'DAY')from dual;
-SELECT numtodsinterval(999999999.99999999999, 'DAY')from dual;
-SELECT numtodsinterval(2147483647, 'HOUR')from dual;
-SELECT numtodsinterval(2147483647, 'MINUTE')from dual;
-SELECT numtodsinterval(2147483647, 'SECOND')from dual;
-SELECT numtodsinterval(123456789.123456789, 'DAY')from dual;
+SELECT numtodsinterval(-2147483648, 'DAY');
+SELECT numtodsinterval(-2147483648, 'HOUR');
+SELECT numtodsinterval(-2147483648, 'MINUTE');
+SELECT numtodsinterval(-2147483648, 'SECOND');
+SELECT numtodsinterval(2147483647, 'DAY');
+SELECT numtodsinterval(999999999.99999999999, 'DAY');
+SELECT numtodsinterval(2147483647, 'HOUR');
+SELECT numtodsinterval(2147483647, 'MINUTE');
+SELECT numtodsinterval(2147483647, 'SECOND');
+SELECT numtodsinterval(123456789.123456789, 'DAY');
 SELECT '2147483647 days 24 hours'::interval;
 
 set intervalstyle=postgres;

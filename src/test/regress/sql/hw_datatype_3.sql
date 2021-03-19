@@ -185,14 +185,14 @@ drop table date_smalldate;
 
 --INTERAL TO NUMERIC
 create table test_num(mynum numeric);
-select to_date('2013-03-14 14:27:00','YYYY-MM-DD HH24:MI:SS') - to_date('2013-3-1 9:00:00','YYYY-MM-DD HH24:MI:SS') from dual;
+select to_date('2013-03-14 14:27:00','YYYY-MM-DD HH24:MI:SS') - to_date('2013-3-1 9:00:00','YYYY-MM-DD HH24:MI:SS');
 insert into test_num values(to_date('2013-03-14 14:27:00','YYYY-MM-DD HH24:MI:SS') - to_date('2013-3-1 9:00:00','YYYY-MM-DD HH24:MI:SS'));
 select mynum from test_num order by 1;
 insert into test_num values(interval '2 days 09:33:00');
 select mynum from test_num order by 1;
 select floor(mynum) from test_num order by 1;
 drop table test_num;
-select floor(interval '2 days 09:33:00') from dual;
+select floor(interval '2 days 09:33:00');
 
 create or replace procedure test_interval_to_num(my_num numeric)
 as

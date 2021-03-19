@@ -10,7 +10,7 @@ AS
     END;
 /
 
-SELECT test_return(1) from dual;
+SELECT test_return(1);
 
 declare
 a int := 1;
@@ -47,7 +47,7 @@ AS
     END;
 /
 
-SELECT test_return1(1) from dual;
+SELECT test_return1(1);
 
 declare
 a int := 1;
@@ -127,7 +127,7 @@ AS
     END;
 /
 
-SELECT test_return5(1) from dual;
+SELECT test_return5(1);
 
 declare
 a int := 1;
@@ -610,7 +610,7 @@ AS
     END;
 /
 
-SELECT test_return(1) from dual;
+SELECT test_return(1);
 
 declare
 a int := 1;
@@ -647,7 +647,7 @@ AS
     END;
 /
 
-SELECT test_return1(1) from dual;
+SELECT test_return1(1);
 
 declare
 a int := 1;
@@ -727,7 +727,7 @@ AS
     END;
 /
 
-SELECT test_return5(1) from dual;
+SELECT test_return5(1);
 
 declare
 a int := 1;

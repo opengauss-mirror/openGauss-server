@@ -1,11 +1,11 @@
 -- add test case into 'case DCH_RRRR' and 'case DCH_RR' in DCH_from_char function, then the function adjust_partial_year_to_current_year will covered:
-select to_date('06-JAN-40 00:00:00','DD-MON-RRRR HH24:MI:SS') from dual;
+select to_date('06-JAN-40 00:00:00','DD-MON-RRRR HH24:MI:SS');
          to_date          
 --------------------------
  Fri Jan 06 00:00:00 2040
 (1 row)
 
-select to_date('01/05/81','dd/mm/rr') from dual;
+select to_date('01/05/81','dd/mm/rr');
          to_date          
 --------------------------
  Fri May 01 00:00:00 1981

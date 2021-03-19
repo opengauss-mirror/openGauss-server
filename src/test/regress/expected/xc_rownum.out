@@ -231,13 +231,13 @@ select rownum rn from distributors group by rn;
   4
 (4 rows)
 
-select rownum + 1 from dual group by rownum;
+select rownum + 1 group by rownum;
  ?column? 
 ----------
         2
 (1 row)
 
-select rownum + 1 rn from dual group by rn;
+select rownum + 1 rn group by rn;
  rn 
 ----
   2

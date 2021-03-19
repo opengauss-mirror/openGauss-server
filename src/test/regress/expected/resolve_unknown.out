@@ -33,18 +33,16 @@ explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1
            Output: 'vasya'::text
 (6 rows)
 
-explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
+explain (verbose on, costs off) select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
                QUERY PLAN                
 -----------------------------------------
  Result
    Output: 1
    One-Time Filter: ('vasya'::text = $0)
    InitPlan 1 (returns $0)
-     ->  Subquery Scan on dual
+     ->  Result
            Output: 'vasya'::text
-           ->  Result
-                 Output: 'X'::text
-(8 rows)
+(6 rows)
 
 select 1 where 'vasya' = (select 'vasya' as col1);
  ?column? 
@@ -58,7 +56,7 @@ select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
         1
 (1 row)
 
-select 1 where 'vasya' = (select 'vasya' as col1 from dual where col1 <> 'aaa');
+select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
  ?column? 
 ----------
         1
@@ -239,7 +237,7 @@ INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1
 ERROR:  column "b" is of type unknown but expression is of type text
 HINT:  You will need to rewrite or cast the expression.
 CONTEXT:  referenced column: b
-INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian';
 TABLE test_unknown ORDER BY a;
  a |    b     | c 
 ---+----------+---
@@ -260,7 +258,7 @@ INSERT INTO test_unknown(a, b) VALUES (4, 'suzhou'),  (5, 'hangzhou') ORDER BY 1
 ERROR:  column "b" is of type unknown but expression is of type text
 HINT:  You will need to rewrite or cast the expression.
 CONTEXT:  referenced column: b
-INSERT INTO test_unknown(a, b) SELECT 6, 'xian' FROM DUAL;
+INSERT INTO test_unknown(a, b) SELECT 6, 'xian';
 TABLE test_unknown ORDER BY a;
  a |    b     | c 
 ---+----------+---

@@ -86,8 +86,8 @@ select rownum, name from (select name from distributors where rownum <= 4 inters
 --test group by
 select rownum from distributors group by rownum;
 select rownum rn from distributors group by rn;
-select rownum + 1 from dual group by rownum;
-select rownum + 1 rn from dual group by rn;
+select rownum + 1 group by rownum;
+select rownum + 1 rn group by rn;
 
 --test having
 select id from distributors group by rownum,id having rownum < 5;
