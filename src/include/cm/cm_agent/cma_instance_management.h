@@ -24,14 +24,11 @@ void kill_instance_force(const char* data_path, InstanceTypes ins_type);
 void immediate_stop_one_instance(const char* instance_data_path, InstanceTypes instance_type);
 void immediate_shutdown_nodes(bool kill_cmserver, bool kill_cn);
 void* agentStartAndStopMain(void* arg);
-
 bool ExecuteCmdWithResult(char* cmd, char* result);
 bool getnicstatus(uint32 listen_ip_count, char ips[][CM_IP_LENGTH]);
 bool Is_cluster_replacing(void);
 bool Is_cluster_resizing(void);
-
 int agentCheckPort(uint32 port);
-
 uint32 GetLibcommPort(const char* file_path, uint32 base_port, int port_type);
-
+extern bool UpdateLibcommConfig();
 #endif

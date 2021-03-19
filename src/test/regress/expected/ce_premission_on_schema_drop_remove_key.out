@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY IF EXISTS MyCMK1 CASCADE;
-NOTICE:  global setting "mycmk1" does not exist
+NOTICE:  client master key "mycmk1" does not exist
 -- create another user
 DROP ROLE IF EXISTS newuser;
 NOTICE:  role "newuser" does not exist, skipping
@@ -99,8 +99,8 @@ CONTEXT:  referenced column: has_table_privilege
 --DROP CLIENT MASTER KEY MyCMK1;
 DROP SCHEMA IF EXISTS testns CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to global setting: mycmk1
-drop cascades to column setting: mycek1
+DETAIL:  drop cascades to client master key: mycmk1
+drop cascades to column encryption key: mycek1
 select * from gs_client_global_keys;
  global_key_name | key_namespace | key_owner | key_acl | create_date 
 -----------------+---------------+-----------+---------+-------------

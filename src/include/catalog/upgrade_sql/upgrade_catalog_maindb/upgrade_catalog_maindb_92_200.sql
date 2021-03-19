@@ -1582,6 +1582,7 @@ CREATE OR REPLACE VIEW pg_catalog.DV_SESSION_LONGOPS AS
 REVOKE ALL on PG_CATALOG.DV_SESSIONS FROM public;
 REVOKE ALL on PG_CATALOG.DV_SESSION_LONGOPS FROM public;
 
+
 CREATE OR REPLACE FUNCTION  pg_catalog.proc_add_partition(
                   IN        relationname         name,
                   IN        boundaries_interval  INTERVAL
@@ -1590,42 +1591,19 @@ RETURNS void
 AS
 $$
 DECLARE
-    pgclass_rec         pg_class%rowtype;
-    row_name            record;
     sql                 text;
     part_relname        text;
     check_count         int;
     rel_oid             int;
-    job_id              int;
     time_interval       int;
-    part_boundarie      timestamptz;
+    part_boundary       timestamptz;
     partition_tmp       timestamptz;
-    username            name;
+    database            name;
     now_timestamp       timestamptz;
     namespace           name;
     table_name          name;
     pos                 integer;
 BEGIN
-    /* check tsdb_enable */
-    IF check_engine_enable() = false
-    THEN
-        RAISE EXCEPTION 'tsdb engine is not exist';
-    END IF;
-    /* check tsdb_enable end */
-
-    /* skip for cluster unstable */
-    IF (SELECT count(*) FROM pg_settings WHERE name='enable_prevent_job_task_startup' AND setting='on') > 0
-    THEN
-       RAISE WARNING 'skip proc_add_partition() when enable_prevent_job_task_startup = on';
-       RETURN;
-    END IF;
-    IF (SELECT count(*) FROM pg_settings WHERE name='enable_online_ddl_waitlock' AND setting='on') > 0
-    THEN
-       RAISE WARNING 'skip proc_add_partition() when enable_online_ddl_waitlock = on';
-       RETURN;
-    END IF;
-    /* skip for cluster unstable */
-
     /* check parameter */
     IF relationname is null THEN
         RAISE EXCEPTION 'parameter ''relationname'' cannot be null';
@@ -1637,80 +1615,45 @@ BEGIN
         RAISE EXCEPTION 'boundaries_interval must be greater than 0';
     END IF;
     pos = is_contain_namespace(relationname);
-    IF pos != 0 THEN
-        namespace = substring(relationname from 1 for pos -1);
-        table_name = substring(relationname from pos+1 for char_length(relationname) - pos);
+    IF pos = 0 THEN
+        RAISE EXCEPTION 'parameter ''relationname'' must be format namespace.relname';
     END IF;
+    namespace = substring(relationname from 1 for pos - 1);
+    table_name = substring(relationname from pos + 1 for char_length(relationname) - pos);
     /* check parameter end */
+    sql = 'select current_database();';
+    EXECUTE sql INTO database;
 
     /* check table exist */
-    sql := 'select current_user';
-    EXECUTE(sql) into username;
-    IF pos = 0 THEN
-        sql := 'SELECT count(*) FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || relationname || '''
-            AND pg_catalog.pg_table_is_visible(c.oid) ;';
-    ELSE
-        sql := 'SELECT count(*) FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || table_name || '''
-            AND n.nspname = ''' || namespace || ''';';
-    END IF;
-    EXECUTE sql INTO check_count;
+    sql := 'SELECT count(*) FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace 
+            WHERE c.relname = $1 AND n.nspname = $2 and c.relkind = ''r'' and c.parttype = ''p'';';
+    EXECUTE sql INTO check_count USING table_name, namespace;
     IF check_count = 0 THEN
-        RAISE EXCEPTION  'please input the correct relation name!';
+        RAISE EXCEPTION  'please input the correct relation name, relation kind should be r and be a partition table!';
     END IF;
     /* check table exist end */
 
-    /* check table owner privilege */
-    IF pos = 0 THEN
-        sql := 'SELECT count(*) FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || relationname || '''
-            AND pg_catalog.pg_table_is_visible(c.oid) and pg_catalog.pg_get_userbyid(c.relowner) = ''' || username || ''';';
-    ELSE
-        sql := 'SELECT count(*) FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || table_name || '''
-            AND n.nspname = ''' || namespace || ''' and pg_catalog.pg_get_userbyid(c.relowner) = ''' || username || ''';';
-    END IF;
-    EXECUTE sql INTO check_count;
-    IF check_count = 0 THEN
-        RAISE EXCEPTION 'permission denied for relation %', relationname
-        USING HINT = 'please assure you have the privilege';
-    END IF;
-    /* check table owner privilege end */
-
-    /* check partition table */
-    IF pos = 0 THEN
-        sql := 'SELECT c.oid FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || relationname || '''
-            AND pg_catalog.pg_table_is_visible(c.oid) and pg_catalog.pg_get_userbyid(c.relowner) = ''' || username || ''';';
-    ELSE
-        sql := 'SELECT c.oid FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ''' || table_name || '''
-            AND n.nspname = ''' || namespace || ''' and pg_catalog.pg_get_userbyid(c.relowner) = ''' || username || ''';';
-    END IF;
-    EXECUTE sql into rel_oid;
-    sql := 'SELECT relkind,parttype FROM pg_class WHERE oid = ''' || rel_oid ||'''';
-    EXECUTE sql into pgclass_rec.relkind, pgclass_rec.parttype;
-    IF pgclass_rec.relkind != 'r' THEN
-        RAISE EXCEPTION  ' % is not a table !',relationname;
-    END IF;
-    IF pgclass_rec.parttype != 'p' THEN
-        RAISE EXCEPTION  ' % does not have partition !',relationname;
-    END IF;
+    sql := 'SELECT c.oid FROM pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = $1 AND n.nspname = $2;';
+    EXECUTE sql into rel_oid USING table_name, namespace;
     /* check partition table end */
 
     /* iteratively checking time range for every partition*/
     sql := 'SELECT boundaries[1] FROM pg_partition WHERE parentid = ' || rel_oid ||' AND boundaries IS NOT NULL ORDER BY
-    EXTRACT(epoch FROM CAST(boundaries[1] as timestamptz)) DESC LIMIT 1';
-    EXECUTE sql INTO part_boundarie;
+            EXTRACT(epoch FROM CAST(boundaries[1] as timestamptz)) DESC LIMIT 1';
+    EXECUTE sql INTO part_boundary;
 
     /* reinforce the job failed to throw error when inserting data */
     sql := 'select current_timestamp(0)';
-    EXECUTE(sql) into now_timestamp;
-    WHILE  part_boundarie - 20 * boundaries_interval < now_timestamp  LOOP
-        part_boundarie = part_boundarie + boundaries_interval;
-        sql = 'select proc_add_partition_by_boundary(''' || relationname || ''', ' ||  '''' || part_boundarie || ''');';
-        EXECUTE(sql);
+    EXECUTE sql into now_timestamp;
+    WHILE  part_boundary - 20 * boundaries_interval < now_timestamp  LOOP
+        part_boundary = part_boundary + boundaries_interval;
+        partition_tmp = date_trunc('second', part_boundary);
+        EXECUTE format('ALTER TABLE '||relationname||' ADD PARTITION p'||EXTRACT(epoch FROM CAST(partition_tmp AS TIMESTAMPTZ))||' values less than (%L);', part_boundary);
     END LOOP;
 
-    part_boundarie := part_boundarie + boundaries_interval;
-    partition_tmp = date_trunc('second', part_boundarie);
-    sql :='ALTER TABLE '||relationname||' ADD PARTITION p'||EXTRACT(epoch FROM CAST(partition_tmp AS TIMESTAMPTZ))||' values less than ('''||part_boundarie||''');';
-    EXECUTE (sql);
+    part_boundary := part_boundary + boundaries_interval;
+    partition_tmp = date_trunc('second', part_boundary);
+    EXECUTE 'ALTER TABLE '||relationname||' ADD PARTITION p'||EXTRACT(epoch FROM CAST(partition_tmp AS TIMESTAMPTZ))||' values less than ('''||part_boundary||''');';
 
 END;
 $$

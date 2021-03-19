@@ -174,11 +174,12 @@ static void delay_control(TimestampTz last_send_time)
     TimestampTz now = GetCurrentTimestamp();
     TimestampTz timeout = TimestampTzPlusMilliseconds(last_send_time, u_sess->attr.attr_common.dn_heartbeat_interval);
     TimestampDifference(now, timeout, &secs, &microsecs);
-    Assert(secs <= u_sess->attr.attr_common.dn_heartbeat_interval);
 
     /* If has exceeded send_interval, don't delay. */
     if (secs == 0 && microsecs == 0) {
         return;
+    } else if (secs > u_sess->attr.attr_common.dn_heartbeat_interval) {
+        secs = u_sess->attr.attr_common.dn_heartbeat_interval;
     }
 
     pg_usleep(secs * USECS_PER_SEC + microsecs);
@@ -417,6 +418,24 @@ Size heartbeat_shmem_size(void)
     Size size = 0;
     size = add_size(size, sizeof(heartbeat_state));
     return size;
+}
+
+/*
+ * Reset heartbeat timestamp.
+ */ 
+void InitHeartbeatTimestamp()
+{
+    volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
+
+    SpinLockAcquire(&stat->mutex);
+    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (replconninfo == NULL) {
+            continue;
+        }
+        stat->channel_array[i].last_reply_timestamp = 0;
+    }
+    SpinLockRelease(&stat->mutex);
 }
 
 /* Allocate and initialize heartbeat shared memory */

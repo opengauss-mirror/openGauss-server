@@ -251,6 +251,38 @@ PolicyLabelItem::PolicyLabelItem(const char *schema, const char *object, const c
     }
 }
 
+void PolicyLabelItem::init(const PolicyLabelItem &arg)
+{
+    m_schema = arg.m_schema;
+    m_object = arg.m_object;
+    errno_t rc = memset_s(m_column, sizeof(m_column), 0, sizeof(m_column));
+    securec_check(rc, "\0", "\0");
+    if (arg.m_column != NULL && strlen(arg.m_column) > 0)
+    {
+        rc = snprintf_s(m_column, sizeof(m_column), strlen(arg.m_column), "%s", arg.m_column);
+        securec_check_ss(rc, "\0", "\0");
+    }
+    m_obj_type = arg.m_obj_type;
+}
+
+PolicyLabelItem::PolicyLabelItem(const PolicyLabelItem &arg)
+{
+    if (this == &arg) {
+        return;
+    }
+    init(arg);
+}
+
+PolicyLabelItem &PolicyLabelItem::operator=(const PolicyLabelItem &arg)
+{
+    if (this == &arg) {
+        return *this;
+    }
+
+    init(arg);
+    return *this;
+}
+
 /*
  * set_object
  *    set m_obj_type and objid by given parameters.
@@ -354,8 +386,8 @@ bool get_function_name(long long funcid, PolicyLabelItem *func_label)
     const char *procname  = func_rel->proname.data;
     func_label->m_schema  = func_rel->pronamespace;
 
-    ReleaseSysCache(tuple);
     func_label->set_object(procname, O_FUNCTION);
+    ReleaseSysCache(tuple);
     return true;
 }
 

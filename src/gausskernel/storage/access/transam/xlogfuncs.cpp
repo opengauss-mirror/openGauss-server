@@ -75,13 +75,6 @@ Datum pg_start_backup(PG_FUNCTION_ARGS)
     char startxlogstr[MAXFNAMELEN];
     errno_t errorno = EOK;
 
-    SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
-
-    if (status == SESSION_BACKUP_NON_EXCLUSIVE)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("a non-exclusive backup is already in progress in this session")));
-
     backupidstr = text_to_cstring(backupid);
     dir = AllocateDir("pg_tblspc");
     if (!dir) {
@@ -121,13 +114,6 @@ Datum pg_stop_backup(PG_FUNCTION_ARGS)
     char stopxlogstr[MAXFNAMELEN];
     errno_t errorno = EOK;
 
-    SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
-
-    if (status == SESSION_BACKUP_NON_EXCLUSIVE)
-        ereport(ERROR,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("a non-exclusive backup is already in progress in this session")));
-
     /* when delay xlog recycle is true, we do not copy xlog from archive */
     stoppoint = do_pg_stop_backup(NULL, !GetDelayXlogRecycle());
 
@@ -136,156 +122,6 @@ Datum pg_stop_backup(PG_FUNCTION_ARGS)
     securec_check_ss(errorno, "", "");
 
     PG_RETURN_TEXT_P(cstring_to_text(stopxlogstr));
-}
-
-/*
- * pg_start_backup_v2: set up for taking an on-line backup dump
- *
- */
-Datum pg_start_backup_v2(PG_FUNCTION_ARGS)
-{
-    text* backupid = PG_GETARG_TEXT_P(0);
-    bool fast = PG_GETARG_BOOL(1);
-    bool  exclusive = PG_GETARG_BOOL(2);
-    char* backupidstr = NULL;
-    char* labelfile = NULL;
-    char* tblspcmapfile = NULL;
-    XLogRecPtr startpoint;
-    DIR *dir;
-    char startxlogstr[MAXFNAMELEN];
-    errno_t errorno = EOK;
-    MemoryContext oldContext;
-
-    u_sess->probackup_context = AllocSetContextCreate(u_sess->top_mem_cxt, "probackup context",
-                                                      ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
-                                                      ALLOCSET_DEFAULT_MAXSIZE);
-    oldContext = MemoryContextSwitchTo(u_sess->probackup_context);
-    
-    SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
-
-    if (status == SESSION_BACKUP_NON_EXCLUSIVE)
-        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("a non-exclusive backup is already in progress in this session")));
-
-    backupidstr = text_to_cstring(backupid);
-    dir = AllocateDir("pg_tblspc");
-    if (!dir) {
-        ereport(ERROR, (errmsg("could not open directory \"%s\": %m", "pg_tblspc")));
-    }
-
-    if (exclusive) {
-        startpoint = do_pg_start_backup(backupidstr, fast, NULL, dir, NULL, NULL, false, true);
-    } else {
-        if (status == SESSION_BACKUP_EXCLUSIVE)
-            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                 errmsg("a  backup is already in progress in this session")));
-
-        startpoint = do_pg_start_backup(backupidstr, fast, &labelfile,dir, &tblspcmapfile, NULL,false,true);
-        u_sess->proc_cxt.LabelFile = MemoryContextStrdup(u_sess->probackup_context, labelfile);
-        if (tblspcmapfile != NULL) {
-            u_sess->proc_cxt.TblspcMapFile = MemoryContextStrdup(u_sess->probackup_context, tblspcmapfile);
-        } else {
-            u_sess->proc_cxt.TblspcMapFile = NULL;
-        }
-    }
-
-    errorno = snprintf_s(startxlogstr, sizeof(startxlogstr), sizeof(startxlogstr) - 1, "%X/%X",
-                         (uint32)(startpoint >> 32), (uint32)startpoint);
-    securec_check_ss(errorno, "", "");
-
-    PG_RETURN_TEXT_P(cstring_to_text(startxlogstr));
-
-    MemoryContextSwitchTo(oldContext);
-}
-
-/*
- * pg_stop_backup_v2: finish taking an on-line backup dump
- *
- */
-Datum pg_stop_backup_v2(PG_FUNCTION_ARGS)
-{
-    ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
-    TupleDesc    tupdesc;
-    Tuplestorestate *tupstore;
-    MemoryContext perqueryctx, oldcontext, oldcontext2;
-    Datum        values[3];
-    bool         nulls[3];
-    XLogRecPtr stoppoint;
-    char stopxlogstr[MAXFNAMELEN];
-    errno_t errorno = EOK;
-    bool  exclusive = PG_GETARG_BOOL(0);
-    errno_t rc;
-
-    SessionBackupState status = u_sess->proc_cxt.sessionBackupState;
-
-    oldcontext2 = MemoryContextSwitchTo(u_sess->probackup_context);
-
-    /* check to see if caller supports us returning a tuplestore */
-    if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("set-valued function called in context that cannot accept a set")));
-    if (!(rsinfo->allowedModes & SFRM_Materialize))
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("materialize mode required, but it is not allowed in this context")));
-
-    /* Build a tuple descriptor for our result type */
-    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
-        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("return type must be a row type")));
-
-    perqueryctx = rsinfo->econtext->ecxt_per_query_memory;
-    oldcontext = MemoryContextSwitchTo(perqueryctx);
-
-    tupstore = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
-    rsinfo->returnMode = SFRM_Materialize;
-    rsinfo->setResult = tupstore;
-    rsinfo->setDesc = tupdesc;
-
-    MemoryContextSwitchTo(oldcontext);
-
-    rc = memset_s(values, sizeof(values), 0, sizeof(values));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
-    securec_check(rc, "\0", "\0");
-
-    if (exclusive) {
-        if (status == SESSION_BACKUP_NON_EXCLUSIVE)
-            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg("non-exclusive backup in progress"), errhint("Did you mean to use pg_stop_backup('f')?")));
-        /* when delay xlog recycle is true, we do not copy xlog from archive */
-        stoppoint = do_pg_stop_backup(NULL, !GetDelayXlogRecycle());
-        nulls[1] = true;
-        nulls[2] = true;
-    } else {
-        if (status != SESSION_BACKUP_NON_EXCLUSIVE)
-            ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                     errmsg("non-exclusive backup is not in progress")));
-
-        stoppoint = do_pg_stop_backup(u_sess->proc_cxt.LabelFile, !GetDelayXlogRecycle());
-
-        values[1] = CStringGetTextDatum(u_sess->proc_cxt.LabelFile);
-        pfree(u_sess->proc_cxt.LabelFile);
-        u_sess->proc_cxt.LabelFile = NULL;
-
-        if (u_sess->proc_cxt.TblspcMapFile) {
-            values[2] = CStringGetTextDatum(u_sess->proc_cxt.TblspcMapFile);
-            pfree(u_sess->proc_cxt.TblspcMapFile);
-            u_sess->proc_cxt.TblspcMapFile = NULL;
-        } else {
-            nulls[2] = true;
-        }
-    }
-
-    errorno = snprintf_s(stopxlogstr, sizeof(stopxlogstr), sizeof(stopxlogstr) - 1, "%X/%X",
-                         (uint32)(stoppoint >> 32), (uint32)stoppoint);
-    securec_check_ss(errorno, "", "");
-    values[0] = CStringGetTextDatum(stopxlogstr);
-
-    tuplestore_putvalues(tupstore, tupdesc, values, nulls);
-    tuplestore_donestoring(tupstore);
-
-    MemoryContextSwitchTo(oldcontext2);
-
-    return (Datum) 0;
 }
 
 /*
@@ -1123,6 +959,11 @@ Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
     XLogRecPtr locationpoint;
     char xlogfilename[MAXFNAMELEN];
     errno_t errorno = EOK;
+
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("Must be system admin or operator admin in operation mode to gs_set_obs_delete_location."))));
+    }
 
     locationstr = text_to_cstring(location);
 

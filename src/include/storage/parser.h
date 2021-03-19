@@ -28,7 +28,9 @@
 #include <string>
 #include <assert.h>
 
+#ifdef GDS_SERVER
 #include "event.h"
+#endif
 #include "bulkload/utils.h"
 #ifdef OBS_SERVER
 #include "access/obs/obs_am.h"

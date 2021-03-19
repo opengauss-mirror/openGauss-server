@@ -131,6 +131,7 @@
 #include "catalog/pgxc_node.h"
 #include "workload/workload.h"
 #include "streaming/init.h"
+#include "replication/obswalreceiver.h"
 
 static RemoteQueryExecType ExecUtilityFindNodes(ObjectType object_type, Oid rel_id, bool* is_temp);
 static RemoteQueryExecType exec_utility_find_nodes_relkind(Oid rel_id, bool* is_temp);
@@ -145,9 +146,6 @@ static void exec_utility_with_message_parallel_ddl_mode(
 static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_string);
 
 static ExecNodes* assign_utility_stmt_exec_nodes(Node* parse_tree);
-static void ExecUtilityStmtOnFirstExecCnNode_Barrier(const char* query_string, bool sent_to_remote, 
-    bool force_auto_commit, RemoteQueryExecType exec_type, bool is_temp, const char* first_exec_node, 
-    const Node* parse_tree, char* completionTag);
 
 #endif
 
@@ -2371,7 +2369,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
             bool nodeis_active = true;
             nodeis_active = is_pgxc_nodeactive(node_oid);
-            if (OidIsValid(node_oid) && nodeis_active == false)
+            if (OidIsValid(node_oid) && nodeis_active == false && !IS_CNDISASTER_RECOVER_MODE)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Current Node is not active")));
         }
     }
@@ -3040,6 +3038,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     /* fall through */
                 case OBJECT_FOREIGN_TABLE:
                 case OBJECT_STREAM:
+                case OBJECT_MATVIEW:
                 case OBJECT_TABLE: {
 #ifdef PGXC
                     /*
@@ -3074,7 +3073,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 case OBJECT_SEQUENCE:
                 case OBJECT_VIEW:
                 case OBJECT_CONTQUERY:
-                case OBJECT_MATVIEW:
 #ifdef PGXC
                 {
                     if (((DropStmt*)parse_tree)->removeType == OBJECT_FOREIGN_TABLE ||
@@ -5264,6 +5262,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             /* something happen on datanodes */
             if (IS_PGXC_DATANODE)
+#else
+            Relation matview = heap_openrv(stmt->relation, stmt->incremental ? ExclusiveLock : AccessExclusiveLock);
+            CheckRefreshMatview(matview, is_incremental_matview(matview->rd_id));
+            heap_close(matview, NoLock);
 #endif
             {
                 if (stmt->incremental) {
@@ -5702,15 +5704,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifndef ENABLE_MULTIPLE_NODES
             DISTRIBUTED_FEATURE_NOT_SUPPORTED();
 #endif
-            if (IS_PGXC_COORDINATOR) {
-                char* first_exec_node = find_first_exec_cn();
-                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
-                if (is_first_node == false) {
-                    ExecUtilityStmtOnFirstExecCnNode_Barrier(query_string, sent_to_remote, false, 
-                        EXEC_ON_COORDS, false, first_exec_node, parse_tree, completion_tag);
-                    break;
-                }
-            }
             RequestBarrier(((BarrierStmt*)parse_tree)->id, completion_tag);
             break;
 
@@ -6573,9 +6566,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CleanConnStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-            DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             CleanConnection((CleanConnStmt*)parse_tree);
 
             if (IS_PGXC_COORDINATOR)
@@ -6968,32 +6958,6 @@ void ExecUtilityStmtOnNodes_ParallelDDLMode(const char* query_string, ExecNodes*
     }
 }
 
-static void ExecUtilityStmtOnFirstExecCnNode_Barrier(const char* query_string, bool sent_to_remote, 
-    bool force_auto_commit, RemoteQueryExecType exec_type, bool is_temp, const char* first_exec_node, 
-    const Node* parse_tree, char* completionTag)
-{
-    int rc = 0;
-    /* Nothing to be done if this statement has been sent to the nodes */
-    if (sent_to_remote)
-        return;
-    
-    if (!IsConnFromCoord()) {
-        RemoteQuery* step = makeNode(RemoteQuery);
-        step->combine_type = COMBINE_TYPE_SAME;
-        step->sql_statement = pstrdup(query_string);
-        step->force_autocommit = force_auto_commit;
-        step->exec_type = exec_type;
-        step->is_temp = is_temp;
-        ExecRemoteUtilityParallelBarrier(step, first_exec_node);
-        pfree_ext(step->sql_statement);
-        pfree_ext(step);
-        if (completionTag != NULL) {
-            rc = sprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, "BARRIER %s", ((BarrierStmt*)parse_tree)->id);
-            securec_check_ss(rc, "\0", "\0");
-        }
-    }
-}
-
 static RemoteQueryExecType set_exec_type(Oid object_id, bool* is_temp)
 {
     RemoteQueryExecType type;
@@ -7351,6 +7315,10 @@ Query* UtilityContainsQuery(Node* parse_tree)
 static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
 {
     const char* tag = NULL;
+    bool is_multiple_nodes = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    is_multiple_nodes = true;
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     switch (obj_type) {
         case OBJECT_AGGREGATE:
@@ -7394,6 +7362,12 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
             break;
         case OBJECT_STREAM:
             tag = "ALTER STREAM";
+            if (!is_multiple_nodes) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Not supported for streaming engine in current version"),
+                        errdetail("You should use the multiple nodes version")));
+            }
             break;
         case OBJECT_FUNCTION:
             tag = "ALTER FUNCTION";
@@ -7469,6 +7443,12 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
             break;
         case OBJECT_CONTQUERY:
             tag = "ALTER CONTVIEW";
+            if (!is_multiple_nodes) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Not supported for streaming engine in current version"),
+                        errdetail("You should use the multiple nodes version")));
+            }
             break;
         case OBJECT_MATVIEW:
             tag = "ALTER MATERIALIZED VIEW";
@@ -7504,6 +7484,10 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
 const char* CreateCommandTag(Node* parse_tree)
 {
     const char* tag = NULL;
+    bool is_multiple_nodes = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    is_multiple_nodes = true;
+#endif   /* ENABLE_MULTIPLE_NODES */
 
     switch (nodeTag(parse_tree)) {
             /* raw plannable queries */
@@ -7694,6 +7678,12 @@ const char* CreateCommandTag(Node* parse_tree)
             if (pg_strcasecmp(((CreateForeignTableStmt *)parse_tree)->servername, 
                 STREAMING_SERVER) == 0) {
                 tag = "CREATE STREAM";
+                if (!is_multiple_nodes) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Not supported for streaming engine in current version"),
+                            errdetail("You should use the multiple nodes version")));
+                }
             } else {
                 tag = "CREATE FOREIGN TABLE";
             }
@@ -7717,6 +7707,12 @@ const char* CreateCommandTag(Node* parse_tree)
                     break;
                 case OBJECT_CONTQUERY:
                     tag = "DROP CONTVIEW";
+                    if (!is_multiple_nodes) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Not supported for streaming engine in current version"),
+                                errdetail("You should use the multiple nodes version")));
+                    }
                     break;
                 case OBJECT_MATVIEW:
                     tag = "DROP MATERIALIZED VIEW";
@@ -7761,6 +7757,12 @@ const char* CreateCommandTag(Node* parse_tree)
                     break;
                 case OBJECT_STREAM:
                     tag = "DROP STREAM";
+                    if (!is_multiple_nodes) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Not supported for streaming engine in current version"),
+                                errdetail("You should use the multiple nodes version")));
+                    }
                     break;
                 case OBJECT_EXTENSION:
                     tag = "DROP EXTENSION";
@@ -7807,10 +7809,10 @@ const char* CreateCommandTag(Node* parse_tree)
                     tag = "DROP DATA SOURCE";
                     break;
                 case OBJECT_GLOBAL_SETTING:
-                    tag = "DROP GLOBAL SETTING";
+                    tag = "DROP CLIENT MASTER KEY";
                     break;
                 case OBJECT_COLUMN_SETTING:
-                    tag = "DROP CLIENT LOGIC COLUMN SETTING";
+                    tag = "DROP COLUMN ENCRYPTION KEY";
                     break;
                 default:
                     tag = "?\?\?";
@@ -7930,6 +7932,14 @@ const char* CreateCommandTag(Node* parse_tree)
             else
 #endif   /* ENABLE_MULTIPLE_NODES */
                 tag = "CREATE VIEW";
+            if ((((ViewStmt*)parse_tree)->relkind) == OBJECT_CONTQUERY) {
+                if (!is_multiple_nodes) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Not supported for streaming engine in current version"),
+                            errdetail("You should use the multiple nodes version")));
+                }
+            }
             break;
 
         case T_CreateFunctionStmt: {
@@ -11804,10 +11814,11 @@ bool ObjectsInSameNodeGroup(List* objects, NodeTag stmttype)
         }
 
         /*
-         * Only check relation, for index, view is not associated with
+         * Only check relation and materialized view, for index, view is not associated with
          * nodegroup they belongs to its base table
          */
-        if (get_rel_relkind(table_oid) != RELKIND_RELATION) {
+        char relkind = get_rel_relkind(table_oid);
+        if ((relkind != RELKIND_RELATION) && (relkind != RELKIND_MATVIEW)) {
             continue;
         }
 

@@ -1027,33 +1027,29 @@ void SetLocalSnapshotPreparedArray(Snapshot snapshot)
          * since we use static snapshot, don't palloc each time,
          * just free if it exceed defalut bound 128, see AtEOXact_Snapshot
          */
-        PG_TRY();
-        {
-            MemoryContext oldContext =
-                MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
-            int upper_bound = nextPowerOf2(numPrepXid);
-            int newCapacity = (upper_bound > defualt_prepared_num) ? upper_bound : defualt_prepared_num;
-            if (newCapacity > snapshot->prepared_array_capacity) {
-                pfree_ext(snapshot->prepared_array);
-                snapshot->prepared_array_capacity = 0;
-                snapshot->prepared_count = 0;
-            }
+        MemoryContext oldContext =
+            MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+        int upper_bound = nextPowerOf2(numPrepXid);
+        int newCapacity = (upper_bound > defualt_prepared_num) ? upper_bound : defualt_prepared_num;
+        if (newCapacity > snapshot->prepared_array_capacity) {
+            pfree_ext(snapshot->prepared_array);
+            snapshot->prepared_array_capacity = 0;
+            snapshot->prepared_count = 0;
+        }
+        if (snapshot->prepared_array == NULL) {
+            snapshot->prepared_array = (TransactionId *)palloc0_noexcept(sizeof(TransactionId) * newCapacity);
             if (snapshot->prepared_array == NULL) {
-                snapshot->prepared_array = (TransactionId *)palloc0(sizeof(TransactionId) * newCapacity);
-                snapshot->prepared_array_capacity = newCapacity;
+                /* release the refcount */
+                ReleasePrepXid(prepXid);
+                ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
             }
-            MemoryContextSwitchTo(oldContext);
-            Size size = mul_size(numPrepXid, sizeof(TransactionId));
-            errno_t rc = memcpy_s(snapshot->prepared_array, size, prepXid->validPrepXid, size);
-            securec_check(rc, "", "");
+            snapshot->prepared_array_capacity = newCapacity;
         }
-        PG_CATCH();
-        {
-            /* release the refcount */
-            ReleasePrepXid(prepXid);
-            PG_RE_THROW();
-        }
-        PG_END_TRY();
+        MemoryContextSwitchTo(oldContext);
+        Size size = mul_size(numPrepXid, sizeof(TransactionId));
+        errno_t rc = memcpy_s(snapshot->prepared_array, size, prepXid->validPrepXid, size);
+        securec_check(rc, "", "");
+
         /* update prepare list count */
         snapshot->prepared_count = numPrepXid;
         ReleasePrepXid(prepXid);
@@ -1861,19 +1857,11 @@ void EndPrepare(GlobalTransaction gxact)
     }
 
     gxact->prepare_end_lsn = XLogInsert(RM_XACT_ID, XLOG_XACT_PREPARE);
-    XLogFlush(gxact->prepare_end_lsn);
+    XLogWaitFlush(gxact->prepare_end_lsn);
 
     /* If we crash now, we have prepared: WAL replay will fix things */
     /* Store record's start location to read that later on Commit */
     gxact->prepare_start_lsn = t_thrd.xlog_cxt.ProcLastRecPtr;
-
-    /*
-     * Wake up all walsenders to send WAL up to the PREPARE record immediately
-     * if replication is enabled
-     */
-    if (g_instance.attr.attr_storage.max_wal_senders > 0) {
-        WalSndWakeup();
-    }
 
     /*
      * Mark the prepared transaction as valid.	As soon as xact.c marks
@@ -2308,17 +2296,6 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 
     /* compute latestXid among all children */
     latestXid = TransactionIdLatest(xid, hdr->nsubxacts, children);
-
-#ifdef ENABLE_MOT
-    if (u_sess->attr.attr_common.xc_maintenance_mode) {
-        /*
-         * Check if this transaction is a MOT engine one.
-         * Do it only in maintenance mode since gs_clean will only be called
-         * in this state.
-         */
-        MOTProcessRecoveredTransaction(xid, isCommit);
-    }
-#endif
 
     /*
      * The order of operations here is critical: make the XLOG entry for
@@ -3336,6 +3313,7 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
 
     /* See notes in RecordTransactionCommit */
     t_thrd.pgxact->delayChkpt = true;
+    UpdateNextMaxKnownCSN(GetCommitCsn());
 
     /* Emit the XLOG commit record */
     xlrec.crec.csn = GetCommitCsn();
@@ -3374,6 +3352,10 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
         XLogRegisterData((char *)invalmsgs, ninvalmsgs * sizeof(SharedInvalidationMessage));
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    XLogRegisterData((char *) &u_sess->utils_cxt.RecentXmin, sizeof(TransactionId));
+#endif
+
     if (nlibrary > 0) {
         XLogRegisterData((char *)librarys, libraryLen);
     }
@@ -3401,7 +3383,7 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
      * a contradiction)
      */
     /* Flush XLOG to disk */
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     /*
      * Wake up all walsenders to send WAL up to the COMMIT PREPARED record
@@ -3485,7 +3467,7 @@ static void RecordTransactionAbortPrepared(TransactionId xid, int nchildren, Tra
     }
 
     /* Always flush, since we're about to remove the 2PC state file */
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     /*
      * Wake up all walsenders to send WAL up to the ABORT PREPARED record
@@ -3632,7 +3614,7 @@ void RecoverPrepareTransactionCSNLog(char *buf)
         TransactionId *sub_xids = (TransactionId *)(buf + MAXALIGN(sizeof(TwoPhaseFileHeader)));
         ExtendCsnlogForSubtrans(hdr->xid, hdr->nsubxacts, sub_xids);
         CSNLogSetCommitSeqNo(hdr->xid, hdr->nsubxacts, sub_xids,
-                             COMMITSEQNO_COMMIT_INPROGRESS | t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+                             COMMITSEQNO_COMMIT_INPROGRESS);
     }
 }
 

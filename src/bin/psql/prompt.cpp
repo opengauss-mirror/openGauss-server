@@ -54,9 +54,9 @@ static char* GetEnvStr(const char* env)
  * (might not be completely multibyte safe)
  *
  * Defined interpolations are:
- * %M - database server "hostname.domainname", "[local]" for AF_UNIX
- *		sockets, "[local:/dir/name]" if not default
- * %m - like %M, but hostname only (before first dot), or always "[local]"
+ * %M - database server "hostname.domainname", "local" for AF_UNIX
+ *		sockets, "local:/dir/name" if not default
+ * %m - like %M, but hostname only (before first dot), or always "local"
  * %> - database server port number
  * %n - database user name
  * %/ - current database
@@ -171,9 +171,9 @@ char* get_prompt(promptStatus_t status)
                         /* UNIX socket */
                         else {
                             if ((host == NULL) || strcmp(host, DEFAULT_PGSOCKET_DIR) == 0 || *p == 'm')
-                                strlcpy(buf, "[local]", sizeof(buf));
+                                strlcpy(buf, "local", sizeof(buf));
                             else
-                                check_sprintf_s(sprintf_s(buf, sizeof(buf), "[local:%s]", host));
+                                check_sprintf_s(sprintf_s(buf, sizeof(buf), "local:%s", host));
                         }
 #endif
                     }

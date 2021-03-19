@@ -91,6 +91,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "instruments/instr_statement.h"
+#include "commands/sequence.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/cache/queryid_cachemgr.h"
 #include "tsdb/cache/part_cachemgr.h"
@@ -1496,6 +1497,29 @@ CommitSeqNo getLocalNextCSN()
     return pg_atomic_fetch_add_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo, 1);
 }
 
+void UpdateNextMaxKnownCSN(CommitSeqNo csn)
+{
+    /* 
+     * GTM-Free mode use getLocalNextCSN to update nextCommitSeqNo,
+     * GTM mode update nextCommitSeqNo in UpdateCSNAtTransactionCommit.
+     * GTM-Lite mode update nextCommitSeqNo in this function.
+     */
+    if (!GTM_LITE_MODE) {
+        return;
+    }
+    CommitSeqNo currentNextCommitSeqNo;
+    CommitSeqNo nextMaxKnownCommitSeqNo = csn + 1;
+ loop:
+    currentNextCommitSeqNo = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+    if (nextMaxKnownCommitSeqNo <= currentNextCommitSeqNo) {
+        return;
+    }
+    if (!pg_atomic_compare_exchange_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo,
+        &currentNextCommitSeqNo, nextMaxKnownCommitSeqNo)) {
+        goto loop;
+    }
+}
+
 /* ----------------------------------------------------------------
  *						CommitTransaction stuff
  * ----------------------------------------------------------------
@@ -1670,6 +1694,7 @@ static TransactionId RecordTransactionCommit(void)
          */
         START_CRIT_SECTION();
         t_thrd.pgxact->delayChkpt = true;
+        UpdateNextMaxKnownCSN(GetCommitCsn());
 
         SetCurrentTransactionStopTimestamp();
 
@@ -1817,11 +1842,8 @@ static TransactionId RecordTransactionCommit(void)
          * We do not sleep if u_sess->attr.attr_storage.enableFsync is not turned on, nor if there are
          * fewer than u_sess->attr.attr_storage.CommitSiblings other backends with active transactions.
          */
-        if (u_sess->attr.attr_storage.CommitDelay > 0 && u_sess->attr.attr_storage.enableFsync &&
-            MinimumActiveBackends(u_sess->attr.attr_storage.CommitSiblings))
-            pg_usleep(u_sess->attr.attr_storage.CommitDelay);
-
-        XLogFlush(t_thrd.xlog_cxt.XactLastRecEnd);
+        /* Wait for local flush only when we don't wait for the remote server */
+        XLogWaitFlush(t_thrd.xlog_cxt.XactLastRecEnd);
 
         /* Now we may update the CLOG, if we wrote a COMMIT record above */
         if (markXidCommitted) {
@@ -1840,7 +1862,6 @@ static TransactionId RecordTransactionCommit(void)
          * Report the latest async commit LSN, so that the WAL writer knows to
          * flush this commit.
          */
-        XLogSetAsyncXactLSN(t_thrd.xlog_cxt.XactLastRecEnd);
 
         /*
          * We must not immediately update the CLOG, since we didn't flush the
@@ -2305,7 +2326,6 @@ static void AtCleanup_Memory(void)
     t_thrd.asy_cxt.upperPendingNotifies = NULL;
 
     CurrentTransactionState->curTransactionContext = NULL;
-
     t_thrd.xact_cxt.PGXCBucketMap = NULL;
     t_thrd.xact_cxt.PGXCNodeId = -1;
     t_thrd.xact_cxt.inheritFileNode = false;
@@ -2560,6 +2580,10 @@ static void StartTransaction(bool begin_on_gtm)
 
 void ThreadLocalFlagCleanUp()
 {
+    if (ENABLE_DN_GPC) {
+        CleanSessGPCPtr(u_sess);
+    }
+
     /* clean hash table in opfusion */
     if (IS_PGXC_DATANODE) {
         OpFusion::ClearInUnexpectSituation();
@@ -2592,6 +2616,9 @@ static void CommitTransaction(bool STP_commit)
     TransactionId latestXid;
     bool barrierLockHeld = false;
     bool use_old_version_gid = GTM_MODE || (t_thrd.proc->workingVersionNum <= GTM_OLD_VERSION_NUM);
+#ifdef ENABLE_MULTIPLE_NODES
+        checkAndDoUpdateSequence();
+#endif
 
     ShowTransactionState("CommitTransaction");
 
@@ -3416,6 +3443,9 @@ static void PrepareTransaction(bool STP_commit)
      * triggers could open cursors, etc, we have to keep looping until there's
      * nothing left to do.
      */
+    if (IS_PGXC_DATANODE) {
+        OpFusion::ClearInUnexpectSituation();
+    }
     for (;;) {
         /*
          * Fire all currently pending deferred triggers.
@@ -4112,7 +4142,7 @@ static void CleanupTransaction(void)
     /* do abort cleanup processing */
     AtCleanup_Portals();      /* now safe to release portal memory */
     AtEOXact_Snapshot(false); /* and release the transaction's snapshots */
-
+    pfree_ext(u_sess->xact_cxt.send_seqname);
     t_thrd.utils_cxt.CurrentResourceOwner = NULL; /* and resource owner */
     if (t_thrd.utils_cxt.TopTransactionResourceOwner)
         ResourceOwnerDelete(t_thrd.utils_cxt.TopTransactionResourceOwner);
@@ -4228,7 +4258,6 @@ void CommitTransactionCommand(bool STP_commit)
 {
     TransactionState s = CurrentTransactionState;
     TBlockState oldstate = s->blockState;
-
     switch (s->blockState) {
             /*
              * This shouldn't happen, because it means the previous
@@ -4266,9 +4295,6 @@ void CommitTransactionCommand(bool STP_commit)
              * counter and return.
              */
         case TBLOCK_INPROGRESS:
-            if ((ENABLE_CN_GPC && !STP_commit) || ENABLE_DN_GPC) {
-                g_instance.plan_cache->Commit();
-            }    
             CommandCounterIncrement();
 
             if (STP_commit) {
@@ -4278,9 +4304,6 @@ void CommitTransactionCommand(bool STP_commit)
             break;
 
         case TBLOCK_SUBINPROGRESS:
-            if ((ENABLE_CN_GPC && !STP_commit) || ENABLE_DN_GPC) {
-                g_instance.plan_cache->Commit();
-            }
             CommandCounterIncrement();
 
             if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
@@ -6968,7 +6991,7 @@ static void unlink_relfiles(_in_ ColFileNodeRel *xnodes, _in_ int nrels, bool ha
 static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, TransactionId* sub_xids, int nsubxacts,
                                       SharedInvalidationMessage* inval_msgs, int nmsgs, ColFileNodeRel* xnodes,
                                       bool hasbucket, int nrels, int nlibrary, Oid dbId, Oid tsId, uint32 xinfo,
-                                      uint64 csn, TransactionId newGlobalXmin)
+                                      uint64 csn, TransactionId newStandbyXmin)
 {
     TransactionId max_xid;
     XLogRecPtr globalDelayDDLLSN;
@@ -7076,8 +7099,8 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
                     errmsg("xact_redo_commit_internal: unknown csn state %lu", (uint64)csn)));
         }
 
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin, newGlobalXmin)) {
-            t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin = newGlobalXmin;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->standbyXmin, newStandbyXmin)) {
+            t_thrd.xact_cxt.ShmemVariableCache->standbyXmin = newStandbyXmin;
         }
 
 #endif
@@ -7179,7 +7202,7 @@ static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPt
 {
     TransactionId* subxacts = NULL;
     SharedInvalidationMessage* inval_msgs = NULL;
-    TransactionId globalXmin = InvalidTransactionId;
+    TransactionId newStandbyXmin = InvalidTransactionId;
 
     Assert(TransactionIdIsValid(xid));
 
@@ -7191,7 +7214,7 @@ static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPt
 
 #ifndef ENABLE_MULTIPLE_NODES
     /* recent_xmin follows inval_msgs */
-    globalXmin = *((TransactionId *)&(inval_msgs[xlrec->nmsgs]));
+    newStandbyXmin = *((TransactionId *)&(inval_msgs[xlrec->nmsgs]));
 #endif
     xact_redo_commit_internal(xid,
         lsn,
@@ -7207,7 +7230,7 @@ static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPt
         xlrec->tsId,
         xlrec->xinfo,
         xlrec->csn,
-        globalXmin);
+        newStandbyXmin);
 }
 
 /*
@@ -7784,7 +7807,7 @@ bool IsPGEngineUsed()
 }
 
 /*
- * Check if we are using PG storage engine in parent transaction.
+ * Check if we are using MOT storage engine in parent transaction.
  */
 bool IsMOTEngineUsedInParentTransaction()
 {

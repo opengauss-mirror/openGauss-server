@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # mkldexport
 #	create an AIX exports file from an object file
@@ -21,6 +21,7 @@
 # setting this to nm -B might be better
 # ... due to changes in AIX 4.x ...
 # ... let us search in different directories - Gerhard Reithofer
+# Copyright: (c) Huawei Technologies Co., Ltd. 2021. All rights reserved.
 if [ -x /usr/ucb/nm ]
 then NM=/usr/ucb/nm
 elif [ -x /usr/bin/nm ]

@@ -208,7 +208,7 @@ static void get_arg_mode_by_pos(const int pos, const char *argmodes, const int n
 static List *append_inarg_list(const char argmode, const ListCell *cell,List *in_parameter);
 static void check_outarg_info(const bool *have_assigend,
 				const char *argmodes,const int proargnum);
-bool IsValidIdentClientKey(char *input);
+bool IsValidIdentClientKey(const char *input);
 bool IsValidIdent(char *input);
 bool IsValidGroupname(const char *input);
 static bool checkNlssortArgs(const char *argname);
@@ -4812,7 +4812,7 @@ encryptionType:
     |           ENCRYPTION_TYPE '=' DETERMINISTIC {$$ =EncryptionType::DETERMINISTIC_TYPE;     }
 ;
 setting_name:
-        ColId { $$ = list_make1(makeString($1)); }
+        ColId { $$ = check_setting_name(list_make1(makeString($1)), yyscanner); }
         | ColId indirection
             {
                 $$ = check_setting_name(lcons(makeString($1), $2), yyscanner);
@@ -6060,6 +6060,11 @@ CreateMatViewStmt:
 				            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				                errmsg("WITH NO DATA for materialized views not yet supported")));
                    }
+                   if ($3 && $6->options) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("options for incremental materialized views not yet supported")));
+                   }
 #ifndef ENABLE_MULTIPLE_NODES
                    if ($3 && $6->distributeby) {
                         ereport(ERROR,
@@ -6863,9 +6868,10 @@ CreateWeakPasswordDictionaryStmt:
 
 opt_vals:               WITH VALUES                                            {}
                        | /*EMPTY*/                                             {}
+			   ;
 
-weak_password_string_list:  '(' password_string ')'                                 { $$ = list_make1($2);  }
-                       | weak_password_string_list ',' '(' password_string ')'      { $$ = lappend($1, $4); } 
+weak_password_string_list:  '(' password_string ')'                                 { $$ = list_make1(makeString($2)); }
+                       | weak_password_string_list ',' '(' password_string ')'      { $$ = lappend($1, makeString($4)); } 
                ;
 
 /*****************************************************************************
@@ -12040,7 +12046,6 @@ TypeOwner:	RoleId			{ $$ = $1; }
 			| SESSION_USER	{ $$ = pstrdup($1); }
 		;
 
-
 /*****************************************************************************
  *
  *		QUERY:	Define Rewrite Rule
@@ -14787,8 +14792,6 @@ ExplainableStmt:
 			| MergeStmt
 			| DeclareCursorStmt
 			| CreateAsStmt
-			| CreateMatViewStmt
-			| RefreshMatViewStmt
 			| ExecuteStmt					/* by default all are $$=$1 */
 		;
 
@@ -15260,7 +15263,7 @@ DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias
 					n->limitClause = (Node*)list_nth($8, 1);
 					n->returningList = $9;
 					n->withClause = $1;
-					n->hintState = create_hintstate($3);
+					n->hintState = create_hintstate($3);					
 					$$ = (Node *)n;
 				}
 		| opt_with_clause DELETE_P hint_string relation_expr_opt_alias
@@ -15273,7 +15276,7 @@ DeleteStmt: opt_with_clause DELETE_P hint_string FROM relation_expr_opt_alias
 					n->limitClause = (Node*)list_nth($7, 1);
 					n->returningList = $8;
 					n->withClause = $1;
-					n->hintState = create_hintstate($3);
+					n->hintState = create_hintstate($3);				
 					$$ = (Node *)n;
 				}
 		;
@@ -20087,6 +20090,7 @@ unreserved_keyword:
 			| CONTENT_P
 			| CONTINUE_P
 			| CONVERSION_P
+            | CONTVIEW
 			| COORDINATOR
 			| COPY
 			| COST
@@ -20371,6 +20375,7 @@ unreserved_keyword:
 			| STDOUT
 			| STORAGE
 			| STORE_P
+            | STREAM
 			| STRICT_P
 			| STRIP_P
 			| SYNONYM
@@ -20621,7 +20626,6 @@ reserved_keyword:
 			| SELECT
 			| SESSION_USER
 			| SOME
-            | STREAM
 			| SYMMETRIC
 			| SYSDATE
 			| TABLE
@@ -20871,15 +20875,15 @@ check_func_name(List *names, core_yyscan_t yyscanner)
 }
 
 bool
-IsValidIdentClientKey(char *input)
+IsValidIdentClientKey(const char *input)
 {
+	if (input == NULL || strlen(input) <= 0) {
+		return false;
+	}
 	char c = input[0];
-	/*The first character id numbers or dollar*/
+	/*The first character id numbers or dollar or point*/
 	if ((c >= '0' && c <= '9') || c == '$' || c == '.')
 	{
-		ereport(ERROR,
-			(errcode(ERRCODE_SYNTAX_ERROR),
-			errmsg("invalid name: %s", input)));
 		return false;
 	}
 
@@ -20893,9 +20897,6 @@ IsValidIdentClientKey(char *input)
 		}
 		else
 		{
-			ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				errmsg("invalid name: %s", input)));
 			return false;
 		}
 	}
@@ -20910,7 +20911,16 @@ check_setting_name(List *names, core_yyscan_t yyscanner)
 	foreach(i, names)
 	{
 		Value* v = (Value *)lfirst(i);
-		IsValidIdentClientKey(v->val.str);
+		if (v == NULL || v->type != T_String) {
+			ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("invalid name")));
+		}
+		if (!IsValidIdentClientKey(v->val.str)) {
+			ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				errmsg("invalid name")));
+		}
 	}
 	return names;
 }
@@ -21316,7 +21326,7 @@ SplitColQualList(List *qualList,
 			if (*clientLogicColumnRef)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("multiple CLIENT_LOGIC columns are not allowed"),
+						 errmsg("multiple encrypted columns are not allowed"),
 						 parser_errposition(e->location)));
 			*clientLogicColumnRef = e;
 		}
@@ -22160,4 +22170,4 @@ static void parameter_check_execute_direct(const char* query)
 #undef yylval
 #undef yylloc
 
-#include "scan.cpp"
+#include "scan.inc"

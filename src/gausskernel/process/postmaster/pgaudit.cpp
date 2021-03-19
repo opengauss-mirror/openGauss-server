@@ -84,6 +84,7 @@
 #endif
 
 #define MAX_QUEUE_SIZE 100000
+#define MAX_CONNECTION_INFO_SIZE (MAXNUMLEN * 4 + NI_MAXHOST)
 
 typedef struct {
     char nuls[2]; /* always \0\0 */
@@ -358,7 +359,7 @@ struct AuditEventInfo {
     const char* dbname;
     const char* appname;
     const char* remotehost;
-    char client_info[MAXNUMLEN * 4];
+    char client_info[MAX_CONNECTION_INFO_SIZE];
     char threadid[MAXNUMLEN * 4];
     char localport[MAXNUMLEN];
     char remoteport[MAXNUMLEN];
@@ -404,8 +405,7 @@ static void pgaudit_indextbl_init(void);
 static const char* pgaudit_string_field(AuditData* adata, int num);
 static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS], 
                                      AuditData *adata, 
-                                     const AuditMsgHdr &header, 
-                                     const char *field);
+                                     const AuditMsgHdr &header);
 static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 fnum, TimestampTz begtime,
     TimestampTz endtime, const char *audit_directory);
 
@@ -1749,6 +1749,7 @@ static bool audit_type_validcheck(AuditType type)
         case MASKING_POLICY_EVENT:
         case SECURITY_EVENT:
         case AUDIT_INTERNAL_EVENT:
+            type_status = 1; /* audit these cases by default */
             break;
         case AUDIT_COPY_TO:
         case AUDIT_COPY_FROM:
@@ -1870,8 +1871,8 @@ static bool audit_get_clientinfo(AuditType type, const char* object_name, AuditE
         *remotehost = _("[unknown]");
 
     errorno = snprintf_s(event_info.client_info,
-        MAXNUMLEN * 4,
-        MAXNUMLEN * 4 - 1,
+        MAX_CONNECTION_INFO_SIZE,
+        MAX_CONNECTION_INFO_SIZE - 1,
         "%s@%s",
         *appname,
         *remotehost);
@@ -2408,63 +2409,49 @@ static void pgaudit_query_file_for_elastic()
 }
 
 /*
- * Brief        : scan the specified audit file.
- * Description    :
+ * Brief          : scan the specified audit file into tuple
+ * Description    : Note we use old/new version to differ whether there is user_id field in the file.
+ *                  for expanding new field later, maybe we will depend on version id to implement 
+ *                  backward compatibility but not bool variable
  */
 static void deserialization_to_tuple(Datum (&values)[PGAUDIT_QUERY_COLS], 
                                      AuditData *adata, 
-                                     const AuditMsgHdr &header, 
-                                     const char *field)
+                                     const AuditMsgHdr &header)
 {
+    /* append timestamp info to data tuple */
     int i = 0;
     values[i++] = TimestampTzGetDatum(time_t_to_timestamptz(adata->header.time));
     values[i++] = CStringGetTextDatum(AuditTypeDesc(adata->type));
     values[i++] = CStringGetTextDatum(AuditResultDesc(adata->result));
-    /* new format of the audit file under correct record */
-    if (header.fields == PGAUDIT_QUERY_COLS) {
-        field = pgaudit_string_field(adata, AUDIT_USER_ID);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_USER_NAME);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_DATABASE_NAME);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_CLIENT_CONNINFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_OBJECT_NAME);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_DETAIL_INFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_NODENAME_INFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_THREADID_INFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_LOCALPORT_INFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_REMOTEPORT_INFO);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-    } else {
-        /* the older audit file do not have userid info, so let it to be null */
-        field = NULL;
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_USER_NAME - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_DATABASE_NAME - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_CLIENT_CONNINFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_OBJECT_NAME - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_DETAIL_INFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_NODENAME_INFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_THREADID_INFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_LOCALPORT_INFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-        field = pgaudit_string_field(adata, AUDIT_REMOTEPORT_INFO - 1);
-        values[i++] = CStringGetTextDatum(FILED_NULLABLE(field));
-    }
+
+    /*
+     * new format of the audit file under correct record
+     * the older audit file do not have userid info, so let it to be null
+     */
+    int index_field = 0;
+    const char* field = NULL;
+    bool new_version = (header.fields == PGAUDIT_QUERY_COLS);
+    field = new_version ? pgaudit_string_field(adata, index_field++) : NULL;
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user id */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* user name */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* dbname */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* client info */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* object name */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* detail info */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* node name */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* thread id */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* local port */
+    field = pgaudit_string_field(adata, index_field++);
+    values[i++] = CStringGetTextDatum(FILED_NULLABLE(field)); /* remote port */
+
     Assert(i == PGAUDIT_QUERY_COLS);
 }
 static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 fnum, TimestampTz begtime,
@@ -2475,7 +2462,6 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
     TimestampTz datetime;
     AuditMsgHdr header;
     AuditData* adata = NULL;
-    const char* field = NULL;
 
     if (state == NULL || tdesc == NULL)
         return;
@@ -2529,7 +2515,7 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
         /* filt and assemble audit info into tuplestore */
         datetime = time_t_to_timestamptz(adata->header.time);
         if (datetime >= begtime && datetime < endtime && header.flags == AUDIT_TUPLE_NORMAL) {
-            deserialization_to_tuple(values, adata, header, field);
+            deserialization_to_tuple(values, adata, header);
             tuplestore_putvalues(state, tdesc, values, nulls);
         }
 
@@ -2537,6 +2523,71 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
     } while (true);
 
     pgaudit_close_file(fp, t_thrd.audit.pgaudit_filepath);
+}
+
+/*
+ * Brief        : scan the specified audit file to delete audit.
+ * Description    :
+ */
+static void pgaudit_delete_file(uint32 fnum, TimestampTz begtime, TimestampTz endtime)
+{
+    int fd = -1;
+    ssize_t nread = 0;
+    TimestampTz datetime;
+    AuditMsgHdr header;
+
+    int rc = snprintf_s(t_thrd.audit.pgaudit_filepath,
+        MAXPGPATH,
+        MAXPGPATH - 1,
+        pgaudit_filename,
+        g_instance.attr.attr_security.Audit_directory,
+        fnum);
+    securec_check_intval(rc,,);
+
+    /* Open the audit file to scan the audit record. */
+    fd = open(t_thrd.audit.pgaudit_filepath, O_RDWR, pgaudit_filemode);
+    if (fd < 0) {
+        ereport(LOG,
+            (errcode_for_file_access(), errmsg("could not open audit file \"%s\": %m", t_thrd.audit.pgaudit_filepath)));
+        return;
+    }
+
+    do {
+        /* read the audit message header first */
+        nread = read(fd, &header, sizeof(AuditMsgHdr));
+        if (nread <= 0)
+            break;
+
+        if (header.signature[0] != 'A' ||
+            header.signature[1] != 'U' ||
+            header.version != 0 ||
+            !(header.fields == (PGAUDIT_QUERY_COLS - 1) ||
+            header.fields == PGAUDIT_QUERY_COLS)) {
+            /* make sure we are compatible with the older version audit file */
+            ereport(LOG, (errmsg("invalid data in audit file \"%s\"", t_thrd.audit.pgaudit_filepath)));
+            break;
+        }
+
+        datetime = time_t_to_timestamptz(header.time);
+        if (datetime >= begtime && datetime < endtime && header.flags == AUDIT_TUPLE_NORMAL) {
+            long offset = sizeof(AuditMsgHdr);
+            header.flags = AUDIT_TUPLE_DEAD;
+            if (lseek(fd, -offset, SEEK_CUR) < 0) {
+                ereport(WARNING, (errcode_for_file_access(), errmsg("could not seek in audit file: %m")));
+                break;
+            }
+            if (write(fd, &header, sizeof(AuditMsgHdr)) != sizeof(AuditMsgHdr)) {
+                ereport(WARNING, (errcode_for_file_access(), errmsg("could not write to audit file: %m")));
+                break;
+            }
+        }
+        if (lseek(fd, header.size - sizeof(AuditMsgHdr), SEEK_CUR) < 0) {
+            ereport(WARNING, (errcode_for_file_access(), errmsg("could not seek in audit file: %m")));
+            break;
+        }
+    } while (true);
+
+    close(fd);
 }
 
 /* check whether system changed when auditor write audit data to current file */
@@ -2685,7 +2736,55 @@ Datum pg_query_audit(PG_FUNCTION_ARGS)
  */
 Datum pg_delete_audit(PG_FUNCTION_ARGS)
 {
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("The function of deleting audit logs is not supported.")));
+    TimestampTz begtime = PG_GETARG_TIMESTAMPTZ(0);
+    TimestampTz endtime = PG_GETARG_TIMESTAMPTZ(1);
+
+    t_thrd.audit.Audit_delete = true;
+
+    /* Check some permissions first */
+    Oid roleid = GetUserId();
+    if (!has_auditadmin_privilege(roleid)) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("permission denied to delete audit")));
+    }
+
+    /*
+     * When t_thrd.audit.audit_indextbl is not NULL,
+     * but its origin memory context is NULL, free it will generate core
+     */
+    t_thrd.audit.audit_indextbl = NULL;
+    pgaudit_read_indexfile(g_instance.attr.attr_security.Audit_directory);
+
+    if (begtime < endtime && (t_thrd.audit.audit_indextbl != NULL) && t_thrd.audit.audit_indextbl->count > 0) {
+        bool satisfied = false;
+        uint32 index;
+        uint32 fnum;
+        AuditIndexItem* item = NULL;
+
+        index = t_thrd.audit.audit_indextbl->begidx;
+        do {
+            item = t_thrd.audit.audit_indextbl->data + index;
+            fnum = item->filenum;
+
+            /* check whether system changed when auditor write audit data to current file */
+            satisfied = pgaudit_check_system(begtime, endtime, index);
+            if (satisfied) {
+                pgaudit_delete_file(fnum, begtime, endtime);
+                satisfied = false;
+            }
+
+            if (index == t_thrd.audit.audit_indextbl->curidx) {
+                break;
+            }
+
+            index = (index + 1) % t_thrd.audit.audit_indextbl->maxnum;
+        } while (true);
+    }
+
+    if (t_thrd.audit.audit_indextbl) {
+        pfree(t_thrd.audit.audit_indextbl);
+        t_thrd.audit.audit_indextbl = NULL;
+    }
+
     PG_RETURN_VOID();
 }
 

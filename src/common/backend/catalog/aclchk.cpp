@@ -339,7 +339,6 @@ static Acl* merge_acl_with_grant(Acl* old_acl, bool is_grant, bool grant_option,
 
     return new_acl;
 }
-
 /*
  * Restrict the privileges to what we can actually grant, and emit
  * the standards-mandated warning and error messages.
@@ -1777,7 +1776,7 @@ static void ExecGrant_Attribute(InternalGrant* istmt, Oid relOid, const char* re
     merged_acl = aclconcat(old_rel_acl, old_acl);
 
     /* Determine ID to do the grant as, and available grant options */
-    /* Need special treatment for relaions in schema dbe_perf */
+    /* Need special treatment for relaions in schema dbe_perf and schema snapshot */
     Form_pg_class pg_class_tuple = NULL;
     HeapTuple class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relOid));
     if (!HeapTupleIsValid(class_tuple)) {
@@ -1789,7 +1788,7 @@ static void ExecGrant_Attribute(InternalGrant* istmt, Oid relOid, const char* re
     ReleaseSysCache(class_tuple);
 
     select_best_grantor(GetUserId(), col_privileges, col_ddl_privileges, merged_acl, ownerId,
-        &grantorId, &avail_goptions, &avail_ddl_goptions, IsPerformanceNamespace(namespaceId));
+        &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(namespaceId));
 
     /* Special treatment for opradmin in operation mode */
     if (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode) {
@@ -2083,10 +2082,10 @@ static void ExecGrant_Relation(InternalGrant* istmt)
             AclObjectKind aclkind;
 
             /* Determine ID to do the grant as, and available grant options */
-            /* Need special treatment for relations in schema dbe_perf */
+            /* Need special treatment for relations in schema dbe_perf and schema snapshot */
             Oid namespaceId = pg_class_tuple->relnamespace;
             select_best_grantor(GetUserId(), privileges, ddl_privileges, old_acl, ownerId,
-                &grantorId, &avail_goptions, &avail_ddl_goptions, IsPerformanceNamespace(namespaceId));
+                &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(namespaceId));
 
             /* Special treatment for opradmin in operation mode */
             if (isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode) {
@@ -2715,10 +2714,10 @@ static void ExecGrant_Function(InternalGrant* istmt)
         }
 
         /* Determine ID to do the grant as, and available grant options */
-        /* Need special treatment for procs in schema dbe_perf */
+        /* Need special treatment for procs in schema dbe_perf and schema snapshot */
         Oid namespaceId = pg_proc_tuple->pronamespace;
         select_best_grantor(GetUserId(), istmt->privileges, istmt->ddl_privileges, old_acl, ownerId,
-            &grantorId, &avail_goptions, &avail_ddl_goptions, IsPerformanceNamespace(namespaceId));
+            &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(namespaceId));
 
         /*
          * Restrict the privileges to what we can actually grant, and emit the
@@ -3155,9 +3154,9 @@ static void ExecGrant_Namespace(InternalGrant* istmt)
         }
 
         /* Determine ID to do the grant as, and available grant options */
-        /* Need special treatment for special schema dbe_perf*/
+        /* Need special treatment for special schema dbe_perf and schema snapshot*/
         select_best_grantor(GetUserId(), istmt->privileges, istmt->ddl_privileges, old_acl, ownerId,
-            &grantorId, &avail_goptions, &avail_ddl_goptions, IsPerformanceNamespace(nspid));
+            &grantorId, &avail_goptions, &avail_ddl_goptions, IsMonitorSpace(nspid));
 
         /*
          * Restrict the privileges to what we can actually grant, and emit the
@@ -4663,7 +4662,7 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
     /* detoast column's ACL if necessary */
     acl = DatumGetAclP(aclDatum);
 
-    if (IsPerformanceNamespace(namespaceId)) {
+    if (IsMonitorSpace(namespaceId)) {
        result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
@@ -4737,16 +4736,18 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         mask &= ~(ACL_INSERT | ACL_UPDATE | ACL_DELETE | ACL_TRUNCATE | ACL_USAGE);
     }
 
-    /* For relations in schema dbe_perf, initial user and monitorsdmin bypass all permission-checking. */
+    /* For relations in schema dbe_perf and schema snapshot,
+     * initial user and monitorsdmin bypass all permission-checking.
+     */
     Oid namespaceId = classForm->relnamespace;
-    if (IsPerformanceNamespace(namespaceId) && (roleid == INITIAL_USER_ID || isMonitoradmin(roleid))) {
+    if (IsMonitorSpace(namespaceId) && (roleid == INITIAL_USER_ID || isMonitoradmin(roleid))) {
         ReleaseSysCache(tuple);
         return mask;
     }
 
     /* Otherwise, superusers bypass all permission-checking, except access independent role's objects. */
     /* Database Security:  Support separation of privilege. */
-    if (!is_ddl_privileges && !IsPerformanceNamespace(namespaceId) && (superuser_arg(roleid) || systemDBA_arg(roleid)) &&
+    if (!is_ddl_privileges && !IsMonitorSpace(namespaceId) && (superuser_arg(roleid) || systemDBA_arg(roleid)) &&
         ((classForm->relowner == roleid) || !is_role_independent(classForm->relowner) ||
             independent_priv_aclcheck(mask, classForm->relkind))) {
 #ifdef ACLDEBUG
@@ -4818,7 +4819,7 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
     if (is_ddl_privileges) {
         mask = ADD_DDL_FLAG(mask);
     }
-    if (IsPerformanceNamespace(namespaceId)) {
+    if (IsMonitorSpace(namespaceId)) {
         result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
@@ -4960,15 +4961,17 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
 
-    /* For procs in schema dbe_perf, initial user and monitorsdmin bypass all permission-checking. */
+    /* For procs in schema dbe_perf and schema snapshot,
+     * initial user and monitorsdmin bypass all permission-checking.
+     */
     Oid namespaceId = ((Form_pg_proc) GETSTRUCT(tuple))->pronamespace;
-    if (IsPerformanceNamespace(namespaceId) && (roleid == INITIAL_USER_ID || isMonitoradmin(roleid))) {
+    if (IsMonitorSpace(namespaceId) && (roleid == INITIAL_USER_ID || isMonitoradmin(roleid))) {
         ReleaseSysCache(tuple);
         return REMOVE_DDL_FLAG(mask);
     }
-    /* Superusers bypass all permission checking for all procs not in schema dbe_perf. */
+    /* Superusers bypass all permission checking for all procs not in schema dbe_perf and schema snapshot. */
     /* Database Security:  Support separation of privilege.*/
-    if (!IsPerformanceNamespace(namespaceId) && (superuser_arg(roleid) || systemDBA_arg(roleid))) {
+    if (!IsMonitorSpace(namespaceId) && (superuser_arg(roleid) || systemDBA_arg(roleid))) {
         ReleaseSysCache(tuple);
         return REMOVE_DDL_FLAG(mask);
     }
@@ -4987,7 +4990,7 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
         check_nodegroup_privilege(roleid, ownerId, ACL_USAGE);
     }
 
-    if (IsPerformanceNamespace(namespaceId)) {
+    if (IsMonitorSpace(namespaceId)) {
         result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);
@@ -5222,7 +5225,6 @@ AclMode pg_largeobject_aclmask_snapshot(Oid lobj_oid, Oid roleid, AclMode mask, 
 
     return result;
 }
-
 /*
  * Exported routine for examining a user's privileges for a namespace
  */
@@ -5237,10 +5239,10 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
 
     /*
      * The initial user bypass all permission checking.
-     * Sysadmin bypass all permission checking except for schema dbe_perf.
-     * Monitoradmin can always bypass permission checking for schema dbe_perf.
+     * Sysadmin bypass all permission checking except for schema dbe_perf and schema snapshot.
+     * Monitoradmin can always bypass permission checking for schema dbe_perf and schema snapshot.
     */
-    if (nsp_oid == PG_DBEPERF_NAMESPACE) {
+    if (IsMonitorSpace(nsp_oid)) {
         if (isMonitoradmin(roleid) || roleid == INITIAL_USER_ID) {
             return REMOVE_DDL_FLAG(mask);
         }
@@ -5300,7 +5302,7 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
         check_nodegroup_privilege(roleid, ownerId, mask);
     }
 
-    if (nsp_oid == PG_DBEPERF_NAMESPACE) {
+    if (IsMonitorSpace(nsp_oid)) {
         result = aclmask_dbe_perf(acl, roleid, ownerId, mask, how);
     } else {
         result = aclmask(acl, roleid, ownerId, mask, how);

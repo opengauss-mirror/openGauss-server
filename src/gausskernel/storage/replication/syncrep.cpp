@@ -61,6 +61,7 @@
 #include "utils/builtins.h"
 #include "utils/ps_status.h"
 #include "utils/distribute_test.h"
+#include "common/config/cm_config.h"
 
 /*
  * To control whether a master configured with synchronous commit is
@@ -646,7 +647,7 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * or there are not enough synchronous standbys.
      * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
      * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
-    */
+     */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
         (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
         list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
@@ -1419,6 +1420,60 @@ static bool SyncRepQueueIsOrderedByLSN(int mode)
 #endif
 
 /*
+ * Obtain cluster information from cluster_static_config.
+ */
+int init_gauss_cluster_config(void)
+{
+    char path[MAXPGPATH] = {0};
+    int err_no = 0;
+    int nRet = 0;
+    int status = 0;
+    uint32 nodeidx = 0;
+    struct stat statbuf {};
+
+    char* gausshome = gs_getenv_r("GAUSSHOME");
+    check_backend_env(gausshome);
+
+    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (lstat(path, &statbuf) != 0) {
+        return 1;
+    }
+
+    status = read_config_file(path, &err_no);
+
+    if (0 != status) {
+        return 1;
+    }
+
+    if (g_nodeHeader.node <= 0) {
+        free(g_node);
+        return 1;
+    }
+
+    for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
+        if (g_node[nodeidx].node == g_nodeHeader.node) {
+            g_currentNode = &g_node[nodeidx];
+            break;
+        }
+    }
+
+    if (NULL == g_currentNode) {
+        free(g_node);
+        return 1;
+    }
+
+    if (get_dynamic_dn_role() != 0) {
+        // failed to get dynamic dn role
+        free(g_node);
+        return 1;
+    }
+
+    return 0;
+}
+
+/*
  * ===========================================================
  * Synchronous Replication functions executed by any process
  * ===========================================================
@@ -1431,6 +1486,12 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
         int parse_rc;
         SyncRepConfigData *pconf = NULL;
         syncrep_scanner_yyscan_t yyscanner;
+        char* nodenameList = NULL;
+        char* az1 = g_instance.attr.attr_storage.available_zone;
+        char* data_dir = t_thrd.proc_cxt.DataDir;
+        uint32 idx;
+        char* p = NULL;
+        int resultStatus;
 
         /* Reset communication variables to ensure a fresh start */
         t_thrd.syncrepgram_cxt.syncrep_parse_result = NULL;
@@ -1456,7 +1517,53 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
                       t_thrd.syncrepgram_cxt.syncrep_parse_result->config_size);
         securec_check(rc, "", "");
 
+        if (strcmp(pconf->member_names, "*") == 0) {
+            goto pass;
+        }
+
+        if (pconf->num_sync > pconf->nmembers) {
+            // The sync number must less or equals to the number of standby node names.
+            return false;
+        }
+
+        /* get current cluster information from cluster_staic_config */
+        if (strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 && has_static_config()
+            && 0 == init_gauss_cluster_config()) {
+            for (idx = 0; idx < g_node_num; idx++) {
+                if (g_currentNode->node == g_node[idx].node) {
+                    g_local_node_idx = idx;
+                    break;
+                }
+            }
+        } else {
+            goto pass;
+        }
+        g_local_node_name = g_node[g_local_node_idx].nodeName;
+
+        resultStatus = get_nodename_list_by_AZ(az1, data_dir, &nodenameList);
+        if (nodenameList == NULL) {
+            return false;
+        }
+
+        p = pconf->member_names;
+        for (int i = 1; i <= pconf->nmembers; i++) {
+            if (!contain_nodename(nodenameList, p)) {
+                // The value of pamameter synchronous_standby_names is incorrect.
+                free(nodenameList);
+                return false;
+            }
+            p += strlen(p) + 1;
+        }
+
+        free(nodenameList);
+
+pass:
         *extra = (void *)pconf;
+        if (t_thrd.syncrepgram_cxt.syncrep_parse_result) {
+            pfree(t_thrd.syncrepgram_cxt.syncrep_parse_result);
+            t_thrd.syncrepgram_cxt.syncrep_parse_result = NULL;
+        }
+
         /*
          * We need not explicitly clean up syncrep_parse_result.  It, and any
          * other cruft generated during parsing, will be freed when the

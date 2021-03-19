@@ -237,7 +237,9 @@ set local inplace_upgrade_next_system_object_oids = IUO_CATALOG,false,true,20,0,
 create table pg_catalog.pg_inplace_table2 (a int);
 set isinplaceupgrade=off;
 commit;
-vacuum full pg_inplace_table2;
+set xc_maintenance_mode = on;
+vacuum full pg_inplace_table2
+set xc_maintenance_mode = off;;
 begin;
 set isinplaceupgrade=on;
 drop type if exists pg_catalog.pg_inplace_table2;

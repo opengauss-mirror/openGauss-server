@@ -90,7 +90,8 @@ static const pg_on_exit_callback on_sess_exit_list[] = {
 #endif
     pq_close,
     AtProcExit_Files,
-    audit_processlogout
+    audit_processlogout,
+    log_disconnections
 };
 
 static const int on_sess_exit_size = lengthof(on_sess_exit_list);

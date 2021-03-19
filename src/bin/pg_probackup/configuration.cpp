@@ -370,9 +370,10 @@ parse_pair(const char buffer[], char key[], char value[])
     /* skip blank buffer */
     if (end - start <= 0)
     {
-        if (*start == '=')
+        if (*start == '=') { 
             elog(ERROR, "Syntax error in \"%s\"", buffer);
-            return false;
+        }
+        return false;
     }
 
     /* key found */

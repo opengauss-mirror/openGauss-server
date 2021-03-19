@@ -1,5 +1,3 @@
-/* src/backend/utils/mb/Unicode/gb18030_to_utf8.map */
-
 static pg_local_to_utf LUmapGB18030[ 63360 ] = {
   {0x8140, 0xe4b882},
   {0x8141, 0xe4b884},

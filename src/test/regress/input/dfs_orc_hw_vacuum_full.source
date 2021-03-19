@@ -436,7 +436,9 @@ execute direct on(datanode1) 'select print_desc_t2()';
 
 delete from t1 where c4=1;
 delete from t2 where c2=2;
+set xc_maintenance_mode = on;
 vacuum full;
+set xc_maintenance_mode = off;
 execute direct on(datanode1) 'select public.print_desc()';
 execute direct on(datanode1) 'select print_desc_t2()';
 

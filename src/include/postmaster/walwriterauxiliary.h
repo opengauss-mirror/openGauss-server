@@ -13,25 +13,16 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * client_logic_common.h
+ * walwriterauxiliary.h
  *
  * IDENTIFICATION
- *	  src\include\client_logic\client_logic_common.h
+ *    src/include/postmaster/walwriterauxiliary.h
  *
  * -------------------------------------------------------------------------
  */
+#ifndef _WALWRITERAUXILIARY_H
+#define _WALWRITERAUXILIARY_H
 
-#ifndef GS_CL_COMMON_H
-#define GS_CL_COMMON_H
+extern void WalWriterAuxiliaryMain(void);
 
-#include <string>
-#include "cstrings_map.h"
-
-enum class ArgsParseState {
-    KEY,
-    VALUE,
-    FLUSH
-};
-
-typedef CStringsMap StringArgsVec;
-#endif
+#endif   /* _WALWRITERAUXILIARY_H */

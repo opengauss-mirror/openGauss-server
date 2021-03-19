@@ -426,6 +426,10 @@ public:
     /* Mark recursive vfd is invalid before aborting transaction. */
     static void MarkRecursiveVfdInvalid();
 
+#ifndef ENABLE_MULTIPLE_NODES
+    struct PortalData *m_portal;
+#endif
+
 private:
     /* Set the executor stop flag to true. */
     void stopThread();

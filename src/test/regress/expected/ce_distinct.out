@@ -34,7 +34,7 @@ LINE 1: SELECT id, distinct name FROM t_distinct order by id;
                    ^
 DROP TABLE t_distinct;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-NOTICE:  drop cascades to column setting: mycek
+NOTICE:  drop cascades to column encryption key: mycek
 \! gs_ktool -d all
 DELETE ALL
  1

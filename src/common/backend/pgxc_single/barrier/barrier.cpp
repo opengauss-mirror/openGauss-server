@@ -147,7 +147,7 @@ void ProcessCreateBarrierExecute(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogFlush(recptr);
+        XLogWaitFlush(recptr);
     }
 
     pq_beginmessage(&buf, 'b');
@@ -219,19 +219,24 @@ void RequestBarrier(const char* id, char* completionTag)
 
 static void WaitBarrierArchived()
 {
-    if (getObsReplicationSlot() == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Current dataNode is not start archived")));
-    }
-
+    int cnt = 0;
     ereport(LOG,
             (errmsg("Query barrier lsn: 0x%lx", g_instance.archive_obs_cxt.barrierLsn)));
     do {
+        if (NULL == getObsReplicationSlot()) {
+            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), errmsg("Archived thread shut down.")));
+        }
         if (XLByteLE(pg_atomic_read_u64(&g_instance.archive_obs_cxt.barrierLsn),
             pg_atomic_read_u64(&g_instance.archive_obs_cxt.archive_task.targetLsn))) {
             break;
         }
         CHECK_FOR_INTERRUPTS();
         pg_usleep(100000L);
+        cnt++;
+        /* timeout 10 minute */
+        if (cnt > WAIT_ARCHIVE_TIMEOUT) {
+            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), errmsg("Wait archived timeout.")));
+        }
     } while (1);
     ereport(LOG,
             (errmsg("Query archive lsn: 0x%lx", g_instance.archive_obs_cxt.archive_task.targetLsn)));
@@ -258,7 +263,7 @@ void DisasterRecoveryRequestBarrier(const char* id)
     XLogRegisterData((char*)id, strlen(id) + 1);
 
     recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 
     pg_atomic_init_u64(&g_instance.archive_obs_cxt.barrierLsn, recptr);
 
@@ -274,7 +279,8 @@ static void barrier_redo_pause()
 
     while (IS_DISASTER_RECOVER_MODE) {
         RedoInterruptCallBack();
-        if (strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId) < 0) {
+        if (strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId) < 0 ||
+            strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryStopBarrierId) == 0) {
             break;
         } else {
             pg_usleep(1000L);
@@ -587,7 +593,7 @@ static void ExecuteBarrier(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogFlush(recptr);
+        XLogWaitFlush(recptr);
     }
 }
 

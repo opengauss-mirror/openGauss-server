@@ -1047,7 +1047,7 @@ static char* getAffixFlagSet(IspellDict* Conf, char* s)
             ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR), errmsg("invalid affix alias \"%s\"", s)));
         }
 
-        if (curaffix > 0 && curaffix <= Conf->nAffixData) {
+        if (curaffix > 0 && curaffix < Conf->nAffixData) {
             /*
             * Do not substract 1 from curaffix
             * because empty string was added in NIImportOOAffixes

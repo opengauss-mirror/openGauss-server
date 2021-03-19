@@ -419,6 +419,7 @@ extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
 extern HTAB* relfilenode_hashtbl_create();
 extern CommitSeqNo getLocalNextCSN();
+extern void UpdateNextMaxKnownCSN(CommitSeqNo csn);
 #ifdef ENABLE_MOT
 extern bool IsMOTEngineUsed();
 extern bool IsMOTEngineUsedInParentTransaction();

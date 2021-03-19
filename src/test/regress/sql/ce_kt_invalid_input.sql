@@ -6,6 +6,7 @@
 -- genereate with set invalid len (support [1, 112])
 \! gs_ktool -g -l -1
 \! gs_ktool -g -l 0
+\! gs_ktool -g -l 15
 \! gs_ktool -g -l 113
 \! gs_ktool -g -l 999999999
 \! gs_ktool -g -l .

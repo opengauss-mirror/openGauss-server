@@ -1157,7 +1157,8 @@ static int64 sendDir(const char *path, int basepathlen, bool sizeonly, List *tab
             LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
             for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
                 ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
-                if (s->in_use && s->data.database == InvalidOid && strcmp(de->d_name, NameStr(s->data.name)) == 0) {
+                if (s->in_use && s->data.database == InvalidOid && strcmp(de->d_name, NameStr(s->data.name)) == 0 &&
+                    GET_SLOT_PERSISTENCY(s->data) != RS_BACKUP && GET_SLOT_EXTRA_DATA_LENGTH(s->data) == 0) {
                     isphysicalslot = true;
                     break;
                 }

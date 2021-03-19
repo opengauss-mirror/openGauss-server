@@ -53,6 +53,15 @@ typedef enum ColumnEncryptionAlgorithm {
     AEAD_AES_128_CBC_HMAC_SHA256
 } ColumnEncryptionAlgorithm;
 
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+const int MAX_KEY_PATH_VALUE_LEN = 64;
+
+typedef enum {
+    CE_IGNORE,
+    CE_CREATE_CMK,
+    CE_DROP_CMK,
+} CEQueryType;
+#endif
 
 inline ColumnEncryptionAlgorithm get_cek_algorithm_from_string(const char *alg)
 {

@@ -802,6 +802,10 @@ bool IsSnapshotNamespace(Oid namespaceId)
     return namespaceId == PG_SNAPSHOT_NAMESPACE;
 }
 
+bool IsMonitorSpace(Oid namespaceId)
+{
+    return IsPerformanceNamespace(namespaceId) || IsSnapshotNamespace(namespaceId);
+}
 /*
  * IsReservedName
  *		True iff name starts with the pg_ prefix.

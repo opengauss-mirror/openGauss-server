@@ -337,7 +337,7 @@ static StreamSharedContext* buildLocalStreamContext(Stream* streamNode, PlannedS
     securec_check_ss(rc, "", "");
 
     /* Create a shared memory context for local stream in-memory data exchange. */
-    localStreamMemoryCtx = AllocSetContextCreate(t_thrd.mem_cxt.data_exchange_mem_cxt,
+    localStreamMemoryCtx = AllocSetContextCreate(u_sess->stream_cxt.data_exchange_mem_cxt,
         context_name,
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
@@ -675,7 +675,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
     if (ctl->dummyThread == false) {
         /* Initialize the consumer object. */
         for (i = 0; i < streamNode->smpDesc.consumerDop; i++) {
-            consumer = New(t_thrd.mem_cxt.stream_runtime_mem_cxt) StreamConsumer(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+            consumer = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamConsumer(
+                u_sess->stream_cxt.stream_runtime_mem_cxt);
 
             /* Set smp identifier. */
             key.smpIdentifier = i;
@@ -714,8 +715,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
         for (i = 0; i < streamNode->smpDesc.producerDop; i++) {
             /* Set smp identifier. */
             key.smpIdentifier = i;
-            producer = New(t_thrd.mem_cxt.stream_runtime_mem_cxt) StreamProducer(
-                key, pstmt, streamNode, t_thrd.mem_cxt.stream_runtime_mem_cxt, producerConnNum, transType);
+            producer = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamProducer(
+                key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, producerConnNum, transType);
             producer->setSharedContext(sharedContext);
             producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
                 u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
@@ -733,8 +734,8 @@ static void InitStream(StreamFlowCtl* ctl, StreamTransType transType)
         }
     } else {
         key.smpIdentifier = 0;
-        producer = New(t_thrd.mem_cxt.stream_runtime_mem_cxt)
-            StreamProducer(key, pstmt, streamNode, t_thrd.mem_cxt.stream_runtime_mem_cxt, consumerNum, transType);
+        producer = New(u_sess->stream_cxt.stream_runtime_mem_cxt)
+            StreamProducer(key, pstmt, streamNode, u_sess->stream_cxt.stream_runtime_mem_cxt, consumerNum, transType);
         producer->setUniqueSQLKey(u_sess->unique_sql_cxt.unique_sql_id,
             u_sess->unique_sql_cxt.unique_sql_user_id, u_sess->unique_sql_cxt.unique_sql_cn_id);
         producerSMPList = lappend(producerSMPList, producer);
@@ -925,16 +926,16 @@ static void InitStreamFlow(StreamFlowCtl* ctl)
 void DeinitStreamContext()
 {
     /* Reset the stream runtime context now for next query. */
-    if (t_thrd.mem_cxt.stream_runtime_mem_cxt != NULL) {
-        MemoryContextDelete(t_thrd.mem_cxt.stream_runtime_mem_cxt);
-        t_thrd.mem_cxt.stream_runtime_mem_cxt = NULL;
+    if (u_sess->stream_cxt.stream_runtime_mem_cxt != NULL) {
+        MemoryContextDelete(u_sess->stream_cxt.stream_runtime_mem_cxt);
+        u_sess->stream_cxt.stream_runtime_mem_cxt = NULL;
     }
 
     if (IS_PGXC_DATANODE) {
         /* Reset the shared memory context now for next query. */
-        if (t_thrd.mem_cxt.data_exchange_mem_cxt != NULL) {
-            MemoryContextDelete(t_thrd.mem_cxt.data_exchange_mem_cxt);
-            t_thrd.mem_cxt.data_exchange_mem_cxt = NULL;
+        if (u_sess->stream_cxt.data_exchange_mem_cxt != NULL) {
+            MemoryContextDelete(u_sess->stream_cxt.data_exchange_mem_cxt);
+            u_sess->stream_cxt.data_exchange_mem_cxt = NULL;
         }
     }
 }
@@ -952,7 +953,7 @@ void InitStreamContext()
     /* Append tid to identify each postgres thread. */
     rc = snprintf_s(context_name, NAMEDATALEN, NAMEDATALEN - 1, "StreamRuntimeContext__%lu", u_sess->debug_query_id);
     securec_check_ss(rc, "\0", "\0");
-    t_thrd.mem_cxt.stream_runtime_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
+    u_sess->stream_cxt.stream_runtime_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
         context_name,
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
@@ -964,7 +965,7 @@ void InitStreamContext()
         rc = snprintf_s(
             context_name, NAMEDATALEN, NAMEDATALEN - 1, "MemoryDataExchangeContext_%lu", u_sess->debug_query_id);
         securec_check_ss(rc, "\0", "\0");
-        t_thrd.mem_cxt.data_exchange_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
+        u_sess->stream_cxt.data_exchange_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
             context_name,
             ALLOCSET_DEFAULT_MINSIZE,
             ALLOCSET_DEFAULT_INITSIZE,
@@ -990,15 +991,15 @@ void BuildStreamFlow(PlannedStmt* plan)
     StreamProducer* producer = NULL;
 
     if (plan->num_streams > 0 && u_sess->stream_cxt.global_obj == NULL) {
-        AutoContextSwitch streamCxtGuard(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+        AutoContextSwitch streamCxtGuard(u_sess->stream_cxt.stream_runtime_mem_cxt);
         int threadNum = 0;
         List* topConsumerList = NULL;
 
         /* Hold interrupts during stream connection and thread initialization. */
         HOLD_INTERRUPTS();
 
-        u_sess->stream_cxt.global_obj = New(t_thrd.mem_cxt.stream_runtime_mem_cxt) StreamNodeGroup();
-        u_sess->stream_cxt.global_obj->m_streamRuntimeContext = t_thrd.mem_cxt.stream_runtime_mem_cxt;
+        u_sess->stream_cxt.global_obj = New(u_sess->stream_cxt.stream_runtime_mem_cxt) StreamNodeGroup();
+        u_sess->stream_cxt.global_obj->m_streamRuntimeContext = u_sess->stream_cxt.stream_runtime_mem_cxt;
 
         StreamFlowCtl ctl;
         ctl.pstmt = plan;
@@ -2088,10 +2089,6 @@ StreamState* BuildStreamRuntime(Stream* node, EState* estate, int eflags)
         /* In case there is no target list, force its creation */
         ExecAssignResultTypeFromTL(&stream_state->ss.ps);
     }
-
-    /* Stream runtime only set up on datanode. */
-    if (IS_PGXC_DATANODE)
-        SetupStreamRuntime(stream_state);
 
     /* Set up underlying execution nodes on coordinator nodes */
 #ifdef ENABLE_MULTIPLE_NODES

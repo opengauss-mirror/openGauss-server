@@ -222,6 +222,11 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
     knl_session_context* sess = ctrl->sess;
+    /* Session may be NULL when the session exits during the clean connection process.
+       We do nothing if the session is NULL */
+    if (sess == NULL) {
+        return ESRCH;
+    }
     /* Check user permission, and we dont have user id for cancel request. */
     CheckPermissionForSendSignal(sess);
     volatile sig_atomic_t* plock = &ctrl->lock;
@@ -231,26 +236,24 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
             /*  perform an atomic compare and swap. */
             val = __sync_val_compare_and_swap(plock, 0, 1);
             if (val == 0) {
-                if (sess != NULL) {
-                    if (sess->status == KNL_SESS_ATTACH) {
-                        t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
-                        t_thrd.sig_cxt.session_id = sess->session_id;
-                        status = gs_signal_send(sess->attachPid, signal);
-                        t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
-                        t_thrd.sig_cxt.session_id = 0;
-                    } else if (sess->status == KNL_SESS_DETACH) {
-                        switch (signal) {
-                            case SIGTERM:
-                                sess->status = KNL_SESS_CLOSE;
-                                CloseClientSocket(sess, false);
-                                status = 0;
-                                break;
-                            default:
-                                break;
-                        }
-                    } else {
-                        status = ESRCH;
+                if (sess->status == KNL_SESS_ATTACH) {
+                    t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
+                    t_thrd.sig_cxt.session_id = sess->session_id;
+                    status = gs_signal_send(sess->attachPid, signal);
+                    t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_NONE;
+                    t_thrd.sig_cxt.session_id = 0;
+                } else if (sess->status == KNL_SESS_DETACH) {
+                    switch (signal) {
+                        case SIGTERM:
+                            sess->status = KNL_SESS_CLOSE;
+                            CloseClientSocket(sess, false);
+                            status = 0;
+                            break;
+                        default:
+                            break;
                     }
+                } else {
+                    status = ESRCH;
                 }
                 /*  restore the value. */
                 ctrl->lock = 0;
@@ -327,6 +330,80 @@ int ThreadPoolSessControl::CountDBSessions(Oid dbId)
 
     alock.unLock();
 
+    return count;
+}
+
+bool ThreadPoolSessControl::ValidDBoidAndUseroid(Oid dbOid, Oid userOid, knl_sess_control* ctrl)
+{
+    /*
+     * Thread are 3 situation in CLEAN CONNECTION:
+     * 1. Only database, for example: CLEAN CONNECTION TO ALL FORCE FOR DATABASE xxx;
+     * 2. Only user, for example: CLEAN CONNECTION TO ALL FORCE TO USER xxx;
+     * 3. Both database and user, for example: CLEAN CONNECTION TO ALL FORCE FOR DATABASE xxx TO USER xxx;
+     */
+    if (((dbOid != InvalidOid) && (userOid == InvalidOid) && (ctrl->sess->proc_cxt.MyDatabaseId == dbOid))
+        || ((dbOid == InvalidOid) && (userOid != InvalidOid) && (ctrl->sess->proc_cxt.MyRoleId == userOid))
+        || ((ctrl->sess->proc_cxt.MyDatabaseId == dbOid) && (ctrl->sess->proc_cxt.MyRoleId == userOid))) {
+        return true;
+    }
+    return false;
+}
+
+int ThreadPoolSessControl::CountDBSessionsNotCleaned(Oid dbOid, Oid userOid)
+{
+    if ((dbOid == InvalidOid) && (userOid == InvalidOid)) {
+        ereport(WARNING,
+            (errmsg("DB oid and user oid are all Invalid (may be NULL). Shut down clean activite sessions.")));
+        return 0;
+    }
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+
+    int count = 0;
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
+        if (ValidDBoidAndUseroid(dbOid, userOid, ctrl)) {
+            int status = ThreadPoolSessControl::SendSignal(ctrl->idx, 0);
+            if (status == 0) {
+                /* Termination not done yet */
+                count++;
+            }
+        }
+        elem = DLGetSucc(elem);
+    }
+
+    alock.unLock();
+    return count;
+}
+
+int ThreadPoolSessControl::CleanDBSessions(Oid dbOid, Oid userOid)
+{
+    if ((dbOid == InvalidOid) && (userOid == InvalidOid)) {
+        ereport(WARNING,
+            (errmsg("DB oid and user oid are all Invalid (may be NULL). Shut down clean activite sessions.")));
+        return 0;
+    }
+    AutoMutexLock alock(&m_sessCtrlock);
+    alock.lock();
+
+    int count = 0;
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = DLGetHead(&m_activelist);
+
+    while (elem != NULL) {
+        ctrl= (knl_sess_control*)DLE_VAL(elem);
+        if (ValidDBoidAndUseroid(dbOid, userOid, ctrl)) {
+            count++;
+            ThreadPoolSessControl::SendSignal(ctrl->idx, SIGTERM);
+            ThreadPoolSessControl::SendSignal(ctrl->idx, SIGUSR2);
+        }
+        elem = DLGetSucc(elem);
+    }
+
+    alock.unLock();
     return count;
 }
 

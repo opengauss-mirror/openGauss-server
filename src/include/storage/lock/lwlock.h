@@ -187,6 +187,9 @@ enum BuiltinTrancheIds
     LWTRANCHE_NGROUP_MAPPING,    
     LWTRANCHE_MATVIEW_SEQNO,
     LWTRANCHE_IO_STAT,
+    LWTRANCHE_WAL_FLUSH_WAIT,
+    LWTRANCHE_WAL_BUFFER_INIT_WAIT,
+    LWTRANCHE_WAL_INIT_SEGMENT,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

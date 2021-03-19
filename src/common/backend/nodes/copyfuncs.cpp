@@ -61,12 +61,15 @@ typedef struct OpMemInfo {
  */
 
 /* Copy a simple scalar field (int, float, bool, enum, etc) */
-#define COPY_SCALAR_FIELD(fldname)                                                                         \
-    do {                                                                                                   \
-        errno_t rc;                                                                                        \
-        rc = memcpy_s(&newnode->fldname, sizeof(newnode->fldname), &from->fldname, sizeof(from->fldname)); \
-        securec_check(rc, "", "");                                                                         \
-    } while (0)
+#define COPY_SCALAR_FIELD(fldname)      (newnode->fldname = from->fldname)
+
+#define COPY_ARRAY_FIELD(fldname)                                                                      \
+do {                                                                                                   \
+    errno_t rc;                                                                                        \
+    rc = memcpy_s(&newnode->fldname, sizeof(newnode->fldname), &from->fldname, sizeof(from->fldname)); \
+    securec_check(rc, "", "");                                                                         \
+} while (0)
+
 
 /* Copy a field that is a pointer to some kind of Node or Node tree */
 #define COPY_NODE_FIELD(fldname)                                              \
@@ -5040,7 +5043,7 @@ static VacuumStmt* _copyVacuumStmt(const VacuumStmt* from)
     COPY_SCALAR_FIELD(num_samples);
     COPY_NODE_FIELD(sampleRows);
     COPY_SCALAR_FIELD(tableidx);
-    COPY_SCALAR_FIELD(pstGlobalStatEx);
+    COPY_ARRAY_FIELD(pstGlobalStatEx);
     COPY_SCALAR_FIELD(memUsage.work_mem);
     COPY_SCALAR_FIELD(memUsage.max_mem);
 
@@ -5345,8 +5348,25 @@ static CreateRlsPolicyStmt* _copyCreateRlsPolicyStmt(const CreateRlsPolicyStmt* 
     COPY_NODE_FIELD(relation);
     COPY_STRING_FIELD(cmdName);
     COPY_SCALAR_FIELD(isPermissive);
+    COPY_SCALAR_FIELD(fromExternal);
     COPY_NODE_FIELD(roleList);
     COPY_NODE_FIELD(usingQual);
+
+    return newnode;
+}
+
+static CreateWeakPasswordDictionaryStmt* _copyCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* from)
+{
+    CreateWeakPasswordDictionaryStmt* newnode = makeNode(CreateWeakPasswordDictionaryStmt);
+
+    COPY_NODE_FIELD(weak_password_string_list);
+
+    return newnode;
+}
+
+static DropWeakPasswordDictionaryStmt* _copyDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* from)
+{
+    DropWeakPasswordDictionaryStmt* newnode = makeNode(DropWeakPasswordDictionaryStmt);
 
     return newnode;
 }
@@ -5972,7 +5992,7 @@ static BloomFilterSet* _copyBloomFilterSet(const BloomFilterSet* from)
     if (from->startupEntries > 0) {
         newnode->valuePositions = (ValueBit*)palloc0(from->startupEntries * sizeof(ValueBit));
         for (uint64 cell = 0; cell < from->startupEntries; cell++) {
-            COPY_SCALAR_FIELD(valuePositions[cell].position);
+            COPY_ARRAY_FIELD(valuePositions[cell].position);
 
             /* test valuePositions value */
             for (int i = 0; i < 4; i++) {
@@ -6804,6 +6824,12 @@ void* copyObject(const void* from)
             break;
         case T_ReindexStmt:
             retval = _copyReindexStmt((ReindexStmt*)from);
+            break;
+        case T_CreateWeakPasswordDictionaryStmt:
+            retval = _copyCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)from);
+            break;
+        case T_DropWeakPasswordDictionaryStmt:
+            retval = _copyDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)from);
             break;
         case T_CheckPointStmt:
             retval = (void*)makeNode(CheckPointStmt);

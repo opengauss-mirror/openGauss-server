@@ -75,7 +75,6 @@ extern DistributeBy *infer_incmatview_distkey(CreateTableAsStmt *stmt);
 extern void check_basetable_permission(Query *query);
 extern bool isIncMatView(RangeVar *rv);
 extern void MatviewShmemSetInvalid();
-extern void acquire_mativew_tables_lock(Query *query, bool incremental);
 extern void check_basetable(Query *query, bool isCreateMatview, bool isIncremental);
 extern List *pull_up_rels_recursive(Node *node);
 

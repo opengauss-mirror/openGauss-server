@@ -109,7 +109,7 @@ function print_help()
     -V|--version           show version information.
     -f|--file              provide the file list released.
     -3rd|--binarylib_dir   the directory of third party binarylibs.
-    -pkg|--package         provode type of installation packages, values parameter is all, server, jdbc, odbc, agent, adaptor.
+    -pkg|--package         provode type of installation packages, values parameter is all, server, jdbc, odbc, agent.
     -pm                    product mode, values parameter is single, multiple or opengauss, default value is multiple.
     -p|--path              generation package storage path.
     -t                     packaging format, values parameter is tar or rpm, the default value is tar.
@@ -322,7 +322,6 @@ declare version_string="${mppdb_name_for_package}-${version_number}"
 declare package_pre_name="${version_string}-${dist_version}-${PLATFORM}bit"
 declare server_package_name="${package_pre_name}.${install_package_format}.gz"
 declare agent_package_name="${package_pre_name}-AGENT.${install_package_format}.gz"
-declare adaptor_package_name="${package_pre_name}-ADAPTOR.${install_package_format}.gz"
 declare gsql_package_name="${mppdb_name_for_package}-${version_number}-${dist_version}-${PLATFORM}bit-gsql.${install_package_format}.gz"
 declare client_package_name="${package_pre_name}-ClientTools.${install_package_format}.gz"
 declare libpq_package_name="${package_pre_name}-Libpq.${install_package_format}.gz"
@@ -355,7 +354,11 @@ else
     BINARYLIBS_PATH="${ROOT_DIR}/binarylibs"
 fi
 
-declare UPGRADE_SQL_DIR="${ROOT_DIR}/src/distribute/include/catalog/upgrade_sql"
+if [ "$product_mode"x == "single"x ] || [ "$product_mode"x == "opengauss"x ]; then
+    declare UPGRADE_SQL_DIR="${ROOT_DIR}/src/include/catalog/upgrade_sql"
+else
+    declare UPGRADE_SQL_DIR="${ROOT_DIR}/src/distribute/include/catalog/upgrade_sql"
+fi
 
 gaussdb_200_file="${binarylib_dir}/buildtools/license_control/gaussdb.version.GaussDB200"
 gaussdb_300_file="${binarylib_dir}/buildtools/license_control/gaussdb.version.GaussDB300"
@@ -432,7 +435,7 @@ function mpp_pkg_pre_check()
         rm -rf $LOG_FILE
     fi
 
-    if [  X"$package_type" == X"server" -o X"$package_type" == X"all" ] && [ X$zip_package = X"on" ] && [ ! -d "${ROOT_DIR}"/script/script/gspylib/ ]; then
+    if [  X"$package_type" == X"server" -o X"$package_type" == X"all" ] && [ X"$zip_package" = X"on" ] && [ ! -d "${ROOT_DIR}"/script/script/gspylib/ ]; then
         printf "\033[31mCan not found OM script directory. solution steps:\n\033[0m"
         echo "  1) git clone git@isource-dg.huawei.com:2222/GaussDB_Kernel/GaussDB_Kernel_OM.git -b $(git branch | grep '*' | sed -e 's/*//g' -e 's/^ //g')"
         echo "  2) if you do not have the permission to git it, please call CMO "
@@ -452,16 +455,9 @@ function package_upgrade_sql()
     echo "Begin to install upgrade_sql files..."
     UPGRADE_SQL_TAR="upgrade_sql.tar.gz"
     UPGRADE_SQL_SHA256="upgrade_sql.sha256"
-    SINGLE_IGNORE_VERSION=(263 264 270 280 287)
     MULTIP_IGNORE_VERSION=(289 294 296)
     cp -r "${UPGRADE_SQL_DIR}" .
     [ $? -ne 0 ] && die "Failed to cp upgrade_sql files"
-    if [ "$product_mode"x == "single"x ] || [ "$product_mode"x == "opengauss"x ]; then
-        for version_num in ${SINGLE_IGNORE_VERSION[*]}
-        do
-            find ./upgrade_sql -name *${version_num}* | xargs rm -rf
-        done
-    fi
     if [ "$product_mode"x == "multiple"x ]; then
         for version_num in ${MULTIP_IGNORE_VERSION[*]}
         do
@@ -686,7 +682,7 @@ function install_gaussdb()
     echo "Begin configure." >> "$LOG_FILE" 2>&1
     chmod 755 configure
 
-    shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylibs_path} --enable-thread-safety --without-readline --without-zlib"
+    shared_opt="--gcc-version=${gcc_version}.0 --prefix="${BUILD_DIR}" --3rd=${binarylibs_path} --enable-thread-safety --with-readline --without-zlib"
     if [ "$product_mode"x == "multiple"x ]; then
         if [ "$version_mode"x == "release"x ]; then
             ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}"  CC="${USE_CCACHE}g++" ${ENABLE_CCACHE} --enable-multiple-nodes $extra_config_opt >> "$LOG_FILE" 2>&1
@@ -787,7 +783,7 @@ function install_gaussdb()
         spec="opengauss"
     fi
 
-    if [ $spec = "gaussdbkernel" ]; then
+    if [ "${spec}" = "gaussdbkernel" ]; then
         echo "Begin make install Roach..." >> "$LOG_FILE" 2>&1
         #copy gs_roach form clienttools to bin
         if [ "$version_mode"x == "release"x ]; then
@@ -890,7 +886,7 @@ function install_gaussdb()
 
     #back to separate_debug_symbol.sh dir
     cd $SCRIPT_DIR
-    if [ "$version_mode" = "release" -a "$separate_symbol" = "on" -a $zip_package = "on" ]; then
+    if [ "$version_mode" = "release" -a "$separate_symbol" = "on" -a "$zip_package" = "on" ]; then
        chmod +x ./separate_debug_information.sh
        ./separate_debug_information.sh
         cd $SCRIPT_DIR
@@ -901,7 +897,7 @@ function install_gaussdb()
     cd $ROOT_DIR
 
     # om scripts may be package alone
-    if [ $zip_package = "on" ]; then
+    if [ "${zip_package}" = "on" ]; then
         copy_script_file "$script_dir/" ${BUILD_DIR}/bin/
         cp ${BUILD_DIR}/bin/script/gspylib/etc/sql/pmk_schema.sql ${BUILD_DIR}/share/postgresql/
         if [ -f "${BUILD_DIR}"/bin/script/gspylib/etc/sql/pmk_schema_single_inst.sql ]; then
@@ -970,11 +966,22 @@ function make_package_gsql()
     mkdir -p gsql
     mkdir -p gsql/bin
     mkdir -p gsql/lib
+    mkdir -p gsql/gs_ktool_file
 
     # copy gsql and depend *.so
     cp ${BUILD_DIR}/bin/gsql gsql/bin
     if [ $? -ne 0 ]; then
         die "copy gsql failed."
+    fi
+
+    cp ${BUILD_DIR}/bin/gs_ktool gsql/bin
+    if [ $? -ne 0 ]; then
+        die "copy gsql failed."
+    fi
+
+    cp -r ${BUILD_DIR}/etc/gs_ktool_file/gs_ktool_conf.ini gsql/gs_ktool_file
+    if [ $? -ne 0 ]; then
+        die "copy gs_ktool_con.ini failed."
     fi
 
     cd gsql
@@ -1161,10 +1168,6 @@ function target_file_copy()
     cp -rf $BUILD_DIR/script/impl/ $2/bin/script/
     cp -rf $BUILD_DIR/script/local/ $2/bin/script/
 
-    # copy server.key to bin path
-    cp -f ${BUILD_DIR}/server.key.cipher $2/bin/
-    cp -f ${BUILD_DIR}/server.key.rand $2/bin/
-
     # copy script which gs_roach depends from ${script_dir}/ to $2/bin/script
     cp -rf ${script_dir}/other/roach/util/ $2/bin/script/
     cp -f ${script_dir}/other/roach/local/* $2/bin/script/local/
@@ -1228,10 +1231,6 @@ function target_file_copy()
     cp -rf $BUILD_DIR/script/impl/ $2/script/
     cp -rf $BUILD_DIR/script/local/ $2/script/
 
-    # copy server.key to temp path
-    cp -f ${BUILD_DIR}/server.key.cipher $2/
-    cp -f ${BUILD_DIR}/server.key.rand $2/
-
     # copy GaussRoach.py to script dir
     cp -f ${script_dir}/other/roach/GaussRoach.py $2/script/
     cp -f ${script_dir}/other/roach/SyncDataToStby.py $2/script/
@@ -1257,12 +1256,6 @@ function target_file_copy()
     if [ $? -ne 0 ]; then
         die "copy ${script_dir}/agent/common/py_pstree.py to $2/script/ failed. $res"
     fi
-    #copy adaptor tool to temp path
-    res=$(cp -rf ${script_dir}/adaptor/ $2/ 2>&1)
-    if [ $? -ne 0 ]; then
-        die "copy ${script_dir}/adaptor to $2 failed. $res"
-    fi
-
     # copy the default xml to temp path
     res=$(cp -f ${script_dir}/build/cluster_default_agent.xml $2/ 2>&1)
     if [ $? -ne 0 ]; then
@@ -1310,7 +1303,7 @@ function read_script_file()
 }
 
 #######################################################################
-##function make_package have tree actions
+##function make_package have three actions
 ##1.parse release_file_list variable represent file
 ##2.copy target file into a newly created temporary directory temp
 ##3.package all file in the temp directory and renome to destination package_path
@@ -1520,6 +1513,16 @@ function make_package()
             cp ./lib/_cffi_backend.so_UCS4 ./lib/_cffi_backend.so
             cp -r ./script/gspylib/pssh/bin ./agent/
             cp -r ./script/gspylib/clib ./agent/
+            if [ "$product_mode"x == "single"x ]
+            then
+                if [ ! -e ./agent/centralized_cluster ]
+                then
+                        touch ./agent/centralized_cluster
+                        echo "This file is used only to distinguish cluster types (generated by the packaging script)." >> ./agent/centralized_cluster
+                else
+                        echo "This file is used only to distinguish cluster types (generated by the packaging script)." > ./agent/centralized_cluster
+                fi
+            fi
             $package_command "${agent_package_name}" ./agent ./lib ./cluster_default_agent.xml ./version.cfg >>"$LOG_FILE" 2>&1
             if [ $? -ne 0 ]; then
                 die "$package_command ${agent_package_name} failed"
@@ -1527,17 +1530,9 @@ function make_package()
             mv ${agent_package_name} ${package_path}
             echo "Agent package has been finished."
 
-            #compress the adaptor package
-            echo "Adaptor package is starting."
-            echo  "$package_command ${adaptor_package_name}"
-            $package_command "${adaptor_package_name}" ./adaptor >>"$LOG_FILE" 2>&1
-            mv ${adaptor_package_name} ${package_path}
-            echo "Adaptor package has been finished."
-
-            #remove the agent and adaptor path which only needed by agent and adaptor before compress server package
+            #remove the agent path which only needed by agent before compress server package
             echo "Server package is starting."
             rm -rf ./agent
-            rm -rf ./adaptor
             cp -a ${BUILD_TOOLS_PATH}/secbox .
             if [ -e secbox/libso ] ; then rm -rf secbox/libso ; fi
             mkdir -p secbox/libso/
@@ -1594,9 +1589,6 @@ function copy_script_file()
     local target_dir=$2
 
     cp -rf $target_file/script/ $target_dir/ &&
-    cp -f ${binarylib_dir}/buildtools/server_key/server.key.cipher $target_dir &&
-    cp -f ${binarylib_dir}/buildtools/server_key/server.key.rand $target_dir &&
-
     find $target_dir/script/ -type f -print0 | xargs -0 -n 10 -r dos2unix > /dev/null 2>&1 &&
     find $target_dir/script/gspylib/inspection/ -name d2utmp* -print0 | xargs -0 rm -rf &&
     cp -rf $target_file/script/gspylib/inspection/lib/checknetspeed/speed_test* $target_dir/script/gspylib/inspection/lib/checknetspeed/ &&

@@ -126,6 +126,11 @@ void PerformCursorOpen(PlannedStmt* stmt, ParamListInfo params, const char* quer
             portal->cursorOptions |= CURSOR_OPT_NO_SCROLL;
     }
 
+    if (portal->cursorOptions & CURSOR_OPT_HOLD) {
+        portal->cursorHoldUserId = u_sess->misc_cxt.CurrentUserId;
+        portal->cursorHoldSecRestrictionCxt = u_sess->misc_cxt.SecurityRestrictionContext;
+    }
+
     /* For gc_fdw */
     if (u_sess->pgxc_cxt.gc_fdw_snapshot) {
         PushActiveSnapshot(u_sess->pgxc_cxt.gc_fdw_snapshot);
@@ -182,8 +187,13 @@ void PerformPortalFetch(FetchStmt* stmt, DestReceiver* dest, char* completionTag
     if (stmt->ismove)
         dest = None_Receiver;
 
+    bool savedIsAllowCommitRollback;
+    bool needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedIsAllowCommitRollback, STP_XACT_OPEN_FOR);
+
     /* Do it */
     nprocessed = PortalRunFetch(portal, stmt->direction, stmt->howMany, dest);
+
+    stp_reset_xact_state_and_err_msg(savedIsAllowCommitRollback, needResetErrMsg);
 
     /* Return command status if wanted */
     if (completionTag != NULL) {
@@ -307,6 +317,8 @@ void PersistHoldablePortal(Portal portal)
     ResourceOwner saveResourceOwner;
     MemoryContext savePortalContext;
     MemoryContext oldcxt;
+    Oid saveUserid;
+    int saveSecContext;
 
     /*
      * If we're preserving a holdable portal, we had better be inside the
@@ -342,6 +354,13 @@ void PersistHoldablePortal(Portal portal)
     saveActivePortal = ActivePortal;
     saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     savePortalContext = t_thrd.mem_cxt.portal_mem_cxt;
+
+    if (OidIsValid(portal->cursorHoldUserId)) {
+        /* GetUserIdAndSecContext is cheap enough that no harm in a wasted call */
+        GetUserIdAndSecContext(&saveUserid, &saveSecContext);
+        SetUserIdAndSecContext(portal->cursorHoldUserId, 
+            portal->cursorHoldSecRestrictionCxt | SECURITY_LOCAL_USERID_CHANGE);
+    }
     PG_TRY();
     {
         ActivePortal = portal;
@@ -433,7 +452,9 @@ void PersistHoldablePortal(Portal portal)
         ActivePortal = saveActivePortal;
         t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
         t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
-
+        if (OidIsValid(portal->cursorHoldUserId)) {
+            SetUserIdAndSecContext(saveUserid, saveSecContext);
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -446,7 +467,9 @@ void PersistHoldablePortal(Portal portal)
     ActivePortal = saveActivePortal;
     t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
     t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
-
+    if (OidIsValid(portal->cursorHoldUserId)) {
+        SetUserIdAndSecContext(saveUserid, saveSecContext);
+    }
     PopActiveSnapshot();
 
     /*

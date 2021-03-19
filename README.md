@@ -360,6 +360,8 @@ gs_uninstall --delete-data -L
 
 - binarylibs：openGauss依赖的第三方开源软件，你可以直接编译openGauss-third_party代码获取，也可以从开源社区下载已经编译好的并上传的一个副本。
 
+对于数据库、三方库、GCC的编译以及常见问题，参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
+
 在编译openGauss之前，请检查操作系统和软件依赖要求。
 
 openGauss可以通过一键式shell工具build.sh进行编译，也可以通过命令进行编译。安装包由build.sh生成。
@@ -372,6 +374,7 @@ openGauss支持以下操作系统：
 
 - openEuler-20.03-LTS（aarch64架构）
 
+适配其他系统，参照博客[openGauss数据库编译指导](https://opengauss.org/zh/blogs/blogs.html?post/xingchen/opengauss_compile/)
 
 以下表格列举了编译openGauss的软件要求。
 
@@ -388,6 +391,7 @@ openGauss支持以下操作系统：
 | glibc-devel   | 2.17-111        |
 | patch         | 2.7.1-10        |
 | lsb_release   | 4.1             |
+| readline-devel| 7.0-13          |
 
 ### 下载openGauss
 
@@ -508,19 +512,19 @@ openGauss-server中的build.sh是编译过程中的重要脚本工具。该工�
    **debug**版本：
 
    ```
-   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib
    ```
 
    **release**版本：
 
    ```
-   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS="-O2 -g3" --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-thread-safety --without-readline --without-zlib
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS="-O2 -g3" --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-thread-safety --with-readline --without-zlib
    ```
 
    **memcheck**版本：
 
    ```
-   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --without-readline --without-zlib --enable-memory-check
+   ./configure --gcc-version=7.3.0 CC=g++ CFLAGS='-O0' --prefix=$GAUSSHOME --3rd=$BINARYLIBS --enable-debug --enable-cassert --enable-thread-safety --with-readline --without-zlib --enable-memory-check
    ```
 
    > **注意** 

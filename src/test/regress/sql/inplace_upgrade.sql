@@ -145,7 +145,9 @@ create table pg_catalog.pg_inplace_table2 (a int);
 set isinplaceupgrade=off;
 commit;
 
+set xc_maintenance_mode = on;
 vacuum full pg_inplace_table2;
+set xc_maintenance_mode = off;
 
 begin;
 set isinplaceupgrade=on;

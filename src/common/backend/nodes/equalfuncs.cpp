@@ -194,9 +194,7 @@ static bool _equalAggref(const Aggref* a, const Aggref* b)
 #ifdef PGXC
     COMPARE_SCALAR_FIELD(aggtrantype);
     COMPARE_SCALAR_FIELD(agghas_collectfn);
-#ifdef ENABLE_MULTIPLE_NODES
     COMPARE_SCALAR_FIELD(aggstage);
-#endif
 #endif /* PGXC */
     COMPARE_SCALAR_FIELD(aggcollid);
     COMPARE_SCALAR_FIELD(inputcollid);
@@ -1867,6 +1865,7 @@ static bool _equalCreateRlsPolicyStmt(const CreateRlsPolicyStmt* a, const Create
     COMPARE_NODE_FIELD(relation);
     COMPARE_STRING_FIELD(cmdName);
     COMPARE_SCALAR_FIELD(isPermissive);
+    COMPARE_SCALAR_FIELD(fromExternal);
     COMPARE_NODE_FIELD(roleList);
     COMPARE_NODE_FIELD(usingQual);
 
@@ -1880,6 +1879,18 @@ static bool _equalAlterRlsPolicyStmt(const AlterRlsPolicyStmt* a, const AlterRls
     COMPARE_NODE_FIELD(roleList);
     COMPARE_NODE_FIELD(usingQual);
 
+    return true;
+}
+
+static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* a, const CreateWeakPasswordDictionaryStmt* b)
+{
+    COMPARE_NODE_FIELD(weak_password_string_list);
+
+    return true;
+}
+
+static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
+{
     return true;
 }
 
@@ -3360,6 +3371,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterRlsPolicyStmt:
             retval = _equalAlterRlsPolicyStmt((AlterRlsPolicyStmt*)a, (AlterRlsPolicyStmt*)b);
+            break;
+        case T_CreateWeakPasswordDictionaryStmt:
+            retval = _equalCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)a, (CreateWeakPasswordDictionaryStmt*)b);
+            break;
+        case T_DropWeakPasswordDictionaryStmt:
+            retval = _equalDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)a, (DropWeakPasswordDictionaryStmt*)b);
             break;
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);

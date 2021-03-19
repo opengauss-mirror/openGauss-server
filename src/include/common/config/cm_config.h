@@ -49,6 +49,7 @@
 #define CM_MAX_COMMAND_LEN 1024
 #define CM_MAX_COMMAND_LONG_LEN 2048
 #define CONNSTR_LEN 256
+#define DN_SYNC_LEN (256)
 
 // A logic datanode number in a node, The logic datanode can be include the primary, standby and dummystandby DN.
 #define LOGIC_DN_PER_NODE 32
@@ -130,6 +131,12 @@
 
 #define ETCD_KEY_LENGTH 1024
 #define ETCD_VLAUE_LENGTH 1024
+
+#define CASCADE_STANDBY_TYPE 3
+#define STATIC_CONFIG_FILE "cluster_static_config"
+#define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"
+/* the max real path length in linux is 4096, adapt this for realpath func */
+#define MAX_REALPATH_LEN 4096
 
 /* az_Priorities, only init the values when load config file */
 const uint32 g_az_invalid = 0;
@@ -377,6 +384,11 @@ typedef struct logicClusterList {
     logicClusterInfo lcInfoArray[LOGIC_CLUSTER_NUMBER];
 } logicClusterList;
 
+typedef struct AZ_Info {
+    char* nodeName;
+    uint32 azPriority;
+} AZList;
+
 extern staticConfigHeader g_nodeHeader;
 extern staticNodeConfig* g_node;
 extern staticNodeConfig* g_currentNode;
@@ -406,6 +418,9 @@ extern bool logic_cluster_query;
 extern bool logic_cluster_restart;
 extern uint32 g_datanodeid;
 extern char* g_logicClusterName;
+extern uint32 g_local_node_idx;
+extern char* g_local_node_name;
+extern char* g_lcname;
 
 extern int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const char *dataPath);
 extern int read_config_file(const char* file_path, int* err_no);
@@ -418,5 +433,10 @@ extern int node_index_Comparator(const void* arg1, const void* arg2);
 extern void set_cm_read_flag(bool falg);
 extern char* getAZNamebyPriority(uint32 azPriority);
 extern int cmconfig_getenv(const char* env_var, char* output_env_value, uint32 env_value_len);
+extern bool contain_nodename(const char* namelist, const char* name);
+extern int get_dynamic_dn_role(void);
+extern int get_nodename_list_by_AZ(const char* AZName, const char* data_dir, char** nodeNameList);
+extern int checkPath(const char* fileName);
+extern bool has_static_config();
 
 #endif

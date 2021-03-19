@@ -652,7 +652,8 @@ bool Table::CreateMultipleRows(size_t numRows, Row* rows[])
     return res;
 }
 
-RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull)
+RC Table::AddColumn(
+    const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES type, bool isNotNull, unsigned int envelopeType)
 {
     // validate input parameters
     if (!colName || type >= MOT_CATALOG_FIELD_TYPES::MOT_TYPE_UNKNOWN)
@@ -695,6 +696,7 @@ RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES 
     m_columns[m_fieldCnt]->m_id = m_fieldCnt;
     m_columns[m_fieldCnt]->m_offset = m_tupleSize;
     m_columns[m_fieldCnt]->m_isNotNull = isNotNull;
+    m_columns[m_fieldCnt]->m_envelopeType = envelopeType;
     m_columns[m_fieldCnt]->SetKeySize();
 
     m_tupleSize += size;
@@ -817,7 +819,8 @@ size_t Table::SerializeItemSize(Column* column)
     size_t ret = SerializableARR<char, Column::MAX_COLUMN_NAME_LEN>::SerializeSize(column->m_name) +
                  SerializablePOD<uint64_t>::SerializeSize(column->m_size) +
                  SerializablePOD<MOT_CATALOG_FIELD_TYPES>::SerializeSize(column->m_type) +
-                 SerializablePOD<bool>::SerializeSize(column->m_isNotNull);
+                 SerializablePOD<bool>::SerializeSize(column->m_isNotNull) +
+                 SerializablePOD<unsigned int>::SerializeSize(column->m_envelopeType);  // required for MOT JIT
     return ret;
 }
 
@@ -830,15 +833,17 @@ char* Table::SerializeItem(char* dataOut, Column* column)
     dataOut = SerializablePOD<uint64_t>::Serialize(dataOut, column->m_size);
     dataOut = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Serialize(dataOut, column->m_type);
     dataOut = SerializablePOD<bool>::Serialize(dataOut, column->m_isNotNull);
+    dataOut = SerializablePOD<unsigned int>::Serialize(dataOut, column->m_envelopeType);  // required for MOT JIT
     return dataOut;
 }
 
-char* Table::DesrializeMeta(char* dataIn, CommonColumnMeta& meta)
+char* Table::DeserializeMeta(char* dataIn, CommonColumnMeta& meta)
 {
     dataIn = SerializableARR<char, Column::MAX_COLUMN_NAME_LEN>::Deserialize(dataIn, meta.m_name);
     dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, meta.m_size);
     dataIn = SerializablePOD<MOT_CATALOG_FIELD_TYPES>::Deserialize(dataIn, meta.m_type);
     dataIn = SerializablePOD<bool>::Deserialize(dataIn, meta.m_isNotNull);
+    dataIn = SerializablePOD<unsigned int>::Deserialize(dataIn, meta.m_envelopeType);  // required for MOT JIT
     return dataIn;
 }
 
@@ -928,7 +933,7 @@ RC Table::RemoveSecondaryIndex(MOT::Index* index, TxnManager* txn)
     return res;
 }
 
-char* Table::DesrializeMeta(char* dataIn, CommonIndexMeta& meta)
+char* Table::DeserializeMeta(char* dataIn, CommonIndexMeta& meta)
 {
     uint32_t order, method, constr;
     dataIn = SerializableSTR::Deserialize(dataIn, meta.m_name);
@@ -1109,8 +1114,8 @@ void Table::Deserialize(const char* in)
     /* deserialize the columns */
     CommonColumnMeta col;
     for (uint32_t i = 0; i < saveFieldCount; i++) {
-        dataIn = DesrializeMeta(dataIn, col);
-        if (AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull) != RC_OK) {
+        dataIn = DeserializeMeta(dataIn, col);
+        if (AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull, col.m_envelopeType) != RC_OK) {
             MOT_LOG_ERROR("Table::deserialize - failed to add column %u", i);
             return;
         }
@@ -1121,20 +1126,22 @@ void Table::Deserialize(const char* in)
         return;
     }
 
-    CommonIndexMeta idx;
-    /* primary key */
-    dataIn = DesrializeMeta(dataIn, idx);
-    if (CreateIndexFromMeta(idx, true, MOTCurrThreadId) != RC_OK) {
-        MOT_LOG_ERROR("Table::deserialize - failed to create primary index");
-        return;
-    }
-
-    /* secondaries */
-    for (uint16_t i = 2; i <= savedNumIndexes; i++) {
-        dataIn = DesrializeMeta(dataIn, idx);
-        if (CreateIndexFromMeta(idx, false, MOTCurrThreadId) != RC_OK) {
-            MOT_LOG_ERROR("Table::deserialize - failed to create secondary index [%u]", (i - 2));
+    if (savedNumIndexes > 0) {
+        CommonIndexMeta idx;
+        /* primary key */
+        dataIn = DeserializeMeta(dataIn, idx);
+        if (CreateIndexFromMeta(idx, true, MOTCurrThreadId) != RC_OK) {
+            MOT_LOG_ERROR("Table::deserialize - failed to create primary index");
             return;
+        }
+
+        /* secondaries */
+        for (uint16_t i = 2; i <= savedNumIndexes; i++) {
+            dataIn = DeserializeMeta(dataIn, idx);
+            if (CreateIndexFromMeta(idx, false, MOTCurrThreadId) != RC_OK) {
+                MOT_LOG_ERROR("Table::deserialize - failed to create secondary index [%u]", (i - 2));
+                return;
+            }
         }
     }
     MOT_ASSERT(m_numIndexes == savedNumIndexes);
@@ -1215,4 +1222,52 @@ void Table::DeserializeNameAndIds(const char* data, uint32_t& intId, uint64_t& e
     dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, extId);
 }
 
+size_t Table::SerializeRedoSize()
+{
+    size_t colsSize = 0;
+    for (uint32_t i = 0; i < m_fieldCnt; i++) {
+        colsSize += SerializeItemSize(m_columns[i]);
+    }
+
+    /*
+     * This method is just for serializing the table meta data for CreateTable Redo, without any indexes.
+     * For all the indexes (including primary index), there will be separate redo entry. So we serialize with number of
+     * indexes as 0.
+     */
+    uint16_t numIndexes = 0;
+
+    size_t ret =
+        SerializableSTR::SerializeSize(m_tableName) + SerializableSTR::SerializeSize(m_longTableName) +
+        SerializablePOD<uint16_t>::SerializeSize(numIndexes) + SerializablePOD<uint32_t>::SerializeSize(m_tableId) +
+        SerializablePOD<uint64_t>::SerializeSize(m_tableExId) +
+        SerializablePOD<bool>::SerializeSize(m_fixedLengthRows) + SerializablePOD<uint32_t>::SerializeSize(m_fieldCnt) +
+        SerializablePOD<uint32_t>::SerializeSize(m_tupleSize) + SerializablePOD<uint32_t>::SerializeSize(m_maxFields) +
+        colsSize;
+    return ret;
+}
+
+void Table::SerializeRedo(char* dataOut)
+{
+    /*
+     * This method is just for serializing the table meta data for CreateTable Redo, without any indexes.
+     * For all the indexes (including primary index), there will be separate redo entry. So we serialize with number of
+     * indexes as 0.
+     */
+    uint16_t numIndexes = 0;
+    char* savedDO = dataOut;
+    dataOut = SerializableSTR::Serialize(dataOut, m_tableName);
+    dataOut = SerializableSTR::Serialize(dataOut, m_longTableName);
+    dataOut = SerializablePOD<uint16_t>::Serialize(dataOut, numIndexes);
+    dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, m_tableId);
+    dataOut = SerializablePOD<uint64_t>::Serialize(dataOut, m_tableExId);
+    dataOut = SerializablePOD<bool>::Serialize(dataOut, m_fixedLengthRows);
+    dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, m_fieldCnt);
+    dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, m_tupleSize);
+    dataOut = SerializablePOD<uint32_t>::Serialize(dataOut, m_maxFields);
+
+    /* serialize the columns */
+    for (uint32_t i = 0; i < m_fieldCnt; i++) {
+        dataOut = SerializeItem(dataOut, GetField(i));
+    }
+}
 }  // namespace MOT

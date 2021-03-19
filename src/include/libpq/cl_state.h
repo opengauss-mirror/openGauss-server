@@ -32,6 +32,9 @@
 #include "libpq-fe.h"
 #include "postgres_fe.h"
 #include "client_logic_processor/raw_values_list.h"
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+#include "client_logic/client_logic_enums.h"
+#endif
 
 typedef struct pg_conn PGconn;
 
@@ -62,6 +65,16 @@ public:
     PreparedStatementsList *pendingStatements;
 
     char lastStmtName[NAMEDATALEN];
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    /* 
+     * while create cmk, we will do :
+     * (1) client : generate cmk key store files
+     * (2) server : check operation is allowed, return result
+     * (3) client : if server check failed, we will delete the cmk store files generated in step (1) 
+     */
+    CEQueryType query_type;
+    char query_args[MAX_KEY_PATH_VALUE_LEN];
+#endif
     ObjectFqdn *droppedSchemas;
     size_t droppedSchemas_size;
     size_t droppedSchemas_allocated;
@@ -72,8 +85,6 @@ public:
     size_t droppedColumnSettings_size;
     size_t droppedColumnSettings_allocated;
     ExecStatusType m_lastResultStatus;
-    bool isInvalidOperationOnColumn;
-    bool isDuringRefreshCacheOnError;
     CacheRefreshType cacheRefreshType;
     std::unordered_map<std::string, HookResource *> m_hookResources;
 

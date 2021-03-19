@@ -686,7 +686,7 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
 
     //  for (i = parray_num(parent_chain) - 1; i >= 0; i--)
     //  for (i = 0; i < parray_num(parent_chain); i++)
-    while (backup_seq >= 0 && backup_seq < parray_num(parent_chain))
+    while (backup_seq >= 0 && (size_t)backup_seq < parray_num(parent_chain))
     {
         char     from_root[MAXPGPATH];
         char     from_fullpath[MAXPGPATH];
@@ -850,7 +850,9 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
 
             Assert(compressed_size > 0);
             Assert(compressed_size <= BLCKSZ);
-
+            if (compressed_size > BLCKSZ) {
+                compressed_size = BLCKSZ;
+            }
             read_len = compressed_size + sizeof(BackupPageHeader);
         }
         else
@@ -924,7 +926,7 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
         Assert(compressed_size <= BLCKSZ);
 
         /* no point in writing redundant data */
-        if (nblocks > 0 && blknum >= nblocks)
+        if (nblocks > 0 && blknum >= (BlockNumber)nblocks)
             break;
 
         if (compressed_size > BLCKSZ)
@@ -958,7 +960,7 @@ restore_data_file_internal(FILE *in, FILE *out, pgFile *file, uint32 backup_vers
             if (!headers && fseek(in, read_len, SEEK_CUR) != 0)
                 elog(ERROR, "Cannot seek block %u of \"%s\": %s",
                     blknum, from_fullpath, strerror(errno));
-                continue;
+            continue;
         }
 
         if (headers &&
@@ -1330,7 +1332,7 @@ backup_non_data_file_internal(const char *from_fullpath,
 
             if (read_len > 0)
             {
-                if (fwrite(buf, 1, read_len, out) != read_len)
+                if (fwrite(buf, 1, read_len, out) != (size_t)read_len)
                     elog(ERROR, "Cannot write to file \"%s\": %s", to_fullpath,
                         strerror(errno));
 
@@ -1548,6 +1550,9 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
     if (!headers && file->n_headers > 0)
     {
         elog(WARNING, "Cannot get page headers for file \"%s\"", fullpath);
+        if (in != nullptr) {
+            (void)fclose(in);
+        }
         return false;
     }
 
@@ -1583,7 +1588,9 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
 
             Assert(compressed_size > 0);
             Assert(compressed_size <= BLCKSZ);
-
+            if (compressed_size > BLCKSZ) {
+                compressed_size = BLCKSZ;
+            }
             read_len = sizeof(BackupPageHeader) + compressed_size;
 
             if (cur_pos_in != headers[n_hdr].pos)
@@ -1623,7 +1630,9 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
 
         Assert(compressed_size <= BLCKSZ);
         Assert(compressed_size > 0);
-
+        if (compressed_size > BLCKSZ) {
+            compressed_size = BLCKSZ;
+        }
         if (headers)
             len = fread(&compressed_page, 1, read_len, in);
         else
@@ -1762,7 +1771,7 @@ get_checksum_map(const char *fullpath, uint32 checksum_version,
     rc = memset_s(checksum_map, n_blocks * sizeof(PageState),0, n_blocks * sizeof(PageState));
     securec_check(rc, "\0", "\0");
 
-    for (blknum = 0; blknum < n_blocks;  blknum++)
+    for (blknum = 0; blknum < (BlockNumber)n_blocks;  blknum++)
     {
         size_t read_len = fread(read_buffer, 1, BLCKSZ, in);
         PageState page_st;
@@ -1832,7 +1841,7 @@ get_lsn_map(const char *fullpath, uint32 checksum_version,
     rc = memset_s(lsn_map, sizeof(datapagemap_t),0, sizeof(datapagemap_t));
     securec_check(rc, "\0", "\0");
 
-    for (blknum = 0; blknum < n_blocks;  blknum++)
+    for (blknum = 0; blknum < (BlockNumber)n_blocks;  blknum++)
     {
         size_t read_len = fread(read_buffer, 1, BLCKSZ, in);
         PageState page_st;
@@ -1989,7 +1998,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         setvbuf(in, in_buf, _IOFBF, STDIO_BUFSIZE);
     }
 
-    while (blknum < file->n_blocks)
+    while (blknum < (BlockNumber)file->n_blocks)
     {
         PageState page_st;
         int rc = prepare_page(conn_arg, file, prev_backup_start_lsn,
@@ -2123,7 +2132,7 @@ get_data_file_headers(HeaderMap *hdr_map, pgFile *file, uint32 backup_version, b
     rc = memset_s(zheaders, file->hdr_size, 0, file->hdr_size);
     securec_check(rc, "\0", "\0");
 
-    if (fread(zheaders, 1, file->hdr_size, in) != file->hdr_size)
+    if (fread(zheaders, 1, file->hdr_size, in) != (size_t)file->hdr_size)
     {
         elog(strict ? ERROR : WARNING, "Cannot read header file at offset: %li len: %i \"%s\": %s",
             file->hdr_off, file->hdr_size, hdr_map->path, strerror(errno));
@@ -2252,7 +2261,7 @@ write_page_headers(BackupPageHeader2 *headers, pgFile *file, HeaderMap *hdr_map,
 
     
 
-    if (fwrite(zheaders, 1, z_len, hdr_map->fp) != z_len)
+    if (fwrite(zheaders, 1, z_len, hdr_map->fp) != (size_t)z_len)
         elog(ERROR, "Cannot write to file \"%s\": %s", map_path, strerror(errno));
 
     file->hdr_size = z_len;   /* save the length of compressed headers */

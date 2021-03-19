@@ -1293,7 +1293,7 @@ void releaseDummyRelation(Relation* relation)
         smgrclearowner(&(*relation)->rd_smgr, (*relation)->rd_smgr);
     }
 
-    if (!RelationIsBucket(*relation) && (*relation)->rd_indexcxt != NULL) {
+    if ((*relation)->rd_indexcxt != NULL) {
         MemoryContextDelete((*relation)->rd_indexcxt);
         (*relation)->rd_indexcxt = NULL;
     }

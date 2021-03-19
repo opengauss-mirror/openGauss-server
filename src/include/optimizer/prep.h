@@ -63,7 +63,7 @@ extern Node* get_real_rte_varno_attno_or_node(Query* parse, Index* varno, AttrNu
  * prototypes for prepqual.c
  */
 extern Node* negate_clause(Node* node);
-extern Expr* canonicalize_qual(Expr* qual);
+extern Expr* canonicalize_qual(Expr* qual, bool is_check);
 
 /*
  * prototypes for preptlist.c

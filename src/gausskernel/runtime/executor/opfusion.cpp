@@ -42,6 +42,7 @@
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "parser/parsetree.h"
+#include "parser/parse_coerce.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
 #include "tcop/tcopprot.h"
@@ -273,7 +274,7 @@ void OpFusion::auditRecord()
     }
 }
 
-void OpFusion::executeEnd(const char* portal_name)
+void OpFusion::executeEnd(const char* portal_name, bool* isQueryCompleted)
 {
 #ifdef ENABLE_MOT
     if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
@@ -297,16 +298,23 @@ void OpFusion::executeEnd(const char* portal_name)
     /* reset the context. */
     if (m_isCompleted) {
         UnregisterSnapshot(m_snapshot);
+        m_snapshot = NULL;
         MemoryContextDeleteChildren(m_tmpContext);
         /* reset the context. */
         MemoryContextReset(m_tmpContext);
         /* clear hash table */
         removeFusionFromHtab(portal_name);
-        u_sess->exec_cxt.CurrentOpFusionObj = NULL;
         m_outParams = NULL;
         m_isCompleted = false;
-        m_snapshot = NULL;
+        if (isQueryCompleted)
+            *isQueryCompleted = true;
+        u_sess->xact_cxt.pbe_execute_complete = true;
+    } else {
+        if (isQueryCompleted)
+            *isQueryCompleted = false;
+        u_sess->xact_cxt.pbe_execute_complete = false;
     }
+    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
 
     m_isFirst = false;
     auditRecord();
@@ -316,7 +324,7 @@ void OpFusion::executeEnd(const char* portal_name)
     }
 }
 
-bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLevel)
+bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted)
 {
     if (op == FUSION_EXECUTE && msg != NULL)
         refreshCurFusion(msg);
@@ -347,13 +355,13 @@ bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLe
                 u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
                 u_sess->exec_cxt.need_track_resource = old_status;
                 gstrace_exit(GS_TRC_ID_BypassExecutor);
-                u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name);
+                u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
                 UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
                 break;
             }
 
             case FUSION_DESCRIB: {
-                u_sess->exec_cxt.CurrentOpFusionObj->decribe(msg);
+                u_sess->exec_cxt.CurrentOpFusionObj->describe(msg);
                 break;
             }
 
@@ -661,13 +669,15 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     MemoryContextSwitchTo(old_context);
 }
 
-void OpFusion::decribe(StringInfo msg)
+void OpFusion::describe(StringInfo msg)
 {
     if (m_psrc->resultDesc != NULL) {
         StringInfoData buf;
         initStringInfo(&buf);
         SendRowDescriptionMessage(&buf, m_tupDesc, m_planstmt->planTree->targetlist, m_rformats);
         pfree_ext(buf.data);
+    } else {
+        pq_putemptymessage('n');
     }
 }
 
@@ -911,8 +921,10 @@ void OpFusion::clean()
 {
     UnregisterSnapshot(m_snapshot);
     m_snapshot = NULL;
+    m_position = 0;
     m_outParams = NULL;
-    m_scan->End(true);
+    if (m_scan)
+        m_scan->End(true);
     m_isCompleted = false;
     MemoryContextDeleteChildren(m_tmpContext);
     /* reset the context. */
@@ -925,6 +937,7 @@ void OpFusion::storeFusion(const char *portalname)
     if (!u_sess->pcache_cxt.pn_fusion_htab)
         initFusionHtab();
 
+    removeFusionFromHtab(m_portalName);
     entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_ENTER, NULL));
     entry->opfusion = this;
 
@@ -1253,6 +1266,7 @@ InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             func = (FuncExpr*)expr;
 
             m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
+            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
             m_targetFuncNodes[m_targetFuncNum].funcid = func->funcid;
             m_targetFuncNodes[m_targetFuncNum].args = func->args;
             ++m_targetFuncNum;
@@ -1268,6 +1282,7 @@ InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             opexpr = (OpExpr*)expr;
 
             m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
+            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
             m_targetFuncNodes[m_targetFuncNum].funcid = opexpr->opfuncid;
             m_targetFuncNodes[m_targetFuncNum].args = opexpr->args;
             ++m_targetFuncNum;
@@ -1296,12 +1311,14 @@ void InsertFusion::refreshParameterIfNecessary()
 
     /* calculate func result */
     for (int i = 0; i < m_targetFuncNum; ++i) {
+        ELOG_FIELD_NAME_START(m_targetFuncNodes[i].resname);
         if (m_targetFuncNodes[i].funcid != InvalidOid) {
             func_isnull = false;
             m_values[m_targetFuncNodes[i].resno - 1] = CalFuncNodeVal(
                 m_targetFuncNodes[i].funcid, m_targetFuncNodes[i].args, &func_isnull, m_curVarValue, m_curVarIsnull);
             m_isnull[m_targetFuncNodes[i].resno - 1] = func_isnull;
         }
+        ELOG_FIELD_NAME_END;
     }
     /* mapping params */
     if (m_targetParamNum > 0) {
@@ -1597,6 +1614,7 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             opexpr = (OpExpr*)expr;
 
             m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
+            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
             m_targetFuncNodes[m_targetFuncNum].funcid = opexpr->opfuncid;
             m_targetFuncNodes[m_targetFuncNum].args = opexpr->args;
             ++m_targetFuncNum;
@@ -1604,6 +1622,7 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             func = (FuncExpr*)expr;
 
             m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
+            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
             m_targetFuncNodes[m_targetFuncNum].funcid = func->funcid;
             m_targetFuncNodes[m_targetFuncNum].args = func->args;
             ++m_targetFuncNum;
@@ -1654,6 +1673,7 @@ void UpdateFusion::refreshTargetParameterIfNecessary()
     }
     /* calculate func result */
     for (int i = 0; i < m_targetFuncNum; ++i) {
+        ELOG_FIELD_NAME_START(m_targetFuncNodes[i].resname);
         if (m_targetFuncNodes[i].funcid != InvalidOid) {
             bool func_isnull = false;
             m_values[m_targetFuncNodes[i].resno - 1] =
@@ -1661,6 +1681,7 @@ void UpdateFusion::refreshTargetParameterIfNecessary()
                                m_curVarValue, m_curVarIsnull);
             m_isnull[m_targetFuncNodes[i].resno - 1] = func_isnull;
         }
+        ELOG_FIELD_NAME_END;
     }
 }
 

@@ -15,7 +15,7 @@ top_builddir = ../../../../../
 # shared library parameters
 NAME=client_logic_fmt
 
-override CPPFLAGS := -DFRONTEND -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq  
+override CPPFLAGS := -DFRONTEND -DPGXC -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/common/interfaces/libpq  
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -shared
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -shared
 

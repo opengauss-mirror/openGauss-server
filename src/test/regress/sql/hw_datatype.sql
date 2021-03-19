@@ -178,8 +178,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-select TEST_FUNC('abc'::clob) from dual;
-select TEST_FUNC('abc'::varchar2) from dual;
+select TEST_FUNC('abc'::clob);
+select TEST_FUNC('abc'::varchar2);
 drop function test_func(char);
 
 --VARCHAR2
@@ -189,14 +189,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-select TEST_FUNC('abc'::clob) from dual;
-select TEST_FUNC(123) from dual;
-select TEST_FUNC('123'::integer) from dual;
-select TEST_FUNC('abc'::raw) from dual;
-select TEST_FUNC('abc'::char) from dual;
-select TEST_FUNC('2012-08-01 11:23:45'::timestamp) from dual; --with timezone?
-select TEST_FUNC(interval '1 18:00:00' day to second) from dual;
-select TEST_FUNC('1 day 18:00:00') from dual;
+select TEST_FUNC('abc'::clob);
+select TEST_FUNC(123);
+select TEST_FUNC('123'::integer);
+select TEST_FUNC('abc'::raw);
+select TEST_FUNC('abc'::char);
+select TEST_FUNC('2012-08-01 11:23:45'::timestamp); --with timezone?
+select TEST_FUNC(interval '1 18:00:00' day to second);
+select TEST_FUNC('1 day 18:00:00');
 
 drop function test_func(varchar2);
 
@@ -207,8 +207,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-select TEST_FUNC('abc'::char) from dual;
-select TEST_FUNC('abc'::varchar2) from dual;
+select TEST_FUNC('abc'::char);
+select TEST_FUNC('abc'::varchar2);
 
 drop function test_func(clob);
 
@@ -219,8 +219,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-select TEST_FUNC('123'::char(3)) from dual;
-select TEST_FUNC('123'::varchar2) from dual;
+select TEST_FUNC('123'::char(3));
+select TEST_FUNC('123'::varchar2);
 drop function test_func(integer);
 
 --TIMESTAMP
@@ -230,8 +230,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-select TEST_FUNC('2012-08-01 11:23:45'::char(20)) from dual;
-select TEST_FUNC('2012-08-01 11:23:45'::varchar2) from dual;
+select TEST_FUNC('2012-08-01 11:23:45'::char(20));
+select TEST_FUNC('2012-08-01 11:23:45'::varchar2);
 drop function test_func(timestamp);
 
 --INTERVAL
@@ -240,8 +240,8 @@ BEGIN
 	raise info'TEST INTERVAL VALUE IS %',tempdata;  
 END;
 $$ LANGUAGE plpgsql;
-select TEST_FUNC('1 day 18:00:00'::char(20)) from dual;
-select TEST_FUNC('1 day 18:00:00'::varchar2) from dual;
+select TEST_FUNC('1 day 18:00:00'::char(20));
+select TEST_FUNC('1 day 18:00:00'::varchar2);
 drop function test_func(INTERVAL);
 
 create function ftime(a abstime)returns int
@@ -964,13 +964,13 @@ select 2 > '15'::text;
 
 SELECT pg_catalog.array_dims(' '::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims(' '::anyarray)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_to_string(' '::anyarray,' '::text,''::text) AS a
 ,LENGTH(pg_catalog.array_to_string(' '::anyarray,' '::text,' '::text)) AS b
-FROM dual;
+;
 SELECT pg_catalog.array_dims('{1,2,3}'::anyarray) AS a
 ,LENGTH(pg_catalog.array_dims('{1,2,3}'::anyarray)) AS b
-FROM dual;
+;

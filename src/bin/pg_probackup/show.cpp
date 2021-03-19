@@ -79,7 +79,7 @@ static int32 json_level = 0;
 int
 do_show(const char *instance_name, time_t requested_backup_id, bool show_archive)
 {
-    int i;
+    size_t i;
 
     if (instance_name == NULL &&
         requested_backup_id != INVALID_BACKUP_ID)
@@ -373,10 +373,6 @@ print_backup_json_object(PQExpBuffer buf, pgBackup *backup)
     json_add_key(buf, "compress-level", json_level);
     appendPQExpBuffer(buf, "%d", backup->compress_level);
 
-    json_add_value(buf, "from-replica",
-                   backup->from_replica ? "true" : "false", json_level,
-                   true);
-
     json_add_key(buf, "block-size", json_level);
     appendPQExpBuffer(buf, "%u", backup->block_size);
 
@@ -491,7 +487,7 @@ print_backup_json_object(PQExpBuffer buf, pgBackup *backup)
 static int
 show_backup(const char *instance_name, time_t requested_backup_id)
 {
-    int i;
+    size_t i;
     pgBackup   *backup = NULL;
     parray       *backups;
 
@@ -579,7 +575,7 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
     /*
      * Fill row values and calculate maximum width of each field.
      */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; (size_t)i < parray_num(backup_list); i++)
     {
         pgBackup   *backup = (pgBackup *)parray_get(backup_list, i);
         ShowBackendRow *row = &rows[i];
@@ -701,7 +697,7 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
     /*
      * Print header.
      */
-    for (i = 0; i < widths_sum; i++)
+    for (i = 0; (uint32)i < widths_sum; i++)
         appendPQExpBufferChar(&show_buf, '=');
     appendPQExpBufferChar(&show_buf, '\n');
 
@@ -711,14 +707,14 @@ show_instance_plain(const char *instance_name, parray *backup_list, bool show_na
     }
     appendPQExpBufferChar(&show_buf, '\n');
 
-    for (i = 0; i < widths_sum; i++)
+    for (i = 0; (uint32)i < widths_sum; i++)
         appendPQExpBufferChar(&show_buf, '=');
     appendPQExpBufferChar(&show_buf, '\n');
 
     /*
      * Print values.
      */
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; (size_t)i < parray_num(backup_list); i++)
     {
         ShowBackendRow *row = &rows[i];
         int            cur = 0;
@@ -808,7 +804,7 @@ show_instance_json(const char *instance_name, parray *backup_list)
      */
     json_add(buf, JT_BEGIN_ARRAY, &json_level);
 
-    for (i = 0; i < parray_num(backup_list); i++)
+    for (i = 0; (size_t)i < parray_num(backup_list); i++)
     {
         pgBackup   *backup = (pgBackup *)parray_get(backup_list, i);
 
@@ -874,7 +870,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
         widths[i] = strlen(names[i]);
 
     /* Ignore empty timelines */
-    for (i = 0; i < parray_num(tli_list); i++)
+    for (i = 0; (size_t)i < parray_num(tli_list); i++)
     {
         timelineInfo *tlinfo = (timelineInfo *) parray_get(tli_list, i);
 
@@ -888,7 +884,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
     /*
      * Fill row values and calculate maximum width of each field.
      */
-    for (i = 0; i < parray_num(actual_tli_list); i++)
+    for (i = 0; (size_t)i < parray_num(actual_tli_list); i++)
     {
         timelineInfo *tlinfo = (timelineInfo *) parray_get(actual_tli_list, i);
         ShowArchiveRow *row = &rows[i];
@@ -985,7 +981,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
     /*
      * Print header.
      */
-    for (i = 0; i < widths_sum; i++)
+    for (i = 0; (uint32)i < widths_sum; i++)
         appendPQExpBufferChar(&show_buf, '=');
     appendPQExpBufferChar(&show_buf, '\n');
 
@@ -995,7 +991,7 @@ show_archive_plain(const char *instance_name, uint32 xlog_seg_size,
     }
     appendPQExpBufferChar(&show_buf, '\n');
 
-    for (i = 0; i < widths_sum; i++)
+    for (i = 0; (uint32)i < widths_sum; i++)
         appendPQExpBufferChar(&show_buf, '=');
     appendPQExpBufferChar(&show_buf, '\n');
 
@@ -1074,7 +1070,7 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
 
     /* Ignore empty timelines */
 
-    for (i = 0; i < parray_num(tli_list); i++)
+    for (i = 0; (size_t)i < parray_num(tli_list); i++)
     {
         timelineInfo *tlinfo = (timelineInfo *) parray_get(tli_list, i);
 
@@ -1093,7 +1089,7 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
         char        tmp_buf[MAXFNAMELEN];
         float        zratio = 0;
 
-        if (i != (parray_num(actual_tli_list) - 1))
+        if ((size_t)i != (parray_num(actual_tli_list) - 1))
             appendPQExpBufferChar(buf, ',');
 
         json_add(buf, JT_BEGIN_OBJECT, &json_level);
@@ -1153,7 +1149,7 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
         {
             json_add(buf, JT_BEGIN_ARRAY, &json_level);
 
-            for (j = 0; j < parray_num(tlinfo->lost_segments); j++)
+            for (j = 0; (size_t)j < parray_num(tlinfo->lost_segments); j++)
             {
                 xlogInterval *lost_segments = (xlogInterval *) parray_get(tlinfo->lost_segments, j);
 
@@ -1183,7 +1179,7 @@ show_archive_json(const char *instance_name, uint32 xlog_seg_size,
         if (tlinfo->backups != NULL)
         {
             json_add(buf, JT_BEGIN_ARRAY, &json_level);
-            for (j = 0; j < parray_num(tlinfo->backups); j++)
+            for (j = 0; (size_t)j < parray_num(tlinfo->backups); j++)
             {
                 pgBackup *backup = (pgBackup *)parray_get(tlinfo->backups, j);
 

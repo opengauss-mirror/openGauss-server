@@ -3059,8 +3059,8 @@ static void InitConfigureNamesBool()
             check_adio_debug_guc,
             NULL,
             NULL},
-
-        {{"enable_adio_function", PGC_POSTMASTER, DEVELOPER_OPTIONS, gettext_noop("Enable adio function."), NULL},
+        /* This is a beta feature, set it to PGC_INTERNAL, so user can't configure it */
+        {{"enable_adio_function", PGC_INTERNAL, DEVELOPER_OPTIONS, gettext_noop("Enable adio function."), NULL},
             &g_instance.attr.attr_storage.enable_adio_function,
             false,
             check_adio_function_guc,
@@ -3256,6 +3256,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
+#ifndef ENABLE_MULTIPLE_NODES
         {{"enable_beta_opfusion",
              PGC_USERSET,
              QUERY_TUNING_METHOD,
@@ -3266,6 +3267,7 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+#endif
 
         {{"enable_partition_opfusion", PGC_USERSET, QUERY_TUNING_METHOD,
             gettext_noop("Enables partition opfusion features."),
@@ -3349,16 +3351,6 @@ static void InitConfigureNamesBool()
              NULL},
             &u_sess->attr.attr_storage.enable_xlog_prune,
             true,
-            NULL,
-            NULL,
-            NULL},
-	    {{"enable_full_encryption",
-            PGC_BACKEND,
-            CE_OPTIONS,
-	        gettext_noop("notifying server that this client supports column encryption. "),
-            NULL},
-            &u_sess->attr.attr_common.enable_full_encryption,
-            false,
             NULL,
             NULL,
             NULL},
@@ -4877,6 +4869,37 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+        {{"wal_writer_cpu",
+             PGC_POSTMASTER,
+             WAL_SETTINGS,
+             gettext_noop("Sets the binding CPU number for the WAL writer thread."),
+             NULL,
+             GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_storage.wal_writer_cpu,
+            -1,
+            -1,
+            1023,
+            NULL,
+            NULL,
+            NULL
+        },
+
+        {{"wal_file_init_num",
+             PGC_POSTMASTER,
+             WAL_SETTINGS,
+             gettext_noop("Sets the number of xlog segment files that WAL writer auxiliary thread "
+                          "creates at one time."),
+             NULL,
+             GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_storage.wal_file_init_num,
+            10,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL
+        },
+
         {{"advance_xlog_file_num",
              PGC_POSTMASTER,
              WAL_SETTINGS,
@@ -4940,7 +4963,11 @@ static void InitConfigureNamesInt()
                 gettext_noop("Sets the maximum number of simultaneously running WAL sender processes."),
                 NULL},
             &g_instance.attr.attr_storage.max_wal_senders,
+#ifdef ENABLE_MULTIPLE_NODES
+            4,
+#else
             16,
+#endif
             0,
             MAX_BACKENDS,
             NULL,
@@ -6144,7 +6171,8 @@ static void InitConfigureNamesInt()
              PGC_USERSET,
              QUERY_TUNING,
              gettext_noop("Send ack check package to stream sender periodically."),
-             NULL},
+             NULL,
+             GUC_UNIT_MS},
             &u_sess->attr.attr_network.comm_ackchk_time,
             2000, 
             0,    
@@ -7272,6 +7300,21 @@ static void InitConfigureNamesInt64()
             NULL,
             NULL,
             NULL},
+
+        {{"xlog_idle_flushes_before_sleep",
+             PGC_POSTMASTER,
+             WAL_SETTINGS,
+             gettext_noop("Number of idle xlog flushes before xlog flusher goes to sleep."),
+             NULL,
+             GUC_NOT_IN_SAMPLE},
+            &g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep,
+            INT64CONST(500),
+            INT64CONST(0),
+            INT64CONST(0x7FFFFFFFFFFFFFF),
+            NULL,
+            NULL,
+            NULL
+        },
 
         {{"track_stmt_details_size",
              PGC_USERSET,
@@ -11200,7 +11243,7 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
     if (endptr == value)
         return false; /* no HINT for integer syntax error */
 
-    if (errno == ERANGE || val != (int64)((int32)val)) {
+    if (errno == ERANGE) {
         if (hintmsg != NULL)
             *hintmsg = gettext_noop("Value exceeds integer range.");
 
@@ -11211,16 +11254,16 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
     while (isspace((unsigned char)*endptr))
         endptr++;
 
-    /* Handle possible unit */
+    /* Handle possible unit conversion before check integer overflow */
     if (*endptr != '\0') {
         /*
          * Note: the multiple-switch coding technique here is a bit tedious,
          * but seems necessary to avoid intermediate-value overflows.
          */
         if (flags & GUC_UNIT_MEMORY) {
-            val = (int64)memory_unit_convert(&endptr, val, flags, hintmsg);
+            val = (int64)MemoryUnitConvert(&endptr, val, flags, hintmsg);
         } else if (flags & GUC_UNIT_TIME) {
-            val = (int64)time_unit_convert(&endptr, val, flags, hintmsg);
+            val = (int64)TimeUnitConvert(&endptr, val, flags, hintmsg);
         }
 
         /* allow whitespace after unit */
@@ -11229,14 +11272,14 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
 
         if (*endptr != '\0')
             return false; /* appropriate hint, if any, already set */
+    }
 
-        /* Check for overflow due to units conversion */
-        if (val != (int64)((int32)val)) {
-            if (hintmsg != NULL)
-                *hintmsg = gettext_noop("Value exceeds integer range.");
+    /* Check for integer overflow */
+    if (val != (int64)((int32)val)) {
+        if (hintmsg != NULL)
+            *hintmsg = gettext_noop("Value exceeds integer range.");
 
-            return false;
-        }
+        return false;
     }
 
     if (result != NULL)
@@ -11328,9 +11371,9 @@ bool parse_real(const char* value, double* result, int flags, const char** hintm
          * but seems necessary to avoid intermediate-value overflows.
          */
         if (flags & GUC_UNIT_MEMORY) {
-            val = memory_unit_convert(&endptr, val, flags, hintmsg);
+            val = MemoryUnitConvert(&endptr, val, flags, hintmsg);
         } else if (flags & GUC_UNIT_TIME) {
-            val = time_unit_convert(&endptr, val, flags, hintmsg);
+            val = TimeUnitConvert(&endptr, val, flags, hintmsg);
         }
 
         /* allow whitespace after unit */
@@ -11354,7 +11397,7 @@ bool parse_real(const char* value, double* result, int flags, const char** hintm
  * The reference is used because auto-increment of formal parameters does not change the value of the actual parameter.
  * As a result, an error is reported.
  */
-double memory_unit_convert(char** endptr, double value, int flags, const char** hintmsg)
+double MemoryUnitConvert(char** endptr, double value, int flags, const char** hintmsg)
 {
     double val = value;
     const int size_2byte = 2;
@@ -11424,7 +11467,8 @@ double memory_unit_convert(char** endptr, double value, int flags, const char** 
     }
     return val;
 }
-double time_unit_convert(char** endptr, double value, int flags, const char** hintmsg)
+
+double TimeUnitConvert(char** endptr, double value, int flags, const char** hintmsg)
 {
     double val = value;
     const int size_1byte = 1;
@@ -12611,7 +12655,7 @@ int set_config_option(const char* name, const char* value, GucContext context, G
             struct config_string* conf = (struct config_string*)record;
             char* newval = NULL;
             void* newextra = NULL;
-
+            bool is_reset_val = false;
             if (u_sess->catalog_cxt.overrideStack &&
                 (strcasecmp(name, SEARCH_PATH_GUC_NAME) == 0 || strcasecmp(name, CURRENT_SCHEMA_GUC_NAME) == 0)) {
                 /*
@@ -12678,9 +12722,13 @@ int set_config_option(const char* name, const char* value, GucContext context, G
                 newextra = conf->reset_extra;
                 source = conf->gen.reset_source;
                 context = conf->gen.reset_scontext;
+                is_reset_val = true;
             }
 
             if (prohibitValueChange) {
+                if (!is_reset_val) {
+                    pfree_ext(newval);
+                }
                 /* newval shouldn't be NULL, so we're a bit sloppy here */
                 if (*conf->variable == NULL || newval == NULL || strcmp(*conf->variable, newval) != 0) {
                     ereport(elevel,
@@ -12903,6 +12951,7 @@ const char* GetConfigOption(const char* name, bool missing_ok, bool restrict_sup
     if (restrict_superuser && (record->flags & GUC_SUPERUSER_ONLY) && !superuser())
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("must be superuser to examine \"%s\"", name)));
+
 
     switch (record->vartype) {
         case PGC_BOOL:
@@ -13224,6 +13273,7 @@ static void CheckAndGetAlterSystemSetParam(AlterSystemStmt* altersysstmt,
     struct config_generic *record = NULL;
 
     CheckAlterSystemSetPrivilege(altersysstmt->setstmt->name);
+
     /*
      * Validate the name and arguments [value1, value2 ... ].
      */
@@ -17481,6 +17531,7 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
     int remoteservice_len = strlen("remoteservice");
     int local_heartbeat_len = strlen("localheartbeatport");
     int remote_heartbeat_len = strlen("remoteheartbeatport");
+    int cascadeLen = strlen("iscascade");
 
     errno_t errorno = EOK;
 
@@ -17656,6 +17707,16 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
                 }
             }
 
+            /* is a cascade standby */
+            iter = strstr(token, "iscascade");
+            if (NULL != iter) {
+                iter += cascadeLen;
+
+                if (strstr(iter, "true") != NULL) {
+                    repl[parsed].isCascade = true;
+                }
+            }
+
             token = strtok_r(NULL, ",", &tmp_token);
             parsed++;
         }
@@ -17731,6 +17792,7 @@ static bool check_replconninfo(char** newval, void** extra, GucSource source)
     return true;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 /*
  * @@GaussDB@@
  * Brief			: Determine if all eight replconninfos are empty.
@@ -17746,6 +17808,7 @@ static inline bool GetReplCurArrayIsNull()
     }
     return true;
 }
+#endif
 
 /*
  * @@GaussDB@@
@@ -17768,12 +17831,15 @@ static void assign_replconninfo1(const char* newval, void* extra)
     if (u_sess->attr.attr_storage.ReplConnInfoArr[1] != NULL && newval != NULL &&
         strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[1], newval) != 0) {
         t_thrd.postmaster_cxt.ReplConnChanged[1] = true;
+
+#ifndef ENABLE_MULTIPLE_NODES
         /* perceive single --> primary_standby */
         if (t_thrd.postmaster_cxt.HaShmData != NULL &&
             t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE &&
             !GetReplCurArrayIsNull()) {
                 t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
         }
+#endif
     }
 }
 
@@ -18330,14 +18396,13 @@ int find_guc_option(char** optlines, const char* opt_name,
     /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
     if (matchtimes > 1) {
         ereport(NOTICE, (errmsg("There are %d \"%s\" not commented in \"postgresql.conf\", and only the "
-        "last one in %dth line will be set and used.", 
-        matchtimes, 
-        opt_name, 
-        (targetline + 1))));
+            "last one in %dth line will be set and used.",
+            matchtimes, opt_name, (targetline + 1))));
     }
     if (matchtimes > 0) {
         return targetline;
     }
+
     /* The second loop is to deal with the lines commented by '#' */
     matchtimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
@@ -19719,4 +19784,4 @@ bool check_numa_distribute_mode(char** newval, void** extra, GucSource source)
     return false;
 }
 
-#include "guc-file.cpp"
+#include "guc-file.inc"

@@ -262,7 +262,9 @@ EXECUTE DIRECT ON ( datanode2 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineite
                1
 (1 row)
 
+set xc_maintenance_mode = on;
 VACUUM FULL;
+set xc_maintenance_mode = off;
 EXECUTE DIRECT ON ( datanode1 ) ' SELECT check_xmin_xmax(CAST (varchar ''lineitem'' AS text)) ';
  check_xmin_xmax 
 -----------------

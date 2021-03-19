@@ -2411,8 +2411,10 @@ keep_going: /* We will come back to here until there is
                 // rest error message and insert more specific information
                 resetPQExpBuffer(&conn->errorMessage);
                 appendPQExpBuffer(&conn->errorMessage,
-                    libpq_gettext("could not send startup packet: %s\n"),
-                    SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
+                    libpq_gettext("could not send startup packet: %s\n"
+                                  "localhost: %s, localport: %s, remotehost: %s, remoteaddr: %s, remoteport:%s\n"),
+                    SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)),
+                    conn->pglocalhost, conn->pglocalport, conn->pghost, conn->pghostaddr, conn->pgport);
                 libpq_free(startpacket);
                 goto error_return;
             }
@@ -3033,7 +3035,6 @@ error_return:
 #ifdef SUPPORT_PGPASSFILE
     dot_pg_pass_warning(conn);
 #endif
-
     /*
      * We used to close the socket at this point, but that makes it awkward
      * for those above us if they wish to remove this socket from their own

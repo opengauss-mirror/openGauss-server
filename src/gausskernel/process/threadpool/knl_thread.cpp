@@ -373,8 +373,6 @@ static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
     mem_cxt->gs_signal_mem_cxt = NULL;
     mem_cxt->mask_password_mem_cxt = NULL;
     mem_cxt->row_desc_mem_cxt = NULL;
-    mem_cxt->stream_runtime_mem_cxt = NULL;
-    mem_cxt->data_exchange_mem_cxt = NULL;
     mem_cxt->portal_mem_cxt = NULL;
     mem_cxt->mem_track_mem_cxt = NULL;
     mem_cxt->batch_encode_numeric_mem_cxt = NULL;
@@ -629,7 +627,6 @@ static void knl_t_arch_init(knl_t_arch_context* arch)
     arch->task_wait_interval = 1000;
     arch->last_arch_time = 0;
     arch->sync_walsender_idx = -1;
-    arch->sync_walsender_term = 0;
 }
 
 static void knl_t_logger_init(knl_t_logger_context* logger)
@@ -962,6 +959,12 @@ static void knl_t_walwriter_init(knl_t_walwriter_context* walwriter_cxt)
 {
     walwriter_cxt->got_SIGHUP = false;
     walwriter_cxt->shutdown_requested = false;
+}
+
+static void knl_t_walwriterauxiliary_init(knl_t_walwriterauxiliary_context *const walwriterauxiliary_cxt)
+{
+    walwriterauxiliary_cxt->got_SIGHUP = false;
+    walwriterauxiliary_cxt->shutdown_requested = false;
 }
 
 static void knl_t_poolcleaner_init(knl_t_poolcleaner_context* poolcleaner_cxt)
@@ -1555,6 +1558,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_walreceiverfuncs_init(&t_thrd.walreceiverfuncs_cxt);
     knl_t_walsender_init(&t_thrd.walsender_cxt);
     knl_t_walwriter_init(&t_thrd.walwriter_cxt);
+    knl_t_walwriterauxiliary_init(&t_thrd.walwriterauxiliary_cxt);
     knl_t_catchup_init(&t_thrd.catchup_cxt);
     knl_t_wlm_init(&t_thrd.wlm_cxt);
     knl_t_xact_init(&t_thrd.xact_cxt);

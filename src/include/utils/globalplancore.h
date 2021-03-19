@@ -36,8 +36,7 @@
 #define GPC_HTAB_SIZE (128)
 #define GLOBALPLANCACHEKEY_MAGIC (953717831)
 #define CAS_SLEEP_DURATION (2)
-#define MAX_PREPARE_WAIING_TIME \
-    (u_sess->attr.attr_common.SessionTimeout > 1200 ? u_sess->attr.attr_common.SessionTimeout * 2 : 1200 * 2)
+#define GPC_CLEAN_WAIT_TIME (3600)
 
 #define ENABLE_GPC (g_instance.attr.attr_common.enable_global_plancache == true && \
                        g_instance.attr.attr_common.enable_thread_pool == true)
@@ -61,7 +60,6 @@ typedef enum PGXCNode_HandleGPC
     HANDLE_RUN,
     HANDLE_FIRST_SEND
 } PGXCNode_HandleGPC;
-
 
 typedef struct GPCHashCtl
 {
@@ -136,6 +134,7 @@ typedef struct GPCEnv
 typedef struct GPCKey
 {
     uint32          query_length;
+    /* query_string is plansource->querystring */
     const char     *query_string;
     GPCEnv          env;
     SPISign         spi_signature;
@@ -144,7 +143,9 @@ typedef struct GPCKey
 typedef struct GPCVal
 {
     CachedPlanSource*  plansource;
-}GPCVal;
+    instr_time  last_use_time;
+    volatile uint32 used_count; /* fetched times */
+} GPCVal;
 
 typedef struct GPCEntry
 {
@@ -186,34 +187,6 @@ typedef struct PreparedStatement
     bool        has_prepare_dn_stmt; /* datanode statment has prepared or not */
 } PreparedStatement;
 
-typedef struct GPCPreparedStatement
-{
-    sess_orient key;
-    instr_time  last_used_time;
-    bool        sess_detach;
-    DList* prepare_statement_list; /*the list of the prepare statements of the different queries with the same gid,
-                                    *we assume the amount of different prepare statements wont be huge, so we chose
-                                    *linked list instead of HTAB*/
-} GPCPreparedStatement;
-
-
-typedef struct GPCPrepareStatus
-{
-    char *statement_name;
-    char *query;
-    int refcount;
-    uint64 cn_sessid;
-    uint32 cn_node_id;
-    uint32 cn_time_line;
-    bool is_shared;
-} GPCPrepareStatus;
-
-typedef struct TimelineEntry
-{
-    uint32 node_id;      //CN index
-    uint32 timeline;
-} TimelineEntry;
-
 /* for gpc, help to locate plancache and spiplan */
 typedef struct SPIPlanCacheEnt {
     uint32 key;
@@ -231,7 +204,10 @@ extern void GPCResetAll();
 void GPCCleanDatanodeStatement(int dn_stmt_num, const char* stmt_name);
 void GPCReGplan(CachedPlanSource* plansource);
 void CNGPCCleanUpSession();
-List* CopyLocalStmt(const List* stmt_list);
+List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, MemoryContext* plan_context);
+bool SPIParseEnableGPC(const Node *node);
+void CleanSessGPCPtr(knl_session_context* currentSession);
+void CleanSessionGPCDetach(knl_session_context* currentSession);
 
 /* for HTAB SPICacheTable, global procedure plancache */
 extern SPIPlanCacheEnt*  SPIPlanCacheTableLookup(uint32 key);
@@ -250,8 +226,7 @@ inline void gpc_record_log(const char* action, const char* filename, int lineno,
                            CachedPlanSource* plansource, const char* stmtname)
 {
     ereport(DEBUG3, (errmodule(MOD_GPC), errcode(ERRCODE_LOG),
-        errmsg("GPC (%lu,%u,%u), (Action:%s, Location %s,%d), (dn_session:%lu), plansource %p, stmt: %s ",
-                u_sess->sess_ident.cn_sessid, u_sess->sess_ident.cn_timeline, u_sess->sess_ident.cn_nodeid,
+        errmsg("GPC (Action:%s, Location %s,%d), (dn_session:%lu), plansource %p, stmt: %s ",
                 action, filename, lineno, u_sess->session_id, plansource, stmtname)));
 }
 
@@ -281,13 +256,5 @@ inline void cn_gpc_record_log(const char* action, const char* filename, int line
 
 #define CN_GPC_LOG(action, plansource, stmt) \
     (cn_gpc_record_log(action, __FILE__, __LINE__, plansource, stmt))
-
-inline void GPCCheckGuc()
-{
-    if (unlikely((u_sess->sess_ident.cn_sessid == 0 && u_sess->sess_ident.cn_timeline == 0 &&
-        u_sess->sess_ident.cn_nodeid == 0 && !IS_PGXC_COORDINATOR)))
-        ereport(ERROR, (errmodule(MOD_GPC), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                          errmsg("cn does not set enable_global_plancache but %s set", g_instance.attr.attr_common.PGXCNodeName)));
-}
 
 #endif   /* GLOBALPLANCORE_H */

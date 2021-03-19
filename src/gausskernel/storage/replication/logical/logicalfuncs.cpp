@@ -485,6 +485,11 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
         log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
     }
 
+    if (t_thrd.logical_cxt.sendFd >= 0) {
+        (void)close(t_thrd.logical_cxt.sendFd);
+        t_thrd.logical_cxt.sendFd = -1;
+    }
+
     /* free context, call shutdown callback */
     FreeDecodingContext(ctx);
 

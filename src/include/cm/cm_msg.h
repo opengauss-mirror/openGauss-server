@@ -29,6 +29,7 @@
 #define CN_INFO_NUM 8
 #define RESERVE_NUM 160
 #define RESERVE_NUM_USED 4
+#define MAX_SYNC_STANDBY_LIST 1024
 
 using std::string;
 using std::vector;
@@ -161,7 +162,9 @@ typedef enum CM_MessageType {
     MSG_CM_CTL_GLOBAL_BARRIER_DATA = 106,
     MSG_CM_CTL_GLOBAL_BARRIER_DATA_BEGIN = 107,
     MSG_CM_CTL_BARRIER_DATA_END = 108,
-    MSG_CM_CTL_BACKUP_OPEN = 109
+    MSG_CM_CTL_BACKUP_OPEN = 109,
+    MSG_CM_AGENT_DN_SYNC_LIST = 110,
+    MSG_AGENT_CM_DN_SYNC_LIST = 111,
 } CM_MessageType;
 
 #define UNDEFINED_LOCKMODE 0
@@ -262,6 +265,16 @@ extern int g_dn_phony_dead_times[CM_MAX_DATANODE_PER_NODE];
 extern int g_cn_phony_dead_times;
 
 typedef enum {DN, CN} GetinstanceType;
+
+typedef struct DatanodeSyncList {
+    int count;
+    uint32 dnSyncList[CM_PRIMARY_STANDBY_NUM];
+    int syncStandbyNum;
+    // remain
+    int remain;
+    char remainStr[DN_SYNC_LEN];
+} DatanodeSyncList;
+
 typedef struct cm_msg_type {
     int msg_type;
 } cm_msg_type;
@@ -478,6 +491,15 @@ typedef struct agent_to_cm_gs_guc_feedback {
     synchronous_standby_mode type;
     bool status; /* gs guc command exec status */
 } agent_to_cm_gs_guc_feedback;
+
+typedef struct CmToAgentGsGucSyncList {
+    int msgType;
+    uint32 node;
+    uint32 instanceId;
+    uint32 groupIndex;
+    DatanodeSyncList dnSyncList;
+    int instanceNum;
+} CmToAgentGsGucSyncList;
 
 typedef struct cm_to_agent_notify {
     int msg_type;
@@ -806,7 +828,7 @@ typedef struct agent_to_cm_coordinate_status_report {
     cm_coordinate_group_mode group_mode;
     bool cleanDropCnFlag;
     bool isCnDnDisconnected;
-    int cn_active_info[CN_INFO_NUM];
+    uint32 cn_active_info[CN_INFO_NUM];
     char resevered[RESERVE_NUM];
     int cn_restart_counts;
     int phony_dead_times;
@@ -827,7 +849,7 @@ typedef struct agent_to_cm_coordinate_status_report_v1 {
     cm_coordinate_group_mode group_mode;
     bool cleanDropCnFlag;
     bool isCnDnDisconnected;
-    int cn_active_info[CN_INFO_NUM];
+    uint32 cn_active_info[CN_INFO_NUM];
     int cn_dn_disconnect_times;
     char resevered[RESERVE_NUM - RESERVE_NUM_USED];
     int cn_restart_counts;
@@ -856,8 +878,17 @@ typedef struct agent_to_cm_datanode_status_report {
     int dn_restart_counts;
     int phony_dead_times;
     int dn_restart_counts_in_hour;
-
 } agent_to_cm_datanode_status_report;
+
+typedef struct AgentToCmserverDnSyncList {
+    int msg_type;
+    uint32 node;
+    uint32 instanceId;
+    int instanceType;
+    char dnSynLists[DN_SYNC_LEN];
+    // remain
+    char remainStr[DN_SYNC_LEN];
+} AgentToCmserverDnSyncList;
 
 typedef struct agent_to_cm_gtm_status_report {
     int msg_type;
@@ -900,7 +931,8 @@ typedef struct coordinate_status_info {
 typedef struct datanode_status_info {
     pthread_rwlock_t lk_lock;
     agent_to_cm_datanode_status_report report_msg;
-    agent_to_cm_datanode_barrier_status_report barrier_msg;
+    agent_to_cm_coordinate_barrier_status_report barrier_msg;
+    AgentToCmserverDnSyncList dnSyncListMsg;
 } datanode_status_info;
 
 typedef struct gtm_status_info {
@@ -1022,6 +1054,8 @@ typedef struct cm_instance_datanode_report_status {
     uint64 barrierLSN;
     uint64 archive_LSN;
     uint64 flush_LSN;
+    DatanodeSyncList dnSyncList;
+    uint32 arbiTime;
 } cm_instance_datanode_report_status;
 
 typedef struct cm_instance_gtm_report_status {

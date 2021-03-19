@@ -2249,108 +2249,6 @@ Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate)
     return eval_const_expressions_mutator(node, &context);
 }
 
-/**
- * only work on oracle database, find string equal or not equal filter condition
- * if the expr is string equal or not equal, return true, otherwise return false
- */
-static bool is_support_empty_str_optimization(OpExpr *expr)
-{
-    if (u_sess->attr.attr_sql.sql_compatibility != A_FORMAT) {
-        return false;
-    }
-    const int SUPPORT_EQ_NE = 4;
-    const Oid TEXTNEOID = 531;
-    const Oid var_eq_const_op_array[SUPPORT_EQ_NE] = {
-        BPCHAREQOID, BPCHARNEOID,
-        TEXTEQOID, TEXTNEOID
-    };
-    bool is_support_optimize = false;
-    for (int i = 0; i < SUPPORT_EQ_NE; i++) {
-        if (expr->opno == var_eq_const_op_array[i]) {
-            is_support_optimize = true;
-            break;
-        }
-    }
-    return is_support_optimize;
-}
-
-/**
- * only work on oracle database, find string equal or not equal filter condition
- * if the args has var column element, return true, otherwise return false
- */
-static bool contain_var_element(List *args)
-{
-    ListCell *lc = NULL;
-    foreach(lc, args) {
-        Expr *expr = (Expr *)lfirst(lc);
-        if (IsA(expr, Var)) {
-            return true;
-        } else if (IsA(expr, RelabelType) && ((RelabelType *)expr)->relabelformat == COERCE_IMPLICIT_CAST) {
-            Var *var = (Var *)((RelabelType *)expr)->arg;
-            if (var != NULL && IsA(var, Var)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-/**
- * only work on oracle database, find string equal or not equal filter condition
- * if the args has null const element or null param element, return true, otherwise return false
- */
-static bool contain_null_element(List *args, const eval_const_expressions_context *context)
-{
-    ListCell *lc = NULL;
-    foreach(lc, args) {
-        Expr *expr = (Expr *)lfirst(lc);
-        if (IsA(expr, Const)) {
-            Const *val = (Const *)expr;
-            if (!val->constisnull) {
-                return false;
-            }
-            return true;
-        } else if (IsA(expr, Param)) {
-            Param *param = (Param *)expr;
-            if (context == NULL || context->boundParams == NULL || context->boundParams->params == NULL) {
-                return false;
-            }
-            if (context->boundParams->numParams < param->paramid) {
-                return false;
-            }
-            ParamExternData *prm = &context->boundParams->params[param->paramid - 1];
-            if (!prm->isnull) {
-                return false;
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * only work on oracle database, find empty string equal or not equal filter condition
- * if the expr has null string (not) equal operator, return true, otherwise return false
- */
-static Expr *oracle_emptystr_equal_optimize(OpExpr *expr, eval_const_expressions_context *context)
-{
-    Assert(IsA(expr, OpExpr));
-    if (!is_support_empty_str_optimization(expr)) {
-        return NULL;
-    }
-    List *args = expr->args;
-    const int EQUAL_OPERATOR_ARGS = 2;
-    if (list_length(args) != EQUAL_OPERATOR_ARGS) {
-        return NULL;
-    }
-    if (!contain_var_element(args)) {
-        return NULL;
-    }
-    if (!contain_null_element(args, context)) {
-        return NULL;
-    }
-    return (Expr *)makeBoolConst(false, false);
-}
 Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context* context)
 {
     if (node == NULL)
@@ -2495,10 +2393,6 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
              * on input to this extent.
              */
             set_opfuncid(expr);
-            simple = oracle_emptystr_equal_optimize(expr, context);
-            if (simple != NULL) {
-                return (Node *)simple;
-            }
             /*
              * Code for op/func reduction is pretty bulky, so split it out
              * as a separate function.

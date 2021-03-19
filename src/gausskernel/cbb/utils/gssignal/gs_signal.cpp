@@ -46,6 +46,7 @@
 #include "postmaster/postmaster.h"
 #include "utils/palloc.h"
 #include "utils/memutils.h"
+#include "utils/guc.h"
 
 #define SUB_HODLER_SIZE 100
 #define RES_SIGNAL SIGUSR2

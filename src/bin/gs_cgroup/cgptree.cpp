@@ -877,6 +877,12 @@ static struct controller_info* cgptree_get_controller_list(void)
         error = cgroup_get_controller_next(&ctrl_handle, &info);
         if (error && error != ECGEOF) {
             fprintf(stderr, "get next controller failed: %s\n", cgroup_strerror(error));
+            if (curr_cinfo->ctrl_name != NULL)
+                free(curr_cinfo->ctrl_name);
+            if (curr_cinfo->mount_point != NULL)
+                free(curr_cinfo->mount_point);
+            cgptree_free_group_tree(curr_cinfo->group_head);
+            free(curr_cinfo);
             break;
         }
 

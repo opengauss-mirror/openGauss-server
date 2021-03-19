@@ -714,7 +714,7 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
              * section anyway, but let's make sure.
              */
             START_CRIT_SECTION();
-            XLogFlush(max_lsn);
+            XLogWaitFlush(max_lsn);
             END_CRIT_SECTION();
         }
     }
@@ -1076,10 +1076,11 @@ int SimpleLruFlush(SlruCtl ctl, bool checkpoint)
 /*
  * Remove all segments before the one holding the passed page number
  */
-void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage)
+void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, bool isPart, int partitionNum)
 {
-    SlruShared shared = ctl->shared;
+    SlruShared shared = NULL;
     int64 slotno;
+    bool isCsnLogCtl = strcmp(ctl->dir, "pg_csnlog") == 0;
 
     /*
      * The cutoff point is the start of the segment containing cutoffPage.
@@ -1092,53 +1093,61 @@ void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage)
      * or just after a checkpoint, any dirty pages should have been flushed
      * already ... we're just being extra careful here.)
      */
-    (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
-
+    for (int i = 0; i < partitionNum; i++) {
+        shared = (ctl + i)->shared;
+        (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
+    
 restart:;
 
-    /*
-     * While we are holding the lock, make an important safety check: the
-     * planned cutoff point must be <= the current endpoint page. Otherwise we
-     * have already wrapped around, and proceeding with the truncation would
-     * risk removing the current segment.
-     */
-    if (shared->latest_page_number < cutoffPage) {
-        LWLockRelease(shared->control_lock);
-        ereport(LOG,
-                (errmodule(MOD_SLRU), errmsg("could not truncate directory \"%s\": apparent wraparound", ctl->dir)));
-        return;
-    }
-
-    for (slotno = 0; slotno < shared->num_slots; slotno++) {
-        if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
-            continue;
-        if (shared->page_number[slotno] >= cutoffPage)
-            continue;
-
         /*
-         * If page is clean, just change state to EMPTY (expected case).
+         * While we are holding the lock, make an important safety check: the
+         * planned cutoff point must be <= the current endpoint page. Otherwise we
+         * have already wrapped around, and proceeding with the truncation would
+         * risk removing the current segment. If we use partitioned slru ctl, no need
+         * to check the lateset_page_number.
          */
-        if (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno]) {
-            shared->page_status[slotno] = SLRU_PAGE_EMPTY;
-            continue;
+        if (shared->latest_page_number < cutoffPage && !isPart) {
+            LWLockRelease(shared->control_lock);
+            ereport(LOG, (errmodule(MOD_SLRU),
+                errmsg("could not truncate directory \"%s\": apparent wraparound", ctl->dir)));
+            return;
         }
 
-        /*
-         * Hmm, we have (or may have) I/O operations acting on the page, so
-         * we've got to wait for them to finish and then start again. This is
-         * the same logic as in SlruSelectLRUPage.	(XXX if page is dirty,
-         * wouldn't it be OK to just discard it without writing it?  For now,
-         * keep the logic the same as it was.)
-         */
-        if (shared->page_status[slotno] == SLRU_PAGE_VALID)
-            SlruInternalWritePage(ctl, slotno, NULL);
-        else
-            SimpleLruWaitIO(ctl, slotno);
-        goto restart;
+        for (slotno = 0; slotno < shared->num_slots; slotno++) {
+            if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
+                continue;
+            if (shared->page_number[slotno] >= cutoffPage)
+                continue;
+
+            /*
+             * If page is clean, just change state to EMPTY (expected case).
+             */
+            if (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno]) {
+                shared->page_status[slotno] = SLRU_PAGE_EMPTY;
+                continue;
+            }
+
+            /*
+             * Hmm, we have (or may have) I/O operations acting on the page, so
+             * we've got to wait for them to finish and then start again. This is
+             * the same logic as in SlruSelectLRUPage.	(XXX if page is dirty,
+             * wouldn't it be OK to just discard it without writing it?  For now,
+             * keep the logic the same as it was.) Csnlog just discard it without writing it.
+             */
+            if (shared->page_status[slotno] == SLRU_PAGE_VALID) {
+                if (isCsnLogCtl) {
+                    shared->page_status[slotno] = SLRU_PAGE_EMPTY;
+                    continue;
+                }
+                SlruInternalWritePage((ctl + i), slotno, NULL);
+            } else {
+                SimpleLruWaitIO((ctl + i), slotno);
+            }     
+            goto restart;
+        }
+
+        LWLockRelease(shared->control_lock);
     }
-
-    LWLockRelease(shared->control_lock);
-
     ereport(LOG, (errmodule(MOD_SLRU), errmsg("remove old segments(<%ld) under %s", cutoffPage, ctl->dir)));
 
     /* Now we can remove the old segment(s) */

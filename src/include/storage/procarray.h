@@ -85,7 +85,9 @@ extern ThreadId CancelVirtualTransaction(const VirtualTransactionId& vxid, ProcS
 extern bool MinimumActiveBackends(int min);
 extern int CountDBBackends(Oid database_oid);
 extern int CountDBActiveBackends(Oid database_oid);
+extern int CountSingleNodeActiveBackends(Oid databaseOid, Oid userOid);
 extern void CancelDBBackends(Oid databaseid, ProcSignalReason sigmode, bool conflictPending);
+extern void CancelSingleNodeBackends(Oid databaseOid, Oid userOid, ProcSignalReason sigmode, bool conflictPending);
 extern int CountUserBackends(Oid roleid);
 extern bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared);
 

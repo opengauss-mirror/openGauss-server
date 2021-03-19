@@ -361,18 +361,6 @@ public:
         return status;
     }
 
-    inline bool IsInProcessTx(uint64_t id)
-    {
-        uint64_t intId;
-        return m_inProcessTransactions.FindTransactionId(id, intId, false);
-    }
-
-    inline uint64_t PerformInProcessTx(uint64_t id, bool isCommit)
-    {
-        MOT_ASSERT(m_recoveryManager);
-        return m_recoveryManager->PerformInProcessTx(id, isCommit);
-    }
-
     bool IsRecovering() const
     {
         return m_recovering;

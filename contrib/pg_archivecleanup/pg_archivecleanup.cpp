@@ -224,7 +224,7 @@ static void SetWALFileNameForCleanup(void)
 
 static void usage(void)
 {
-    printf("%s removes older WAL files from PostgreSQL archives.\n\n", progname);
+    printf("%s removes older WAL files from openGauss archives.\n\n", progname);
     printf("Usage:\n");
     printf("  %s [OPTION]... ARCHIVELOCATION OLDESTKEPTWALFILE\n", progname);
     printf("\nOptions:\n");
@@ -242,7 +242,11 @@ static void usage(void)
            "Or for use as a standalone archive cleaner:\n"
            "e.g.\n"
            "  pg_archivecleanup /mnt/server/archiverdir 000000010000000000000010.00000020.backup\n");
-    printf("\nReport bugs to <pgsql-bugs@postgresql.org>.\n");
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n");
+#endif
 }
 
 /*------------ MAIN ----------------------------------------*/

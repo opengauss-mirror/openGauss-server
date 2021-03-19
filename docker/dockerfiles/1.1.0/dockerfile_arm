@@ -13,10 +13,10 @@ RUN set -eux; \
     useradd -u 70 -g omm -d /home/omm omm; \
     mkdir -p /var/lib/opengauss && \
     mkdir -p /usr/local/opengauss && \
-    mkdir -p /var/run/opengauss  && \ 
+    mkdir -p /var/run/opengauss  && \
     mkdir /docker-entrypoint-initdb.d && \
     tar -jxf openGauss-1.1.0-openEuler-64bit.tar.bz2 -C /usr/local/opengauss && \
-    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \ 
+    chown -R omm:omm /var/run/opengauss && chown -R omm:omm /usr/local/opengauss && chown -R omm:omm /var/lib/opengauss &&  chown -R omm:omm /docker-entrypoint-initdb.d && \
     chmod 2777 /var/run/opengauss && \
     rm -rf openGauss-1.1.0-openEuler-64bit.tar.bz2 && yum clean all
 
@@ -37,5 +37,5 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh;ln -s /usr/local/bin/entrypoint.sh / 
 
 ENTRYPOINT ["entrypoint.sh"]
 
-EXPOSE 5432 
+EXPOSE 5432
 CMD ["gaussdb"]

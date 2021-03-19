@@ -19,13 +19,13 @@ CREATE COLUMN ENCRYPTION KEY test_drop_cek2 WITH VALUES (CLIENT_MASTER_KEY = tes
 SELECT  count(*), 'count' FROM gs_client_global_keys;
  count | ?column? 
 -------+----------
-     2 | count
+     1 | count
 (1 row)
 
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------
-     2 | count
+     1 | count
 (1 row)
 
 SET ROLE test1 PASSWORD "Gauss@123";
@@ -34,7 +34,7 @@ ERROR:  permission denied for schema test2
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------
-     2 | count
+     1 | count
 (1 row)
 
 SET ROLE test2 PASSWORD "Gauss@123";
@@ -42,7 +42,7 @@ DROP column encryption key test2.test_drop_cek2;
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------
-     1 | count
+     0 | count
 (1 row)
 
 SET ROLE test_security_admin PASSWORD "Gauss@123";
@@ -51,7 +51,7 @@ ERROR:  permission denied for schema test1
 SELECT  count(*), 'count' FROM gs_column_keys;
  count | ?column? 
 -------+----------
-     1 | count
+     0 | count
 (1 row)
 
 RESET ROLE;

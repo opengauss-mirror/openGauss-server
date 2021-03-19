@@ -66,7 +66,6 @@
 #include "instruments/gs_stat.h"
 #include "instruments/list.h"
 #include "replication/rto_statistic.h"
-#include "utils/globalpreparestmt.h"
 #include "storage/lock/lock.h"
 
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
@@ -2900,7 +2899,10 @@ static PgStat_WaitCountStatus* wcslist_nthcell_array(int current_index)
 
     return wcb;
 }
-
+#define SET_AVG_TUPLE(total_time, count)                                            \
+    do {                                                                            \
+        values[++i] = Int64GetDatum((total_time) / (((count) == 0) ? 1 : (count))); \
+    } while (0)
 /*
  * @Description: system function for SQL count. When guc parameter 'pgstat_track_sql_count' is set on
  *			and user selcets view of pg_sql_count, the functoin wiil be called to find user`s SQL count
@@ -3063,19 +3065,19 @@ Datum pg_stat_get_sql_count(PG_FUNCTION_ARGS)
         values[++i] = Int64GetDatum(wcb->wc_cnt.wc_sql_dml);
         values[++i] = Int64GetDatum(wcb->wc_cnt.wc_sql_dcl);
         values[++i] = Int64GetDatum(wcb->wc_cnt.selectElapse.total_time);
-        values[++i] = Int64GetDatum(wcb->wc_cnt.selectElapse.avg_time);
+        SET_AVG_TUPLE(wcb->wc_cnt.selectElapse.total_time, wcb->wc_cnt.wc_sql_select);
         values[++i] = Int64GetDatum(wcb->wc_cnt.selectElapse.max_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.selectElapse.min_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.updateElapse.total_time);
-        values[++i] = Int64GetDatum(wcb->wc_cnt.updateElapse.avg_time);
+        SET_AVG_TUPLE(wcb->wc_cnt.updateElapse.total_time, wcb->wc_cnt.wc_sql_update);
         values[++i] = Int64GetDatum(wcb->wc_cnt.updateElapse.max_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.updateElapse.min_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.insertElapse.total_time);
-        values[++i] = Int64GetDatum(wcb->wc_cnt.insertElapse.avg_time);
+        SET_AVG_TUPLE(wcb->wc_cnt.insertElapse.total_time, wcb->wc_cnt.wc_sql_insert);
         values[++i] = Int64GetDatum(wcb->wc_cnt.insertElapse.max_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.insertElapse.min_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.deleteElapse.total_time);
-        values[++i] = Int64GetDatum(wcb->wc_cnt.deleteElapse.avg_time);
+        SET_AVG_TUPLE(wcb->wc_cnt.deleteElapse.total_time, wcb->wc_cnt.wc_sql_delete);
         values[++i] = Int64GetDatum(wcb->wc_cnt.deleteElapse.max_time);
         values[++i] = Int64GetDatum(wcb->wc_cnt.deleteElapse.min_time);
 
@@ -12957,8 +12959,7 @@ Datum gs_threadpool_status(PG_FUNCTION_ARGS)
     }
 }
 
-Datum
-gs_globalplancache_status(PG_FUNCTION_ARGS)
+Datum gs_globalplancache_status(PG_FUNCTION_ARGS)
 {
     FuncCallContext *funcctx = NULL;
     MemoryContext oldcontext;
@@ -13102,50 +13103,15 @@ gs_globalplancache_prepare_status(PG_FUNCTION_ARGS)
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
-        if (ENABLE_THREAD_POOL && ENABLE_DN_GPC) {
-            funcctx->user_fctx = (void *)g_instance.prepare_cache->GetStatus(&(funcctx->max_calls));
-        } else {
-            funcctx->max_calls = 0;
-        }
+        funcctx->max_calls = 0;
 
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
     /* stuff done on every call of the function */
     funcctx = SRF_PERCALL_SETUP();
-    GPCPrepareStatus *entry = (GPCPrepareStatus *)funcctx->user_fctx;
-
-    if (funcctx->call_cntr < funcctx->max_calls)	/* do when there is more left to send */
-    {
-        Datum values[GPC_PREPARE_TUPLES_ATTR_NUM];
-        bool nulls[GPC_PREPARE_TUPLES_ATTR_NUM];
-        HeapTuple tuple;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-
-        entry += funcctx->call_cntr;
-
-        values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
-        values[1] = Int64GetDatum(entry->cn_sessid);
-        values[2] = Int32GetDatum(entry->cn_node_id);
-        values[3] = Int32GetDatum(entry->cn_time_line);
-        values[4] = CStringGetTextDatum(entry->statement_name);
-        values[5] = Int32GetDatum(entry->refcount);
-        values[6] = BoolGetDatum(entry->is_shared);
-        values[7] = CStringGetTextDatum(entry->query);
-
-        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
-    }
-    else
-    {
-        /* do when there is no more left */
-        SRF_RETURN_DONE(funcctx);
-    }
+    /* do when there is no more left */
+    SRF_RETURN_DONE(funcctx);
 }
 
 Datum local_rto_stat(PG_FUNCTION_ARGS)

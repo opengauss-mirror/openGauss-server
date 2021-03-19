@@ -27,4 +27,36 @@ DROP ROLE bob;
 DROP COLUMN ENCRYPTION KEY rlspolicy_cek;
 DROP CLIENT MASTER KEY rlspolicy_cmk;
 
+CREATE USER rlspolicy_user1 PASSWORD 'gauss@123';
+CREATE USER rlspolicy_user2 PASSWORD 'gauss@123';
+SET ROLE rlspolicy_user1 PASSWORD 'gauss@123';
+CREATE CLIENT MASTER KEY rlspolicy_cmk1 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY rlspolicy_cek1 WITH VALUES (CLIENT_MASTER_KEY = rlspolicy_cmk1, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+SET ROLE rlspolicy_user2 PASSWORD 'gauss@123';
+SELECT count(*) FROM gs_client_global_keys;
+SELECT count(*) FROM gs_client_global_keys_args;
+SELECT count(*) FROM gs_column_keys;
+SELECT count(*) FROM gs_column_keys_args;
+SET ROLE rlspolicy_user1 PASSWORD 'gauss@123';
+GRANT USAGE ON COLUMN_ENCRYPTION_KEY rlspolicy_cek1 to rlspolicy_user2;
+GRANT USAGE ON CLIENT_MASTER_KEY rlspolicy_cmk1 to rlspolicy_user2;
+SET ROLE rlspolicy_user2 PASSWORD 'gauss@123';
+SELECT count(*) FROM gs_client_global_keys;
+SELECT count(*) FROM gs_client_global_keys_args;
+SELECT count(*) FROM gs_column_keys;
+SELECT count(*) FROM gs_column_keys_args;
+RESET ROLE;
+SELECT count(*) FROM gs_client_global_keys;
+SELECT count(*) FROM gs_client_global_keys_args;
+SELECT count(*) FROM gs_column_keys;
+SELECT count(*) FROM gs_column_keys_args;
+SET ROLE rlspolicy_user1 PASSWORD 'gauss@123';
+DROP COLUMN ENCRYPTION KEY rlspolicy_cek1;
+DROP CLIENT MASTER KEY rlspolicy_cmk1;
+RESET ROLE;
+DROP SCHEMA IF EXISTS rlspolicy_user1 CASCADE;
+DROP SCHEMA IF EXISTS rlspolicy_user2 CASCADE;
+DROP ROLE rlspolicy_user1;
+DROP ROLE rlspolicy_user2;
+
 \! gs_ktool -d all

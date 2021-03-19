@@ -251,8 +251,16 @@ struct PGPROC {
     /* The proc which block cur proc */
     PROCLOCK* blockProcLock;
 
-    /* knl_thrd_context who is waiting for lock. Only valid when itself is in ProcSleep() now. */
+    /*
+     * A knl_thrd_context pointer to find this proc's t_thrd.
+     *
+     * NOTE: Only be valid/used for lock waiter now. There is no concurrency risk for other lock
+     * releaser, who must be holding the sepcified partition lock of lockmgr's shared hash table
+     * to traverse the lock wait queue, to visit this thread since the lock wait queue would be
+     * destoryed before thread exits.
+     */
     void *waitLockThrd;
+
     char *dw_unaligned_buf;
     char *dw_buf;
     volatile int32 dw_pos;
@@ -327,6 +335,8 @@ typedef struct PROC_HDR {
     pg_atomic_uint32 clogGroupFirst;
     /* WALWriter process's latch */
     Latch* walwriterLatch;
+    /* WALWriterAuxiliary process's latch */
+    Latch* walwriterauxiliaryLatch;
     /* Checkpointer process's latch */
     Latch* checkpointerLatch;
     /* BCMWriter process's latch */
@@ -408,6 +418,7 @@ extern void ProcQueueInit(PROC_QUEUE* queue);
 extern int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_update);
 extern PGPROC* ProcWakeup(PGPROC* proc, int waitStatus);
 extern void ProcLockWakeup(LockMethod lockMethodTable, LOCK* lock, const PROCLOCK* proclock = NULL);
+extern void ProcBlockerUpdate(PGPROC *waiterProc, PROCLOCK *blockerProcLock, const char* lockMode, bool isLockHolder);
 extern bool IsWaitingForLock(void);
 extern void LockErrorCleanup(void);
 

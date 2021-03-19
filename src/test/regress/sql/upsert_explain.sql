@@ -5,9 +5,6 @@
 --------------------------------------------------------------------------------------------
 \c upsert;
 SET CURRENT_SCHEMA TO upsert_test_explain;
--- enable_upsert_to_merge must be off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
-SHOW enable_upsert_to_merge;
 
 create temp table up_expl_temp(c1 int, c2 int, c3 int unique) ;
 

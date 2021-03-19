@@ -22,7 +22,7 @@ SUBDIRS = logical heartbeat
 include $(top_srcdir)/src/gausskernel/common.mk
 
 # repl_scanner is compiled as part of repl_gram
-repl_gram.o: repl_scanner.cpp
+repl_gram.o: repl_scanner.inc
 
 # See notes in src/common/parser/Makefile about the following two rules
 repl_gram.hpp: repl_gram.y repl_gram.cpp
@@ -39,21 +39,21 @@ else
 	@$(missing) bison $< $@
 endif
 
-repl_scanner.cpp: repl_scanner.l
+repl_scanner.inc: repl_scanner.l
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
-	sed -i "s/YY_NULL/YY_ZERO/g" repl_scanner.cpp
+	sed -i "s/YY_NULL/YY_ZERO/g" repl_scanner.inc
 	@rm -f lex.backup
 else
 	@$(missing) flex $< $@
-	sed -i 's/YY_NULL/YY_ZERO/g' repl_scanner.cpp	
+	sed -i 's/YY_NULL/YY_ZERO/g' repl_scanner.inc	
 endif
 
-# repl_gram.cpp and repl_scanner.cpp are in the distribution tarball, so
+# repl_gram.cpp and repl_scanner.inc are in the distribution tarball, so
 # they are not cleaned here.
 
 # scan is compiled as part of gram
-syncrep_gram.o: syncrep_scanner.cpp
+syncrep_gram.o: syncrep_scanner.inc
 
 # Latest flex causes warnings in this file.
 ifeq ($(GCC),yes)
@@ -74,12 +74,12 @@ else
 	@$(missing) bison $< $@
 endif
 
-syncrep_scanner.cpp: syncrep_scanner.l
+syncrep_scanner.inc: syncrep_scanner.l
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
 	@if [ `wc -l <lex.backup` -eq 1 ]; then rm -f lex.backup; else echo "Warning: scanner may require backup, see lex.backup."; rm -f lex.backup; fi
-	sed -i 's/YY_NULL/YY_ZERO/g' syncrep_scanner.cpp
+	sed -i 's/YY_NULL/YY_ZERO/g' syncrep_scanner.inc
 else
 	@$(missing) flex $< $@
-	sed -i 's/YY_NULL/YY_ZERO/g' syncrep_scanner.cpp
+	sed -i 's/YY_NULL/YY_ZERO/g' syncrep_scanner.inc
 endif

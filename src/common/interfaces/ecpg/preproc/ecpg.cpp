@@ -51,7 +51,11 @@ static void help(const char* progname)
     printf(_("  -?, --help     show this help, then exit\n"));
     printf(_("\nIf no output file is specified, the name is formed by adding .c to the\n"
              "input file name, after stripping off .pgc if present.\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to openGauss community by raising an issue.\n"));
+#endif
 }
 
 static void add_include_path(char* path)

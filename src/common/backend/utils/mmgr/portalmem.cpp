@@ -22,6 +22,8 @@
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "commands/portalcmds.h"
+#include "distributelayer/streamCore.h"
+#include "distributelayer/streamMain.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -227,17 +229,22 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     portal->activeSubid = portal->createSubid;
     portal->strategy = PORTAL_MULTI_QUERY;
     portal->cursorOptions = CURSOR_OPT_NO_SCROLL;
+    portal->cursorHoldUserId = InvalidOid;
+    portal->cursorHoldSecRestrictionCxt = 0;
     portal->atStart = true;
     portal->atEnd = true; /* disallow fetches until query is set */
     portal->visible = true;
     portal->creation_time = GetCurrentStatementStartTimestamp();
     portal->funcOid = InvalidOid;
     portal->is_from_spi = is_from_spi;
+    portal->copyCxt = NULL;
     int rc = memset_s(portal->cursorAttribute, CURSOR_ATTRIBUTE_NUMBER * sizeof(void*), 0,
                       CURSOR_ATTRIBUTE_NUMBER * sizeof(void*));
     securec_check(rc, "\0", "\0");
     portal->funcUseCount = 0;
-
+#ifndef ENABLE_MULTIPLE_NODES
+    portal->streamInfo.Reset();
+#endif
     /* put portal in table (sets portal->name) */
     PortalHashTableInsert(portal, name);
 
@@ -557,12 +564,31 @@ void PortalDrop(Portal portal, bool isTopCommit)
         portal->holdStore = NULL;
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!StreamThreadAmI()) {
+        portal->streamInfo.AttachToSession();
+        if (u_sess->stream_cxt.global_obj != NULL) {
+            StreamTopConsumerIam();
+            /* Set sync point for waiting all stream threads complete. */
+            StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+            UnRegisterStreamSnapshots();
+            StreamNodeGroup::destroy(STREAM_COMPLETE);
+        }
+        // reset some flag related to stream
+        ResetStreamEnv();
+    }
+#endif
+
     /* delete tuplestore storage, if any */
     if (portal->holdContext)
         MemoryContextDelete(portal->holdContext);
 
     /* release subsidiary storage */
     MemoryContextDelete(PortalGetHeapMemory(portal));
+
+    /* release gpc's copy plan */
+    if (ENABLE_GPC && portal->copyCxt)
+        MemoryContextDelete(portal->copyCxt);
 
     u_sess->parser_cxt.param_message = NULL;
     /* release portal struct (it's in u_sess->portal_mem_cxt) */
@@ -645,10 +671,6 @@ bool PreCommit_Portals(bool isPrepare, bool STP_commit)
     bool result = false;
     HASH_SEQ_STATUS status;
     PortalHashEnt* hentry = NULL;
-    /* Opfusion need drop entry for this portalname if commit */
-    if (u_sess->exec_cxt.CurrentOpFusionObj != NULL) {
-        OpFusion::removeFusionFromHtab(u_sess->exec_cxt.CurrentOpFusionObj->m_portalName);
-    }
 
     if (u_sess->exec_cxt.PortalHashTable == NULL)
         return false;
@@ -838,10 +860,6 @@ void AtCleanup_Portals(void)
 {
     HASH_SEQ_STATUS status;
     PortalHashEnt* hentry = NULL;
-    /* Opfusion need drop entry for this portalname if abort */
-    if (u_sess->exec_cxt.CurrentOpFusionObj != NULL) {
-        OpFusion::removeFusionFromHtab(u_sess->exec_cxt.CurrentOpFusionObj->m_portalName);
-    }
 
     if (u_sess->exec_cxt.PortalHashTable == NULL)
         return;

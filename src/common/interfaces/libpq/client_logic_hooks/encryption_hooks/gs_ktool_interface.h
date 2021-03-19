@@ -35,12 +35,12 @@ extern bool kt_check_algorithm_type(CmkAlgorithm algo_type);
 extern bool kt_atoi(const char *cmk_id_str, unsigned int *cmk_id);
 
 extern bool create_cmk(unsigned int cmk_id);
-extern bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain, bool is_report_err);
+extern bool read_cmk_plain(const unsigned int cmk_id, unsigned char *cmk_plain);
 
 extern bool encrypt_cek_use_aes256(const unsigned char *cek_plain, size_t cek_plain_size, unsigned char *cmk_plain,
-    unsigned char *cek_ciph, size_t &cek_ciph_size, bool is_report_err);
-extern bool decrypt_cek_use_aes256(const unsigned char *cek_ciphe, size_t cek_ciphe_size, unsigned char *cmk_plain,
-    unsigned char *cek_plain, size_t *cek_plain_len, bool is_report_err);
+    unsigned char *cek_ciph, size_t &cek_ciph_size);
+extern bool decrypt_cek_use_aes256(const unsigned char *cek_cipher, size_t cek_cipher_size, unsigned char *cmk_plain,
+    unsigned char *cek_plain, size_t *cek_plain_len);
 
 extern void free_cmk_plain_cache();
 #endif

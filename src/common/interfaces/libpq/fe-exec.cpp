@@ -39,6 +39,9 @@
 #include "client_logic_processor/values_processor.h"
 #include "client_logic_fmt/gs_copy.h"
 #include "client_logic_processor/raw_values_cont.h"
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+#include "client_logic_hooks/encryption_hooks/localkms_gen_cmk.h"
+#endif
 #endif /* HAVE_CE */
 
 /* keep this in same order as ExecStatusType in libpq-fe.h */
@@ -1058,6 +1061,14 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
     const PGdataValue* columns = conn->rowBuf;
     PGresAttValue* tup = NULL;
     int i;
+    errno_t rc = 0;
+
+#ifdef HAVE_CE
+    unsigned char* deProcessed = NULL;
+    DecryptDataRes dec_dat_res = DEC_DATA_ERR;
+    const char *decrypt_err_info = "failed to decrypt";
+    bool is_encrypted_dat = false;
+#endif /* HAVE_CE */
 
     /*
      * In single-row mode, make a new PGresult that will hold just this one
@@ -1093,18 +1104,18 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
             tup[i].value = res->null_field;
         } else {
 #ifdef HAVE_CE
-            bool isValueDecrypted = false;
-            unsigned char* deProcessed = NULL;
             if (conn->client_logic->enable_client_encryption) {
-                if (is_clientlogic_datatype(res->attDescs[i].typid)) {
+                is_encrypted_dat = is_clientlogic_datatype(res->attDescs[i].typid);
+                if (is_encrypted_dat) {
                     size_t length = (size_t)clen;
-                    if (ValuesProcessor::deprocess_value(conn, (unsigned char *)columns[i].value, length,
-                        res->attDescs[i].atttypmod, res->attDescs[i].format, &deProcessed, length, false)) {
+                    dec_dat_res = ValuesProcessor::deprocess_value(conn, (unsigned char *)columns[i].value, length,
+                        res->attDescs[i].atttypmod, res->attDescs[i].format, &deProcessed, length, false);
+                    if (dec_dat_res == DEC_DATA_SUCCEED) {
                         clen = (int)length;
-                        isValueDecrypted = true;
+                    } else if (dec_dat_res == DEC_DATA_ERR) {
+                        /* contiue to process remain rows */
                     } else {
-                        *errmsgp = libpq_gettext("ERROR(CLIENT): failed to process data of processed column");
-                        conn->client_logic->isInvalidOperationOnColumn = true;
+                        *errmsgp = libpq_gettext("ERROR(CLIENT): failed to decrypt column encryption key");
                         goto fail;
                     }
                 }
@@ -1121,18 +1132,33 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
 
             /* copy and zero-terminate the data (even if it's binary) */
             if (clen > 0) {
-                int rcs = 0;
 #ifdef HAVE_CE
-                if (!conn->client_logic->enable_client_encryption || !isValueDecrypted) {
-                    rcs = memcpy_s(val, clen + 1, columns[i].value, clen);
+                if (!conn->client_logic->enable_client_encryption || !is_encrypted_dat) {
+                    rc = memcpy_s(val, clen + 1, columns[i].value, clen);
+                    securec_check_c(rc, "", "");
                 } else {
-                    rcs = memcpy_s(val, clen + 1, deProcessed, clen);
-                    free(deProcessed);
+                    if (is_encrypted_dat) {
+                        if (dec_dat_res == DEC_DATA_SUCCEED) {
+                            rc = memcpy_s(val, clen + 1, deProcessed, clen);
+                            securec_check_c(rc, "", "");
+                        } else if (dec_dat_res == DEC_DATA_ERR) {
+                            rc = strcpy_s(val, clen + 1, decrypt_err_info);
+                            securec_check_c(rc, "", "");
+                            clen = (int)strlen(decrypt_err_info);
+                        } else {
+                            /* do nothing */
+                        }
+
+                        if (deProcessed != NULL) {
+                            free(deProcessed);
+                            deProcessed = NULL;
+                        }
+                    }
                 }
 #else
-                rcs = memcpy_s(val, clen + 1, columns[i].value, clen);
+                rc = memcpy_s(val, clen + 1, columns[i].value, clen);
+                securec_check_c(rc, "", "");
 #endif /* HAVE_CE */
-                securec_check_c(rcs, "\0", "\0");
             }
             val[clen] = '\0';
 
@@ -1179,7 +1205,7 @@ fail:
  *			0 if error (conn->errorMessage is set)
  */
 int PQsendQuery(PGconn* conn, const char* query)
-{
+{   
     if (!PQsendQueryStart(conn))
         return 0;
 
@@ -1191,6 +1217,9 @@ int PQsendQuery(PGconn* conn, const char* query)
 #ifdef HAVE_CE
     StatementData statementData (conn, query);
     if (conn->client_logic->enable_client_encryption) {
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+        conn->client_logic->query_type = CE_IGNORE;
+#endif
         if (!conn->client_logic->disable_once) {
             bool clientLogicRet = Processor::run_pre_query(&statementData);
             if (!clientLogicRet)
@@ -1209,7 +1238,11 @@ int PQsendQuery(PGconn* conn, const char* query)
             (strcasestr(temp_query, client_logic_str) != NULL))) {
             free(temp_query);
             temp_query = NULL;
-            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR: disable client logic feature\n"));
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): disable client-encryption feature, please use -C to enable it.\n"));
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+        conn->client_logic->query_type = CE_IGNORE;
+#endif
             return 0;
         }
         if (temp_query != NULL) {
@@ -1222,6 +1255,11 @@ int PQsendQuery(PGconn* conn, const char* query)
     /* construct the outgoing Query message */
     if (pqPutMsgStart('Q', false, conn) < 0 || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0) {
         pqHandleSendFailure(conn);
+#ifdef HAVE_CE
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+        conn->client_logic->query_type = CE_IGNORE;
+#endif
+#endif
         return 0;
     }
 
@@ -1240,6 +1278,11 @@ int PQsendQuery(PGconn* conn, const char* query)
      */
     if (pqFlush(conn) < 0) {
         pqHandleSendFailure(conn);
+#ifdef HAVE_CE
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+        conn->client_logic->query_type = CE_IGNORE;
+#endif
+#endif
         return 0;
     }
 
@@ -1969,47 +2012,7 @@ int PQisBusy(PGconn* conn)
     /* PQgetResult will return immediately in all states except BUSY. */
     return conn->asyncStatus == PGASYNC_BUSY;
 }
-#ifdef HAVE_CE
-void checkRefreshCacheOnError(PGconn* conn)
-{
-    if (conn->client_logic->enable_client_encryption) {
-        if (conn->client_logic->isInvalidOperationOnColumn && !conn->client_logic->isDuringRefreshCacheOnError) {
-            /*
-             * copy query because it will be overwritten
-             */
-            char* query_to_resend = NULL;
-            size_t last_query_size = 0;
-            if (conn->last_query != NULL) { 
-                last_query_size = strlen(conn->last_query);
-            }
-            if (last_query_size > 0) {
-                query_to_resend = (char*)malloc(last_query_size + 1);
-                if (query_to_resend != NULL) {
-                    check_strncpy_s(strncpy_s(query_to_resend, last_query_size + 1, conn->last_query, last_query_size));
-                    query_to_resend[last_query_size] = '\0';
-                }
-            }
 
-            /*
-             * if an "invalid operation on a column" was detected it probably means 
-             * that a DML operation was made on "client logic" special column
-             * however, the client that performed the DML operation was under the impression that
-             * this is a regular column for this reason, the driver's CACHE needs to be updated again.
-             */
-            conn->client_logic->isDuringRefreshCacheOnError = true;
-            conn->client_logic->cacheRefreshType =  CacheRefreshType::ALL;
-            ICachedColumnManager::get_instance().load_cache(conn);
-            if (query_to_resend != NULL) {
-                PQclear(PQexec(conn, query_to_resend));
-                free(query_to_resend);
-                query_to_resend = NULL;
-            }
-            conn->client_logic->isInvalidOperationOnColumn = false;
-            conn->client_logic->isDuringRefreshCacheOnError = false;
-        }
-    }
-}
-#endif 
 /*
  * PQgetResult
  *	  Get the next PGresult produced by a query.  Returns NULL if no
@@ -2335,6 +2338,12 @@ static PGresult* PQexecFinish(PGconn* conn)
     PGresult* result = NULL;
     PGresult* lastResult = NULL;
 
+#ifdef HAVE_CE
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    CEQueryType qry_type = conn->client_logic->query_type;
+#endif
+#endif
+
     /*
      * For backwards compatibility, return the last result if there are more
      * than one --- but merge error messages if we get more than one error
@@ -2368,7 +2377,14 @@ static PGresult* PQexecFinish(PGconn* conn)
     }
 
 #ifdef HAVE_CE
-    checkRefreshCacheOnError(conn);
+#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
+    if (conn->client_logic->enable_client_encryption) {
+        if (qry_type != CE_IGNORE) {
+            localkms_post_process(qry_type, lastResult->resultStatus, conn->client_logic->query_args);
+            conn->client_logic->query_type = CE_IGNORE;
+        }
+    }
+#endif
 #endif
 
     return lastResult;

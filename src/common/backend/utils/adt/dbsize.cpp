@@ -138,7 +138,11 @@ static int64 db_dir_size(const char* path)
             else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", filename)));
         }
-        dirsize += fst.st_size;
+        if (S_ISDIR(fst.st_mode)) {
+            dirsize += db_dir_size(filename);
+        } else {
+            dirsize += fst.st_size;
+        }
     }
 
     FreeDir(dirdesc);

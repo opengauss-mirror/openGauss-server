@@ -46,6 +46,8 @@
 #define RESPONSE_BARRIER_OK 5
 #define RESPONSE_PLANID_OK 6
 #define RESPONSE_ANALYZE_ROWCNT 7
+#define RESPONSE_SEQUENCE_OK 8
+
 
 #define REMOTE_CHECKMSG_LEN 8  /* it equals to the count of bytes added in AddCheckMessage when is_stream is false */
 #define STREAM_CHECKMSG_LEN 20 /* it equals to the count of bytes added in AddCheckMessage when is_stream is true */
@@ -258,6 +260,7 @@ extern void sendQuery(const char* sql, const PGXCNodeAllHandles* pgxc_handles,
 StringInfo* SendExplainToDNs(ExplainState*, RemoteQuery*, int*, const char*);
 bool CheckPrepared(RemoteQuery* rq, Oid nodeoid);
 void FindExecNodesInPBE(RemoteQueryState* planstate, ExecNodes* exec_nodes, RemoteQueryExecType exec_type);
+extern PGXCNodeHandle* GetRegisteredTransactionNodes(bool write);
 #endif
 
 #ifdef ENABLE_UT
@@ -268,4 +271,5 @@ extern PGXCNodeAllHandles* connect_compute_pool_for_HDFS();
 extern PGXCNodeAllHandles* make_cp_conn(ComputePoolConfig** configs, int cnum, int srvtype, const char* dbname);
 extern List* get_dnlist_for_hdfs(int fnum);
 extern void ReloadTransactionNodes(void);
+
 #endif

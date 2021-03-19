@@ -28,6 +28,7 @@
 
 #include <string>
 #include <client_logic_cache/icached_column.h>
+#include "client_logic_processor/values_processor.h"
 typedef unsigned int Oid;
 
 class PGClientLogic;
@@ -55,7 +56,8 @@ public:
         static bool post_create(PGClientLogic &clientlogic, const char *function_name, StringArgs &args);
         static bool set_deletion_expected(const char *object_name, bool is_schema);
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-        static bool delete_localkms_file(GlobalHookExecutor *global_hook_executor);
+        static bool get_key_path_by_cmk_name(GlobalHookExecutor *global_hook_executor, char *key_path_buf,
+            size_t buf_len);
 #endif
     };
 
@@ -79,17 +81,16 @@ public:
 
     /* process the data */
     static int get_estimated_processed_data_size(const ColumnHookExecutorsList *hookExecutors, int dataSize);
-    static int process_data(bool is_during_refresh_cache, const ICachedColumn *cachedColumn, 
-        ColumnHookExecutorsList *column_hook_executors_list, const unsigned char *data, int dataSize,
-        unsigned char *processedData);
+    static int process_data(const ICachedColumn *cachedColumn, ColumnHookExecutorsList *column_hook_executors_list,
+        const unsigned char *data, int dataSize, unsigned char *processedData);
 
     /*
      * DML REPONSE
      */
 
     /* the dataProcessed should be encoded with some of the arguments in the begining of the data */
-    static int deprocess_data(PGClientLogic &clientlogic, const unsigned char *dataProcessed, int dataProcessedsize,
-        unsigned char **data);
+    static DecryptDataRes deprocess_data(PGClientLogic &clientlogic, const unsigned char *dataProcessed, 
+        int dataProcessedsize, unsigned char **data, int *data_plain_size);
 
     /* UNION, IN, NOT IN, INTERSECT, EXCEPT */
     static bool is_set_operation_allowed(const ICachedColumn *ce);

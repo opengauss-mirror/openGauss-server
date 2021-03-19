@@ -149,7 +149,7 @@ char* GenReport::GenerateHtmlReport(List* Contents)
      * declare css for html
      */
     const char* css =
-        "<html lang=\"en\"><head><title>XuanYuan WDR Workload Diagnosis Report</title>\n"
+        "<html lang=\"en\"><head><title>openGauss WDR Workload Diagnosis Report</title>\n"
         "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n"
         "<style type=\"text/css\">\n"
         "a.wdr {font:bold 8pt Arial,Helvetica,sans-serif;color:#663300;vertical-align:top;"
@@ -3463,6 +3463,38 @@ void GenReport::get_summary_load_profile(report_params* params)
     GenReport::add_data(dash, &params->Contents);
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+static void get_summary_instance_efficiency_percentages(report_params* params, dashboard* dash)
+{
+    List* query_result = NIL;
+    StringInfoData query;
+    initStringInfo(&query);
+
+    appendStringInfo(&query,
+        "select 'Buffer Hit %%: ' as \"Metric Name\", "
+        "    case when s.all_reads = 0 then 1 else round(s.blks_hit * 100 / s.all_reads) end as \"Metric Value\" "
+        "from "
+        "  (select (snap_2.all_reads - coalesce(snap_1.all_reads, 0)) as all_reads, "
+        "       (snap_2.blks_hit - coalesce(snap_1.blks_hit, 0)) as blks_hit "
+        "   from"
+        "     (select sum(coalesce(snap_blks_read, 0) + coalesce(snap_blks_hit, 0)) as all_reads, "
+        "        coalesce(sum(snap_blks_hit), 0) as blks_hit "
+        "        from snapshot.snap_summary_stat_database "
+        "        where snapshot_id = %ld) snap_1, "
+        "     (select sum(coalesce(snap_blks_read, 0) + coalesce(snap_blks_hit, 0)) as all_reads, "
+        "        coalesce(sum(snap_blks_hit), 0) as blks_hit "
+        "        from snapshot.snap_summary_stat_database "
+        "        where snapshot_id = %ld) snap_2"
+        "   ) as s",
+        params->begin_snap_id,
+        params->end_snap_id);
+
+    GenReport::get_query_data(query.data, true, &query_result, &dash->type);
+    dash->table = list_concat(dash->table, query_result);
+
+    pfree(query.data);
+}
+#else
 /* summary ratios about instance effciency: buffer hit ratio, cpu efficiency ratio, radio of redo 
  *    with nowait, soft parse ratio and excution without parse ratio */
 static void get_summary_instance_efficiency_percentages(report_params* params, dashboard* dash)
@@ -3473,8 +3505,8 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
 
     appendStringInfo(&query,
         "select "
-        "    unnest(array['Buffer Hit %%', 'Effective CPU %%', 'Redo NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
-        "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads) end, s2.cpu_to_elapsd, s3.redo_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
+        "    unnest(array['Buffer Hit %%', 'Effective CPU %%', 'WalWrite NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
+        "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads) end, s2.cpu_to_elapsd, s3.walwrite_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
         "from "
         "  (select (snap_2.all_reads - coalesce(snap_1.all_reads, 0)) as all_reads, "
         "       (snap_2.blks_hit - coalesce(snap_1.blks_hit, 0)) as blks_hit "
@@ -3503,7 +3535,7 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
         "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
         "           where snapshot_id = %ld and snap_stat_name = 'DB_TIME') snap_2) db_time "
         "  ) s2, "
-        "  (select (bufferAccess.snap_wait - bufferFull.snap_wait) * 100 / greatest(bufferAccess.snap_wait, 1) as redo_nowait "
+        "  (select (bufferAccess.snap_wait - bufferFull.snap_wait) * 100 / greatest(bufferAccess.snap_wait, 1) as walwrite_nowait "
         "   from "
         "     (select coalesce(snap_2.snap_wait) - coalesce(snap_1.snap_wait, 0) as snap_wait "
         "      from "
@@ -3552,6 +3584,7 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
 
     pfree(query.data);
 }
+#endif
 
 /* summary report - instance efficiency information */
 static void get_summary_instance_efficiency(report_params* params)
@@ -3569,7 +3602,7 @@ static void get_summary_instance_efficiency(report_params* params)
     dash->tableTitle = "Instance Efficiency Percentages (Target 100%)";
     dash->desc = lappend(dash->desc, (void*)desc);
 
-    /* instance efficiency, Buffer Hit %, Effective CPU % extra */
+    /* instance efficiency, Buffer Hit %: */
     get_summary_instance_efficiency_percentages(params, dash);
     GenReport::add_data(dash, &params->Contents);
 }
@@ -4332,9 +4365,9 @@ Datum generate_wdr_report(PG_FUNCTION_ARGS)
     int rc = 0;
     int index = 0;
     report_params params = {0};
-    params.begin_snap_id = PG_GETARG_OID(index);
+    params.begin_snap_id = PG_GETARG_INT64(index);
     index++;
-    params.end_snap_id = PG_GETARG_OID(index);
+    params.end_snap_id = PG_GETARG_INT64(index);
 
     // summary/detail/summary + detail
     index++;
@@ -4357,9 +4390,14 @@ Datum generate_wdr_report(PG_FUNCTION_ARGS)
         params.report_node = PG_GETARG_CSTRING(index);
     }
 
-    if (!superuser()) {
-        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Superuser privilege is neended to generate report")));
+    if (!isMonitoradmin(GetUserId())) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED),
+            errmsg("Monitor admin privilege is neended to generate WDR report")));
     }
+    ereport(LOG, (errmsg("generate WDR report start")));
+    ereport(LOG, (errmsg("begin_snapshot_id:%ld, end_snapshot_id:%ld, report_type:%s, report_scope:%s, report_node:%s",
+        params.begin_snap_id, params.end_snap_id, params.report_type, params.report_scope,
+        (params.report_node == NULL) ? "NULL" : params.report_node)));
     MemoryContext old_context = CurrentMemoryContext;
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
@@ -4370,6 +4408,7 @@ Datum generate_wdr_report(PG_FUNCTION_ARGS)
     char* result_str = GenReport::GenerateHtmlReport(params.Contents);
     (void)MemoryContextSwitchTo(spi_context);
     (void)SPI_finish();
+    ereport(LOG, (errmsg("generate WDR report end")));
     text* textStr = cstring_to_text(result_str);
     pfree(result_str);
     PG_RETURN_TEXT_P(textStr);

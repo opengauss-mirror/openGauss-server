@@ -214,7 +214,7 @@ RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist)
         /* Record how many subqueries in current query level */
         if (root->glob->minopmem > 0 && root->simple_rte_array[rti]->rtekind == RTE_SUBQUERY)
             num_subq++;
-
+#ifdef ENABLE_MULTIPLE_NODES
         bool is_dn_gather = u_sess->attr.attr_sql.enable_dngather && ng_get_different_nodegroup_count() == 2;
         /* Add subplan clause to rel's subplan restriction list */
         if (IS_STREAM_PLAN && root->is_correlated &&
@@ -237,6 +237,7 @@ RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist)
                 list_free_ext(restrictinfo);
             }
         }
+#endif
     }
 
     /*
@@ -416,7 +417,7 @@ static void set_base_rel_pathlists(PlannerInfo* root)
             root->has_recursive_correlated_rte = true;
             set_correlated_rel_pathlist(root, rel);
         }
-
+#ifdef ENABLE_MULTIPLE_NODES
         /* For subplan, we should make the base table replicated, and add filter to the temporary result */
         if (IS_STREAM_PLAN && root->is_correlated &&
             (GetLocatorType(rte->relid) != LOCATOR_TYPE_REPLICATED || ng_is_multiple_nodegroup_scenario())) {
@@ -575,6 +576,7 @@ static void set_base_rel_pathlists(PlannerInfo* root)
             rel->cheapest_unique_path = NULL;
             rel->cheapest_parameterized_paths = NIL;
         }
+#endif
     }
 }
 
@@ -799,7 +801,7 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
             RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
-            pruningRatio = rel->partItrs / partMmap->rangeElementsNum;
+            pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
         }
 
         heap_close(relation, NoLock);
@@ -819,6 +821,16 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     if (rte->tablesample == NULL) {
         /* Mark rel with estimated output rows, width, etc */
         set_baserel_size_estimates(root, rel);
+
+        /*
+         * Check to see if we can extract any restriction conditions from join
+         * quals that are OR-of-AND structures.  If so, add them to the rel's
+         * restriction list, and redo the above steps.
+         */
+        if (create_or_index_quals(root, rel)) {
+            check_partial_indexes(root, rel);
+            set_baserel_size_estimates(root, rel);
+        }
     } else {
         /* Sampled relation */
         set_tablesample_rel_size(root, rel, rte);

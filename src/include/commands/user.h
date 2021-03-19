@@ -18,7 +18,7 @@
 #define PASSWORD_TYPE_PLAINTEXT 0
 #define PASSWORD_TYPE_MD5 1
 typedef struct LockInfoBuck {
-    Oid pid;
+    ThreadId pid;
     Oid relation;
     Oid database;
     Oid nspoid;
@@ -61,7 +61,6 @@ extern USER_STATUS GetAccountLockedStatus(Oid roleID);
 extern void DropUserStatus(Oid roleID);
 extern Oid GetRoleOid(const char* username);
 extern bool IsRoleExist(const char* username);
-bool HasModifiedInitPwdByChkAuthHistory(Oid roleID);
 void CheckLockPrivilege(Oid roleID, HeapTuple tuple, bool is_opradmin);
 extern bool is_role_persistence(Oid roleid);
 void CheckAlterAuditadminPrivilege(Oid roleid, bool isOnlyAlterPassword);

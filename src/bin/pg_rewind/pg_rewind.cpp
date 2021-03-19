@@ -43,6 +43,7 @@ static void digestControlFile(ControlFileData* ControlFile, const char* source);
 static BuildErrorCode updateControlFile(ControlFileData* ControlFile);
 static BuildErrorCode sanityChecks(void);
 static void rewind_dw_file();
+static BuildErrorCode MoveOldXlogFiles(uint32 checkSeg, const char* newPath);
 
 static ControlFileData ControlFile_target;
 static ControlFileData ControlFile_source;
@@ -70,7 +71,6 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     char* buffer = NULL;
     XLogRecPtr startrec;
     XLogRecPtr endrec;
-    XLogRecPtr maxrec;
     ControlFileData ControlFile_new;
     int fd = -1;
     FILE* file = NULL;
@@ -81,12 +81,11 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     char xlog_start[MAXFNAMELEN] = {0};
     char xlog_end[MAXFNAMELEN] = {0};
     char xlog_location[MAXPGPATH] = {0};
+    char movedXlogPath[MAXPGPATH] = {0};
     int nRet = 0;
     errno_t errorno = EOK;
-    char returnmsg[XLOG_READER_MAX_MSGLENTH] = {0};
     GaussState state;
     BuildErrorCode rv = BUILD_SUCCESS;
-    pg_crc32 maxLsnCrc = 0;
 
     datadir_target = pg_strdup(pgdata);
     /* here we set basedir for last xlog requests purpose. the value is the datadir */
@@ -157,6 +156,10 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
 
     /* stat file 4: backup_filemap */
     nRet = snprintf_s(bkup_filemap, MAXPGPATH, MAXPGPATH - 1, "%s/pg_rewind_filemap", datadir_target);
+    securec_check_ss_c(nRet, "", "");
+
+    /* stat file 5: moved old xlog dir */
+    nRet = snprintf_s(movedXlogPath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", bkup_file);
     securec_check_ss_c(nRet, "", "");
 
     errorno = memset_s(&state, sizeof(state), 0, sizeof(state));
@@ -243,6 +246,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         (uint32)(chkptredo >> 32),
         (uint32)chkptredo,
         chkpttli);
+
     XLByteToSeg(chkptredo, checkSeg);
     XLogFileName(divergeXlogFileName, chkpttli, checkSeg);
     pg_log(PG_PROGRESS, "diverge xlogfile is %s, older ones will not be copied or removed.\n", divergeXlogFileName);
@@ -307,6 +311,15 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "backup target files success\n");
 
+    MoveOldXlogFiles(checkSeg, movedXlogPath);
+    PG_CHECKBUILD_AND_RETURN();
+    pg_log(PG_WARNING, _("starting background WAL receiver\n"));
+    nRet = snprintf_s(xlog_start, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(chkptredo >> 32), (uint32)chkptredo);
+    securec_check_ss_c(nRet, "", "");
+    get_xlog_location(xlog_location);
+    pg_log(PG_PROGRESS, "Starting copy xlog, start point: %s\n", xlog_start);
+    StartLogStreamer(xlog_start, timeline, sysidentifier, (const char*)xlog_location, term);
+
     /* Create build_complete.start file first */
     canonicalize_path(start_file);
     if ((fd = open(start_file, O_WRONLY | O_CREAT | O_EXCL, 0600)) < 0) {
@@ -336,15 +349,6 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
 
     progress_report(true);
 
-    /* Check if recoreds at chkptredo and chkptrec are valid. */
-    (void)readOneRecord(datadir_target, chkptredo, chkpttli);
-    PG_CHECKBUILD_AND_RETURN();
-    pg_log(PG_PROGRESS, "read checkpoint redo (%X/%X) success.\n", (uint32)(chkptredo >> 32), (uint32)chkptredo);
-
-    (void)readOneRecord(datadir_target, chkptrec, chkpttli);
-    PG_CHECKBUILD_AND_RETURN();
-    pg_log(PG_PROGRESS, "read checkpoint rec (%X/%X) success.\n", (uint32)(chkptrec >> 32), (uint32)chkptrec);
-
     /*
      * Update control file of target. Make it ready to perform archive
      * recovery when restarting.
@@ -359,25 +363,18 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
      */
     errorno = memcpy_s(&ControlFile_new, sizeof(ControlFileData), &ControlFile_source, sizeof(ControlFileData));
     securec_check_c(errorno, "\0", "\0");
-    maxrec = FindMaxLSN(datadir_target, returnmsg, XLOG_READER_MAX_MSGLENTH, &maxLsnCrc);
-    if (replication_type == RT_WITH_DUMMY_STANDBY) {
-        endrec = maxrec;
-        if(XLogRecPtrIsInvalid(endrec)) {
-            pg_fatal("find max lsn fail, need full build, errmsg: %s\n", returnmsg);
-            return BUILD_FATAL;
-        }
-        pg_log(PG_PROGRESS, "find minRecoveryPoint success, %s\n", returnmsg);
+
+    if (connstr_source != NULL) {
+        endrec = libpqGetCurrentXlogFlushLocation();
+        PG_CHECKBUILD_AND_RETURN();
+        pg_log(PG_PROGRESS, "find minRecoveryPoint success from xlog insert location %X/%X\n",
+            (uint32) (endrec >> 32), (uint32) endrec);
     } else {
-        if (connstr_source != NULL) {
-            endrec = libpqGetCurrentXlogInsertLocation();
-            pg_log(PG_PROGRESS, "find minRecoveryPoint success from xlog insert location %X/%X\n",
-                (uint32) (endrec >> 32), (uint32) endrec);
-        } else {
-            endrec = ControlFile_source.checkPoint;
-            pg_log(PG_PROGRESS, "find minRecoveryPoint success from checkpoint location %X/%X\n",
-                (uint32) (endrec >> 32), (uint32) endrec);
-        }
+        endrec = ControlFile_source.checkPoint;
+        pg_log(PG_PROGRESS, "find minRecoveryPoint success from checkpoint location %X/%X\n",
+            (uint32) (endrec >> 32), (uint32) endrec);
     }
+
     ControlFile_new.minRecoveryPoint = endrec;
     ControlFile_new.state = DB_IN_ARCHIVE_RECOVERY;
     rv = updateControlFile(&ControlFile_new);
@@ -397,13 +394,8 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         libpqDisconnect();
     }
 
-    pg_log(PG_WARNING, _("starting background WAL receiver\n"));
-    nRet = snprintf_s(xlog_start, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(maxrec >> 32), (uint32)maxrec);
-    securec_check_ss_c(nRet, "", "");
     nRet = snprintf_s(xlog_end, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(endrec >> 32), (uint32)endrec);
     securec_check_ss_c(nRet, "", "");
-    get_xlog_location(xlog_location);
-    StartLogStreamer(xlog_start, timeline, sysidentifier, (const char*)xlog_location, term);
 
     /*
      * Run IDENTIFY_MAXLSN to get end lsn
@@ -452,6 +444,15 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     PG_CHECKRETURN_AND_RETURN(rv);
     pg_log(PG_PROGRESS, "create backup label success\n");
 
+    /* Check if recoreds at chkptredo and chkptrec are valid. */
+    (void)readOneRecord(datadir_target, chkptredo, chkpttli);
+    PG_CHECKBUILD_AND_RETURN();
+    pg_log(PG_PROGRESS, "read checkpoint redo (%X/%X) success.\n", (uint32)(chkptredo >> 32), (uint32)chkptredo);
+
+    (void)readOneRecord(datadir_target, chkptrec, chkpttli);
+    PG_CHECKBUILD_AND_RETURN();
+    pg_log(PG_PROGRESS, "read checkpoint rec (%X/%X) success.\n", (uint32)(chkptrec >> 32), (uint32)chkptrec);
+
     /* Rename build_complete.start file to build_complete.done file */
     if (rename(start_file, done_file) < 0) {
         pg_fatal("failed to rename \"%s\" to \"%s\": %s\n", TAG_START, TAG_DONE, strerror(errno));
@@ -460,6 +461,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
 
     /* Remove pg_rewind_bak dir */
     delete_all_file(bkup_file, true);
+    PG_CHECKBUILD_AND_RETURN();
 
     if (datadir_target != NULL) {
         free(datadir_target);
@@ -732,5 +734,73 @@ static void rewind_dw_file()
     free(unaligned_buf);
     unaligned_buf = NULL;
     close(fd);
+}
+
+/* move xlog files which are after CommonCheckpoint to another dir for finding rewind block */
+static BuildErrorCode MoveOldXlogFiles(uint32 checkSeg, const char* newPath)
+{
+    char xlogLocation[MAXPGPATH] = {0};
+    char movedXlogFile[MAXPGPATH] = {0};
+    char movedXlogLocation[MAXPGPATH] = {0};
+    char realMovedPath[PATH_MAX] = {0};
+    char realXlogPath[PATH_MAX] = {0};
+    DIR *xlogDir = NULL;
+    struct dirent *dirEnt = NULL;
+    TimeLineID tli = 0;
+    uint32 xlogReadLogid = -1;
+    uint32 xlogReadLogSeg = -1;
+    int rc;
+    int ret = 0;
+
+    rc = snprintf_s(xlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s/%s", datadir_target, "pg_xlog");
+    securec_check_ss_c(rc, "\0", "\0");
+    if (realpath(xlogLocation, realXlogPath) == NULL && realXlogPath[0] == '\0') {
+        pg_log(PG_FATAL, "could not get canonical path for file \"%s\": %s in backup\n", xlogLocation,
+            gs_strerror(errno));
+        return BUILD_FATAL;
+    }
+
+    xlogDir = opendir(realXlogPath);
+    if (!xlogDir) {
+        pg_log(PG_ERROR, "open xlog dir %s failed when move old xlog files.\n", realXlogPath);
+        return BUILD_ERROR;
+    }
+    while ((dirEnt = readdir(xlogDir)) != NULL) {
+        if (strlen(dirEnt->d_name) == 24 && strspn(dirEnt->d_name, "0123456789ABCDEF") == 24) {
+            if (sscanf_s(dirEnt->d_name, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
+                pg_log(PG_DEBUG, "failed to translate name to xlog: %s\n", dirEnt->d_name);
+                continue;
+            }
+            if ((checkSeg / XLogSegmentsPerXLogId) < xlogReadLogid ||
+                ((checkSeg / XLogSegmentsPerXLogId) == xlogReadLogid &&
+                (checkSeg % XLogSegmentsPerXLogId) <= xlogReadLogSeg)) {
+                rc = snprintf_s(movedXlogFile, MAXPGPATH, MAXPGPATH - 1, "%s/%s", realXlogPath, dirEnt->d_name);
+                securec_check_ss_c(rc, "\0", "\0");
+                rc = snprintf_s(movedXlogLocation, MAXPGPATH, MAXPGPATH - 1, "%s/%s", newPath, dirEnt->d_name);
+                securec_check_ss_c(rc, "\0", "\0");
+                if (!is_file_exist(newPath)) {
+                    if (mkdir(newPath, S_IRWXU) != 0) {
+                        pg_log(PG_ERROR, "could not create directory \"%s\"\n", newPath);
+                        (void)closedir(xlogDir);
+                        return BUILD_ERROR;
+                    }
+                }
+                if (realpath(movedXlogLocation, realMovedPath) == NULL && realMovedPath[0] == '\0') {
+                    pg_log(PG_FATAL, "could not get canonical path for file \"%s\": %s in backup\n",
+                        movedXlogLocation, gs_strerror(errno));
+                    (void)closedir(xlogDir);
+                    return BUILD_FATAL;
+                }
+                ret = rename(movedXlogFile, realMovedPath);
+                if (ret != 0) {
+                    pg_log(PG_ERROR, "failed to rename xlog file: %s\n", movedXlogFile);
+                    (void)closedir(xlogDir);
+                    return BUILD_ERROR;
+                }
+            }
+        }
+    }
+    (void)closedir(xlogDir);
+    return BUILD_SUCCESS;
 }
 

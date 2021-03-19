@@ -25,3 +25,9 @@
 \! rm -rf @testtablespace@/passwd.txt
 \! rm -rf @testtablespace@/test8
 
+-- use env PGDATA
+\! mkdir -p @testtablespace@/test9
+\! export PGDATA=@testtablespace@/test9 && ( @abs_bindir@/gs_initdb -w test@123 --nodename coorn9 >> @abs_bindir@/test_initdb9.log 2>&1 )
+\! cat @abs_bindir@/test_initdb9.log | grep Success
+\! rm -f @abs_bindir@/test_initdb9.log
+\! rm -rf @testtablespace@/test9

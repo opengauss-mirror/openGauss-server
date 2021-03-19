@@ -109,7 +109,44 @@ typedef enum PortalStatus {
     PORTAL_DONE,    /* portal is finished (don't re-run it) */
     PORTAL_FAILED   /* portal got error (can't re-run it) */
 } PortalStatus;
+#ifndef ENABLE_MULTIPLE_NODES
+typedef struct PortalStream {
+    class StreamNodeGroup* streamGroup;
+    MemoryContext stream_runtime_mem_cxt;
+    MemoryContext data_exchange_mem_cxt;
+    uint64 query_id;
 
+    void Reset()
+    {
+        streamGroup = NULL;
+        stream_runtime_mem_cxt = NULL;
+        data_exchange_mem_cxt = NULL;
+        query_id = 0;
+    }
+
+    void RecordSessionInfo()
+    {
+        streamGroup = u_sess->stream_cxt.global_obj;
+        stream_runtime_mem_cxt = u_sess->stream_cxt.stream_runtime_mem_cxt;
+        data_exchange_mem_cxt = u_sess->stream_cxt.data_exchange_mem_cxt;
+        query_id = u_sess->debug_query_id;
+    }
+
+    void AttachToSession()
+    {
+        if (streamGroup != NULL || u_sess->stream_cxt.global_obj != NULL) {
+            u_sess->stream_cxt.global_obj = streamGroup ?
+                streamGroup : u_sess->stream_cxt.global_obj;
+            u_sess->stream_cxt.stream_runtime_mem_cxt = stream_runtime_mem_cxt ?
+                stream_runtime_mem_cxt : u_sess->stream_cxt.stream_runtime_mem_cxt;
+            u_sess->stream_cxt.data_exchange_mem_cxt = data_exchange_mem_cxt ?
+                data_exchange_mem_cxt : u_sess->stream_cxt.data_exchange_mem_cxt;
+            u_sess->debug_query_id = query_id ?
+                query_id : u_sess->debug_query_id;
+        }
+    }
+} PortalStream;
+#endif
 typedef struct PortalData* Portal;
 
 typedef struct PortalData {
@@ -141,7 +178,9 @@ typedef struct PortalData {
     /* Features/options */
     PortalStrategy strategy; /* see above */
     int cursorOptions;       /* DECLARE CURSOR option bits */
-
+    Oid cursorHoldUserId;    /* Record UserId when cursor with hold */
+    int cursorHoldSecRestrictionCxt;
+    
     /* Status data */
     PortalStatus status; /* see above */
     bool portalPinned;   /* a pinned portal can't be dropped */
@@ -190,7 +229,11 @@ typedef struct PortalData {
     void* cursorAttribute[CURSOR_ATTRIBUTE_NUMBER];
     Oid funcOid; /* function oid */
     int funcUseCount;
+    MemoryContext copyCxt;             /*  memory for gpc copy plan */
     bool is_from_spi;
+#ifndef ENABLE_MULTIPLE_NODES
+    PortalStream streamInfo;
+#endif
 } PortalData;
 
 /*

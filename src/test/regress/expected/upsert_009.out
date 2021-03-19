@@ -3,8 +3,6 @@ ERROR:  schema "test_insert_update_009" does not exist
 CREATE SCHEMA test_insert_update_009;
 SET CURRENT_SCHEMA TO test_insert_update_009;
 SET enable_light_proxy=off;
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
 -- test t1 with no index
 CREATE TABLE t1 (
     col1 INT,

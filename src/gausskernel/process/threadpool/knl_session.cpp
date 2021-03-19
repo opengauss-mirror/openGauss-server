@@ -48,6 +48,7 @@
 #include "utils/inval.h"
 #include "utils/memutils.h"
 #include "utils/palloc.h"
+#include "utils/pg_locale.h"
 #include "utils/pg_lzcompress.h"
 #include "utils/plog.h"
 #include "utils/portal.h"
@@ -80,9 +81,12 @@ static void knl_u_analyze_init(knl_u_analyze_context* anl_cxt)
 
 static void knl_u_attr_init(knl_session_attr* attr)
 {
+    const int sessionDefaultTimeout = 600; /* 10 * 60 = 10 min */
     attr->attr_common.backtrace_min_messages = PANIC;
     attr->attr_common.log_min_messages = WARNING;
     attr->attr_common.client_min_messages = NOTICE;
+    attr->attr_common.SessionTimeout = sessionDefaultTimeout;
+    attr->attr_common.enable_full_encryption = false;
     attr->attr_storage.sync_method = DEFAULT_SYNC_METHOD;
     attr->attr_sql.under_explain = false;
     attr->attr_resource.enable_auto_explain = false;
@@ -246,6 +250,8 @@ static void knl_u_stream_init(knl_u_stream_context* stream_cxt)
     stream_cxt->stop_mythread = false;
     stream_cxt->stop_pid = (ThreadId)-1;
     stream_cxt->stop_query_id = 0;
+    stream_cxt->stream_runtime_mem_cxt = NULL;
+    stream_cxt->data_exchange_mem_cxt = NULL;
 }
 
 static void knl_u_sig_init(knl_u_sig_context* sig_cxt)
@@ -267,6 +273,7 @@ static void knl_u_SPI_init(knl_u_SPI_context* spi)
     spi->is_stp = true;
     spi->is_proconfig_set = false;
     spi->portal_stp_exception_counter = 0;
+    spi->current_stp_with_exception = false;
 }
 
 static void knl_u_trigger_init(knl_u_trigger_context* tri_cxt)
@@ -421,6 +428,8 @@ static void knl_u_plancache_init(knl_u_plancache_context* pcache_cxt)
     pcache_cxt->lightproxy_objs = NULL;
     pcache_cxt->datanode_queries = NULL;
     pcache_cxt->unnamed_stmt_psrc = NULL;
+    pcache_cxt->cur_stmt_psrc = NULL;
+    pcache_cxt->private_refcount = 0;
 
     pcache_cxt->cur_stmt_name = NULL;
     pcache_cxt->gpc_in_ddl = false;
@@ -491,10 +500,6 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->clientIsGsroach = false;
     proc_cxt->IsBinaryUpgrade = false;
     proc_cxt->IsWLMWhiteList = false;
-    proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
-    proc_cxt->LabelFile = NULL;
-    proc_cxt->TblspcMapFile = NULL;
-    proc_cxt->registerAbortBackupHandlerdone = false;
     proc_cxt->gsRewindAddCount = false;
     proc_cxt->PassConnLimit = false;
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
@@ -843,6 +848,7 @@ static void knl_u_libpq_init(knl_u_libpq_context* libpq_cxt)
     libpq_cxt->ident_line_nums = NIL;
     libpq_cxt->ident_context = NULL;
     libpq_cxt->IsConnFromCmAgent = false;
+    libpq_cxt->HasErrorAccurs = false;
 #ifdef USE_SSL
     libpq_cxt->ssl_loaded_verify_locations = false;
     libpq_cxt->ssl_initialized = false;
@@ -886,6 +892,7 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     unique_sql_cxt->current_table_counter = (PgStat_TableCounts*)palloc0(sizeof(PgStat_TableCounts));
     unique_sql_cxt->curr_single_unique_sql = NULL;
     unique_sql_cxt->is_multi_unique_sql = false;
+    unique_sql_cxt->multi_sql_offset = 0;
     unique_sql_cxt->is_top_unique_sql = false;
     unique_sql_cxt->need_update_calls = true;
     unique_sql_cxt->unique_sql_sort_instr = (unique_sql_sorthash_instr*)palloc0(sizeof(unique_sql_sorthash_instr));
@@ -1046,7 +1053,7 @@ static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
     pgxc_cxt->NumDataNodes = 0;
 #else
     pgxc_cxt->NumDataNodes = 1;
-#endif /* ENABLE_MULTIPLE_NODES */
+#endif
     pgxc_cxt->NumCoords = 0;
     pgxc_cxt->NumStandbyDataNodes = 0;
     pgxc_cxt->datanode_count = 0;
@@ -1054,7 +1061,11 @@ static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
     pgxc_cxt->dn_matrics = NULL;
     pgxc_cxt->dn_handles = NULL;
     pgxc_cxt->co_handles = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
     pgxc_cxt->PGXCNodeId = -1;
+#else
+    pgxc_cxt->PGXCNodeId = 0;
+#endif
     pgxc_cxt->PGXCNodeIdentifier = 0;
 
     pgxc_cxt->remoteXactState = (RemoteXactState*)palloc0(sizeof(RemoteXactState));
@@ -1114,6 +1125,8 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->savePrepareGID = NULL;
 
     xact_cxt->pbe_execute_complete = true;
+    xact_cxt->send_seqname = NULL;
+    xact_cxt->send_result = 0;
 }
 
 static void knl_u_ps_init(knl_u_ps_context* ps_cxt)
@@ -1258,6 +1271,7 @@ static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_
 knl_session_context* create_session_context(MemoryContext parent, uint64 id)
 {
     knl_session_context *sess, *old_sess;
+    const int secondToMilliSecond = 1000;
     old_sess = u_sess;
     MemoryContextUnSeal(t_thrd.top_mem_cxt);
     sess = (knl_session_context*)MemoryContextAllocZero(parent, sizeof(knl_session_context));
@@ -1290,6 +1304,12 @@ knl_session_context* create_session_context(MemoryContext parent, uint64 id)
         sess->mcxt_group = New(top_mem_cxt) MemoryContextGroup();
         sess->mcxt_group->Init(top_mem_cxt);
         MemoryContextSeal(top_mem_cxt);
+        /*
+        * threadpool session, set init timeout to
+        * avoid user only establish connections but do not send data or SSL shakehands hang
+        * non-threadpool/fake session will direct call ReadCommand and enable alarm by sig timer
+        * */
+        (void)enable_session_sig_alarm(u_sess->attr.attr_common.SessionTimeout * secondToMilliSecond);
     }
 
     // Switch to context group, in case knl_u_executor_init will alloc memory on CurrentMemoryContext.
@@ -1315,6 +1335,9 @@ void use_fake_session()
 void free_session_context(knl_session_context* session)
 {
     Assert(u_sess == session);
+
+    /* free the locale cache */
+    freeLocaleCache(false);
 
     /* discard all the data in the channel. */
     t_thrd.libpq_cxt.PqSendPointer = 0;

@@ -1494,8 +1494,7 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
      * we can remove this limitation.  (But note that this also defends
      * against flat-out duplicate input paths, which can happen because
      * match_join_clauses_to_index will find the same OR join clauses that
-     * extract_restriction_or_clauses has pulled OR restriction clauses out
-     * of.)
+     * create_or_index_quals has pulled OR restriction clauses out of.)
      *
      * For the same reason, we reject AND combinations in which an index
      * predicate clause duplicates another clause.	Here we find it necessary

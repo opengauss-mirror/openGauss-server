@@ -1005,7 +1005,6 @@ typedef enum WaitEventSQL {
 
 typedef struct {
     uint64 total_time; /* total time for sql */
-    uint64 avg_time;   /* avg time for sql */
     uint64 min_time;   /* min time for sql */
     uint64 max_time;   /* max time for sql */
 } ElapseTime;
@@ -2444,11 +2443,36 @@ extern void resetBadBlockStat();
 extern bool CalcSQLRowStatCounter(
     PgStat_TableCounts* last_total_counter, PgStat_TableCounts* current_sql_table_counter);
 extern void GetCurrentTotalTableCounter(PgStat_TableCounts* total_table_counter);
+
+typedef struct XLogStatCollect {
+    double entryScanTime;
+    double IOTime;
+    double memsetTime;
+    double entryUpdateTime;
+    uint64 writeBytes;
+    uint64 scanEntryCount;
+    uint64 writeSomethingCount;
+    uint64 flushWaitCount;
+    double xlogFlushWaitTime;
+    uint32 walAuxWakeNum;
+    XLogRecPtr writeRqstPtr;
+    XLogRecPtr minCopiedPtr;
+    double IONotificationTime;
+    double sendBufferTime;
+    double memsetNotificationTime;
+    uint32 remoteFlushWaitCount;
+} XLogStatCollect;
+
+extern THR_LOCAL XLogStatCollect *g_xlog_stat_shared;
+
+extern void XLogStatShmemInit(void);
+extern Size XLogStatShmemSize(void);
 extern bool CheckUserExist(Oid userId, bool removeCount);
 extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
 extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
                                           bool hasTID = false, ThreadId threadId = 0);
 extern void pgstat_setup_memcxt(void);
+extern void pgstat_clean_memcxt(void);
 extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
 extern void pgstat_send(void* msg, int len);
 

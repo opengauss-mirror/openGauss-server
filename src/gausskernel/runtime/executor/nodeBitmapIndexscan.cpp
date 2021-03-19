@@ -491,7 +491,13 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
         indexstate->lockMode = lock;
         PruningResult* resultPlan = NULL;
         if (plan->scan.pruningInfo->expr) {
-            resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
+            if (estate->pruningResult) {
+                resultPlan = estate->pruningResult;
+            } else {
+                resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
+                destroyPruningResult(estate->pruningResult);
+                estate->pruningResult = resultPlan;
+            }
         } else {
             resultPlan = plan->scan.pruningInfo;
         }

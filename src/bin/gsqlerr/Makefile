@@ -45,7 +45,7 @@ all:
 
 scanEreport: $(OBJS1) | submake-libpgport
 	$(CC) $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X) $(LIBS)
-	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt
+	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt escan.txt
 
 utscanEreport: $(OBJS1) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutscanEreport.so -lsecurec

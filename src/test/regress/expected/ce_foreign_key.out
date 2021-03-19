@@ -5,7 +5,7 @@ DELETE ALL
 GENERATE
 1
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-ERROR:  global setting "mycmk" does not exist
+ERROR:  client master key "mycmk" does not exist
 CREATE CLIENT MASTER KEY MyCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
 CREATE COLUMN ENCRYPTION KEY MyCEK WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 CREATE COLUMN ENCRYPTION KEY MyCEK2 WITH VALUES (CLIENT_MASTER_KEY = MyCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
@@ -88,7 +88,7 @@ INSERT INTO so_items_a VALUES (10001, 1, 1001, 100, 37.28);
 INSERT INTO so_items_a VALUES (10002, 6, 1001, 100, 37.28);
 INSERT INTO so_items_a VALUES (10001, 1, 1001, 110, 36.28);
 ERROR:  duplicate key value violates unique constraint "so_items_a_pkey"
-DETAIL:  Key (item_id, so_id)=(10001, \x01958779ab9b626f212ebc5d9241d04f0c88005c6cbf99564bddca989a38d1adab506fdb2931000000582af1fa29678ee3a030e0a5ab415d696c2a3f8e309926305ca283a28658d6ad) already exists.
+--?.*
 SELECT * from so_items_a ORDER BY item_id;
  item_id | so_id | product_id | qty | net_price 
 ---------+-------+------------+-----+-----------
@@ -102,7 +102,7 @@ ERROR:  insert or update on table "so_items_c" violates foreign key constraint "
 DETAIL:  Key (so_id)=(6) is not present in table "so_headers".
 INSERT INTO so_items_c VALUES (10001, 1, 1011, 101, 36.28);
 ERROR:  duplicate key value violates unique constraint "so_items_c_pkey"
-DETAIL:  Key (item_id, so_id)=(10001, \x01958779ab9b626f212ebc5d9241d04f0c88005c6cbf99564bddca989a38d1adab506fdb2931000000582af1fa29678ee3a030e0a5ab415d696c2a3f8e309926305ca283a28658d6ad) already exists.
+--?.*
 SELECT * from so_items_c ORDER BY item_id;
  item_id | so_id | product_id | qty | net_price 
 ---------+-------+------------+-----+-----------
@@ -156,8 +156,8 @@ DROP TABLE payments;
 DROP TABLE so_headers;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
 NOTICE:  drop cascades to 2 other objects
-DETAIL:  drop cascades to column setting: mycek
-drop cascades to column setting: mycek2
+DETAIL:  drop cascades to column encryption key: mycek
+drop cascades to column encryption key: mycek2
 \! gs_ktool -d all
 DELETE ALL
  1

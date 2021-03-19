@@ -51,7 +51,7 @@ extern ExecNodes* getExecNodesByGroupName(const char* gname);
 extern PlannedStmt* planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 extern PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo boundParams);
 
-typedef PlannedStmt *(*planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
+typedef void (*planner_hook_type) (Query* parse, int cursorOptions, ParamListInfo boundParams);
 
 extern Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_root, bool hasRecursion,
     double tuple_fraction, PlannerInfo** subroot, int options = SUBQUERY_NORMAL, ItstDisKey* diskeys = NULL,

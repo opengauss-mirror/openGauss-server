@@ -55,6 +55,7 @@
 #include "bin/elog.h"
 #include "openssl/rand.h"
 
+#include "common/config/cm_config.h"
 #if defined(__CYGWIN__)
 #include <sys/cygwin.h>
 #include <windows.h>
@@ -218,8 +219,6 @@ char* g_prefix = NULL;
 // whether change the value of synchronous_standby_names
 bool g_need_changed = true;
 char* g_local_instance_path = NULL;
-// the logical cluster name
-char* g_lcname = NULL;
 
 typedef struct {
     char** nodename_array;
@@ -244,10 +243,7 @@ gucInfo* g_real_gucInfo = NULL;
 /* expect result */
 gucInfo* g_expect_gucInfo = NULL;
 
-/* the local node name and idx  */
-uint32 g_local_node_idx = 0;
 uint32 g_local_dn_idx = 0;
-char* g_local_node_name = NULL;
 char* g_current_data_dir = NULL;
 
 void* pg_malloc(size_t size);
@@ -318,7 +314,6 @@ bool allocate_memory_list();
 extern int init_gauss_cluster_config(void);
 extern char* get_AZ_value(char* value, const char* data_dir);
 extern bool get_hostname_or_ip(char* out_name, size_t name_len);
-extern int checkPath(const char* fileName);
 
 #ifdef __cplusplus
 }
@@ -390,6 +385,7 @@ bool allocate_memory_list()
     securec_check_ss_c(rc, "\0", "\0");
 
     if (checkPath(guc_file) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), guc_file, strerror(errno));
         return false;
     }
     /* maybe fail because of privilege*/
@@ -443,7 +439,19 @@ char* xstrdup(const char* s)
     }
     return result;
 }
-
+/*
+ * @@GaussDB@@
+ * Brief            : char* skipspace(char *p)
+ * Description      : Skip all the blanks at the begin of p
+ * Notes            :
+ */
+static char* skipspace(char *p)
+{
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    return p;
+}
 /*
  * @@GaussDB@@
  * Brief            : static pgpid_t get_pgpid(void)
@@ -630,7 +638,7 @@ static void to_generatenewline(char* oldline, char* newline, const char* param, 
     poldline++;
     pnewline++;
     offsetlen++;
-    while (isspace((unsigned char)*poldline)) {
+    while (isspace((unsigned char)*poldline) && (unsigned char)*poldline != '\n') {
         rc = strncpy_s(pnewline, MAX_VALUE_LEN * 2 - offsetlen, poldline, 1);
         securec_check_c(rc, "\0", "\0");
         poldline++;
@@ -785,7 +793,9 @@ ErrCode get_file_lock(const char* path, FileLock* filelock)
     }
     ret = strcpy_s(newpath, sizeof(newpath), path);
     canonicalize_path(newpath);
-    (void)checkPath(newpath);
+    if (checkPath(newpath) != 0) {
+        write_stderr(_("realpath(%s) failed : %s!\n"), newpath, strerror(errno));
+    }
 
     if (lstat(newpath, &statbuf) != 0) {
         fp = fopen(newpath, PG_BINARY_W);
@@ -1023,6 +1033,7 @@ append_string_info(char **optLines, const char *newContext)
     return optLinesResult;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 /*******************************************************************************
  Function    : IsLastNotNullReplconninfo
  Description : determine if replconninfoX which is being set is the last one valid replconninfo
@@ -1091,6 +1102,19 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
     return false;
 }
 
+static void CheckLastValidReplconninfo(char** opt_lines, int idx)
+{
+    /* Give a warning if the last valid replconninfo is set to a invalid value currently */
+    if (strncmp(config_param[idx], "replconninfo", strlen("replconninfo")) == 0 &&
+        config_value[idx] != NULL && (strlen(config_value[idx]) == 0 ||
+        strncmp(config_value[idx], "''", strlen("''")) == 0) &&
+        IsLastNotNullReplconninfo(opt_lines, config_param[idx])) {
+        write_stderr("\nWARNING: This is the last valid replConnInfo, once set to null, "
+            "the host role will be changed to Normal if the local_role is primary now.\n");
+    }
+}
+#endif
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -1152,6 +1176,7 @@ do_gucset(const char *action_type, const char *data_dir)
         if (NULL == config_param[i]) {
             release_file_lock(&filelock);
             freefile(opt_lines);
+            GS_FREE(tmpAZStr);
             write_stderr( _("%s: invalid input parameters\n"), progname);
             return FAILURE;
         }
@@ -1163,6 +1188,7 @@ do_gucset(const char *action_type, const char *data_dir)
             if (FAILURE == get_global_local_node_name()) {
                 release_file_lock(&filelock);
                 freefile(opt_lines);
+                GS_FREE(tmpAZStr);
                 return FAILURE;
             }
 
@@ -1181,13 +1207,10 @@ do_gucset(const char *action_type, const char *data_dir)
                 GS_FREE(azString);
             }
         }
-        /* Give a warning if the last valid replconninfo is set to a invalid value currently */
-        if (strncmp(config_param[i], "replconninfo", strlen("replconninfo")) == 0 &&
-            config_value[i] != NULL && (strlen(config_value[i]) == 0 || strncmp(config_value[i], "''", strlen("''")) == 0) &&
-            IsLastNotNullReplconninfo(opt_lines, config_param[i])) {
-            write_stderr("\nWARNING: This is the last valid replConnInfo, once set to null, "
-                "the host role will be changed to Normal if the local_role is primary now.\n");
-        }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        CheckLastValidReplconninfo(opt_lines, i);
+#endif
 
         /* find the line where guc parameter in */
         lines_index = find_gucoption(opt_lines, config_param[i], NULL, NULL, &optvalue_off, &optvalue_len);
@@ -1204,18 +1227,12 @@ do_gucset(const char *action_type, const char *data_dir)
                 to_generatenewline(optconf_line, newconf_line, config_param[i], config_value[i], optvalue_len);
             } else {
                 /*
-                 * if parameter value is NULL, not consider it as UNSET,
+                 * if parameter value is NULL; not consider it as UNSET,
                  * which means maintain the configuration parameter, and
                  * there will be prompts telling the user to assign a value.
                  */
-                //line is commented
-                if (isOptLineCommented(optconf_line)) {
-                    rc = strncpy_s(newconf_line, MAX_PARAM_LEN*2, optconf_line, (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
-                    securec_check_c(rc, "\0", "\0");
-                } else {
-                    write_stderr(_("ERROR: %s parameters value is expected\n"), config_param[i]);
-                    return FAILURE;
-                }
+                write_stderr(_("ERROR: %s parameters value is expected\n"), config_param[i]);
+                return FAILURE;
             }
             updateoradd = UPDATE_PARAMETER;
         } else {
@@ -1433,10 +1450,10 @@ static void do_help_check_guc(void)
 #else
     (void)printf(_("\nChecking GUC parameters:\n"));
 
-    (void)printf(_("    %s check [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c \"parameter\", -c "
+    (void)printf(_("    %s check [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c \"parameter\", -c "
                    "\"parameter\", ...}\n"),
         progname);
-    (void)printf(_("    %s check [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c parameter, -c "
+    (void)printf(_("    %s check [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} {-c parameter, -c "
                    "parameter, ...}\n"),
         progname);
 
@@ -1493,20 +1510,20 @@ static void do_help_config_guc(void)
         _("    e.g. %s set -Z cmagent -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
     (void)printf(_("    e.g. %s set -Z cmagent -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 #else
-    (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                         "[--lcname=LCNAME] {-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
-    (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                         "[--lcname=LCNAME] {-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
-    (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                 "[--lcname=LCNAME] {-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
-    (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                 "[--lcname=LCNAME] {-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
-    (void)printf(_("        %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+    (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
                 "[--lcname=LCNAME] {-c \"parameter\" -c \"parameter\" ...}\n"), progname);
     (void)printf(
-     _("    e.g. %s set -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
+     _("    e.g. %s set -Z datanode -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
     (void)printf(
-     _("    e.g. %s reload -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
+     _("    e.g. %s reload -Z datanode -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 
 #endif
 
@@ -1548,25 +1565,25 @@ static void do_help_config_hba(void)
                    "DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #else
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
         progname);
 
     (void)printf(_("  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without "
                 "authentication menthod, use the form: \n"));
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME IPADDR IPMASK\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
                 "DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #endif
@@ -1611,11 +1628,9 @@ static void do_help_set_reset_options(void)
 #ifdef ENABLE_MULTIPLE_NODES
 
     (void)printf(_("\nOptions for set with -c parameter: \n"));
-
-    (void)printf(_("  -Z NODE-TYPE   can be \"coordinator\", \"datanode\", \"cmserver\", \"cmagent\", or \"gtm\""));
+    (void)printf(_("  -Z NODE-TYPE   can be \"coordinator\", \"datanode\", \"cmserver\", \"cmagent\", or \"gtm\". "));
 
     (void)printf(_("NODE-TYPE is used to identify configuration file (with -c parameter) in data directory\n"));
-
     (void)printf(_("  \"coordinator\" or \"datanode\"                     -- postgresql.conf\n"));
     (void)printf(_("  \"coordinator\" and \"datanode\"                    -- postgresql.conf\n"));
     (void)printf(_("  \"cmserver\"                                      -- cm_server.conf\n"));
@@ -1624,6 +1639,16 @@ static void do_help_set_reset_options(void)
 
     (void)printf(_("\nOptions for set and reload with -h host-auth-policy: \n"));
     (void)printf(_("  -Z NODE-TYPE   can be \"coordinator\", or \"datanode\"\n"));
+#else
+
+    (void)printf(_("\nOptions for set with -c parameter: \n"));
+    (void)printf(_("  -Z NODE-TYPE   can only be \"datanode\", default is \"datanode\". "));
+
+    (void)printf(_("NODE-TYPE is used to identify configuration file (with -c parameter) in data directory\n"));
+    (void)printf(_("  \"datanode\"                     -- postgresql.conf\n"));
+
+    (void)printf(_("\nOptions for set and reload with -h host-auth-policy: \n"));
+    (void)printf(_("  -Z NODE-TYPE   can only be \"datanode\", default is \"datanode\"\n"));
 #endif
 }
 
@@ -2227,7 +2252,7 @@ int main(int argc, char** argv)
         config_value = ((char**)pg_malloc_zero(arraysize * sizeof(char*)));
     }
     if (false == allocate_memory_list()) {
-        write_stderr(_("ERROR:: Failed to allocate memory to list.\n"));
+        write_stderr(_("ERROR: Failed to allocate memory to list.\n"));
         exit(1);
     }
 
@@ -3043,18 +3068,14 @@ static bool isMatchOptionName(
     p = optLine;
 
     /* Skip all the blanks at the begin of the optLine */
-    while (isspace((unsigned char)*p)) {
-        p++;
-    }
+    p = skipspace(p);
 
     if ('#' == *p) {
         p++;
     }
 
     /* Skip all the blanks after '#' and before the paraName */
-    while (isspace((unsigned char)*p)) {
-        p++;
-    }
+    p = skipspace(p);
 
     if (find_param_in_string(p, paraName, paraLength) != 0) {
         return false;
@@ -3065,9 +3086,7 @@ static bool isMatchOptionName(
     }
     p += paraLength;
 
-    while (isspace((unsigned char)*p)) {
-        p++;
-    }
+    p = skipspace(p);
 
     /* If not '=', this optLine's format is wrong in configure file */
     if (*p != '=') {
@@ -3077,27 +3096,27 @@ static bool isMatchOptionName(
     p++;
 
     /* Skip all the blanks after '=' and before the value */
-    while (isspace((unsigned char)*p)) {
-        p++;
-    }
-    q = p + 1;
-    tmp = q;
+    p = skipspace(p);
 
-    while (*q && !('\n' == *q || '#' == *q)) {
-        if (!isspace((unsigned char)*q)) {
-            /* End of string */
-            if ('\'' == *q) {
-                tmp = ++q;
-                break;
+    if (strlen(p) != 0) {
+        q = p + 1;
+        tmp = q;
+        while (*q && !('\n' == *q || '#' == *q)) {
+            if (!isspace((unsigned char)*q)) {
+                /* End of string */
+                if ('\'' == *q) {
+                    tmp = ++q;
+                    break;
+                } else {
+                    tmp = ++q;
+                }
             } else {
-                tmp = ++q;
+                /*
+                 * If paraName is a string, the ' ' is considered to
+                 * be part of the string.
+                 */
+                ('\'' == *p) ? tmp = ++q : q++;
             }
-        } else {
-            /*
-             * If paraName is a string, the ' ' is considered to
-             * be part of the string.
-             */
-            ('\'' == *p) ? tmp = ++q : q++;
         }
     }
 

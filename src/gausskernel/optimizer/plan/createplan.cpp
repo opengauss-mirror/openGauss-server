@@ -504,12 +504,7 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
         stream->smpDesc.producerDop = best_path->smpDesc->producerDop > 1 ? best_path->smpDesc->producerDop : 1;
         plan->dop = stream->smpDesc.consumerDop;
         stream->smpDesc.distriType = best_path->smpDesc->distriType;
-#ifndef ENABLE_MULTIPLE_NODES
-        /* single node mode only has LOCAL Stream operator */
-        if (stream->type == STREAM_BROADCAST) {
-            stream->smpDesc.distriType = LOCAL_BROADCAST;
-        }
-#endif
+
         /*
          * Local roundrobin and local broadcast do not need distribute keys,
          * so we set to NIL, in case it add extra targetlist.
@@ -524,6 +519,11 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
     if (stream->smpDesc.consumerDop == 1 && stream->smpDesc.producerDop == 1) {
         pfree(stream);
         return subplan;
+    }
+
+    /* single node mode only has LOCAL Stream operator */
+    if (stream->type == STREAM_BROADCAST) {
+        stream->smpDesc.distriType = LOCAL_BROADCAST;
     }
 #endif
 
@@ -868,6 +868,13 @@ static Path* wipe_dummy_path(Plan* plan, Path* path)
  */
 void disuse_physical_tlist(Plan* plan, Path* path)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    /* StreamPath may not create stream plan, but it already do this step, so just return. */
+    if (IsA(path, StreamPath)) {
+        return;
+    }
+#endif
+
     /* Only need to undo it for path types handled by create_scan_plan() */
     switch (nodeTag(plan)) {
         case T_SubqueryScan: {
@@ -8263,6 +8270,12 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
     if (is_execute_on_coordinator(lefttree))
         return (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (lefttree->dop == 1) {
+        return (Plan*)make_limit(root, lefttree, limitOffset, limitCount, offset_est, count_est);
+    }
+#endif
+
     Plan* result_plan = NULL;
     /*
      * For a replicate plan such as "scan on replicated table", the result could be random
@@ -8270,11 +8283,8 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
      * random datanode is picked to evalute the limit clause if not at top level of plan.
      */
     bool need_force_oneDN = is_result_random(root, lefttree);
-#ifdef ENABLE_MULTIPLE_NODES
     bool pick_one_dn = (need_force_oneDN && root->query_level != 1);
-#else
-    bool pick_one_dn = false;
-#endif
+
 
     if (is_replicated_plan(lefttree)) {
         if (need_force_oneDN && !IsA(lefttree, CteScan)) {
@@ -8366,8 +8376,7 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
                 streamSort->sortCollations = sortPlan->collations;
                 if (IsA(result_plan, RemoteQuery))
                     ((RemoteQuery*)result_plan)->sort = streamSort;
-                else {
-                    Assert(IsA(result_plan, Stream));
+                else if (IsA(result_plan, Stream)) {
                     ((Stream*)result_plan)->sort = streamSort;
                 }
             }
@@ -9273,7 +9282,27 @@ static List* add_agg_node_to_tlist(List* remote_tlist, Node* expr, Index ressort
     }
     return remote_tlist;
 }
+#ifndef ENABLE_MULTIPLE_NODES
+static bool check_median_walker(Node* node, void* context)
+{
+    if (node == NULL) {
+        return false;
+    } else if (IsA(node, Aggref)) {
+        Aggref* agg_node = (Aggref*)node;
+        /* 5555 and 5556 is median's fn oid */
+        if (agg_node->aggfnoid == 5555 || agg_node->aggfnoid == 5556) {
+            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "median aggregate is not supported in stream plan");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            mark_stream_unsupport();
+        }
+        return false;
+    }
 
+    return expression_tree_walker(node, (bool (*)())check_median_walker, context);
+}
+#endif
 /*
  * process_agg_targetlist
  * The function scans the targetlist to check if the we can push anything
@@ -9312,13 +9341,7 @@ List* process_agg_targetlist(PlannerInfo* root, List** local_tlist)
         foreign_qual_context context;
 
 #ifndef ENABLE_MULTIPLE_NODES
-        if (local_tle->resname && strcmp(local_tle->resname, "median") == 0) {
-            errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                NOTPLANSHIPPING_LENGTH,
-                "median aggregate is not supported in stream plan");
-            securec_check_ss_c(sprintf_rc, "\0", "\0");
-            mark_stream_unsupport();
-        }
+        check_median_walker(expr, NULL);
 #endif
 
         foreign_qual_context_init(&context);
@@ -9577,6 +9600,7 @@ Plan* make_stream_plan(
     Stream* stream = makeNode(Stream);
     Plan* plan = &stream->scan.plan;
 
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (lefttree->dop <= 1) {
         /* while lefttree's dop is 1, no need to add stream node in single node */
@@ -9637,7 +9661,11 @@ Plan* make_stream_plan(
             stream->smpDesc.producerDop = 1;
 
         stream->smpDesc.consumerDop = 1;
+#ifdef ENABLE_MULTIPLE_NODES
         stream->smpDesc.distriType = REMOTE_DISTRIBUTE;
+#else
+        stream->smpDesc.distriType = LOCAL_DISTRIBUTE;
+#endif
         plan->dop = stream->smpDesc.consumerDop;
     }
 
@@ -9690,13 +9718,6 @@ Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* redistr
     Stream* stream = NULL;
     Plan* plan = NULL;
 
-#ifndef ENABLE_MULTIPLE_NODES
-    /* while lefttree's dop is 1, no need to add stream node in single node */
-    if (lefttree->dop <= 1) {
-        return lefttree;
-    }
-#endif
-
     /* For some agg operations (such as grouping sets), we do computing in their original node group */
     if (distribution == NULL) {
         distribution = ng_get_dest_distribution(lefttree);
@@ -9733,7 +9754,11 @@ Plan* make_redistribute_for_agg(PlannerInfo* root, Plan* lefttree, List* redistr
     } else {
         stream->smpDesc.producerDop = 1;
         stream->smpDesc.consumerDop = 1;
+#ifdef ENABLE_MULTIPLE_NODES
         stream->smpDesc.distriType = REMOTE_DISTRIBUTE;
+#else
+        stream->smpDesc.distriType = LOCAL_DISTRIBUTE;
+#endif
         plan->dop = 1;
     }
 

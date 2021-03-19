@@ -20,6 +20,31 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "pgxc/pgxc.h"
+#endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+/*
+ * The pooler connections between the CN and DN are reused,
+ * so the set value may not take effect on the DN.
+ * Therefore, we need to clean those old connections by hand.
+ */
+void printHintInfo(const char* dbName, const char* userName)
+{
+    if (dbName != NULL) {
+        ereport(INFO, (errmsg("To ensure that the settings take effect, run the following statement:"
+                            " \"clean connection to all force for database %s;\" ", dbName),
+                        errhint("This operation may interrupt the current running connection.")));
+    }
+
+    if (userName != NULL) {
+        ereport(INFO, (errmsg("To ensure that the settings take effect, run the following statement:"
+                            " \"clean connection to all force to user %s;\" ", userName),
+                        errhint("This operation may interrupt the current running connection.")));
+    }
+}
+#endif
 
 void AlterSetting(Oid databaseid, Oid roleid, VariableSetStmt* setstmt)
 {

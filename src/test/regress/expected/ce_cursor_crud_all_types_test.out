@@ -223,7 +223,7 @@ END;
 DROP TABLE tr1;
 DROP TABLE tr2;
 DROP CLIENT MASTER KEY mycmk CASCADE;
-NOTICE:  drop cascades to column setting: mycek770
+NOTICE:  drop cascades to column encryption key: mycek770
 \! gs_ktool -d all
 DELETE ALL
  1

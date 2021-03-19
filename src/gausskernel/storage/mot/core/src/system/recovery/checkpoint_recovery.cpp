@@ -669,7 +669,7 @@ bool CheckpointRecovery::DeserializeInProcessTxns(int fd, uint64_t numEntries)
             break;
         }
 
-        if (header.m_magic != CP_MGR_MAGIC || header.m_len > REDO_DEFAULT_BUFFER_SIZE) {
+        if (header.m_magic != CP_MGR_MAGIC || header.m_len > RedoLogBuffer::REDO_DEFAULT_BUFFER_SIZE) {
             MOT_LOG_ERROR("DeserializeInProcessTxns: bad entry %lu - %lu", header.m_magic, header.m_len);
             break;
         }

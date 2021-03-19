@@ -186,7 +186,8 @@ int main(int argc, char* argv[])
 
     /* maintance mode is off on default */
     pset.maintance = false;
-
+    /* client encryption is off on default */
+    pset.enable_client_encryption = false;
     /* We must get COLUMNS here before readline() sets it */
     char* columnsEnvStr = GetEnvStr("COLUMNS");
     pset.popt.topt.env_columns = columnsEnvStr != NULL ? atoi(columnsEnvStr) : 0;
@@ -505,7 +506,7 @@ int main(int argc, char* argv[])
             printf(_("Type \"help\" for help.\n\n"));
 
         canAddHist = true;
-
+        initializeInput(options.no_readline ? 0 : 1);
         successResult = MainLoop(stdin);
     }
 
@@ -583,7 +584,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"port", required_argument, NULL, 'p'},
         {"pset", required_argument, NULL, 'P'},
         {"quiet", no_argument, NULL, 'q'},
-        {"disable-client-logic", no_argument, NULL, 'C'},
+        {"enable-client-encryption", no_argument, NULL, 'C'},
         {"record-separator", required_argument, NULL, 'R'},
         {"record-separator-zero", no_argument, NULL, '0'},
         {"single-step", no_argument, NULL, 's'},
@@ -613,7 +614,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
     errno_t rc = EOK;
+#ifdef USE_READLINE
     useReadline = false;
+#endif
 
     rc = memset_s(options, sizeof(*options), 0, sizeof(*options));
     check_memset_s(rc);
@@ -731,7 +734,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 pset.enable_client_encryption = true;
                 break;
             case 'r':
+#ifdef USE_READLINE
                 useReadline = true;
+#endif
                 break;
             case 'R':
                 if (pset.popt.topt.recordSep.separator != NULL)
@@ -777,7 +782,6 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                         fprintf(stderr, _("%s: could not set variable \"%s\"\n"), pset.progname, value);
                         exit(EXIT_FAILURE);
                     }
-                    setHistSize(value, equal_loc + 1, false);
                 }
 
                 free(value);

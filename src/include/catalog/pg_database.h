@@ -82,7 +82,7 @@ typedef FormData_pg_database *Form_pg_database;
 #define Anum_pg_database_datfrozenxid64	14
 
 DATA(insert OID = 1 (  template1 PGUID ENCODING "LC_COLLATE" "LC_CTYPE" t t -1 0 0 1663 "DB_COMPATIBILITY" _null_ 3));
-SHDESCR("default template for new databases");
+SHDESCR("unmodifiable empty database");
 #define TemplateDbOid            1
 
 #define DEFAULT_DATABASE  "postgres"

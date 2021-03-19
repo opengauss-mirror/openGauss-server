@@ -145,6 +145,7 @@
 #include "postmaster/twophasecleaner.h"
 #include "postmaster/licensechecker.h"
 #include "postmaster/walwriter.h"
+#include "postmaster/walwriterauxiliary.h"
 #include "postmaster/lwlockmonitor.h"
 #include "replication/walreceiver.h"
 #include "replication/datareceiver.h"
@@ -199,7 +200,6 @@
 #include "funcapi.h"
 #include "utils/memprot.h"
 #include "pgstat.h"
-#include "utils/globalpreparestmt.h"
 
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
@@ -262,6 +262,7 @@ static bool isNeedGetLCName = true;
 #define PM_BUSY_ALARM_US 1000000L
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
+#define CHECK_TIMES 10
 
 static char gaussdb_state_file[MAXPGPATH] = {0};
 
@@ -1867,7 +1868,7 @@ int PostmasterMain(int argc, char* argv[])
         write_nondefault_variables(PGC_POSTMASTER);
 #endif
     }
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     /* init hotpatch */
     if (hotpatch_remove_signal_file(t_thrd.proc_cxt.DataDir) == HP_OK) {
         int ret;
@@ -1976,18 +1977,9 @@ int PostmasterMain(int argc, char* argv[])
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
         SHARED_CONTEXT);
-
-    g_instance.cache_cxt.global_cache_mem = AllocSetContextCreate(g_instance.instance_context,
-                                                        "GlobalCacheMemory",
-                                                        ALLOCSET_DEFAULT_MINSIZE,
-                                                        ALLOCSET_DEFAULT_INITSIZE,
-                                                        ALLOCSET_DEFAULT_MAXSIZE,
-                                                        SHARED_CONTEXT,
-                                                        DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
-                                                        false);
-
-    g_instance.plan_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPlanCache();
-    g_instance.prepare_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPrepareStmt();
+        
+    /* create global cache memory context */
+    knl_g_cachemem_create();
 
     /* create node group cache hash table */
     ngroup_info_hash_create();
@@ -2722,19 +2714,22 @@ static int ServerLoop(void)
                 IsRemoteReadModeOn() && get_cur_repl_num())
                 g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
         }
-
-        /* WalWriter in standby is to help WalRevWriter thread. So just keep up with WalRcvWriterPID */
-#ifdef ENABLE_MULTIPLE_NODES
+        /*
+         * Likewise, if we have lost the walwriter process, try to start a new
+         * one.  But this is needed only in normal operation (else we cannot
+         * be writing any new WAL).
+         */
         if (g_instance.pid_cxt.WalWriterPID == 0 && pmState == PM_RUN) {
-#else
-        if (g_instance.pid_cxt.WalWriterPID == 0 && (pmState == PM_RUN ||
+            g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+        }
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && (pmState == PM_RUN ||
             ((pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) && g_instance.pid_cxt.WalRcvWriterPID != 0 &&
               t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE))) {
-#endif
-            g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
+            g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
             ereport(LOG,
-                (errmsg("ServerLoop create WalWriter(%lu) for pmState:%u, ServerMode:%u.",
-                    g_instance.pid_cxt.WalWriterPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
+                (errmsg("ServerLoop create WalWriterAuxiliary(%lu) for pmState:%u, ServerMode:%u.",
+                    g_instance.pid_cxt.WalWriterAuxiliaryPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
         }
 
         /*
@@ -2841,7 +2836,14 @@ static int ServerLoop(void)
             g_instance.pid_cxt.CPMonitorPID = initialize_util_thread(WLM_CPMONITOR);
 
         /* If we have lost the twophase cleaner, try to start a new one */
-        if (IS_PGXC_COORDINATOR && u_sess->attr.attr_common.upgrade_mode != 1 &&
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            u_sess->attr.attr_common.upgrade_mode != 1 &&
             g_instance.pid_cxt.TwoPhaseCleanerPID == 0 && pmState == PM_RUN)
             g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
 
@@ -3291,6 +3293,15 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     ereport(elevel,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("requested backend version is larger than grand version.")));
+            } else if (strcmp(nameptr, "enable_full_encryption") == 0) {
+                bool enable_ce = false;
+                if (!parse_bool(valptr, &enable_ce)) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("invalid value for parameter \"enable_full_encryption\""),
+                            errhint("Valid values are: 0, 1.")));
+                }
+                u_sess->attr.attr_common.enable_full_encryption = enable_ce;
             } else if (strcmp(nameptr, "connect_timeout") == 0) {
                 errno = 0;
                 const uint32 poolerConnectTimeoutMaxValue = 7200;  /* Max value of pooler_connect_timeout */
@@ -3361,6 +3372,11 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         ereport(DEBUG5, (errmsg("gs_restore connected")));
                     } else {
                         ereport(DEBUG5, (errmsg("application %s connected", valptr)));
+                    }
+
+                    errno_t ssrc = strncpy_s(u_sess->proc_cxt.applicationName, NAMEDATALEN, valptr, NAMEDATALEN - 1);
+                    if (ssrc != EOK) {
+                        ereport(WARNING, (errmsg("Save app name %s failed in receive startup packet", valptr)));
                     }
                 }
                 /* Assume it's a generic GUC option */
@@ -3528,22 +3544,23 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
     if ((!AM_WAL_SENDER && !(isMaintenanceConnection &&
                                (clientIsGsql || clientIsCmAgent || t_thrd.postmaster_cxt.senderToBuildStandby))) ||
         t_thrd.postmaster_cxt.senderToDummyStandby) {
-#ifdef ENABLE_MULTIPLE_NODES
-        if (STANDBY_MODE == hashmdata->current_mode)
-            ereport(
-                elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW), errmsg("can not accept connection in standby mode.")));
-        else if (PENDING_MODE == hashmdata->current_mode && !IS_PGXC_COORDINATOR)
-            ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection in pending mode.")));
-#else
+
         if (PENDING_MODE == hashmdata->current_mode && !IS_PGXC_COORDINATOR) {
             ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection in pending mode.")));
-        } else if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
-            ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
-                                errmsg("can not accept connection if hot standby off")));
-        }
+                    errmsg("can not accept connection in pending mode.")));
+        } else {
+#ifdef ENABLE_MULTIPLE_NODES
+            if (STANDBY_MODE == hashmdata->current_mode) {
+                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("can not accept connection in standby mode.")));
+            }
+#else
+            if (hashmdata->current_mode == STANDBY_MODE && !g_instance.attr.attr_storage.EnableHotStandby) {
+                ereport(elevel, (errcode(ERRCODE_CANNOT_CONNECT_NOW),
+                        errmsg("can not accept connection if hot standby off")));
+            }
 #endif
+        }
     }
 
     if ((PM_RUN != pmState) && t_thrd.postmaster_cxt.senderToDummyStandby) {
@@ -4038,7 +4055,14 @@ static void SIGHUP_handler(SIGNAL_ARGS)
             signal_child(g_instance.pid_cxt.StartupPID, SIGHUP);
 
 #ifdef PGXC /* PGXC_COORD */
-        if (IS_PGXC_COORDINATOR && g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
             signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGHUP);
 
         if (GTM_LITE_CN && g_instance.pid_cxt.CsnminSyncPID != 0) {
@@ -4085,6 +4109,9 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
         if (g_instance.pid_cxt.WalWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalWriterPID, SIGHUP);
+
+        if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+            signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGHUP);
 
         if (g_instance.pid_cxt.WalRcvWriterPID != 0)
             signal_child(g_instance.pid_cxt.WalRcvWriterPID, SIGHUP);
@@ -4305,6 +4332,17 @@ static void pmdie(SIGNAL_ARGS)
                 pgaudit_system_stop_ok(FastShutdown);
             }
 
+            if (pmState == PM_STARTUP || pmState == PM_INIT) {
+                KillGraceThreads();
+                WaitGraceThreadsExit();
+
+                // threading: do not clean sema, maybe other thread is using it.
+                cancelSemphoreRelease();
+                cancelIpcMemoryDetach();
+
+                ExitPostmaster(0);
+            }
+
             if (g_instance.pid_cxt.StartupPID != 0)
                 signal_child(g_instance.pid_cxt.StartupPID, SIGTERM);
 
@@ -4324,9 +4362,6 @@ static void pmdie(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.DataReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.DataReceiverPID, SIGTERM);
-
-            if (g_instance.pid_cxt.HeartbeatPID != 0)
-                signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
 
             if (g_instance.pid_cxt.FaultMonitorPID != 0)
                 signal_child(g_instance.pid_cxt.FaultMonitorPID, SIGTERM);
@@ -4430,6 +4465,10 @@ static void pmdie(SIGNAL_ARGS)
                  * state, we still have to close thread pool thread.
                  */
                 g_threadPoolControler->ShutDownThreads();
+            }
+			
+            if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0) {
+                signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
             }
 
             if (pmState == PM_RECOVERY) {
@@ -4609,6 +4648,9 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
 
+                if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                    signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
+
                 if (g_instance.pid_cxt.CBMWriterPID != 0) {
                     Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.CBMWriterPID, SIGTERM);
@@ -4783,6 +4825,9 @@ static void ProcessDemoteRequest(void)
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
                 StopAliveBuildSender();
+
+                if (g_instance.pid_cxt.WalWriterAuxiliaryPID != 0)
+                    signal_child(g_instance.pid_cxt.WalWriterAuxiliaryPID, SIGTERM);
 
                 pmState = PM_WAIT_BACKENDS;
             }
@@ -4980,6 +5025,9 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.pid_cxt.WalWriterPID == 0)
                 g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
 
+            if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0)
+                g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
+
             if (g_instance.pid_cxt.CBMWriterPID == 0 && !dummyStandbyMode &&
                 u_sess->attr.attr_storage.enable_cbm_tracking)
                 g_instance.pid_cxt.CBMWriterPID = initialize_util_thread(CBMWRITER);
@@ -5031,7 +5079,14 @@ static void reaper(SIGNAL_ARGS)
                 t_thrd.postmaster_cxt.audit_primary_start = false;
             }
 
-            if (IS_PGXC_COORDINATOR && u_sess->attr.attr_common.upgrade_mode != 1 &&
+            if (
+#ifdef ENABLE_MULTIPLE_NODES
+                IS_PGXC_COORDINATOR &&
+#else
+                (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+                 t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+                u_sess->attr.attr_common.upgrade_mode != 1 &&
                 g_instance.pid_cxt.TwoPhaseCleanerPID == 0)
                 g_instance.pid_cxt.TwoPhaseCleanerPID = initialize_util_thread(TWOPASECLEANER);
 
@@ -5179,6 +5234,9 @@ static void reaper(SIGNAL_ARGS)
                  */
                 SignalChildren(SIGUSR2);
 
+                if (g_instance.pid_cxt.HeartbeatPID != 0)
+                    signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
+
                 pmState = PM_SHUTDOWN_2;
 
                 /*
@@ -5229,6 +5287,20 @@ static void reaper(SIGNAL_ARGS)
 
             if (!EXIT_STATUS_0(exitstatus))
                 HandleChildCrash(pid, exitstatus, _("WAL writer process"));
+
+            continue;
+        }
+
+        /*
+         * Was it the wal file creator?  Normal exit can be ignored; we'll start a
+         * new one at the next iteration of the postmaster's main loop, if
+         * necessary.	Any other exit condition is treated as a crash.
+         */
+        if (pid == g_instance.pid_cxt.WalWriterAuxiliaryPID) {
+            g_instance.pid_cxt.WalWriterAuxiliaryPID = 0;
+
+            if (!EXIT_STATUS_0(exitstatus))
+                HandleChildCrash(pid, exitstatus, _("WAL file creator process"));
 
             continue;
         }
@@ -5338,11 +5410,12 @@ static void reaper(SIGNAL_ARGS)
             if (XLogArchivingActive()) {
                 if (pmState == PM_RUN) {
                     g_instance.pid_cxt.PgArchPID = pgarch_start();
-                }else if (pmState == PM_HOT_STANDBY)
+                }else if (pmState == PM_HOT_STANDBY) {
                     obs_slot = getObsReplicationSlot();
                     if (obs_slot != NULL) {
                         g_instance.pid_cxt.PgArchPID = pgarch_start();
                     }
+                }
             }
             continue;
         }
@@ -5488,7 +5561,14 @@ static void reaper(SIGNAL_ARGS)
         }
 
         /* Was it the twophasecleaner? If so, try to handle */
-        if (IS_PGXC_COORDINATOR && pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
+        if (
+#ifdef ENABLE_MULTIPLE_NODES
+            IS_PGXC_COORDINATOR &&
+#else
+            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
+             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
+#endif
+            pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
             g_instance.pid_cxt.TwoPhaseCleanerPID = 0;
 
             if (!EXIT_STATUS_0(exitstatus))
@@ -5623,6 +5703,8 @@ static const char* GetProcName(ThreadId pid)
         return "checkpointer process";
     else if (pid == g_instance.pid_cxt.WalWriterPID)
         return "WAL writer process";
+    else if (pid == g_instance.pid_cxt.WalWriterAuxiliaryPID)
+        return "WAL file creator process";
     else if (pid == g_instance.pid_cxt.WalReceiverPID)
         return "WAL receiver process";
     else if (pid == g_instance.pid_cxt.WalRcvWriterPID)
@@ -5987,14 +6069,14 @@ static void PostmasterStateMachine(void)
             g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
             g_instance.pid_cxt.BgWriterPID == 0 && g_instance.pid_cxt.StatementPID == 0 &&
             (g_instance.pid_cxt.CheckpointerPID == 0 || !g_instance.fatal_error) &&
-            g_instance.pid_cxt.WalWriterPID == 0 && g_instance.pid_cxt.AutoVacPID == 0 &&
+            g_instance.pid_cxt.WalWriterPID == 0 && g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 &&
+            g_instance.pid_cxt.AutoVacPID == 0 &&
             g_instance.pid_cxt.WLMCollectPID == 0 && g_instance.pid_cxt.WLMMonitorPID == 0 &&
             g_instance.pid_cxt.WLMArbiterPID == 0 && g_instance.pid_cxt.CPMonitorPID == 0 &&
             g_instance.pid_cxt.PgJobSchdPID == 0 && g_instance.pid_cxt.CBMWriterPID == 0 &&
             g_instance.pid_cxt.SnapshotPID == 0 && g_instance.pid_cxt.PercentilePID == 0 &&
-            g_instance.pid_cxt.RemoteServicePID == 0 && g_instance.pid_cxt.HeartbeatPID == 0 &&
-            g_instance.pid_cxt.AshPID == 0 && g_instance.pid_cxt.CsnminSyncPID == 0 &&
-            g_instance.pid_cxt.BarrierCreatorPID == 0 &&
+            g_instance.pid_cxt.RemoteServicePID == 0 && g_instance.pid_cxt.AshPID == 0 &&
+            g_instance.pid_cxt.CsnminSyncPID == 0 && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
 #ifdef ENABLE_MULTIPLE_NODES
             g_instance.pid_cxt.CommPoolerCleanPID == 0 &&
             streaming_backend_manager(STREAMING_BACKEND_SHUTDOWN) &&
@@ -6091,7 +6173,8 @@ static void PostmasterStateMachine(void)
          */
         if (g_instance.pid_cxt.PgArchPID == 0 && CountChildren(BACKEND_TYPE_ALL) == 0 &&
             g_instance.pid_cxt.WalReceiverPID == 0 && g_instance.pid_cxt.WalRcvWriterPID == 0 &&
-            g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0) {
+            g_instance.pid_cxt.DataReceiverPID == 0 && g_instance.pid_cxt.DataRcvWriterPID == 0 &&
+            g_instance.pid_cxt.HeartbeatPID == 0) {
             pmState = PM_WAIT_DEAD_END;
         }
     }
@@ -6124,6 +6207,7 @@ static void PostmasterStateMachine(void)
             Assert(g_instance.pid_cxt.BgWriterPID == 0);
             Assert(g_instance.pid_cxt.CheckpointerPID == 0);
             Assert(g_instance.pid_cxt.WalWriterPID == 0);
+            Assert(g_instance.pid_cxt.WalWriterAuxiliaryPID == 0);
             Assert(g_instance.pid_cxt.AutoVacPID == 0);
             Assert(g_instance.pid_cxt.PgJobSchdPID == 0);
             Assert(g_instance.pid_cxt.CBMWriterPID == 0);
@@ -6998,12 +7082,6 @@ static void handle_recovery_started()
         if (IS_PGXC_DATANODE && t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE &&
             !IS_DN_WITHOUT_STANDBYS_MODE() && IsRemoteReadModeOn())
             g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
-#ifndef ENABLE_MULTIPLE_NODES
-        PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
-        ereport(LOG,
-            (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
-                wal_get_role_string(get_cur_mode()))));
-#endif
         pmState = PM_RECOVERY;
     }
 }
@@ -7017,12 +7095,10 @@ static void handle_begin_hot_standby()
         Assert(g_instance.pid_cxt.PgStatPID == 0);
         if (!dummyStandbyMode)
             g_instance.pid_cxt.PgStatPID = pgstat_start();
-#ifdef ENABLE_MULTIPLE_NODES
         PMUpdateDBState(NORMAL_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
             (errmsg("update gaussdb state file: db state(NORMAL_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
-#endif
 
         ereport(LOG, (errmsg("database system is ready to accept read only connections")));
 
@@ -7141,17 +7217,16 @@ static void sigusr1_handler(SIGNAL_ARGS)
         g_instance.status == NoShutdown) {
         PMUpdateDBStateLSN();
         ereport(LOG, (errmsg("set lsn after recovery done in gaussdb state file")));
-
-#ifndef ENABLE_MULTIPLE_NODES
-        if (g_instance.pid_cxt.WalWriterPID == 0 && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
-            (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
-            g_instance.pid_cxt.WalWriterPID = initialize_util_thread(WALWRITER);
-            ereport(LOG,
-                (errmsg("sigusr1_handler create WalWriter(%lu) after local recovery is done. pmState:%u, ServerMode:%u",
-                    g_instance.pid_cxt.WalWriterPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
-        }
-#endif
     }
+
+    if (g_instance.pid_cxt.WalWriterAuxiliaryPID == 0 && t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        (pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY)) {
+        g_instance.pid_cxt.WalWriterAuxiliaryPID = initialize_util_thread(WALWRITERAUXILIARY);
+        ereport(LOG,
+            (errmsg("sigusr1_handler create WalWriterAuxiliary(%lu) after local recovery is done. pmState:%u, ServerMode:%u",
+                g_instance.pid_cxt.WalWriterAuxiliaryPID, pmState, t_thrd.postmaster_cxt.HaShmData->current_mode)));
+    }
+
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_WAITING)) {
         PMUpdateDBState(WAITING_STATE, get_cur_mode(), get_cur_repl_num());
         ereport(LOG,
@@ -7312,7 +7387,7 @@ static void sigusr1_handler(SIGNAL_ARGS)
         }
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined (ENABLE_MULTIPLE_NODES) || defined (ENABLE_PRIVATEGAUSS)
     check_and_process_hotpatch();
 #endif
 
@@ -9496,14 +9571,16 @@ static void check_and_reset_ha_listen_port(void)
             signal_child(g_instance.pid_cxt.RemoteServicePID, SIGTERM);
 
         ListenSocketRegulation();
-
-        if (t_thrd.postmaster_cxt.HaShmData != NULL && 
-            t_thrd.postmaster_cxt.HaShmData->repl_list_num == 0 && 
-            t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
-            t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
-            SetServerMode(NORMAL_MODE);
-        }
     }
+    
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.postmaster_cxt.HaShmData != NULL && 
+        t_thrd.postmaster_cxt.HaShmData->repl_list_num == 0 && 
+        t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+        t_thrd.postmaster_cxt.HaShmData->current_mode = NORMAL_MODE;
+        SetServerMode(NORMAL_MODE);
+    }
+#endif
 
     return;
 }
@@ -9571,6 +9648,9 @@ static void SetAuxType()
             break;
         case WALWRITER:
             t_thrd.bootstrap_cxt.MyAuxProcType = WalWriterProcess;
+            break;
+        case WALWRITERAUXILIARY:
+            t_thrd.bootstrap_cxt.MyAuxProcType = WalWriterAuxiliaryProcess;
             break;
         case WALRECEIVER:
             t_thrd.bootstrap_cxt.MyAuxProcType = WalReceiverProcess;
@@ -9805,12 +9885,14 @@ int GaussDbAuxiliaryThreadMain(knl_thread_arg* arg)
 
         case WALWRITER:
             /* don't set signals, walwriter has its own agenda */
-#ifndef ENABLE_MULTIPLE_NODES
-            /* walwriter thead only do pre init xlog file, need not init xlog access */
-            if (t_thrd.postmaster_cxt.HaShmData->current_mode != STANDBY_MODE)
-#endif
             InitXLOGAccess();
             WalWriterMain();
+            proc_exit(1); /* should never return */
+            break;
+
+        case WALWRITERAUXILIARY:
+            /* don't set signals, walwriterauxiliary has its own agenda */
+            WalWriterAuxiliaryMain();
             proc_exit(1); /* should never return */
             break;
 
@@ -10079,6 +10161,7 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case BGWRITER:
         case CHECKPOINT_THREAD:
         case WALWRITER:
+        case WALWRITERAUXILIARY:
         case WALRECEIVER:
         case WALRECWRITE:
         case DATARECIVER:
@@ -10170,6 +10253,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10187,6 +10273,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10209,6 +10298,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10230,6 +10322,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             /* Need a PGPROC to run CreateSharedMemoryAndSemaphores */
             InitProcess();
@@ -10289,6 +10384,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             t_thrd.postmaster_cxt.IsRPCWorkerThread = true;
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
 
             InitProcessAndShareMemory();
 
@@ -10301,6 +10399,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             SnapshotMain();
@@ -10310,6 +10412,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             ActiveSessionCollectMain();
@@ -10319,6 +10425,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             StatementFlushMain();
@@ -10328,6 +10438,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             InitShmemAccess(UsedShmemSegAddr);
 
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcess();
             CreateSharedMemoryAndSemaphores(false, 0);
             PercentileMain();
@@ -10356,6 +10470,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
         case BARRIER_CREATOR: {
             if (START_BARRIER_CREATOR) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+                if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                    return STATUS_ERROR;
+                }
                 InitProcessAndShareMemory();
                 barrier_creator_main();
                 proc_exit(0);
@@ -10371,6 +10488,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
         case STREAMING_BACKEND: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+
             InitProcessAndShareMemory();
             streaming_backend_main(arg);
             proc_exit(0);
@@ -10379,6 +10500,10 @@ int GaussDbThreadMain(knl_thread_arg* arg)
        case CSNMIN_SYNC: {
             if (GTM_LITE_CN) {
                 t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+                if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                    return STATUS_ERROR;
+                }
+
                 InitProcessAndShareMemory();
                 csnminsync_main();
                 proc_exit(0);
@@ -10431,6 +10556,7 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<TRACK_STMT_CLEANER>, TRACK_STMT_CLEANER, "TrackStmtClean", "track stmt clean worker" },
     { GaussDbThreadMain<CHECKPOINT_THREAD>, CHECKPOINT_THREAD, "checkpointer", "checkpointer" },
     { GaussDbThreadMain<WALWRITER>, WALWRITER, "WALwriter", "WAL writer" },
+    { GaussDbThreadMain<WALWRITERAUXILIARY>, WALWRITERAUXILIARY, "WALwriteraux", "WAL writer auxiliary" },
     { GaussDbThreadMain<WALRECEIVER>, WALRECEIVER, "WALreceiver", "WAL receiver" },
     { GaussDbThreadMain<WALRECWRITE>, WALRECWRITE, "WALrecwriter", "WAL receive writer" },
     { GaussDbThreadMain<DATARECIVER>, DATARECIVER, "datareceiver", "data receiver" },
@@ -10621,6 +10747,8 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     knl_g_disconn_node_context_data disconn_node;
     text* arg0 = (text*)PG_GETARG_DATUM(0);
     text* arg1 = (text*)PG_GETARG_DATUM(1);
+    bool redoDone = false;
+    int checkTimes = CHECK_TIMES;
     if (arg0 == NULL) {
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_ATTRIBUTE), errmsg("Invalid null pointer attribute for disable_conn()")));
@@ -10656,7 +10784,16 @@ Datum disable_conn(PG_FUNCTION_ARGS)
      * Sleep 0.5s is an auxiliary way to check whether all xlog has been redone.
      */
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
-        if(!knl_g_get_redo_finish_status()) {
+        while (checkTimes--) {
+            if (knl_g_get_redo_finish_status()) {
+                redoDone = true;
+                break;
+            }
+            ereport(LOG, (errmsg("%d redo_done", redoDone)));
+            sleep(0.01);
+        }
+        ereport(LOG, (errmsg("%d redo_done", redoDone)));
+        if (!redoDone) {
             g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node = true;
             ereport(ERROR, (errcode_for_file_access(),
                 errmsg("could not add lock when DN is not redo all xlog, redo done flag is false")));
@@ -10721,6 +10858,7 @@ Datum disable_conn(PG_FUNCTION_ARGS)
     SpinLockAcquire(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
     g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data = disconn_node;
     SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
+    ereport(LOG, (errcode(ERRCODE_LOG), errmsg("disable_conn set mode to %s", disconn_mode)));
     PG_RETURN_VOID();
 }
 

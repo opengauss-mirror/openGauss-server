@@ -612,6 +612,17 @@ static void CleanupJitContextPrimary(JitContext* jitContext)
                 jitContext->m_index->DestroyKey(jitContext->m_endIteratorKey);
                 jitContext->m_endIteratorKey = nullptr;
             }
+
+            if (jitContext->m_beginIterator != nullptr) {
+                destroyIterator(jitContext->m_beginIterator);
+                jitContext->m_beginIterator = nullptr;
+            }
+
+            if (jitContext->m_endIterator != nullptr) {
+                destroyIterator(jitContext->m_endIterator);
+                jitContext->m_endIterator = nullptr;
+            }
+
             jitContext->m_index = nullptr;
         }
 
@@ -636,6 +647,17 @@ static void CleanupJitContextInner(JitContext* jitContext)
                 jitContext->m_innerIndex->DestroyKey(jitContext->m_innerEndIteratorKey);
                 jitContext->m_innerEndIteratorKey = nullptr;
             }
+
+            if (jitContext->m_innerBeginIterator != nullptr) {
+                destroyIterator(jitContext->m_innerBeginIterator);
+                jitContext->m_innerBeginIterator = nullptr;
+            }
+
+            if (jitContext->m_innerEndIterator != nullptr) {
+                destroyIterator(jitContext->m_innerEndIterator);
+                jitContext->m_innerEndIterator = nullptr;
+            }
+
             jitContext->m_innerIndex = nullptr;
         }
     }

@@ -42,8 +42,8 @@
 #define SLOT_AREAD_HEADER_MAGIC_NO 0xBCD7BCD7
 #define GS_TRC_CFG_MAGIC_N 0xABCDABCE
 
-#define MIN_BUF_SIZE 128         // The buffer size when it's tracing to file
-#define DFT_BUF_SIZE 1073741824  // Default trace buffer size.  1GB.  must be a power of 2
+#define MIN_BUF_SIZE MAX_TRC_RC_SZ  // The buffer size when it's tracing to file
+#define DFT_BUF_SIZE 1073741824     // Default trace buffer size.  1GB.  must be a power of 2
 
 #define CACHE_LINE_SIZE 64
 
@@ -144,8 +144,8 @@ typedef struct trace_infra {
     /* the number of used slots since startup */
     volatile uint64_t g_slot_count;
 
-    /* ensure the previous one field in an sepreate cacheline */
-    char pad[CACHE_LINE_SIZE - sizeof(uint64_t)];
+    /* ensure the previous two field in an sepreate cacheline */
+    char pad[CACHE_LINE_SIZE - 2 * sizeof(uint64_t)];
 
     /* buffer size + size of this struct */
     uint64_t total_size;

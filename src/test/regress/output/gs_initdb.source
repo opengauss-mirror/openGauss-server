@@ -102,3 +102,10 @@ freezing database postgres ... ok
 \! @abs_bindir@/gs_initdb -S -A trust --auth-host='ident' --auth-local='peer' --auth-host='ident' --auth-local='peer' -D @testtablespace@/test8 --nodename coorn8 -U test_initdb --pwfile=@testtablespace@/passwd.txt >> /dev/null 2>&1
 \! rm -rf @testtablespace@/passwd.txt
 \! rm -rf @testtablespace@/test8
+-- use env PGDATA
+\! mkdir -p @testtablespace@/test9
+\! export PGDATA=@testtablespace@/test9 && ( @abs_bindir@/gs_initdb -w test@123 --nodename coorn9 >> @abs_bindir@/test_initdb9.log 2>&1 )
+\! cat @abs_bindir@/test_initdb9.log | grep Success
+Success. You can now start the database server of single node using:
+\! rm -f @abs_bindir@/test_initdb9.log
+\! rm -rf @testtablespace@/test9

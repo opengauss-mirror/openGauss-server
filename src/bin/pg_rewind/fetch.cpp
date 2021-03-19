@@ -50,7 +50,6 @@ const int XLOG_NAME_LENGTH = 24;
 
 static BuildErrorCode receiveFileChunks(const char* sql, FILE* file);
 static BuildErrorCode execute_pagemap(datapagemap_t* pagemap, const char* path, FILE* file);
-static void execute_waldatamap(datapagemap_t* pagemap, const char* path, size_t block_size);
 static char* run_simple_query(const char* sql);
 static BuildErrorCode recurse_dir(const char* datadir, const char* path, process_file_callback_t callback);
 static void get_slot_name_by_app_name(void);
@@ -100,8 +99,11 @@ BuildErrorCode libpqGetParameters(void)
     if (str == NULL) {
         return BUILD_FATAL;
     }
-    if (strcmp(str, "f") != 0)
+    if (strcmp(str, "f") != 0) {
         pg_log(PG_ERROR, "source server must not be in recovery mode\n");
+        pg_free(str);
+        return BUILD_ERROR;
+    }
     pg_free(str);
 
     /*
@@ -114,9 +116,15 @@ BuildErrorCode libpqGetParameters(void)
         return BUILD_FATAL;
     }
     str2 = run_simple_query("SHOW enable_incremental_checkpoint");
+    if (str2 == NULL) {
+        return BUILD_FATAL;
+    }
     if (strcmp(str, "on") != 0 && strcmp(str2, "on") != 0) {
         pg_fatal(
             "full_page_writes must be enabled in the source server when the incremental checkpoint is not used.\n");
+        pg_free(str);
+        pg_free(str2);
+        return BUILD_FATAL;
     }
     pg_free(str);
     pg_free(str2);
@@ -157,17 +165,24 @@ static char* run_simple_query(const char* sql)
 
     res = PQexec(conn, sql);
 
-    if (PQresultStatus(res) != PGRES_TUPLES_OK)
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         pg_fatal("error running query (%s) in source server: %s", sql, PQresultErrorMessage(res));
-
+        goto error;
+    }
     /* sanity check the result set */
-    if (PQnfields(res) != 1 || PQntuples(res) != 1 || PQgetisnull(res, 0, 0))
+    if (PQnfields(res) != 1 || PQntuples(res) != 1 || PQgetisnull(res, 0, 0)) {
         pg_fatal("unexpected result set from query\n");
+        goto error;
+    }
 
     result = pg_strdup(PQgetvalue(res, 0, 0));
 
     PQclear(res);
 
+    return result;
+
+error:
+    PQclear(res);
     return result;
 }
 
@@ -185,93 +200,32 @@ void libpqRequestCheckpoint(void)
 /*
  * Calls pg_current_xlog_insert_location() function
  */
-XLogRecPtr libpqGetCurrentXlogInsertLocation(void)
+XLogRecPtr libpqGetCurrentXlogFlushLocation(void)
 {
-    XLogRecPtr result;
+    XLogRecPtr result = InvalidXLogRecPtr;
     uint32 hi = 0;
     uint32 lo = 0;
     char* val = NULL;
 
-    val = run_simple_query("SELECT pg_current_xlog_insert_location()");
-    if (sscanf_s(val, "%X/%X", &hi, &lo) != 2)
+    val = run_simple_query("SELECT pg_get_flush_lsn()");
+    if (val == NULL) {
+        pg_fatal("Could not get source flush lsn.\n");
+        goto error;
+    }
+    if (sscanf_s(val, "%X/%X", &hi, &lo) != 2) {
         pg_fatal("unrecognized result \"%s\" for current XLOG insert location\n", val);
-
+        goto error;
+    }
     result = ((uint64)hi) << 32 | lo;
 
     free(val);
     val = NULL;
 
     return result;
-}
 
-/*
- * Get physical slot.
- */
-void libpqGetSourceSlot(XLogRecPtr* recptr)
-{
-    PGresult* res = NULL;
-    const char* sql = NULL;
-    int i;
-    uint32 hi = 0;
-    uint32 lo = 0;
-
-    sql = "select * from pg_get_replication_slots();";
-    res = PQexec(conn, sql);
-
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_ERROR, "could not fetch file list: %s", PQresultErrorMessage(res));
-        return;
-    }
-
-    /* sanity check the result set */
-    if (PQnfields(res) != 9) {
-        PQclear(res);
-        pg_fatal("unexpected result set while fetching file list\n");
-    }
-
-    /* Read result to local variables */
-    for (i = 0; i < PQntuples(res); i++) {
-        char* slot_name = PQgetvalue(res, i, 0);
-        if (strcmp(slot_name, source_slot_name) != 0) {
-            continue;
-        }
-        char* val = PQgetvalue(res, i, 7);
-        if (sscanf_s(val, "%X/%X", &hi, &lo) != 2) {
-            pg_log(PG_PROGRESS, "unrecognized result \"%s\" for slot restart_lsn\n", val);
-        }
-        *recptr = ((uint64)hi) << 32 | lo;
-        break;
-    }
-    PQclear(res);
-    res = NULL;
-    return;
-}
-
-/*
- * Get remote physical slot name.
- */
-char* libpqGetTargetSlotName()
-{
-    PGresult* res = NULL;
-    const char* sql = NULL;
-    char* target_slot_name = NULL;
-
-    sql = "select * from pg_get_replication_slot_name();";
-    res = PQexec(conn, sql);
-
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_ERROR, "could not fetch pg_get_replication_slot_name list: %s", PQresultErrorMessage(res));
-    }
-
-    /* sanity check the result set */
-    if (PQnfields(res) != 1) {
-        PQclear(res);
-        res = NULL;
-        pg_fatal("unexpected result set while fetching pg_get_replication_slot_name list\n");
-    }
-    target_slot_name = pg_strdup(PQgetvalue(res, 0, 0));
-    PQclear(res);
-    return target_slot_name;
+error:
+    free(val);
+    return result;
 }
 
 /*
@@ -283,7 +237,7 @@ BuildErrorCode fetchSourceFileList()
     const char* sql = NULL;
     int i;
     BuildErrorCode rv = BUILD_SUCCESS;
-    
+
     /*
      * Create a recursive directory listing of the whole data directory.
      *
@@ -309,6 +263,7 @@ BuildErrorCode fetchSourceFileList()
         pg_fatal("unexpected result set while fetching file list\n");
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
     }
+
     /* wait for local stat */
     rv = waitEndTargetFileStatThread();
     PG_CHECKRETURN_AND_FREE_PGRESULT_RETURN(rv, res);
@@ -436,7 +391,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
         /* Read result set to local variables */
         errorno = memcpy_s(&chunkoff, sizeof(int64), PQgetvalue(res, 0, 1), sizeof(int64));
         securec_check_c(errorno, "\0", "\0");
-        chunkoff = ntohl64(chunkoff);
+        chunkoff = (int64)ntohl64((uint64)chunkoff);
         chunksize = PQgetlength(res, 0, 2);
 
         filenamelen = PQgetlength(res, 0, 0);
@@ -467,8 +422,10 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             continue;
         }
 
-        pg_log(PG_DEBUG, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n", filename, chunkoff, chunksize);
-        fprintf(file, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n", filename, chunkoff, chunksize);
+        pg_log(PG_DEBUG, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n",
+               filename, chunkoff, chunksize);
+        fprintf(file, "received chunk for file \"%s\", offset " INT64_FORMAT ", size %d\n",
+                filename, chunkoff, chunksize);
 
         open_target_file(filename, false);
         pg_free(filename);
@@ -498,23 +455,20 @@ char* fetchFile(char* filename, size_t* filesize)
 
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         pg_log(PG_ERROR, "could not fetch remote file \"%s\": %s", filename, PQresultErrorMessage(res));
-        PQclear(res);
-        res = NULL;
+        goto error;
     }
 
     /* sanity check the result set */
     if (PQntuples(res) != 1 || PQgetisnull(res, 0, 0)) {
         pg_fatal("unexpected result set while fetching remote file \"%s\"\n", filename);
-        PQclear(res);
-        res = NULL;
+        goto error;
     }
 
     /* Read result to local variables */
     len = PQgetlength(res, 0, 0);
     if (len < 0 || len > max_file_size) {
         pg_fatal("unexpected file size of remote file \"%s\"\n", filename);
-        PQclear(res);
-        res = NULL;
+        goto error;
     }
     result = (char*)pg_malloc(len + 1);
     errorno = memcpy_s(result, len + 1, PQgetvalue(res, 0, 0), len);
@@ -529,6 +483,11 @@ char* fetchFile(char* filename, size_t* filesize)
     PQclear(res);
     res = NULL;
 
+    return result;
+
+error:
+    PQclear(res);
+    res = NULL;
     return result;
 }
 
@@ -607,9 +566,6 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
         /* If this is a relation file, copy the modified blocks */
         execute_pagemap(&entry->pagemap, entry->path, file);
         PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
-        if (strcmp(entry->path, "pg_xlog") == 0) {
-            pg_log(PG_PROGRESS, "pg_xlog type %d.\n", entry->type);
-        }
 
         switch (entry->action) {
             case FILE_ACTION_NONE:
@@ -677,86 +633,6 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
 
     fprintf(file, "fetch and write file based on temporary table fetchchunks.\n");
     return receiveFileChunks(sql, file);
-}
-
-/*
- * Fetch all the  required replication data blocks from remote source data directory.
- */
-BuildErrorCode executeWalDataMap(filemap_t* map)
-{
-    file_entry_t* entry = NULL;
-    const char* sql = NULL;
-    PGresult* res = NULL;
-    int i;
-
-    /*
-     * First create a temporary table, and load it with the blocks that we
-     * need to fetch.
-     */
-    sql = "CREATE TEMPORARY TABLE fetchchunks_ws(path text, begin int4, len int4);";
-    res = PQexec(conn, sql);
-
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        pg_fatal("could not create temporary table: %s", PQresultErrorMessage(res));
-        PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
-    }
-
-    sql = "COPY fetchchunks_ws FROM STDIN";
-    res = PQexec(conn, sql);
-
-    if (PQresultStatus(res) != PGRES_COPY_IN) {
-        pg_fatal("could not send file list: %s", PQresultErrorMessage(res));
-        PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
-    }
-
-    for (i = 0; i < map->narray; i++) {
-        entry = map->array[i];
-
-        /* report all the path to check whether it's correct */
-        pg_log(PG_DEBUG, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
-
-        /* If this is a relation file, copy the modified blocks */
-        if (entry->isrelfile)
-            execute_waldatamap(&entry->pagemap, entry->path, entry->block_size);
-    }
-
-    if (PQputCopyEnd(conn, NULL) != 1) {
-        pg_fatal("could not send end-of-COPY: %s", PQerrorMessage(conn));
-        PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
-    }
-
-    while ((res = PQgetResult(conn)) != NULL) {
-        if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-            pg_fatal("unexpected result while sending file list: %s", PQresultErrorMessage(res));
-            PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
-        }
-        PQclear(res);
-    }
-
-    /*
-     * We've now copied the list of file ranges that we need to fetch to the
-     * temporary table. Now, actually fetch all of those ranges.
-     */
-    sql = "SELECT path, begin, \n"
-          "  pg_read_binary_file(path, begin, len, true) AS chunk\n"
-          "FROM fetchchunks_ws\n";
-
-    return receiveFileChunks(sql, NULL);
-}
-
-static void execute_waldatamap(datapagemap_t* pagemap, const char* path, size_t block_size)
-{
-    datapagemap_iterator_t* iter = NULL;
-    BlockNumber blkno;
-    off_t offset;
-
-    iter = datapagemap_iterate(pagemap);
-    while (datapagemap_next(iter, &blkno)) {
-        offset = blkno * block_size;
-
-        fetch_file_range(path, offset, offset + block_size);
-    }
-    pg_free(iter);
 }
 
 /*
@@ -1124,6 +1000,9 @@ bool checkDummyStandbyConnection(void)
     res = PQexec(conn, "select peer_role, state from pg_stat_get_wal_senders()");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         pg_log(PG_ERROR, "could not get dummystandby connection status on source: %s", PQresultErrorMessage(res));
+        PQclear(res);
+        res = NULL;
+        return ret;
     }
 
     /* Read result with keyword "Secondary" and "Streaming" */

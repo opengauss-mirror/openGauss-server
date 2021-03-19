@@ -1050,7 +1050,7 @@ void TruncateCLOG(TransactionId oldestXact)
     WriteTruncateXlogRec(cutoffPage);
 
     /* Now we can remove the old CLOG segment(s) */
-    SimpleLruTruncate(ClogCtl(cutoffPage), cutoffPage);
+    SimpleLruTruncate(ClogCtl(0), cutoffPage, true, NUM_CLOG_PARTITIONS);
 
     ereport(LOG, (errmsg("Truncate CLOG at xid %lu", oldestXact)));
 }
@@ -1078,7 +1078,7 @@ static void WriteTruncateXlogRec(int64 pageno)
     XLogBeginInsert();
     XLogRegisterData((char *)(&pageno), sizeof(int64));
     recptr = XLogInsert(RM_CLOG_ID, CLOG_TRUNCATE);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 }
 
 /*
@@ -1118,7 +1118,7 @@ void clog_redo(XLogReaderState *record)
          */
         ClogCtl(pageno)->shared->latest_page_number = pageno;
 
-        SimpleLruTruncate(ClogCtl(pageno), pageno);
+        SimpleLruTruncate(ClogCtl(0), pageno, true, NUM_CLOG_PARTITIONS);
     } else
         ereport(PANIC, (errmsg("clog_redo: unknown op code %u", (uint32)info)));
 }

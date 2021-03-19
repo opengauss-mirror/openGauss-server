@@ -113,27 +113,9 @@ public:
     /**
      * @brief Appends update row redo log entry.
      * @param redoLogBuffer The redo buffer of the transaction.
-     * @param table The table identifier.
-     * @param primaryKey The primary key.
-     * @param attr The field.
-     * @param attrSize The field size.
-     * @param newValue Unused.
+     * @param row The row.
+     * @param modifiedColumns Bitmap set of modified columns.
      */
-    static bool AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, uint64_t primaryKey, uint64_t attr,
-        uint64_t attrSize, uint64_t newValue, uint64_t externalId);
-
-    /**
-     * @brief Appends update row redo log entry.
-     * @param redoLogBuffer The redo buffer of the transaction.
-     * @param table The table identifier.
-     * @param primaryKey The primary key.
-     * @param attr The field.
-     * @param attrSize The field size.
-     * @param newValue Unused.
-     */
-    static bool AppendUpdate(RedoLogBuffer& redoLogBuffer, uint64_t table, Key* primaryKey, uint64_t attr,
-        uint64_t attrSize, uint64_t newValue, uint64_t externalId);
-
     static bool AppendUpdate(RedoLogBuffer& redoLogBuffer, Row* row, BitmapSet* modifiedColumns);
 
     /**
@@ -242,6 +224,22 @@ public:
      * @param len The data buffer length.
      */
     static void ApplyData(const void* data, size_t len);
+
+    /* @def Create Table redo format overhead. */
+    static constexpr uint32_t REDO_CREATE_TABLE_FORMAT_OVERHEAD =
+        sizeof(OperationCode) + sizeof(size_t) + sizeof(EndSegmentBlock);
+
+    /* @def Max limit of table serialize size. */
+    static constexpr uint32_t REDO_MAX_TABLE_SERIALIZE_SIZE =
+        RedoLogBuffer::REDO_DEFAULT_BUFFER_SIZE - REDO_CREATE_TABLE_FORMAT_OVERHEAD;
+
+    /* @def Create Index redo format overhead. */
+    static constexpr uint32_t REDO_CREATE_INDEX_FORMAT_OVERHEAD =
+        sizeof(OperationCode) + sizeof(size_t) + sizeof(uint64_t) + sizeof(EndSegmentBlock);
+
+    /* @def Max limit of index serialize size. */
+    static constexpr uint32_t REDO_MAX_INDEX_SERIALIZE_SIZE =
+        RedoLogBuffer::REDO_DEFAULT_BUFFER_SIZE - REDO_CREATE_INDEX_FORMAT_OVERHEAD;
 };
 }  // End of namespace MOT
 

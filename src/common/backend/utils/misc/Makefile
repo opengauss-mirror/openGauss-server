@@ -33,16 +33,16 @@ endif
 include $(top_srcdir)/src/gausskernel/common.mk
 
 # guc-file is compiled as part of guc
-guc.o: guc-file.cpp
+guc.o: guc-file.inc
 
-guc-file.cpp: guc-file.l
+guc-file.inc: guc-file.l
 ifdef FLEX
 	$(FLEX) $(FLEXFLAGS) -o'$@' $<
 else
 	@$(missing) flex $< $@
 endif
 
-# Note: guc-file.cpp is not deleted by 'make clean',
+# Note: guc-file.inc is not deleted by 'make clean',
 # since we want to ship it in distribution tarballs.
 clean:
 	@rm -f lex.yy.cpp

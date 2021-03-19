@@ -113,7 +113,10 @@ Selectivity scalararraysel_containment(
         useOr = !useOr;
 
     /* Get array element stats for var, if available */
-    if (HeapTupleIsValid(vardata.statsTuple)) {
+    bool isvalidstats = HeapTupleIsValid(vardata.statsTuple) && 
+        statistic_proc_security_check(&vardata, cmpfunc->fn_oid);
+
+    if (isvalidstats) {
         Form_pg_statistic stats;
         Datum* values = NULL;
         int nvalues;
@@ -322,7 +325,8 @@ static Selectivity calc_arraycontsel(VariableStatData* vardata, Datum constval, 
      */
     array = DatumGetArrayTypeP(constval);
 
-    if (HeapTupleIsValid(vardata->statsTuple)) {
+    if (HeapTupleIsValid(vardata->statsTuple) &&
+        statistic_proc_security_check(vardata, cmpfunc->fn_oid)) {
         Form_pg_statistic stats;
         Datum* values = NULL;
         int nvalues;

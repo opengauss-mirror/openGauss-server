@@ -1448,6 +1448,17 @@ static void AcquireDeletionLock(const ObjectAddress* object, int flags)
             LockRelationOid(object->objectId, ShareUpdateExclusiveLock);
         else
             LockRelationOid(object->objectId, AccessExclusiveLock);
+
+        /* we must acquire the base relation lock for matview */
+        if (get_rel_relkind(object->objectId) == RELKIND_MATVIEW) {
+            Relation matview = heap_open(object->objectId, AccessShareLock);
+            if (matview->rd_rules != NULL &&
+                matview->rd_rules->numLocks == 1) {
+                Query *query = get_matview_query(matview);
+                acquire_mativew_tables_lock(query, false);
+            }
+            heap_close(matview, AccessShareLock);
+        }
     } else {
         /* assume we should lock the whole object not a sub-object */
         LockDatabaseObject(object->classId, object->objectId, 0, AccessExclusiveLock);
@@ -3066,7 +3077,7 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
             appendStringInfo(buffer, _("view %s"), relname);
             break;
         case RELKIND_CONTQUERY:
-            appendStringInfo(buffer, _("contquery %s"), relname);
+            appendStringInfo(buffer, _("contview %s"), relname);
             break;
         case RELKIND_MATVIEW:
             appendStringInfo(buffer, _("materialized view %s"),relname);

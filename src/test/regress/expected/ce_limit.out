@@ -48,7 +48,7 @@ SELECT * from t_num order by id limit 5 offset 3;
 
 DROP TABLE t_num;
 DROP CLIENT MASTER KEY MyCMK CASCADE;
-NOTICE:  drop cascades to column setting: mycek
+NOTICE:  drop cascades to column encryption key: mycek
 \! gs_ktool -d all
 DELETE ALL
  1

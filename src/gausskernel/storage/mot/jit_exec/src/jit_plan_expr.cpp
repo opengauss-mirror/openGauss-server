@@ -156,7 +156,8 @@ void RangeScanExpressionCollector::EvaluateScanType()
 
     // first step: sort in-place all collected operators
     if (_index_op_count > 1) {
-        std::sort(&_index_ops[0], &_index_ops[_index_op_count - 1], IndexOpCmp);
+        MOT_LOG_TRACE("Sorting index ops")
+        std::stable_sort(&_index_ops[0], &_index_ops[_index_op_count], IndexOpCmp);
     }
 
     // now verify all but last two are equals operator
@@ -227,7 +228,9 @@ bool RangeScanExpressionCollector::DetermineScanType(JitIndexScanType& scanType,
 void RangeScanExpressionCollector::Cleanup()
 {
     for (int i = 0; i < _index_op_count; ++i) {
-        freeExpr(_index_scan->_search_exprs._exprs[i]._expr);
+        if (_index_scan->_search_exprs._exprs[i]._expr != nullptr) {
+            freeExpr(_index_scan->_search_exprs._exprs[i]._expr);
+        }
     }
     _index_scan->_search_exprs._count = 0;
     _index_op_count = 0;
@@ -255,23 +258,26 @@ int RangeScanExpressionCollector::RemoveSingleDuplicate()
                     continue;
                 }
                 // now we need to decide which one to remove,
-                // our consideration is to keep equals operators and then join expressions
+                // our consideration is to keep first JOIN expressions and then EQUALS expressions
                 int victim = -1;
-                if ((_index_ops[i]._op_class == JIT_WOC_EQUALS) || (_index_ops[j]._op_class == JIT_WOC_EQUALS)) {
+                if ((_index_ops[i]._op_class != JIT_WOC_EQUALS) || (_index_ops[j]._op_class != JIT_WOC_EQUALS)) {
                     // we keep the equals operator for index scan, and leave the other as a filter
-                    MOT_LOG_TRACE("RangeScanExpressionCollector(): Rejecting query due to duplicate index column "
-                                  "reference, one with EQUALS, one without");
+                    MOT_LOG_TRACE("RangeScanExpressionCollector(): Found duplicate index column reference, one with "
+                                  "EQUALS, one without - non-equals column will be considered as a filter");
                     if (_index_ops[i]._op_class != JIT_WOC_EQUALS) {
                         victim = i;
                     } else {
                         victim = j;
                     }
+                    MOT_LOG_TRACE("Selected non-EQUALS victim at index %d", victim);
                 } else if (_index_scan->_search_exprs._exprs[i]._join_expr &&
                            !_index_scan->_search_exprs._exprs[j]._join_expr) {
                     victim = j;
+                    MOT_LOG_TRACE("Selected non-JOIN victim at index %d", victim);
                 } else if (!_index_scan->_search_exprs._exprs[i]._join_expr &&
                            _index_scan->_search_exprs._exprs[j]._join_expr) {
                     victim = i;
+                    MOT_LOG_TRACE("Selected non-JOIN victim at index %d", victim);
                 } else if (_index_scan->_search_exprs._exprs[i]._join_expr &&
                            _index_scan->_search_exprs._exprs[j]._join_expr) {
                     // both are join expressions, this is unacceptable, so we abort
@@ -284,12 +290,18 @@ int RangeScanExpressionCollector::RemoveSingleDuplicate()
                     // both items are not join expressions, both refer to index columns, so we arbitrarily drop one
                     // of them
                     victim = j;
+                    MOT_LOG_TRACE("Selected arbitrary duplicate EQUALS victim at index %d", victim);
                 }
                 // switch victim with last item
+                MOT_LOG_TRACE(
+                    "Removing victim index op at index %d and putting there index %d", victim, _index_op_count - 1);
                 if (_index_scan->_search_exprs._exprs[victim]._expr != nullptr) {
                     freeExpr(_index_scan->_search_exprs._exprs[victim]._expr);
                 }
+                MOT_LOG_TRACE("Removing victim index op at index %d", victim);
                 _index_scan->_search_exprs._exprs[victim] = _index_scan->_search_exprs._exprs[_index_op_count - 1];
+                _index_scan->_search_exprs._exprs[_index_op_count - 1]._expr = nullptr;
+                _index_ops[victim] = _index_ops[_index_op_count - 1];
                 --_index_op_count;
                 --_index_scan->_search_exprs._count;
                 return 1;
@@ -317,8 +329,15 @@ bool RangeScanExpressionCollector::IndexOpCmp(const IndexOpClass& lhs, const Ind
     int result = IntCmp(lhs._index_column_id, rhs._index_column_id);
     if (result == 0) {
         // make sure equals appears before other operators in case column id is equal
-        result = IntCmp(lhs._op_class, rhs._op_class);
+        if ((lhs._op_class == JIT_WOC_EQUALS) && (rhs._op_class != JIT_WOC_EQUALS)) {
+            result = -1;
+        } else if ((lhs._op_class != JIT_WOC_EQUALS) && (rhs._op_class == JIT_WOC_EQUALS)) {
+            result = 1;
+        }
+        // otherwise we keep order intact to avoid misinterpreting open range scan as inverted
     }
+
+    // we return true when strict ascending order is preserved
     return result < 0;
 }
 
@@ -336,6 +355,9 @@ bool RangeScanExpressionCollector::ScanHasHoles(JitIndexScanType scan_type) cons
     if (_index_ops[0]._index_column_id != 0) {
         MOT_LOG_TRACE(
             "RangeScanExpressionCollector(): Disqualifying query - Index scan does not begin with index column 0");
+        for (int i = 0; i < _index_op_count; ++i) {
+            MOT_LOG_TRACE("Index column id %d: %d", i, _index_ops[i]._index_column_id);
+        }
         return true;
     }
 

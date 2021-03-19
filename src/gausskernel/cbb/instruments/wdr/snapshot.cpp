@@ -182,10 +182,13 @@ static void check_snapshot_thd_exit()
     bool need_exit = false;
 
     start_xact_command();
+    PushActiveSnapshot(GetTransactionSnapshot());
     char* redis_group = PgxcGroupGetInRedistributionGroup();
     if (redis_group != NULL) {
         need_exit = true;
+        u_sess->attr.attr_common.ExitOnAnyError = true;
     }
+    PopActiveSnapshot();
     finish_xact_command();
 
     if (need_exit || u_sess->attr.attr_common.upgrade_mode != 0) {
@@ -217,12 +220,14 @@ static bool CheckMemProtectInit()
     {
         errno_t rc;
         start_xact_command();
+        PushActiveSnapshot(GetTransactionSnapshot());
         if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("SPI_connect failed: %s", SPI_result_code_string(rc))));
         const char *query = "select * from DBE_PERF.global_memory_node_detail";
         (void)SnapshotNameSpace::ExecuteQuery(query, SPI_OK_SELECT);
         SPI_finish();
+        PopActiveSnapshot();
         finish_xact_command();
         res = true;
     }
@@ -234,6 +239,7 @@ static bool CheckMemProtectInit()
         ereport(LOG, (errmsg("Failed to snapshot global_memory_node_detail, cause: %s", edata->message)));
         FlushErrorState();
         FreeErrorData(edata);
+        PopActiveSnapshot();
         AbortCurrentTransaction();
         t_thrd.postgres_cxt.xact_started = false;
     }
@@ -883,15 +889,6 @@ static void CreateStatTable(const char* query, const char* tablename)
 
 void SnapshotNameSpace::CreateSnapStatTables(void)
 {
-    Datum colval;
-    bool isnull = false;
-    const char* check_snap_schema_sql = "select count(*) from pg_namespace where nspname = 'snapshot';";
-    const char* createSchema = "create schema snapshot";
-    colval = GetDatumValue(check_snap_schema_sql, 0, 0, &isnull);
-    if (!DatumGetInt32(colval)) {
-        (void)SnapshotNameSpace::ExecuteQuery(createSchema, SPI_OK_UTILITY);
-    }
-
     const char* createTs = "create table snapshot.tables_snap_timestamp(snapshot_id bigint not null, db_name text, "
                            "tablename text, start_ts timestamp with time zone, end_ts timestamp with time zone)";
     const char* tablename1 = "tables_snap_timestamp";
@@ -1380,6 +1377,7 @@ static void analyze_snap_table()
     List* analyzeTableList = NULL;
     int rc = 0;
     start_xact_command();
+    PushActiveSnapshot(GetTransactionSnapshot());
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errcode(ERRCODE_INTERNAL_ERROR),
@@ -1389,6 +1387,7 @@ static void analyze_snap_table()
     set_lock_timeout();
     SnapshotNameSpace::AnalyzeTable(analyzeTableList);
     SPI_finish();
+    PopActiveSnapshot();
     finish_xact_command();
 }
 
@@ -1398,6 +1397,7 @@ void InitSnapshot()
     t_thrd.perf_snap_cxt.is_mem_protect = CheckMemProtectInit();
     /* All the tables list will be initialized once. when database is restarted or powered on */
     start_xact_command();
+    PushActiveSnapshot(GetTransactionSnapshot());
     int rc = 0;
     /* connect SPI to execute query */
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
@@ -1408,6 +1408,7 @@ void InitSnapshot()
     set_lock_timeout();
     SnapshotNameSpace::InitTables();
     SPI_finish();
+    PopActiveSnapshot();
     finish_xact_command();
     ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("create snapshot tables succeed")));
     analyze_snap_table();
@@ -1421,6 +1422,7 @@ void SnapshotNameSpace::SubSnapshotMain(void)
     TimestampTz next_timestamp = GetCurrentTimestamp();
     const int SLEEP_GAP_AFTER_ERROR = 1;
     InitSnapshot();
+    u_sess->attr.attr_common.ExitOnAnyError = false;
 
     while (!t_thrd.perf_snap_cxt.need_exit &&
            (PgxcIsCentralCoordinator(g_instance.attr.attr_common.PGXCNodeName) || IS_SINGLE_NODE) &&
@@ -1438,7 +1440,9 @@ void SnapshotNameSpace::SubSnapshotMain(void)
             pgstat_report_activity(STATE_RUNNING, NULL);
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot start")));
             start_xact_command();
+            PushActiveSnapshot(GetTransactionSnapshot());
             SnapshotNameSpace::take_snapshot();
+            PopActiveSnapshot();
             finish_xact_command();
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
 
@@ -1459,6 +1463,7 @@ void SnapshotNameSpace::SubSnapshotMain(void)
             EmitErrorReport();
             FlushErrorState();
             ereport(WARNING, (errcode(ERRCODE_WARNING), errmsg("WDR snapshot failed")));
+            PopActiveSnapshot();
             AbortCurrentTransaction();
             t_thrd.postgres_cxt.xact_started = false;
             pgstat_report_activity(STATE_IDLE, NULL);

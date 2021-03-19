@@ -17,7 +17,7 @@
  *      APIs for Encrypted Database.
  *
  * IDENTIFICATION
- *    src/distribute/bin/gs_ktool/kt_interface.cpp
+ *    src/bin/gs_ktool/kt_interface.cpp
  *
  *-------------------------------------------------------------------------
  */
@@ -26,7 +26,6 @@
 #define KT_INTERFACE_H
 
 extern bool get_cmk_len(unsigned int cmk_id, unsigned int *cmk_len);
-extern bool get_cmk_plain(unsigned int cmk_id, unsigned char *cmk_plain_buffer, unsigned int *cmk_len, 
-    bool is_report_err);
+extern bool get_cmk_plain(unsigned int cmk_id, unsigned char *cmk_plain_buffer, unsigned int *cmk_len);
 
 #endif

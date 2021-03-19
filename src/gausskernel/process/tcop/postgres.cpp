@@ -57,6 +57,7 @@
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "libpq/pqsignal.h"
+#include "libpq/crypt.h"
 #include "miscadmin.h"
 #include "nodes/print.h"
 #include "optimizer/planner.h"
@@ -165,7 +166,6 @@ extern int optreset; /* might not be declared by system headers */
 #include "utils/syscache.h"
 #include "access/heapam.h"
 #include "utils/plancache.h"
-#include "utils/globalpreparestmt.h"
 #include "commands/tablecmds.h"
 #include "catalog/gs_matview.h"
 #include "streaming/dictcache.h"
@@ -251,9 +251,11 @@ static int errdetail_recovery_conflict(void);
 static bool IsTransactionExitStmt(Node* parsetree);
 static bool IsTransactionExitStmtList(List* parseTrees);
 static bool IsTransactionStmtList(List* parseTrees);
+#ifdef ENABLE_MOT
+static bool IsTransactionPrepareStmt(const Node* parsetree);
+#endif
 static void drop_unnamed_stmt(void);
 static void SigHupHandler(SIGNAL_ARGS);
-static void log_disconnections(int code, Datum arg);
 static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list);
 static void ForceModifyExpiredPwd(const char* queryString, const List* parsetreeList);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -625,6 +627,7 @@ static int SocketBackend(StringInfo inBuf)
         case 'a': /* Not reach : Trigger shipped to DN */
         case 'k': /* Global session ID */
         case 'z': /* PBE for DDL */
+        case 'y': /* sequence from cn 2 dn */
             break;
 #endif
 
@@ -635,7 +638,7 @@ static int SocketBackend(StringInfo inBuf)
              * fatal because we have probably lost message boundary sync, and
              * there's no good way to recover.
              */
-            ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %d", qtype)));
+            ereport(FATAL, (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %c", qtype)));
             break;
     }
 
@@ -2226,7 +2229,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
     /*
      * Before executor, check the status of password.
      */
-    if (u_sess->attr.attr_security.Modify_initial_password && !t_thrd.postgres_cxt.password_changed) {
+    if (!t_thrd.postgres_cxt.password_changed) {
         ForceModifyInitialPwd((const char*)query_string, parsetree_list);
     }
 
@@ -2310,6 +2313,10 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
             if (is_unique_sql_enabled() && !IsConnFromCoord() && query_string_single != NULL) {
                 u_sess->unique_sql_cxt.is_multi_unique_sql = true;
                 u_sess->unique_sql_cxt.curr_single_unique_sql = query_string_single[stmt_num - 1];
+                if (stmt_num > 1 && stmt_num <= list_length(query_string_locationlist)) {
+                    u_sess->unique_sql_cxt.multi_sql_offset =
+                        list_nth_int(query_string_locationlist, stmt_num - 2) + 1;
+                }
             }
         }
 
@@ -2416,6 +2423,12 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                     errmsg("SubTransaction is not supported for memory table")));
         }
 
+        if (IsTransactionPrepareStmt(parsetree) && (IsMOTEngineUsed() || IsMixedEngineUsed())) {
+            /* Explicit prepare transaction is not supported for memory table */
+            ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
+                    errmsg("Explicit prepare transaction is not supported for memory table")));
+        }
+
         /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
                 (querytree_list != NULL && CheckMotIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
@@ -2492,7 +2505,7 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
                 OpFusion::getFusionType(NULL, NULL, plantree_list), oldcontext, NULL, plantree_list, NULL);
             if (opFusionObj != NULL) {
                 ((OpFusion*)opFusionObj)->setCurrentOpFusionObj((OpFusion*)opFusionObj);
-                if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, isTopLevel)) {
+                if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, isTopLevel, NULL)) {
                     CommandCounterIncrement();
                     finish_xact_command();
                     EndCommand(completionTag, dest);
@@ -2629,11 +2642,6 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
          * aborted by error will not send an EndCommand report at all.)
          */
         EndCommand(completionTag, dest);
-#ifndef ENBALE_MULTIPLE_NODE
-        /* Set sync point for waiting all stream threads complete. */
-        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-        UnRegisterStreamSnapshots();
-#endif
         MemoryContextReset(OptimizerContext);
     }
     /* end loop over parsetrees */
@@ -3158,6 +3166,9 @@ static void exec_parse_message(const char* query_string, /* string to execute */
      */
     start_xact_command();
 
+    if (ENABLE_DN_GPC)
+        CleanSessGPCPtr(u_sess);
+
     /*
      * Switch to appropriate context for constructing parsetrees.
      *
@@ -3181,8 +3192,11 @@ static void exec_parse_message(const char* query_string, /* string to execute */
             if (plansource != NULL) {
                 if (ENABLE_CN_GPC)
                     StorePreparedStatementCNGPC(stmt_name, plansource, false, true);
-                else
-                    g_instance.prepare_cache->Store(stmt_name, plansource, false, true);
+                else {
+                    u_sess->pcache_cxt.cur_stmt_psrc = plansource;
+                    if (g_instance.plan_cache->CheckRecreateCachePlan(plansource))
+                        g_instance.plan_cache->RecreateCachePlan(plansource, stmt_name, NULL, NULL, NULL);
+                }
                 goto pass_parsing;
             }
         }
@@ -3703,9 +3717,7 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
     }
 
     /* Make sure the querytree list is valid and we have parse-time locks */
-    if (!ENABLE_CN_GPC) {
-        RevalidateCachedQuery(psrc);
-    }
+    RevalidateCachedQuery(psrc);
 
     if (!psrc->single_exec_node) {
         ereport(LOG, (errmsg("[LIGHT PROXY] distribute key of table in cached plan is changed")));
@@ -4054,10 +4066,16 @@ static void exec_bind_message(StringInfo input_message)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement *pstmt = NULL;
-
-        pstmt = FetchPreparedStatement(stmt_name, true, true);
-        psrc = pstmt->plansource;
+        if (ENABLE_DN_GPC) {
+            psrc = u_sess->pcache_cxt.cur_stmt_psrc;
+            if (SECUREC_UNLIKELY(psrc == NULL))
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                        errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
+        } else {
+            PreparedStatement *pstmt = NULL;
+            pstmt = FetchPreparedStatement(stmt_name, true, true);
+            psrc = pstmt->plansource;
+        }
     } else {
         /* special-case the unnamed statement */
         psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
@@ -4091,14 +4109,22 @@ static void exec_bind_message(StringInfo input_message)
 #ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed()) {
         ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                errmsg("Cross storage engine transaction is not supported")));
+            errmsg("Cross storage engine transaction is not supported")));
+    }
 
     /* block MOT engine queries in sub-transactions */
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed())
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
         ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                errmsg("SubTransaction is not supported for memory table")));
+            errmsg("SubTransaction is not supported for memory table")));
+    }
+
+    if (IsTransactionPrepareStmt(psrc->raw_parse_tree) && (IsMOTEngineUsed() || IsMixedEngineUsed())) {
+        /* Explicit prepare transaction is not supported for memory table */
+        ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
+            errmsg("Explicit prepare transaction is not supported for memory table")));
+    }
 
     /*
      * MOT JIT Execution:
@@ -4122,7 +4148,7 @@ static void exec_bind_message(StringInfo input_message)
 
         if (psrc->opFusionObj != NULL) {
             Assert(psrc->cplan == NULL);
-        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+            ((OpFusion*)psrc->opFusionObj)->clean();
             ((OpFusion*)psrc->opFusionObj)->updatePreAllocParamter(input_message);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             if (portal_name[0] != '\0')
@@ -4183,9 +4209,7 @@ static void exec_bind_message(StringInfo input_message)
                 }
             } else {
                 if (portal_name[0] != '\0') {
-                    MemoryContext old_cxt = MemoryContextSwitchTo(scn->m_context);
-                    scn->storeLightProxy(pstrdup(portal_name));
-                    MemoryContextSwitchTo(old_cxt);
+                    scn->storeLightProxy(portal_name);
                 }
             }
             if (enable_gpc) {
@@ -4519,12 +4543,16 @@ static void exec_bind_message(StringInfo input_message)
      */
     PortalDefineQuery(portal, saved_stmt_name, query_string, psrc->commandTag, cplan->stmt_list, cplan);
 
+    if (ENABLE_GPC && psrc->gplan) {
+        portal->stmts = CopyLocalStmt(cplan->stmt_list, u_sess->top_portal_cxt, &portal->copyCxt);
+    }
+
     if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
         psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
             u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
-        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+            ((OpFusion*)psrc->opFusionObj)->clean();
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
@@ -4660,9 +4688,13 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         return;
     }
 
-    if (ENABLE_GPC) {
-        portal->stmts = CopyLocalStmt(portal->cplan->stmt_list);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    portal->streamInfo.AttachToSession();
+    if (u_sess->stream_cxt.global_obj != NULL) {
+        StreamTopConsumerIam();
     }
+#endif
 
     /* Does the portal contain a transaction command? */
     is_xact_command = IsTransactionStmtList(portal->stmts);
@@ -4774,20 +4806,6 @@ static void exec_execute_message(const char* portal_name, long max_rows)
     bool savedisAllowCommitRollback = false;
     savedisAllowCommitRollback = stp_enable_and_get_old_xact_stmt_state();
 
-#ifndef ENABLE_MULTIPLE_NODES
-    /* check plans contain stream node */
-    ListCell* cell_new = NULL;
-    foreach (cell_new, portal->cplan->stmt_list) {
-        Node* pstmt = (Node*)lfirst(cell_new);
-        if (IsA(pstmt, PlannedStmt)) {
-            PlannedStmt* planEntry = (PlannedStmt*)pstmt;
-            if (InitStreamObject(planEntry)) {
-                break;
-            }
-        }
-    }
-#endif
-
     completed = PortalRun(portal,
         max_rows,
         true, /* always top level */
@@ -4831,10 +4849,12 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         u_sess->xact_cxt.pbe_execute_complete = false;
     }
 
-#ifndef ENBALE_MULTIPLE_NODE
-    /* Set sync point for waiting all stream threads complete. */
-    StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-    UnRegisterStreamSnapshots();
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->xact_cxt.pbe_execute_complete == true) {
+        /* Set sync point for waiting all stream threads complete. */
+        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
+        UnRegisterStreamSnapshots();
+    }
 #endif
 
     if (ENABLE_WORKLOAD_CONTROL) {
@@ -5124,10 +5144,16 @@ static void exec_describe_statement_message(const char* stmt_name)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement *pstmt = NULL;
-
-        pstmt = FetchPreparedStatement(stmt_name, true, true);
-        psrc = pstmt->plansource;
+        if (ENABLE_DN_GPC) {
+            psrc = u_sess->pcache_cxt.cur_stmt_psrc;
+            if (SECUREC_UNLIKELY(psrc == NULL))
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                        errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
+        } else {
+            PreparedStatement *pstmt = NULL;
+            pstmt = FetchPreparedStatement(stmt_name, true, true);
+            psrc = pstmt->plansource;
+        }
     } else {
         /* special-case the unnamed statement */
         psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
@@ -5351,6 +5377,19 @@ static bool IsTransactionStmtList(List* parseTrees)
     return false;
 }
 
+#ifdef ENABLE_MOT
+static bool IsTransactionPrepareStmt(const Node* parsetree)
+{
+    if (parsetree && IsA(parsetree, TransactionStmt)) {
+        TransactionStmt* stmt = (TransactionStmt*)parsetree;
+        if (stmt->kind == TRANS_STMT_PREPARE) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 /* Release any existing unnamed prepared statement */
 static void drop_unnamed_stmt(void)
 {
@@ -5362,7 +5401,7 @@ static void drop_unnamed_stmt(void)
             GPC_LOG("drop private plansource", psrc, psrc->stmt_name);
         }
         DropCachedPlan(psrc);
-        if ((ENABLE_GPC)) {
+        if (ENABLE_GPC) {
             GPC_LOG("drop private plansource end", psrc, 0);
         }
     }
@@ -6556,6 +6595,7 @@ void process_postgres_switches(int argc, char* argv[], GucContext ctx, const cha
         /* Treat it as a Datanode for initdb to work properly */
         g_instance.role = VDATANODE;
         isSingleMode = true;
+        useLocalXid = true;
     }
 #endif
 
@@ -6805,11 +6845,14 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     CommandDest saved_whereToSendOutput = DestNone;
 
     gstrace_entry(GS_TRC_ID_PostgresMain);
+
     /*
      * Initialize globals (already done if under postmaster, but not if
      * standalone).
      */
     if (!IsUnderPostmaster) {
+        PostmasterPid = gs_thread_self();
+
         t_thrd.proc_cxt.MyProcPid = gs_thread_self();
 
         t_thrd.proc_cxt.MyStartTime = time(NULL);
@@ -7094,7 +7137,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
      * Also set up handler to log session end; we have to wait till now to be
      * sure Log_disconnections has its final value.
      */
-    if (IsUnderPostmaster && u_sess->attr.attr_common.Log_disconnections)
+    if (IsUnderPostmaster && !IS_THREAD_POOL_WORKER && u_sess->attr.attr_common.Log_disconnections)
         on_proc_exit(log_disconnections, 0);
 
     /* Data sender process */
@@ -7211,6 +7254,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->proc_cxt.MyProcPort->sock = PGINVALID_SOCKET;
         t_thrd.threadpool_cxt.worker->NotifyReady();
     }
+
     /*
      * POSTGRES main processing loop begins here
      *
@@ -7345,6 +7389,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         /* init pbe execute status when long jump */
         u_sess->xact_cxt.pbe_execute_complete = true;
 
+        /* init row trigger shipping status when long jump */
+        u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
+
         /* release operator-level hash table in memory */
         releaseExplainTable();
 
@@ -7372,6 +7419,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         RESUME_INTERRUPTS();
         StreamNodeGroup::syncQuit(STREAM_ERROR);
         StreamNodeGroup::destroy(STREAM_ERROR);
+
         HOLD_INTERRUPTS();
         ForgetRegisterStreamSnapshots();
 
@@ -7713,10 +7761,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
          */
         if (u_sess->postgres_cxt.ignore_till_sync && firstchar != EOF)
             continue;
-
+#ifdef ENABLE_MULTIPLE_NODES
         // reset some flag related to stream
         ResetStreamEnv();
-
+#endif
         t_thrd.codegen_cxt.codegen_IRload_thr_count = 0;
         IsExplainPlanStmt = false;
         t_thrd.codegen_cxt.g_runningInFmgr = false;
@@ -7782,7 +7830,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 // else, Plan de-serialization code path fails
                 start_xact_command();
 
-                MemoryContext old_cxt = MemoryContextSwitchTo(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+                MemoryContext old_cxt = MemoryContextSwitchTo(u_sess->stream_cxt.stream_runtime_mem_cxt);
                 planstmt = (PlannedStmt*)stringToNode(plan_string);
 
                 /* It is safe to free plan_string after deserializing the message */
@@ -7853,10 +7901,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 }
 #endif
                 exec_simple_query(query_string, QUERY_MESSAGE, &input_message); /* @hdfs Add the second parameter */
-#ifndef ENBALE_MULTIPLE_NODE
-                // After query done, producer container is not usable anymore.
-                StreamNodeGroup::destroy(STREAM_COMPLETE);
-#endif
                 u_sess->debug_query_id = 0;
                 send_ready_for_query = true;
             } break;
@@ -8135,7 +8179,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 int numParams;
                 Oid* paramTypes = NULL;
                 char** paramTypeNames = NULL;
-                bool save_trigger_shipping_flag = u_sess->attr.attr_sql.enable_trigger_shipping;
 
                 /* DN: get the node id. */
                 if (IS_PGXC_DATANODE && IsConnFromCoord())
@@ -8170,21 +8213,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 if (IsStmtRetryEnabled())
                     u_sess->exec_cxt.RetryController->stub_.StartOneStubTest(firstchar);
 #endif
-                PG_TRY();
-                {
-                    /* Disable enable_trigger_shipping for PBE. */
-                    u_sess->attr.attr_sql.enable_trigger_shipping = false;
-                    statement_init_metric_context();
-                    exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, numParams);
-                    statement_commit_metirc_context();
-                }
-                PG_CATCH();
-                {
-                    u_sess->attr.attr_sql.enable_trigger_shipping = save_trigger_shipping_flag;
-                    PG_RE_THROW();
-                }
-                PG_END_TRY();
-                u_sess->attr.attr_sql.enable_trigger_shipping = save_trigger_shipping_flag;
+                statement_init_metric_context();
+                exec_parse_message(query_string, stmt_name, paramTypes, paramTypeNames, numParams);
+                statement_commit_metirc_context();
 
                 /*
                  * since AbortTransaction can't clean named prepared statement, we need to
@@ -8230,8 +8261,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         SetIsTopUniqueSQL(true);
                     }
                 }
-                if (OpFusion::process(FUSION_EXECUTE, &input_message, completionTag, true)) {
-                    if(OpFusion::isQueryCompleted()) {
+                bool isQueryCompleted = false;
+                if (OpFusion::process(FUSION_EXECUTE, &input_message, completionTag, true, &isQueryCompleted)) {
+                    if(isQueryCompleted) {
                         CommandCounterIncrement();
                         EndCommand(completionTag, (CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
                     } else {
@@ -8261,6 +8293,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #ifdef ENABLE_MULTIPLE_NODES
             case 'k':
                 {
+                    /* no k msg from cn now, but keep these code for gray upgrade */
                     if (!ENABLE_DN_GPC)
                         ereport(ERROR, (errmodule(MOD_GPC), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                           errmsg("cn has enabled global plan cache but dn %s disabled", g_instance.attr.attr_common.PGXCNodeName)));
@@ -8283,10 +8316,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         securec_check(rc,"","");
                         u_sess->pgxc_cxt.PGXCNodeId = pq_getmsgint(&input_message, 4);
                         pq_getmsgend(&input_message);
-                        g_instance.prepare_cache->UpdateUseTime(&u_sess->sess_ident, false);
-                        if (handle_type == HANDLE_FIRST_SEND) {
-                            g_instance.prepare_cache->CheckTimeline();
-                        }
                     } else {
                         uint64 origin_global_session_id;
                         rc = memcpy_s(&origin_global_session_id, sizeof(uint64), pq_getmsgbytes(&input_message, sizeof(uint64)),
@@ -8303,10 +8332,6 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                                 sizeof(PGXCNode_HandleGPC));
                         securec_check(rc,"","");
                         pq_getmsgend(&input_message);
-                        g_instance.prepare_cache->UpdateUseTime(&u_sess->sess_ident, false);
-                        if (handle_type == HANDLE_FIRST_SEND) {
-                            g_instance.prepare_cache->CheckTimeline();
-                        }
                     }
                 }
                 break;
@@ -8384,7 +8409,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         }
 
                         if (IS_PGXC_DATANODE && closeTarget[0] != '\0') {
-                            OpFusion::removeFusionFromHtab(closeTarget);
+                            OpFusion* curr = OpFusion::locateFusion(closeTarget);
+                            if (curr != NULL) {
+                                curr->clean();
+                                OpFusion::removeFusionFromHtab(closeTarget);
+                            }
                         }
 
                         portal = GetPortalByName(closeTarget);
@@ -8416,7 +8445,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                     break;
                 }
 
-                if (OpFusion::process(FUSION_DESCRIB, &input_message, NULL, false)) {
+                if (OpFusion::process(FUSION_DESCRIB, &input_message, NULL, false, NULL)) {
                     break;
                 }
 
@@ -8951,9 +8980,11 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         t_thrd.xact_cxt.ShmemVariableCache->local_csn_min)));
                     send_local_csn_min_to_ccn();
                 } else { /* get global_csn_min */
+                    CommitSeqNo currentNextCommitSeqNo =
+                        pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
                     t_thrd.xact_cxt.ShmemVariableCache->cutoff_csn_min =
-                        (csn < t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo) ?
-                        csn : t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
+                        (csn < currentNextCommitSeqNo) ?
+                        csn : currentNextCommitSeqNo;
                     ereport(DEBUG1, (errmsg("set the cutoff_csn_min %lu",
                         t_thrd.xact_cxt.ShmemVariableCache->cutoff_csn_min)));
                     forward_recent_global_xmin();
@@ -9034,10 +9065,30 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pq_getmsgend(&input_message);
             } break;
 #endif
+            case 'y': /* sequence from cn 2 dn */
+            {
+                if (!IS_PGXC_DATANODE)
+                    ereport(
+                        ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+                            errmsg("Only cn can receive the sequence update")));
+
+                int64 result;
+                char* seqname = NULL;
+                int result_signed;
+                result_signed = pq_getmsgbyte(&input_message);
+                result = pq_getmsgint64(&input_message);
+                if (result_signed == '-') {
+                    result *= -1;
+                }
+                seqname = (char*)pq_getmsgstring(&input_message);
+                pq_getmsgend(&input_message);
+                processUpdateSequenceMsg(seqname, result);
+            }
+            break;
 
             default:
                 ereport(FATAL,
-                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %d", firstchar)));
+                    (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("invalid frontend message type %c", firstchar)));
                 break;
         }
     } /* end of input-reading loop */
@@ -9187,8 +9238,11 @@ void ShowUsage(const char* title)
 /*
  * on_proc_exit handler to log end of session
  */
-static void log_disconnections(int code, Datum arg)
+void log_disconnections(int code, Datum arg)
 {
+    if (!u_sess->attr.attr_common.Log_disconnections) {
+        return;
+    }
     Port* port = u_sess->proc_cxt.MyProcPort;
     long secs;
     int usecs;
@@ -9202,19 +9256,25 @@ static void log_disconnections(int code, Datum arg)
     secs %= SECS_PER_HOUR;
     minutes = secs / SECS_PER_MINUTE;
     seconds = secs % SECS_PER_MINUTE;
-
-    ereport(LOG,
-        (errmsg("disconnection: session time: %d:%02d:%02d.%03d "
+    if (port->user_name != NULL && port->database_name != NULL && port->remote_host != NULL && 
+        port->remote_port != NULL) {
+        ereport(LOG,
+                (errmsg("disconnection: session time: %d:%02d:%02d.%03d "
                 "user=%s database=%s host=%s%s%s",
-            hours,
-            minutes,
-            seconds,
-            msecs,
-            port->user_name,
-            port->database_name,
-            port->remote_host,
-            port->remote_port[0] ? " port=" : "",
-            port->remote_port)));
+                hours,
+                minutes,
+                seconds,
+                msecs,
+                port->user_name,
+                port->database_name,
+                port->remote_host,
+                port->remote_port[0] ? " port=" : "",
+                port->remote_port)));
+    } else {
+        ereport(LOG,
+                (errmsg("disconnection: session time: %d:%02d:%02d.%03d ", hours, minutes, seconds, msecs)));
+    }
+    
 }
 
 /* Aduit user logout */
@@ -9262,8 +9322,19 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
 {
     Oid current_user = GetUserId();
 
-    if (current_user != BOOTSTRAP_SUPERUSERID || parsetree_list == NIL)
+    if (current_user != BOOTSTRAP_SUPERUSERID || parsetree_list == NIL) {
         return;
+    }
+    
+    char* current_user_name = GetUserNameFromId(current_user);
+    password_info pass_info = {NULL, 0, 0, false, false};
+    /* return when the initial user's password is not empty */
+    if (get_stored_password(current_user_name, &pass_info)) {
+        t_thrd.postgres_cxt.password_changed = true;
+        pfree_ext(pass_info.shadow_pass);
+        return;
+    }
+    pfree_ext(pass_info.shadow_pass);
 
     if (IsUnderPostmaster && IsConnFromApp() && strcasecmp(u_sess->attr.attr_common.application_name, "gsql") == 0) {
         if (strcmp(query_string, "SELECT intervaltonum(gs_password_deadline())") != 0 &&
@@ -9271,35 +9342,29 @@ static void ForceModifyInitialPwd(const char* query_string, List* parsetree_list
             strcmp(query_string, "SELECT VERSION()") != 0 && strcasecmp(query_string, "delete from pgxc_node;") != 0 &&
             strcasecmp(query_string, "delete from pgxc_group;") != 0 &&
             strncasecmp(query_string, "CREATE NODE", 11) != 0) {
-            bool hasmodified = false;
-            hasmodified = HasModifiedInitPwdByChkAuthHistory(current_user);
-            if (hasmodified) {
-                t_thrd.postgres_cxt.password_changed = true;
-            } else {
-                /*
-                 * Just focuse on the first parsetree_list element, since before
-                 * each operation, the initial password should be changed.
-                 */
-                Node* parsetree = (Node*)linitial(parsetree_list);
-                char* current_user_name = GetUserNameFromId(current_user);
-                if (IsA(parsetree, AlterRoleStmt)) {
-                    /*
-                     * Check if the role in "AlterRoleStmt" matches the current_user.
-                     */
-                    char* alter_name = ((AlterRoleStmt*)parsetree)->role;
-                    if (strcasecmp(current_user_name, alter_name) != 0)
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED),
-                                errmsg("Please use \"ALTER ROLE user_name IDENTIFIED BY 'password' REPLACE 'old "
-                                       "password';\" to modify the initial password of user %s before operation!",
-                                    current_user_name)));
-                } else
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED),
-                            errmsg("Please use \"ALTER ROLE user_name IDENTIFIED BY 'password' REPLACE 'old "
-                                   "password';\" to modify the initial password of user %s before operation!",
-                                current_user_name)));
-            }
+        /*
+         * Just focuse on the first parsetree_list element, since before
+         * each operation, the initial password should be changed.
+         */
+        Node* parsetree = (Node*)linitial(parsetree_list);
+        char* current_user_name = GetUserNameFromId(current_user);
+        if (IsA(parsetree, AlterRoleStmt)) {
+            /*
+             * Check if the role in "AlterRoleStmt" matches the current_user.
+             */
+            char* alter_name = ((AlterRoleStmt*)parsetree)->role;
+            if (strcasecmp(current_user_name, alter_name) != 0)
+                ereport(ERROR,
+                    (errcode(ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED),
+                        errmsg("Please use \"ALTER ROLE user_name PASSWORD 'password';\" "
+                               "to set the password of user %s before other operation!",
+                               current_user_name)));
+        } else
+            ereport(ERROR,
+                (errcode(ERRCODE_INITIAL_PASSWORD_NOT_MODIFIED),
+                    errmsg("Please use \"ALTER ROLE user_name PASSWORD 'password';\" "
+                           "to set the password of user %s before other operation!",
+                           current_user_name)));
         }
     }
 }
@@ -9715,7 +9780,7 @@ void execute_simple_query(const char* query_string)
  *   If query is not SELECT/INSERT/UPDATE/DELETE, return completionTag, else NULL.
  */
 static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int numRFormats, int16* rformats,
-    bool send_DP_msg, CommandDest dest, char* completionTag, const char* stmt_name)
+    bool send_DP_msg, CommandDest dest, char* completionTag, const char* stmt_name, List* gpcCopyStmts)
 {
     CachedPlan* cplan = NULL;
     Portal portal;
@@ -9738,7 +9803,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
                 setCachedPlanBucketId(cps->gplan, params);
             }
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;
             }
@@ -9777,7 +9842,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     cplan = GetCachedPlan(psrc, params, false);
     t_thrd.postgres_cxt.table_created_in_CTAS = false;
 
-    if (cplan != NULL && psrc != NULL) {
+    if (cplan != NULL) {
         /*
          * copy the single_shard info from plan source into plan.
          * With this, we can determine if we should use global snapshot or local snapshot after.
@@ -9798,8 +9863,8 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
         cplan->stmt_list,
         cplan);
 
-    if (ENABLE_GPC) {
-        portal->stmts = CopyLocalStmt(portal->cplan->stmt_list);
+    if (ENABLE_GPC && gpcCopyStmts != NULL) {
+        portal->stmts = gpcCopyStmts;
     }
 
 #ifdef ENABLE_MOT
@@ -9826,7 +9891,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
 
-            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true)) {
+            if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true, NULL)) {
                 CommandCounterIncrement();
                 return;
             }
@@ -10287,9 +10352,16 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
-        PreparedStatement *pstmt = NULL;
-        pstmt = FetchPreparedStatement(stmt_name, true, true);
-        psrc = pstmt->plansource;
+        if (ENABLE_DN_GPC) {
+            psrc = u_sess->pcache_cxt.cur_stmt_psrc;
+            if (SECUREC_UNLIKELY(psrc == NULL))
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                        errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
+        } else {
+            PreparedStatement *pstmt = NULL;
+            pstmt = FetchPreparedStatement(stmt_name, true, true);
+            psrc = pstmt->plansource;
+        }
     } else {
         /* special-case the unnamed statement */
         psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
@@ -10793,17 +10865,22 @@ static void exec_batch_bind_execute(StringInfo input_message)
         process_count = light_execute_batchmsg_set(scn, batch_msg_dnset, batch_count_dnset, send_DP_msg);
     } else {
         char* completionTag = (char*)palloc0(COMPLETION_TAG_BUFSIZE * sizeof(char));
+        List* copyedStmts = NULL;
 
         if (u_sess->attr.attr_resource.use_workload_manager && g_instance.wlm_cxt->gscgroup_init_done &&
             !IsAbortedTransactionBlockState()) {
             u_sess->wlm_cxt->cgroup_last_stmt = u_sess->wlm_cxt->cgroup_stmt;
             u_sess->wlm_cxt->cgroup_stmt = WLMIsSpecialCommand(psrc->raw_parse_tree, NULL);
         }
+        if (ENABLE_GPC && psrc->gplan && psrc->gpc.status.IsSharePlan()) {
+            MemoryContext tmpCxt = NULL;
+            copyedStmts = CopyLocalStmt(psrc->gplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
+        }
 
         if (use_original_logic) {
             for (int i = 0; i < batch_count; i++) {
                 exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
-                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name);
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name, copyedStmts);
             }
 
             /* only send the last commandTag */
@@ -10813,7 +10890,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
             for (int i = 0; i < batch_count; i++) {
                 exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
-                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name);
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name, copyedStmts);
 
                 /* Get process_count (X) from completionTag */
                 if (completionTag[0] == 'I') {

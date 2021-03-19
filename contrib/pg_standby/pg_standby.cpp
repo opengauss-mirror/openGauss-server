@@ -472,7 +472,7 @@ static bool RestoreWALFileForRecovery(void)
 
 static void usage(void)
 {
-    printf("%s allows PostgreSQL warm standby servers to be configured.\n\n", progname);
+    printf("%s allows openGauss warm standby servers to be configured.\n\n", progname);
     printf("Usage:\n");
     printf("  %s [OPTION]... ARCHIVELOCATION NEXTWALFILE XLOGFILEPATH [RESTARTWALFILE]\n", progname);
     printf("\nOptions:\n");
@@ -494,7 +494,11 @@ static void usage(void)
            "  restore_command = 'pg_standby [OPTION]... ARCHIVELOCATION %%f %%p %%r'\n"
            "e.g.\n"
            "  restore_command = 'pg_standby /mnt/server/archiverdir %%f %%p %%r'\n");
-    printf("\nReport bugs to <pgsql-bugs@postgresql.org>.\n");
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n");
+#endif
 }
 
 #ifndef WIN32

@@ -8781,8 +8781,7 @@ DECLARE
     query_str_do_revoke text;
     BEGIN
         query_str_create_table := 'CREATE TABLE public.pgxc_copy_error_log
-                            (relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)
-                            DISTRIBUTE BY hash(begintime)';
+                            (relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)';
         EXECUTE query_str_create_table;
 
         query_str_create_index := 'CREATE INDEX copy_error_log_relname_idx ON public.pgxc_copy_error_log(relname)';
@@ -10810,13 +10809,6 @@ DECLARE
         end loop;
     END;
 $$LANGUAGE plpgsql NOT FENCED;
-
-CREATE OR REPLACE FUNCTION report_application_error(
-    IN log text,
-    IN code integer default null
-)RETURNS void
-AS '$libdir/plpgsql','report_application_error'
-LANGUAGE C VOLATILE NOT FENCED;
 
 --Test distribute situation
 create or replace function table_skewness(table_name text, column_name text,

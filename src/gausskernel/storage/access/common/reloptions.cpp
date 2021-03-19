@@ -66,6 +66,7 @@ static void ValidateStrOptPartitionInterval(const char *val);
 static void ValidateStrOptTimeColumn(const char *val);
 static void ValidateStrOptTTLInterval(const char *val);
 static void ValidateStrOptGatherInterval(const char *val);
+static void ValidateStrOptSwInterval(const char *val);
 static void ValidateStrOptVersion(const char *val);
 static void ValidateStrOptSpcFileSystem(const char *val);
 static void ValidateStrOptSpcAddress(const char *val);
@@ -308,31 +309,38 @@ static relopt_string stringRelOpts[] = {
         TIME_UNDEFINED,
     },
     {
-        { "partition_interval", "partition interval for streaming contquery table", RELOPT_KIND_HEAP },
+        { "partition_interval", "partition interval for streaming contview table", RELOPT_KIND_HEAP },
         9,
         false,
         ValidateStrOptPartitionInterval,
         TIME_UNDEFINED,
     },
     {
-        { "time_column", "time column for streaming contquery table", RELOPT_KIND_HEAP },
+        { "time_column", "time column for streaming contview table", RELOPT_KIND_HEAP },
         9,
         false,
         ValidateStrOptTimeColumn,
         COLUMN_UNDEFINED,
     },
     {
-        { "ttl_interval", "ttl interval for streaming contquery table", RELOPT_KIND_HEAP },
+        { "ttl_interval", "ttl interval for streaming contview table", RELOPT_KIND_HEAP },
         9,
         false,
         ValidateStrOptTTLInterval,
         TIME_UNDEFINED,
     },
     {
-        { "gather_interval", "gather interval for streaming contquery table", RELOPT_KIND_HEAP },
+        { "gather_interval", "gather interval for streaming contview table", RELOPT_KIND_HEAP },
         9,
         false,
         ValidateStrOptGatherInterval,
+        TIME_UNDEFINED,
+    },
+    {
+        { "sw_interval", "sliding window interval for streaming contquery table", RELOPT_KIND_HEAP },
+        9,
+        false,
+        ValidateStrOptSwInterval,
         TIME_UNDEFINED,
     },
     {
@@ -342,7 +350,6 @@ static relopt_string stringRelOpts[] = {
         ValidateStrOptVersion,
         ORC_VERSION_012,
     },
-
     {
         { "compression", "which compression level applied to, or not compressed", RELOPT_KIND_HEAP },
         6,
@@ -424,7 +431,7 @@ static relopt_string stringRelOpts[] = {
         "n",
     },
     {
-        { "string_optimize", "string optimize for streaming contquery table", RELOPT_KIND_HEAP },
+        { "string_optimize", "string optimize for streaming contview table", RELOPT_KIND_HEAP },
         9,
         false,
         ValidateStrOptStringOptimize,
@@ -1582,6 +1589,7 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "time_column", RELOPT_TYPE_STRING, offsetof(StdRdOptions, time_column) },
         { "ttl_interval", RELOPT_TYPE_STRING, offsetof(StdRdOptions, ttl_interval) },
         { "gather_interval", RELOPT_TYPE_STRING, offsetof(StdRdOptions, gather_interval) },
+        { "sw_interval", RELOPT_TYPE_STRING, offsetof(StdRdOptions, sw_interval) },
         { "version", RELOPT_TYPE_STRING, offsetof(StdRdOptions, version) },
         { "compresslevel", RELOPT_TYPE_INT, offsetof(StdRdOptions, compresslevel) },
         { "ignore_enable_hadoop_env", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, ignore_enable_hadoop_env) },
@@ -1635,10 +1643,10 @@ bytea *heap_reloptions(char relkind, Datum reloptions, bool validate)
             }
             return (bytea *)rdopts;
         case RELKIND_RELATION:
+        case RELKIND_MATVIEW:
             return default_reloptions(reloptions, validate, RELOPT_KIND_HEAP);
         case RELKIND_VIEW:
         case RELKIND_CONTQUERY:
-        case RELKIND_MATVIEW:
             return default_reloptions(reloptions, validate, RELOPT_KIND_VIEW);
         default:
             /* other relkinds are not supported */
@@ -1866,7 +1874,7 @@ static void ValidateStrOptTimeColumn(const char *val)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
                  errmsg("Invalid interval string for  \"time_column\" option"),
-                 errdetail("Valid time_column string in contquery.")));
+                 errdetail("Valid time_column string in contview.")));
     }
 }
 
@@ -1883,7 +1891,7 @@ static void ValidateStrOptTTLInterval(const char *val)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
                  errmsg("Invalid interval string for  \"ttl_interval\" option"),
-                 errdetail("Valid ttl_interval string in contquery.")));
+                 errdetail("Valid ttl_interval string in contview.")));
     }
 }
 
@@ -1900,7 +1908,24 @@ static void ValidateStrOptGatherInterval(const char *val)
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
                  errmsg("Invalid interval string for  \"gather_interval\" option"),
-                 errdetail("Valid gather_interval string in contquery.")));
+                 errdetail("Valid gather_interval string in contview.")));
+    }
+}
+
+/*
+ * Brief        : Check the sw_interval Validity.
+ * Input        : val, the sw_interval option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptSwInterval(const char *val)
+{
+    if (val == NULL) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                 errmsg("Invalid interval string for  \"sw_interval\" option"),
+                 errdetail("Valid sw_interval string in contquery.")));
     }
 }
 
@@ -2056,7 +2081,7 @@ static void ValidateStrOptStringOptimize(const char *val)
     if (val == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid interval string for  \"string_optimize\" option"),
-            errdetail("Valid string_optimize string in contquery.")));
+            errdetail("Valid string_optimize string in contview.")));
     }
 }
 

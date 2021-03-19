@@ -95,7 +95,7 @@ static void transientrel_destroy(DestReceiver *self);
 static void refresh_matview_datafill(DestReceiver *dest, Query *query,
                                     const char *queryString);
 static Oid find_mlog_table(Oid relid);
-static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime);
+static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime, CatalogIndexState indstate);
 static void check_simple_query(Query *query, List **distkeyList, List **rangeTables, Oid *groupid);
 static void check_union_all(Query *query, List **distkeyList, List **rangeTables, Oid *groupid);
 static void check_set_op_component(Node *node);
@@ -122,6 +122,20 @@ static int64 MlogComputeSeqNo();
 Size MatviewShmemSize(void)
 {
     return sizeof(matview_shmem_t);
+}
+
+inline PlannedStmt* GetPlanStmt(Query* query, ParamListInfo params)
+{
+    PlannedStmt* plan;
+#ifdef ENABLE_MULTIPLE_NODES
+    plan = pg_plan_query(query, 0, NULL);
+#else
+    int outerdop = u_sess->attr.attr_sql.query_dop_tmp;
+    u_sess->attr.attr_sql.query_dop_tmp = 1;
+    plan = pg_plan_query(query, 0, params);
+    u_sess->attr.attr_sql.query_dop_tmp = outerdop;
+#endif
+    return plan;
 }
 
 /*
@@ -195,12 +209,24 @@ int64 MlogComputeSeqNo()
     while(tup != NULL) {
         matviewdepForm = (Form_gs_matview_dependency)GETSTRUCT(tup);
 
-        Relation rel = heap_open(matviewdepForm->matviewid, AccessShareLock);
+        Relation base_rel = try_relation_open(matviewdepForm->relid, AccessShareLock);
+        if (base_rel == NULL) {
+            tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+            continue;
+        }
+
+        Relation mat_rel = try_relation_open(matviewdepForm->matviewid, AccessShareLock);
+        if (mat_rel == NULL) {
+            heap_close(base_rel, AccessShareLock);
+            tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+            continue;
+        }
 
         Oid mlogid = matviewdepForm->mlogid;
         seqno = MlogGetMaxSeqno(mlogid);
 
-        heap_close(rel, AccessShareLock);
+        heap_close(mat_rel, AccessShareLock);
+        heap_close(base_rel, AccessShareLock);
 
         if (result < seqno) {
             result = seqno;
@@ -243,7 +269,11 @@ int64 MlogGetMaxSeqno(Oid mlogid)
                                 RelationGetDescr(mlog),
                                 &isNull);
 
-        Assert(!isNull);
+        if (isNull) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                    errmsg("seqno should not be NULL when scan mlog table")));
+        }
         result = DatumGetInt64(num);
         break;
     }
@@ -471,9 +501,8 @@ static void ExecutorMatMapDelete(Oid mapid, Oid relid, ItemPointer rel_ctid, Oid
     Relation mapRel = heap_open(mapid, RowExclusiveLock);
     List *indexOidList = RelationGetIndexList(mapRel);
     if (indexOidList == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Can't find index on %s", RelationGetRelationName(mapRel))));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Can't find index on %s", RelationGetRelationName(mapRel))));
     }
     Oid indexOid = (Oid)linitial_oid(indexOidList);
 
@@ -594,13 +623,13 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
 
     List *indexoidlist = RelationGetIndexList(mlog);
     if (indexoidlist == NULL) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Can't find index on %s", RelationGetRelationName(mlog))));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Can't find index on %s", RelationGetRelationName(mlog))));
     }
     indexoid = (Oid)linitial_oid(indexoidlist);
 
     mlogidx = index_open(indexoid, RowExclusiveLock);
+    CatalogIndexState indstate = CatalogOpenIndexes(mlog);
 
     indexScan = index_beginscan(mlog, mlogidx, GetTransactionSnapshot(), 0, 0);
     index_rescan(indexScan, NULL, 0, NULL, 0);
@@ -633,8 +662,7 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
 
         int64 seqno = DatumGetInt64(num);
 
-        ereport(DEBUG5,
-                (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
+        ereport(DEBUG5, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
                 errmsg("Now seqno in Mlog is %ld.", seqno)));
 
         act = DatumGetChar(action);
@@ -649,6 +677,12 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
             HeapTuple reltuple;
 
             if (act == 'D') {
+                /*
+                 * Here we should CommandCounterIncrement when handle 'D' action in mlog,
+                 * because those tuples which insert early should be visible here.
+                 */
+                CommandCounterIncrement();
+
                 ExecutorMatMapDelete(mapid, relid, c_ptr, mvid, xid);
             } else if (mlog_form_tuple(mlog, tuple, rel, &reltuple)) {
                 HeapTuple copyTuple = reltuple;
@@ -679,12 +713,13 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
 
             if (isNull) {
                 /* if time in mlog-table is NULL, then update it as current time. */
-                update_mlog_time(mlog, tuple, curtime);
+                update_mlog_time(mlog, tuple, curtime, indstate);
             }
         }
     }
 
     index_endscan(indexScan);
+    CatalogCloseIndexes(indstate);
     index_close(mlogidx, NoLock);
     list_free_ext(indexoidlist);
     heap_close(rel, NoLock);
@@ -708,8 +743,7 @@ static void ExecutorRefreshMatInc(QueryDesc* queryDesc, Query *query,
     ListCell *lc = NULL;
 
     if (queryDesc->plannedstmt->num_streams > 0) {
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Refresh Matview cannot support stream plan. ")));
     }
 
@@ -784,7 +818,12 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
                    RelationGetRelationName(matviewRel))));
     }
 
-    Assert(!IsSystemRelation(matviewRel));
+    if (IsSystemRelation(matviewRel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+             errmsg("Not support materialized view \"%s\" is a system catalog relation",
+                    RelationGetRelationName(matviewRel))));
+    }
     Assert(!matviewRel->rd_rel->relhasoids);
 
     query = get_matview_query(matviewRel);
@@ -793,7 +832,7 @@ void ExecRefreshMatViewInc(RefreshMatViewStmt *stmt, const char *queryString,
     /* Copy it for ExecutorRefreshMatInc */
     Query *rquery = (Query *)copyObject(query);
 
-    plan = pg_plan_query(rquery, 0, params);
+    plan = GetPlanStmt(rquery, params);
 
     if (plan->num_streams > 0) {
        ereport(ERROR,
@@ -878,7 +917,7 @@ void ExecRefreshIncMatViewAll(RefreshMatViewStmt *stmt, const char *queryString,
     /* Copy it for ExecutorRefreshMatInc */
     Query *rquery = (Query *)copyObject(query);
 
-    plan = pg_plan_query(rquery, 0, params);
+    plan = GetPlanStmt(rquery, params);
 
     if (plan->num_streams > 0) {
        ereport(ERROR,
@@ -1194,7 +1233,7 @@ void ExecCreateMatViewInc(CreateTableAsStmt* stmt, const char* queryString, Para
     /* Copy it for ExecutorRefreshMatInc */
     Query *rquery = (Query *)copyObject(query);
 
-    plan = pg_plan_query(rquery, 0, params);
+    plan = GetPlanStmt(rquery, params);
 
     /* Create a QueryDesc, redirecting output to our tuple receiver */
     queryDesc = CreateQueryDesc(plan, queryString, GetActiveSnapshot(), InvalidSnapshot, dest, params, 0);
@@ -1277,8 +1316,7 @@ static void refresh_matview_datafill(DestReceiver *dest, Query *query, const cha
     Assert(strcmp(second_rte->alias->aliasname, "old"));
     second_rte->isResultRel = true;
 
-    /* Plan the query which will generate data for the refresh. */
-    plan = pg_plan_query(query, 0, NULL);
+    plan = GetPlanStmt(query, NULL);
 
     /*
      * Use a snapshot with an updated command ID to ensure this query sees
@@ -1923,9 +1961,6 @@ void insert_into_matview_map(Oid mapid, Oid matid, ItemPointer matctid,
     heap_freetuple_ext(tup);
     list_free_ext(indexOidList);
 
-    /* Make the changes visible */
-    CommandCounterIncrement();
-
     index_close(mapIdx, NoLock);
     heap_close(mapRel, NoLock);
     return;
@@ -2056,87 +2091,6 @@ void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple, ItemPoint
     return;
 }
 
-TransactionId MlogGetXmin(Oid mlogID)
-{
-    TableScanDesc scan;
-    HeapTuple tuple;
-    TransactionId xmin = InvalidTransactionId;
-    bool isNull = false;
-    Relation rel = heap_open(mlogID, AccessShareLock);
-
-    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
-    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-        Datum datumXid = heap_getattr(tuple,
-                                      MlogAttributeXid,
-                                      RelationGetDescr(rel),
-                                      &isNull);
-
-        if (isNull) {
-            continue;
-        }
-
-        if (xmin == InvalidTransactionId) {
-            xmin = DatumGetTransactionId(datumXid);
-            continue;
-        }
-
-        if (TransactionIdPrecedes(DatumGetTransactionId(datumXid), xmin)) {
-            xmin = DatumGetTransactionId(datumXid);
-        }
-
-    }
-
-    tableam_scan_end(scan);
-    heap_close(rel, NoLock);
-
-    return xmin;
-}
-
-TransactionId MatviewGetXmin(void)
-{
-    TableScanDesc scan;
-    HeapTuple tuple;
-    bool isNull = false;
-    TransactionId xmin = InvalidTransactionId;
-
-    Relation rel = heap_open(MatviewDependencyId, AccessShareLock);
-    scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
-
-    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-        Datum mlogID = heap_getattr(tuple,
-                                    Anum_gs_matview_dep_mlogid,
-                                    RelationGetDescr(rel),
-                                    &isNull);
-
-        /* Assume it can not be NULL */
-        Assert(!isNull);
-
-        TransactionId mlogXmin = MlogGetXmin(DatumGetObjectId(mlogID));
-
-        if (xmin == InvalidTransactionId) {
-            xmin = mlogXmin;
-            continue;
-        }
-
-        if (mlogXmin == InvalidTransactionId) {
-            continue;
-        }
-
-        if (TransactionIdPrecedes(mlogXmin, xmin)) {
-            xmin = mlogXmin;
-        }
-    }
-
-    tableam_scan_end(scan);
-    heap_close(rel, NoLock);
-
-    /* UPDATE the share memory */
-    LWLockAcquire(matview_shmem->matview_lck, LW_EXCLUSIVE);
-    matview_shmem->matview_xmin = xmin;
-    LWLockRelease(matview_shmem->matview_lck);
-    return xmin;
-}
-
 static void update_mlog_time_all(Oid mlogid, Datum curtime)
 {
     Relation mlog;
@@ -2156,6 +2110,7 @@ static void update_mlog_time_all(Oid mlogid, Datum curtime)
     indexoid = (Oid)linitial_oid(indexoidlist);
 
     mlogidx = index_open(indexoid, RowExclusiveLock);
+    CatalogIndexState indstate = CatalogOpenIndexes(mlog);
 
     indexScan = index_beginscan(mlog, mlogidx, SnapshotNow, 0, 0);
     index_rescan(indexScan, NULL, 0, NULL, 0);
@@ -2168,18 +2123,19 @@ static void update_mlog_time_all(Oid mlogid, Datum curtime)
 
         /* update refreshtime */
         if (isNull || (void*)refreshTime == NULL) {
-            update_mlog_time(mlog, tuple, curtime);
+            update_mlog_time(mlog, tuple, curtime, indstate);
         }
     }
 
     list_free_ext(indexoidlist);
     index_endscan(indexScan);
+    CatalogCloseIndexes(indstate);
     index_close(mlogidx, RowExclusiveLock);
     heap_close(mlog, NoLock);
     return;
 }
 
-static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime)
+static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime, CatalogIndexState indstate)
 {
     errno_t rc;
     HeapTuple ntup = NULL;
@@ -2200,7 +2156,7 @@ static void update_mlog_time(Relation mlog, HeapTuple tuple, Datum curtime)
     ntup = heap_modify_tuple(tuple, RelationGetDescr(mlog), values, nulls, replaces);
 
     simple_heap_update(mlog, &ntup->t_self, ntup);
-    CatalogUpdateIndexes(mlog, ntup);
+    CatalogIndexInsert(indstate, ntup);
     heap_freetuple_ext(ntup);
     return;
 }
@@ -2460,10 +2416,17 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
 
             Relation rel = heap_open(rte->relid, AccessShareLock);
             if (RelationUsesLocalBuffers(rel)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("materialized views must not use temporary tables or views")));
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("materialized views must not use temporary tables or views")));
             }
+
+            if (isIncremental && (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Can not create incremental materialized view on unlogged table")));
+            }
+
             heap_close(rel, AccessShareLock);
         }
 
@@ -2742,26 +2705,6 @@ static void MlogClearLogByTime(Oid mlogID, Timestamp ts)
 
     tableam_scan_end(scan);
     heap_close(rel, NoLock);
-
-    return;
-}
-
-/*
- * acquire locks of matview's tables
- */
-void acquire_mativew_tables_lock(Query *query, bool incremental)
-{
-    Relation rel;
-    ListCell *lc = NULL;
-    List *relids = NIL;
-    LOCKMODE lockmode = incremental ?  ShareUpdateExclusiveLock : ExclusiveLock;
-
-    relids = pull_up_rels_recursive((Node *)query);
-    foreach (lc, relids) {
-        Oid relid = (Oid)lfirst_oid(lc);
-        rel = heap_open(relid, lockmode);
-        heap_close(rel, NoLock);
-    }
 
     return;
 }

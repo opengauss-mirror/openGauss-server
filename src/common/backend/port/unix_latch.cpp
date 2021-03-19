@@ -423,6 +423,8 @@ int WaitLatchOrSocket(volatile Latch* latch, int wakeEvents, pgsocket sock, long
             cur_timeout = timeout - (long)INSTR_TIME_GET_MILLISEC(cur_time);
             if (cur_timeout < 0) {
                 cur_timeout = 0;
+            } else if (cur_timeout > timeout) {
+                cur_timeout = timeout;
             }
 
 #ifndef HAVE_POLL

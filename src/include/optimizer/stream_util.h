@@ -82,5 +82,5 @@ extern bool is_type_cast_hash_compatible(FuncExpr* func);
 extern Plan* update_plan_refs(PlannerInfo* root, Plan* plan, Index* fromRTI, Index* toRTI, int rtiSize);
 extern void set_node_ref_subplan_walker(Plan* result_plan, set_node_ref_subplan_context* context);
 extern void StreamPlanWalker(PlannedStmt *pstmt, Plan *plan, bool *need);
-
+extern void mark_distribute_setop_remotequery(PlannerInfo* root, Node* node, Plan* plan, List* subPlans);
 #endif /* STREAM_UTIL_H */

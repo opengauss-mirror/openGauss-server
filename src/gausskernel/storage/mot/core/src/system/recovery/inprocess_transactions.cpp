@@ -29,20 +29,15 @@ DECLARE_LOGGER(RecoveryManager, InProcessTransactions);
 
 InProcessTransactions::~InProcessTransactions()
 {
-    if (m_numEntries) {
-        auto destroyLambda = [](RedoLogTransactionSegments* s, uint64_t) -> RC {
-            delete s;
-            return RC_OK;
-        };
-
-        ForEachTransaction(destroyLambda, true);
-    }
+    Clear();
 }
 
 bool InProcessTransactions::InsertLogSegment(LogSegment* segment)
 {
     uint64_t transactionId = segment->m_controlBlock.m_internalTransactionId;
     RedoLogTransactionSegments* transactionLogEntries = nullptr;
+
+    const std::lock_guard<std::mutex> lock(m_lock);
     auto it = m_map.find(transactionId);
     if (it == m_map.end()) {
         // this is a new transaction. Not found in the map.
@@ -70,15 +65,13 @@ bool InProcessTransactions::InsertLogSegment(LogSegment* segment)
     return true;
 }
 
-bool InProcessTransactions::FindTransactionId(uint64_t externalId, uint64_t& internalId, bool pop)
+bool InProcessTransactions::FindTransactionId(uint64_t externalId, uint64_t& internalId)
 {
     internalId = 0;
+    const std::lock_guard<std::mutex> lock(m_lock);
     auto it = m_extToInt.find(externalId);
     if (it != m_extToInt.end()) {
         internalId = it->second;
-        if (pop) {
-            m_extToInt.erase(it);
-        }
         return true;
     }
     return false;

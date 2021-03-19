@@ -2247,6 +2247,7 @@ static int pg_ctl_lock(const char* lock_file, FILE** lockfile_fd)
 {
     int ret;
     struct stat statbuf;
+    int fildes = 0;
     char standard_lock_file[g_max_length_std_path] = {0};
 
     ret = snprintf_s(standard_lock_file, sizeof(standard_lock_file), sizeof(standard_lock_file) - 1, "%s", lock_file);
@@ -2259,9 +2260,17 @@ static int pg_ctl_lock(const char* lock_file, FILE** lockfile_fd)
         char content[PG_CTL_LOCKFILE_SIZE] = {0};
         *lockfile_fd = fopen(standard_lock_file, PG_BINARY_W);
         if (*lockfile_fd == NULL) {
-            pg_log(PG_WARNING, _("can't open lock file \"%s\" : %s"), standard_lock_file, strerror(errno));
+            pg_log(PG_WARNING, _("can't create lock file \"%s\" : %s"), standard_lock_file, strerror(errno));
             exit(1);
         } else {
+            fildes = fileno(*lockfile_fd);
+            if (fchmod(fildes, S_IRUSR | S_IWUSR) == -1) {
+                pg_log(PG_WARNING, _("can't chmod lock file \"%s\" : %s"), standard_lock_file, strerror(errno));
+                /* Close file and Nullify the pointer for retry */
+                fclose(*lockfile_fd);
+                *lockfile_fd = NULL;
+                exit(1);
+            }
             if (fwrite(content, PG_CTL_LOCKFILE_SIZE, 1, *lockfile_fd) != 1) {
                 fclose(*lockfile_fd);
                 *lockfile_fd = NULL;
@@ -3485,7 +3494,7 @@ static void do_help(void)
     printf(_("  %s unregister [-N SERVICENAME]\n"), progname);
 #endif
     (void)printf(_("  %s querybuild   [-D DATADIR]\n"), progname);
-#ifdef ENABLE_MULTIPLE_NODES
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
     printf(_("\nCommon options:\n"));
@@ -3529,11 +3538,12 @@ static void do_help(void)
     printf(_("\nOptions for restore:\n"));
     printf(_("  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"));
 
+#if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
     printf(_("\nOptions for hotpatch:\n"));
     printf(
         _("  -a ACTION  patch command, ACTION can be \"load\" \"unload\" \"active\" \"deactive\" \"info\" \"list\"\n"));
     printf(_("  -n NAME    patch name, NAME should be patch name with path\n"));
-
+#endif
     printf(_("\nShutdown modes are:\n"));
     printf(_("  fast        quit directly, with proper shutdown\n"));
     printf(_("  immediate   quit without complete shutdown; will lead to recovery on restart\n"));
@@ -3568,11 +3578,12 @@ static void do_help(void)
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
     printf(_("  -C, connector    CN/DN connect to CN for build\n"));
 
-#ifdef ENABLE_MULTIPLE_NODES
-    printf(_("\nReport bugs to <postgres-xc-bugs@lists.sourceforge.net>.\n"));
-
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf("\nReport bugs to GaussDB support.\n");
+#else
+    printf("\nReport bugs to openGauss community by raising an issue.\n");
 #endif
+
 }
 
 static void set_mode(char* modeopt)
@@ -4006,6 +4017,9 @@ static void do_incremental_build(uint32 term)
 
     if (sysidentifier != NULL) {
         pg_free(sysidentifier);
+    }
+    if (bgchild > 0) {
+        (void)kill(bgchild, SIGTERM);
     }
 
 #ifdef ENABLE_MOT
@@ -4692,9 +4706,13 @@ int main(int argc, char** argv)
         // The node defaults to a datanode
         FREE_AND_RESET(pgxcCommand);
         pgxcCommand = xstrdup("--single_node");
-
+#ifdef ENABLE_PRIVATEGAUSS
+        while ((c = getopt_long(
+            argc, argv, "a:b:cD:l:m:M:N:n:o:p:P:r:sS:t:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
+#else
         while ((c = getopt_long(
             argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
+#endif
 #endif
         {
             switch (c) {

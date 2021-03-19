@@ -47,7 +47,7 @@ bool GlobalHookExecutor::set_deletion_expected()
 }
 
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool GlobalHookExecutor::delete_localkms_file()
+bool GlobalHookExecutor::get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len)
 {
     return true;
 }

@@ -924,7 +924,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         } else if (rel != NULL && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
             heap_close(rel, (is_from ? RowExclusiveLock : AccessShareLock));
             ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
+                (errcode(ERRCODE_INVALID_TEMP_OBJECTS),
                     errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.", 
                        g_instance.attr.attr_common.PGXCNodeName)));
@@ -2235,7 +2235,7 @@ static CopyState BeginCopyTo(
         else if (rel->rd_rel->relkind == RELKIND_CONTQUERY)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from contquery \"%s\"", RelationGetRelationName(rel)),
+                    errmsg("cannot copy from contview \"%s\"", RelationGetRelationName(rel)),
                     errhint("Try the COPY (SELECT ...) TO variant.")));
         else if (rel->rd_rel->relkind == RELKIND_MATVIEW)
             ereport(ERROR,
@@ -3418,7 +3418,7 @@ static uint64 CopyFrom(CopyState cstate)
         else if (cstate->rel->rd_rel->relkind == RELKIND_CONTQUERY)
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy to contquery \"%s\"",
+                    errmsg("cannot copy to contview \"%s\"",
                     RelationGetRelationName(cstate->rel))));
         else if (cstate->rel->rd_rel->relkind == RELKIND_MATVIEW)
             ereport(ERROR,
@@ -3892,7 +3892,7 @@ static uint64 CopyFrom(CopyState cstate)
 
                     PG_END_TRY();
                     if (!is_EOF) {
-                        tsstoreInsert->batch_insert(values, nulls, hi_options);
+                        tsstoreInsert->batch_insert(values, nulls, hi_options, false);
                     } else {
                         endFlag = true;
                         tsstoreInsert->end_batch_insert();

@@ -2686,8 +2686,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6116 | int1smaller
  6117 | int1inc
  6118 | set_hashbucket_info
- 6203 | pg_start_backup
- 6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
  7777 | sysdate

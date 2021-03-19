@@ -394,7 +394,7 @@ Relation GetAndOpenDeleteDeltaRel(const Relation rel, LOCKMODE lockmode, bool is
         }
 
         /*
-         * To support Update or Delete during extension, we need to add 3 or 4(partitioned table)
+         * To support Update or Delete during extension, we need to add 2 more columns.
          * more columns. Limited by MaxHeapAttributeNumber, if the table already contains too many columns,
          * we don't allow update or delete anymore, but insert statement can still proceed.
          */

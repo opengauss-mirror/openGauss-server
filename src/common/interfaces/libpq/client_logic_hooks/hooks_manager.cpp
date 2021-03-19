@@ -36,6 +36,7 @@
 #include "client_logic_cache/column_hook_executors_list.h"
 #include "encryption_column_hook_executor.h"
 #include "encryption_global_hook_executor.h"
+#include "client_logic_processor/values_processor.h"
 
 /* DDL */
 GlobalHookExecutorSptr HooksManager::GlobalSettings::create_global_hook_executor(const char *function_name,
@@ -119,7 +120,7 @@ int HooksManager::get_estimated_processed_data_size(const ColumnHookExecutorsLis
     }
     return total + 1; /* 1 is for the byte counting how many executors run */
 }
-int HooksManager::process_data(bool is_during_refresh_cache, const ICachedColumn *cached_column,
+int HooksManager::process_data(const ICachedColumn *cached_column,
     ColumnHookExecutorsList *column_hook_executors_list, const unsigned char *data, int data_size,
     unsigned char *processed_data)
 {
@@ -133,8 +134,7 @@ int HooksManager::process_data(bool is_during_refresh_cache, const ICachedColumn
     size_t column_hook_executors_list_size = column_hook_executors_list->size();
     for (size_t i = 0; i < column_hook_executors_list_size; ++i) {
         ColumnHookExecutor *column_hook_executor = column_hook_executors_list->at(i);
-        ret = column_hook_executor->process_data(is_during_refresh_cache, cached_column, data, data_size,
-            processed_data + 1);
+        ret = column_hook_executor->process_data(cached_column, data, data_size, processed_data + 1);
         if (ret < 0) {
             return -1;
         } else {
@@ -144,22 +144,24 @@ int HooksManager::process_data(bool is_during_refresh_cache, const ICachedColumn
     return total;
 }
 
-int HooksManager::deprocess_data(PGClientLogic &client_logic, const unsigned char *data_processed,
-    int data_processed_size, unsigned char **data)
+DecryptDataRes HooksManager::deprocess_data(PGClientLogic &client_logic, const unsigned char *data_processed,
+    int data_processed_size, unsigned char **data, int *data_plain_size)
 {
+    DecryptDataRes dec_dat_res = DEC_DATA_ERR;
+    
     size_t column_settings_id_cnt(0);
     if (!data_processed || data_processed_size <= 0) {
         if (client_logic.m_conn->verbosity == PQERRORS_VERBOSE) {
             fprintf(stderr, "deprocess empty data\n");
         }
-        return 0;
+        return DEC_DATA_ERR;
     }
 
     /* column settings count (HEADER) */
     column_settings_id_cnt = (size_t)*data_processed++;
     if (column_settings_id_cnt < 1) {
         fprintf(stderr, "invalid number of column encryption key: %zu\n", column_settings_id_cnt);
-        return -1;
+        return DECRYPT_CEK_ERR;
     }
     --data_processed_size;
 
@@ -177,22 +179,22 @@ int HooksManager::deprocess_data(PGClientLogic &client_logic, const unsigned cha
         ColumnHookExecutor *column_hook_executor =
             CacheLoader::get_instance().get_column_hook_executor(column_setting_oid);
         if (!column_hook_executor) {
-            return -1;
+            return CLIENT_HEAP_ERR;
         }
 
         /* deprocess */
-        int data_size = column_hook_executor->deprocess_data(client_logic.isDuringRefreshCacheOnError,
-            data_processed, data_processed_size, data);
-        if (data_size < 0) {
-            return -1;
+        dec_dat_res = column_hook_executor->deprocess_data(data_processed, data_processed_size,
+            data, data_plain_size);
+        if (dec_dat_res != DEC_DATA_SUCCEED) {
+            return dec_dat_res;
         }
 
         /* next iteration will continue from the same point */
         data_processed = *data;
-        data_processed_size = data_size;
+        data_processed_size = *data_plain_size;
     }
 
-    return data_processed_size;
+    return DEC_DATA_SUCCEED;
 }
 
 bool HooksManager::is_operator_allowed(const ICachedColumn *ce, const char * const op)
@@ -282,9 +284,9 @@ bool HooksManager::ColumnSettings::set_deletion_expected(const char *object_name
 }
 
 #if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool HooksManager::GlobalSettings::delete_localkms_file(GlobalHookExecutor *global_hook_executor)
+bool HooksManager::GlobalSettings::get_key_path_by_cmk_name(GlobalHookExecutor *global_hook_executor,
+    char *key_path_buf, size_t buf_len)
 {
-    return global_hook_executor->delete_localkms_file();
+    return global_hook_executor->get_key_path_by_cmk_name(key_path_buf, buf_len);
 }
 #endif
-

@@ -4403,9 +4403,6 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
                         errmsg("could not find tuple for relation %u", RelationGetRelid(relation))));
         }
         classform = (Form_pg_class) GETSTRUCT(tuple);
-    } else {
-        rc = memset_s(&classform, sizeof(classform), 0, sizeof(classform));
-        securec_check(rc, "\0", "\0");
     }
     ereport(LOG,
         (errmsg("Relation %s(%u) set newfilenode %u oldfilenode %u xid %lu",
@@ -5742,7 +5739,7 @@ List* RelationGetIndexPredicate(Relation relation)
      */
     result = (List*)eval_const_expressions(NULL, (Node*)result);
 
-    result = (List*)canonicalize_qual((Expr*)result);
+    result = (List*)canonicalize_qual((Expr*)result, false);
 
     /* Also convert to implicit-AND format */
     result = make_ands_implicit((Expr*)result);

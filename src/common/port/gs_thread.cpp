@@ -325,6 +325,9 @@ static void check_boot_name(char** argv, int argc, char** name_thread)
         case WalWriterProcess:
             *name_thread = "WalWriter";
             break;
+        case WalWriterAuxiliaryProcess:
+            *name_thread = "WalWriterAuxiliary";
+            break;
         case WalReceiverProcess:
             *name_thread = "WalReceiver";
             break;
@@ -466,7 +469,7 @@ void gs_thread_exit(int code)
     (void)gs_signal_deletetimer();
 
     /* free the locale cache */
-    freeLocaleCacheAtThreadExit();
+    freeLocaleCache(true);
 
     /* release llvm context memory */
     CodeGenThreadTearDown();

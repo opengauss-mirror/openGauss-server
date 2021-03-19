@@ -38,7 +38,6 @@
 #include "utils/memutils.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
-#include "utils/globalpreparestmt.h"
 void
 GlobalPlanCache::FillClassicEnvSignatures(GPCEnv *env)
 {
@@ -226,11 +225,14 @@ GlobalPlanCache::GetSchemaName(GPCEnv *env)
 void GPCResetAll()
 {
     pthread_mutex_lock(&g_instance.gpc_reset_lock);
-    MemoryContextUnSealChildren(g_instance.cache_cxt.global_cache_mem);
-    MemoryContextReset(g_instance.cache_cxt.global_cache_mem);
+
+    for (int i = 0; i < MAX_GLOBAL_CACHEMEM_NUM; ++i) {
+        MemoryContextUnSealChildren(g_instance.cache_cxt.global_plancache_mem[i]);
+        MemoryContextReset(g_instance.cache_cxt.global_plancache_mem[i]);
+    }
     g_instance.plan_cache->Init();
-    g_instance.prepare_cache->Init();
     pthread_mutex_unlock(&g_instance.gpc_reset_lock);
+    GPC_LOG("gpc reset all", 0, 0);
 }
 
 void GPCCleanDatanodeStatement(int dn_stmt_num, const char* stmt_name)
@@ -300,17 +302,18 @@ void CNGPCCleanUpSession()
 }
 
 /* incase change shared plan in execute stage, copy stmt into sess */
-List* CopyLocalStmt(const List* stmt_list)
+List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, MemoryContext* plan_context)
 {
-    MemoryContext plan_context = AllocSetContextCreate(u_sess->temp_mem_cxt,
-                                                       "CopyedStmt",
-                                                       ALLOCSET_SMALL_MINSIZE,
-                                                       ALLOCSET_SMALL_INITSIZE,
-                                                       ALLOCSET_DEFAULT_MAXSIZE);
+    *plan_context = AllocSetContextCreate(parent_cxt,
+                                          "CopyedStmt",
+                                          ALLOCSET_DEFAULT_MINSIZE,
+                                          16 * 1024,
+                                          ALLOCSET_DEFAULT_MAXSIZE,
+                                          STACK_CONTEXT);
     /*
      * Copy plan into the new context.
      */
-    MemoryContext oldcxt = MemoryContextSwitchTo(plan_context);
+    MemoryContext oldcxt = MemoryContextSwitchTo(*plan_context);
     List* stmts = (List*)copyObject(stmt_list);
     (void)MemoryContextSwitchTo(oldcxt);
     return stmts;
@@ -689,5 +692,29 @@ void set_func_expr_unique_id(PLpgSQL_function* func)
     if (func->action != NULL) {
         set_id_block(func->action, &unique_id);
     }
+}
+
+bool SPIParseEnableGPC(const Node *node)
+{
+    if (node == NULL)
+        return false;
+    switch (nodeTag(node)) {
+        case T_SelectStmt:
+            if (((SelectStmt*)node)->intoClause)
+                return false;
+            /* fall through */
+        case T_MergeStmt:
+        case T_UpdateStmt:
+        case T_DeleteStmt:
+        case T_InsertStmt:
+            return true;
+        /* like needRecompilePlan */
+        case T_CreateTableAsStmt:
+        case T_TransactionStmt:
+        default:
+            return false;
+    }
+    /* keep compiler quite */
+    return false;
 }
 

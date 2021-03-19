@@ -176,6 +176,8 @@ syncrep_scanner_init(const char *query_string)
 void
 syncrep_scanner_finish(syncrep_scanner_yyscan_t yyscanner)
 {
+	if ((YY_BUFFER_STATE*)t_thrd.syncrepscanner_cxt.scanbufhandle->yy_ch_buf)
+		yyfree((YY_BUFFER_STATE*)t_thrd.syncrepscanner_cxt.scanbufhandle->yy_ch_buf ,yyscanner );
 	yy_delete_buffer(t_thrd.syncrepscanner_cxt.scanbufhandle, yyscanner);
 	t_thrd.syncrepscanner_cxt.scanbufhandle = NULL;
 	yylex_destroy(yyscanner);

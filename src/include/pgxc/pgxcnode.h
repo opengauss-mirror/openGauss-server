@@ -263,7 +263,6 @@ extern void ensure_in_buffer_capacity(size_t bytes_needed, PGXCNodeHandle* handl
 extern void ensure_out_buffer_capacity(size_t bytes_needed, PGXCNodeHandle* handle);
 extern int pgxc_node_send_threadid(PGXCNodeHandle* handle, uint32 threadid);
 extern int pgxc_node_send_queryid(PGXCNodeHandle* handle, uint64 queryid);
-extern int pgxc_node_send_cn_identifier(PGXCNodeHandle *handle, PGXCNode_HandleGPC handle_type);
 extern int pgxc_node_send_unique_sql_id(PGXCNodeHandle* handle);
 extern int pgxc_node_send_query(PGXCNodeHandle* handle, const char* query, bool isPush = false,
     bool trigger_ship = false, bool check_gtm_mode = false, const char *compressPlan = NULL, int cLen = 0);
@@ -271,16 +270,20 @@ extern void pgxc_node_send_gtm_mode(PGXCNodeHandle* handle);
 extern int pgxc_node_send_plan_with_params(PGXCNodeHandle* handle, const char* query, short num_params,
     Oid* param_types, int paramlen, const char* params, int fetch_size);
 extern int pgxc_node_send_describe(PGXCNodeHandle* handle, bool is_statement, const char* name);
+#ifndef ENABLE_MULTIPLE_NODES
 extern int pgxc_node_send_execute(PGXCNodeHandle* handle, const char* portal, int fetch);
+#endif
 extern int pgxc_node_send_close(PGXCNodeHandle* handle, bool is_statement, const char* name);
 extern int pgxc_node_send_sync(PGXCNodeHandle* handle);
 extern int pgxc_node_send_bind(
     PGXCNodeHandle* handle, const char* portal, const char* statement, int paramlen, const char* params);
 extern int pgxc_node_send_parse(
     PGXCNodeHandle* handle, const char* statement, const char* query, short num_params, Oid* param_types);
+#ifndef ENABLE_MULTIPLE_NODES
 extern int pgxc_node_send_query_extended(PGXCNodeHandle* handle, const char* query, const char* statement,
     const char* portal, int num_params, Oid* param_types, int paramlen, const char* params, bool send_describe,
     int fetch_size);
+#endif
 extern int pgxc_node_send_gxid(PGXCNodeHandle* handle, GlobalTransactionId gxid, bool isforcheck);
 extern int pgxc_node_send_commit_csn(PGXCNodeHandle* handle, uint64 commit_csn);
 extern int pgxc_node_send_csn(PGXCNodeHandle* handle, uint64 commit_csn, CsnType csn_type);
@@ -338,6 +341,10 @@ extern GlobalNodeDefinition *global_node_definition;
 extern bool IsAutoVacuumWorkerProcess();
 extern char *format_type_with_nspname(Oid type_oid);
 extern void pgxc_node_all_free(void);
+extern int pgxc_node_send_execute(PGXCNodeHandle* handle, const char* portal, int fetch, bool trigger_ship = false);
+extern int pgxc_node_send_query_extended(PGXCNodeHandle* handle, const char* query, const char* statement,
+    const char* portal, int num_params, Oid* param_types, int paramlen, const char* params, bool send_describe,
+    int fetch_size, bool trigger_ship = false);
 extern void FreePgxcNodehandles(PGXCNodeHandleGroup* handleGroup);
 extern void FreePgxcNodehandlesWithStatus(PGXCNodeHandleGroup* handleGroup, char *statusArray, bool *hasError);
 extern void LibcommFinish(NODE_CONNECTION *conn);

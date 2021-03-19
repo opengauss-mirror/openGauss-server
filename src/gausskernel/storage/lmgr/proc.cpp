@@ -233,10 +233,19 @@ void InitProcGlobal(void)
     PGPROC **procs = NULL;
     int i, j;
     uint32 TotalProcs = (uint32)(GLOBAL_ALL_PROCS);
+    bool needPalloc = false;
 
     MemoryContext oldContext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
-    /* Create the g_instance.proc_base shared structure */
-    g_instance.proc_base = (PROC_HDR *)CACHELINEALIGN(palloc(sizeof(PROC_HDR) + PG_CACHE_LINE_SIZE));
+    if (g_instance.proc_base == NULL) {
+        /* Create the g_instance.proc_base shared structure */
+        g_instance.proc_base = (PROC_HDR *)CACHELINEALIGN(palloc(sizeof(PROC_HDR) + PG_CACHE_LINE_SIZE));
+        needPalloc = true;
+    } else {
+        Assert(g_instance.proc_base != NULL);
+        Assert(g_instance.proc_base->allProcs != NULL);
+        Assert(g_instance.proc_base->allPgXact != NULL);
+        Assert(g_instance.proc_base->allProcs[0] != NULL);
+    }
 
     /*
      * Initialize the data structures.
@@ -252,6 +261,7 @@ void InitProcGlobal(void)
     g_instance.proc_base->startupProcPid = 0;
     g_instance.proc_base->startupBufferPinWaitBufId = -1;
     g_instance.proc_base->walwriterLatch = NULL;
+    g_instance.proc_base->walwriterauxiliaryLatch = NULL;
     g_instance.proc_base->checkpointerLatch = NULL;
     g_instance.proc_base->cbmwriterLatch = NULL;
     pg_atomic_init_u32(&g_instance.proc_base->procArrayGroupFirst, INVALID_PGPROCNO);
@@ -287,15 +297,29 @@ void InitProcGlobal(void)
         }
     } else {
 #endif
-        initProcs[0] = (PGPROC *)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGPROC) + PG_CACHE_LINE_SIZE));
+        if (needPalloc) {
+            initProcs[0] = (PGPROC *)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGPROC) + PG_CACHE_LINE_SIZE));
+        } else {
+            initProcs[0] = g_instance.proc_base->allProcs[0];
+            errno_t rc = memset_s(initProcs[0], TotalProcs * sizeof(PGPROC), 0, TotalProcs * sizeof(PGPROC));
+            securec_check(rc, "", "");
+        }
         if (!initProcs[0]) {
             ereport(FATAL, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of shared memory")));
         }
 #ifdef __USE_NUMA
     }
 #endif
-    procs = (PGPROC **)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGPROC *) + PG_CACHE_LINE_SIZE));
-    g_instance.proc_base->allProcs = procs;
+    if (needPalloc) {
+        procs = (PGPROC **)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGPROC *) + PG_CACHE_LINE_SIZE));
+        g_instance.proc_base->allProcs = procs;
+    } else {
+        errno_t rc = memset_s(g_instance.proc_base->allProcs, TotalProcs * sizeof(PGPROC *), 0,
+            TotalProcs * sizeof(PGPROC *));
+        securec_check(rc, "", "");
+        procs = g_instance.proc_base->allProcs;
+    }
+
     g_instance.proc_base->allProcCount = TotalProcs;
     g_instance.proc_base->allNonPreparedProcCount = g_instance.shmem_cxt.MaxBackends +
                                                     NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS;
@@ -306,16 +330,22 @@ void InitProcGlobal(void)
         procs[i] = &initProcs[i % nNumaNodes][i / nNumaNodes];
     }
 
-    /*
-     * Also allocate a separate array of PGXACT structures.  This is separate
-     * from the main PGPROC array so that the most heavily accessed data is
-     * stored contiguously in memory in as few cache lines as possible. This
-     * provides significant performance benefits, especially on a
-     * multiprocessor system.  There is one PGXACT structure for every PGPROC
-     * structure.
-     */
-    g_instance.proc_base->allPgXact =
-        (PGXACT *)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGXACT) + PG_CACHE_LINE_SIZE));
+    if (needPalloc) {
+        /*
+        * Also allocate a separate array of PGXACT structures.  This is separate
+        * from the main PGPROC array so that the most heavily accessed data is
+        * stored contiguously in memory in as few cache lines as possible. This
+        * provides significant performance benefits, especially on a
+        * multiprocessor system.  There is one PGXACT structure for every PGPROC
+        * structure.
+        */
+        g_instance.proc_base->allPgXact =
+            (PGXACT *)CACHELINEALIGN(palloc0(TotalProcs * sizeof(PGXACT) + PG_CACHE_LINE_SIZE));
+    } else {
+        errno_t rc = memset_s(g_instance.proc_base->allPgXact, TotalProcs * sizeof(PGXACT), 0,
+            TotalProcs * sizeof(PGXACT));
+        securec_check(rc, "", "");
+    }
 
     for (i = 0; (unsigned int)(i) < TotalProcs; i++) {
         /* Common initialization for all PGPROCs, regardless of type.
@@ -446,7 +476,7 @@ static inline void ReleaseChildSlot(void)
           t_thrd.role == WLM_CPMONITOR) || IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND ||
           IsStatementFlushProcess() || IsJobSnapshotProcess() || t_thrd.postmaster_cxt.IsRPCWorkerThread ||
           IsJobPercentileProcess() || t_thrd.role == ARCH)) {
-          (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
+        (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
     }
 }
 
@@ -539,7 +569,9 @@ void InitProcess(void)
 
         ereport(FATAL,
                 (errcode(ERRCODE_TOO_MANY_CONNECTIONS),
-                 errmsg("No free proc new connection.")));
+                 errmsg("No free proc is available to create a new connection for %s. Please check whether the IP "
+                        "address and port are available, and the CN/DN process can be connected",
+                        u_sess->proc_cxt.applicationName)));
     }
 
 #ifdef __USE_NUMA
@@ -613,7 +645,7 @@ void InitProcess(void)
     t_thrd.proc->waitLock = NULL;
     t_thrd.proc->waitProcLock = NULL;
     t_thrd.proc->blockProcLock = NULL;
-    t_thrd.proc->waitLockThrd = NULL;
+    t_thrd.proc->waitLockThrd = &t_thrd;
     init_proc_dw_buf();
 #ifdef USE_ASSERT_CHECKING
     if (assert_enabled) {
@@ -826,6 +858,8 @@ void InitAuxiliaryProcess(void)
     t_thrd.proc->lwIsVictim = false;
     t_thrd.proc->waitLock = NULL;
     t_thrd.proc->waitProcLock = NULL;
+    t_thrd.proc->blockProcLock = NULL;
+    t_thrd.proc->waitLockThrd = &t_thrd;
     t_thrd.proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
     t_thrd.myLogicTid = t_thrd.proc->logictid;
     init_proc_dw_buf();
@@ -1481,7 +1515,6 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
     t_thrd.proc->waitLock = lock;
     t_thrd.proc->waitProcLock = proclock;
     t_thrd.proc->waitLockMode = lockmode;
-    t_thrd.proc->waitLockThrd = &t_thrd;
 
     t_thrd.proc->waitStatus = STATUS_WAITING;
 
@@ -1565,14 +1598,16 @@ int ProcSleep(LOCALLOCK* locallock, LockMethod lockMethodTable, bool allow_con_u
 
         /*
          * If we are not deadlocked, but are waiting on an autovacuum-induced
-         * task, send a signal to interrupt it.
+         * task, send a signal to interrupt it. If I am an autovacuum worker, don't
+         * send a signal to inerrutpt.
          *
          * If we are not deadlocked, but are waiting on a data redistribution
          * -induced task, send a signal to interrupt it. No extra enable_cluster_resize
          * check is needed, since DS_BLOCKED_BY_REDISTRIBUTION can only be set
          * by blocking proc with enable_cluster_resize on.
          */
-        if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_AUTOVACUUM && allow_autovacuum_cancel) {
+        if (t_thrd.storage_cxt.deadlock_state == DS_BLOCKED_BY_AUTOVACUUM && allow_autovacuum_cancel &&
+            !IsAutoVacuumWorkerProcess()) {
             /* cancle all existing blockers */
             CancelAllBlockedAutovacWorkers(lock, lockmode);
 
@@ -1800,6 +1835,27 @@ PGPROC* ProcWakeup(PGPROC* proc, int waitStatus)
     return retProc;
 }
 
+/* 
+ * ProcBlockerUpdate - udpate lock waiter's block information
+ *
+ * waiterProc:      the lock appliant's PGPROC
+ * blockerProcLock: the blocker's PROCLOCK
+ * lockMode:        lockmode of the lock held by blocker
+ * isLockHolder:    blocker is holder or waiter.
+ */
+void ProcBlockerUpdate(PGPROC *waiterProc,
+    PROCLOCK *blockerProcLock, const char* lockMode, bool isLockHolder)
+{
+    knl_thrd_context *pThrd = (knl_thrd_context*)waiterProc->waitLockThrd;
+
+    Assert(pThrd != NULL);
+    pThrd->storage_cxt.conflicting_lock_by_holdlock = isLockHolder;
+    pThrd->storage_cxt.conflicting_lock_mode_name = lockMode;
+    pThrd->storage_cxt.conflicting_lock_thread_id = blockerProcLock->tag.myProc->pid;
+
+    waiterProc->blockProcLock = blockerProcLock;
+}
+
 /*
  * ProcLockWakeup -- routine for waking up processes when a lock is
  *		released (or a prior waiter is aborted).  Scan all waiters
@@ -1843,24 +1899,34 @@ void ProcLockWakeup(LockMethod lockMethodTable, LOCK* lock, const PROCLOCK* proc
              * because it's been cleared.
              */
         } else {
-            /* Update block session for proc which block proc is will be cleanup */
-            if (status == STATUS_OK && proclock != NULL && proclock == proc->blockProcLock &&
-                !(proclock->holdMask & lockMethodTable->conflictTab[lockmode])) {  // need update block proc
-
-                // deadlockcheck may change order of wait queue, so travel whole queue
+            /*
+             * When status is STATUS_OK, it means there are some conflict between this lock waiter
+             * with ahead ones. If it was related to the released PROCLOCK, or the whole wait queue
+             * was rearranged by dead lock checker, try to find out this waiter's new blocker.
+             */
+            if (status == STATUS_OK && (proclock == NULL || (proclock == proc->blockProcLock &&
+                !(proclock->holdMask & lockMethodTable->conflictTab[lockmode])))) {
                 PGPROC* curProc = (PGPROC*)waitQueue->links.next;
+
+                /* traverse the whole queue to find the first conflicter who blocks this proc. */
                 for (int j = 0; j < waitQueue->size; j++) {
                     if (lockMethodTable->conflictTab[lockmode] & LOCKBIT_ON((unsigned int)curProc->waitLockMode)) {
                         break;
                     }
                     curProc = (PGPROC*)curProc->links.next;
                 }
-                proc->blockProcLock = curProc->waitProcLock;
+
+                /* above must be a normal break. */
+                Assert(curProc != NULL);
+
+                /* refresh waiter's with new blocker information. */
+                ProcBlockerUpdate(proc, curProc->waitProcLock,
+                    lockMethodTable->lockModeNames[curProc->waitLockMode], false);
                 status = STATUS_FOUND;
             }
 
             if (status == STATUS_FOUND && oldBlockProcLock != proc->blockProcLock) {
-                /* refresh proc's blocking session id. */
+                /* report new blocking session id into PgBackendStatus. */
                 pgstat_report_blocksid(proc->waitLockThrd,
                     proc->blockProcLock->tag.myProc->sessionid);
             }
@@ -2170,9 +2236,10 @@ bool enable_session_sig_alarm(int delayms)
     struct itimerval timeval;
     errno_t rc = EOK;
 
-    /* Session timer only work when app connect coordinator ,not work for inner conncection. */
-    if (!((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && IsConnFromApp()))
+    /* Session timer only work when connect form app, not work for inner conncection. */
+    if (!IsConnFromApp() || IS_THREAD_POOL_STREAM) {
         return true;
+    }
     /* disable session timeout */
     if (u_sess->attr.attr_common.SessionTimeout == 0 && IS_SINGLE_NODE) {
         return true;
@@ -2187,7 +2254,15 @@ bool enable_session_sig_alarm(int delayms)
     fin_time = TimestampTzPlusMilliseconds(fin_time, delay_time_ms);
     u_sess->storage_cxt.session_fin_time = fin_time;
 
-    if (IS_THREAD_POOL_WORKER) {
+    /*
+     * threadpool session status must be UNINIT,ATTACH,DEATCH...
+     * KNL_SESS_FAKE only use in thread preinit
+     * if a new session is UNINIT
+     * 		if attached, t_thrd is valid.
+     * 		if not attach, t_thrd is invalid
+     * so we user USESS_STATUS to check again
+     * */
+    if (IS_THREAD_POOL_WORKER || u_sess->status != KNL_SESS_FAKE) {
         return true;
     }
     /* Now we set the timer to interrupt. */
@@ -2208,9 +2283,10 @@ bool disable_session_sig_alarm(void)
         u_sess->storage_cxt.session_timeout_active = false;
         return true;
     }
-    /* Session timer only work when app connect coordinator ,not work for inner conncection. */
-    if (!((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && IsConnFromApp()))
+    /* Session timer only work when connect from app, not work for inner conncection. */
+    if (!IsConnFromApp()) {
         return true;
+    }
 
     /* already disable */
     if (!u_sess->attr.attr_common.SessionTimeout && \
@@ -2221,7 +2297,6 @@ bool disable_session_sig_alarm(void)
          */
         ereport(LOG, (errmsg("reset handle xmin.")));
 #endif
-	return true;
         return true;
     }
     /*

@@ -31,8 +31,6 @@ bool useReadline = false;
 #define NL_IN_HISTORY 0x01
 #endif
 
-void setHistSize(const char* targetName, char* targetValue, bool setToDefault);
-
 /*
  * gets_interactive()
  *
@@ -251,41 +249,27 @@ bool SensitiveStrCheck(const char* target)
     }
 }
 
-void setHistSize(const char* targetName, const char* targetValue, bool setToDefault)
+/*
+ * Put any startup stuff related to input in here. It's good to maintain
+ * abstraction this way.
+ *
+ * The only "flag" right now is 1 for use readline & history.
+ */
+void initializeInput(int flags)
 {
-#ifndef ENABLE_LLT
-    char* end = NULL;
-    long int result;
-#define MAXHISTSIZE 500
-#define DEFHISTSIZE 32
-    if (targetName == NULL) {
-        return;
-    }
-    if (strcmp(targetName, "HISTSIZE") == 0) {
-        if (!setToDefault) {
-            if (targetValue == NULL || strlen(targetValue) == 0) {
-                fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value can not be null\n");
-                return;
-            } else {
-                errno = 0;
-                result = strtol(targetValue, &end, 0);
-                if ((errno == ERANGE && (result == LONG_MAX || result == LONG_MIN)) || (errno != 0 && result == 0)) {
-                    fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value overflows\n");
-                    return;
-                }
-                if (*end || result < 0) {
-                    fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value must be positive integer\n");
-                    return;
-                }
-            }
-            if (result > MAXHISTSIZE) {
-                fprintf(stderr, "warning:\"HISTSIZE\" is set to 500,because its value can not be greater than 500\n");
-                result = MAXHISTSIZE;
-            }
-        } else {
-            result = DEFHISTSIZE;
-        }
-        stifle_history((int)result);
+#ifdef USE_READLINE
+
+#ifndef ENABLE_MULTIPLE_NODES
+    flags &= useReadline;
+#endif
+
+    if (flags & 1) {
+        useReadline = true;
+
+        /* these two things must be done in this order: */
+        initialize_readline();
+        rl_variable_bind ("enable-meta-key", "off");
+        rl_initialize();
     }
 #endif
 }

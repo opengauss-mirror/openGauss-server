@@ -337,7 +337,12 @@ bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
     return false;
 }
 
-
+/* Don't sync pgxc node table, it will hold NodeTableLock to read tuple and it's only useful in local node */
+static inline bool NeedSyncXact(uint32 syncFlag, Oid tableOid) 
+{
+    return ((syncFlag & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode()) && (tableOid != PgxcNodeRelationId) &&
+        !u_sess->attr.attr_common.xc_maintenance_mode && !t_thrd.xact_cxt.bInAbortTransaction;
+}
 /*
  * HeapTupleSatisfiesNow
  *		True iff heap tuple is valid "now".
@@ -417,8 +422,7 @@ restart:
             else
                 return false; /* deleted before scan started */
         } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),  &needSync, false, false)) {
-            if (((needSync & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode()) &&
-                !u_sess->attr.attr_common.xc_maintenance_mode && !t_thrd.xact_cxt.bInAbortTransaction) {
+            if (NeedSyncXact(needSync, htup->t_tableOid)) {
                 needSync = 0;
                 SyncWaitXidEnd(HeapTupleHeaderGetXmin(page, tuple), buffer);
                 goto restart;
@@ -466,8 +470,7 @@ restart:
 
     needSync = 0;
     if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(page, tuple), &needSync, false, false)) {
-        if ((needSync & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode() &&
-            !u_sess->attr.attr_common.xc_maintenance_mode && !t_thrd.xact_cxt.bInAbortTransaction) {
+        if (NeedSyncXact(needSync, htup->t_tableOid)) {
             needSync = 0;
             SyncWaitXidEnd(HeapTupleHeaderGetXmax(page, tuple), buffer);
             goto restart;
@@ -1172,13 +1175,27 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
         if (HeapTupleHeaderXminInvalid(tuple))
             return HEAPTUPLE_DEAD;
         xidstatus = TransactionIdGetStatus(HeapTupleGetRawXmin(htup));
-        if (xidstatus == XID_INPROGRESS && TransactionIdIsInProgress(HeapTupleGetRawXmin(htup))) {
+        if (TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmin(htup))) {
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return HEAPTUPLE_INSERT_IN_PROGRESS;
             if (tuple->t_infomask & HEAP_IS_LOCKED)
                 return HEAPTUPLE_INSERT_IN_PROGRESS;
             /* inserted and then deleted by same xact */
-            return HEAPTUPLE_DELETE_IN_PROGRESS;
+            if (TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmax(htup))) {
+                return HEAPTUPLE_DELETE_IN_PROGRESS;
+            }
+            /* deleting subtransaction must have aborted */
+            return HEAPTUPLE_INSERT_IN_PROGRESS;
+        } else if (xidstatus == XID_INPROGRESS && TransactionIdIsInProgress(HeapTupleGetRawXmin(htup))) {
+            /*
+             * It'd be possible to discern between INSERT/DELETE in progress
+             * here by looking at xmax - but that doesn't seem beneficial for
+             * the majority of callers and even detrimental for some. We'd
+             * rather have callers look at/wait for xmin than xmax. It's
+             * always correct to return INSERT_IN_PROGRESS because that's
+             * what's happening from the view of other backends.
+             */
+            return HEAPTUPLE_INSERT_IN_PROGRESS;
         } else if (xidstatus == XID_COMMITTED ||
             (xidstatus == XID_INPROGRESS && TransactionIdDidCommit(HeapTupleGetRawXmin(htup)))) {
             /* must recheck clog again, since csn could be commit in progress before check TransactionIdIsInProgress */

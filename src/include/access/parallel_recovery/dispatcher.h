@@ -61,6 +61,8 @@ typedef struct LogDispatcher {
     uint32* chosedWorkerIds;
     uint32 chosedWorkerCount;
     uint32 readyWorkerCnt;
+    XLogRecPtr dispatchReadRecPtr; /* start of dispatch record read */
+    XLogRecPtr dispatchEndRecPtr;  /* end of dispatch record read */
     bool checkpointNeedFullSync;
 } LogDispatcher;
 

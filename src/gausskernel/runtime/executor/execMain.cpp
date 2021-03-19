@@ -275,12 +275,16 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     t_thrd.utils_cxt.ExecutorMemoryTrack = ((AsanSet)(estate->es_query_cxt))->track;
 #endif
 
+#ifndef ENABLE_MULTIPLE_NODES
+    (void)InitStreamObject(queryDesc->plannedstmt);
+#endif
+
     if (StreamTopConsumerAmI() && queryDesc->instrument_options != 0 && IS_PGXC_DATANODE) {
         int dop = queryDesc->plannedstmt->query_dop;
         if (queryDesc->plannedstmt->in_compute_pool) {
             dop = 1;
         }
-        AutoContextSwitch streamCxtGuard(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+        AutoContextSwitch streamCxtGuard(u_sess->stream_cxt.stream_runtime_mem_cxt);
         u_sess->instr_cxt.global_instr = StreamInstrumentation::InitOnDn(queryDesc, dop);
 
         // u_sess->instr_cxt.thread_instr in DN
@@ -294,7 +298,7 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
         const int dop = 1;
 
         /* m_instrDataContext in CN of compute pool is under t_thrd.mem_cxt.stream_runtime_mem_cxt */
-        AutoContextSwitch streamCxtGuard(t_thrd.mem_cxt.stream_runtime_mem_cxt);
+        AutoContextSwitch streamCxtGuard(u_sess->stream_cxt.stream_runtime_mem_cxt);
         u_sess->instr_cxt.global_instr = StreamInstrumentation::InitOnCP(queryDesc, dop);
 
         u_sess->instr_cxt.thread_instr =
@@ -367,9 +371,13 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
         estate->es_bloom_filter.array_size = bloom_size;
         estate->es_bloom_filter.bfarray = (filter::BloomFilter **)palloc0(bloom_size * sizeof(filter::BloomFilter *));
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     /* statement always start from CN */
-    if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
+    if (IS_PGXC_COORDINATOR) {
+#else
+    /* statement always start in non-stream thread */
+    if (!StreamThreadAmI()) {
+#endif
         SetCurrentStmtTimestamp();
     } /* else stmtSystemTimestamp synchronize from CN */
 
@@ -511,11 +519,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
         u_sess->instr_cxt.can_record_to_table = true;
         ExplainNodeFinish(queryDesc->planstate, queryDesc->plannedstmt, GetCurrentTimestamp(), false);
 
-#ifdef ENABLE_MULTIPLE_NODES
         if ((IS_PGXC_COORDINATOR) && u_sess->instr_cxt.global_instr != NULL) {
-#else
-        if (StreamTopConsumerAmI() && u_sess->instr_cxt.global_instr != NULL) {
-#endif
             delete u_sess->instr_cxt.global_instr;
             u_sess->instr_cxt.thread_instr = NULL;
             u_sess->instr_cxt.global_instr = NULL;
@@ -717,11 +721,10 @@ void ExecutorEnd(QueryDesc *queryDesc)
     }
 }
 
-/* function: ExecGetPlanNodeid
+/*
  * description: get the plan node id of stream thread
- * return value:
- * 0: in postgres thread
- * >=1: in stream thread
+ * return value: 0: in postgres thread
+ *             >=1: in stream thread
  */
 int ExecGetPlanNodeid(void)
 {
@@ -1144,9 +1147,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     ListCell *l = NULL;
     int i;
     bool check = false;
-#ifndef ENABLE_MULTIPLE_NODES
-    plannedstmt->queryId = u_sess->debug_query_id;
-#endif
+
     gstrace_entry(GS_TRC_ID_InitPlan);
     /*
      * Do permissions checks
@@ -1192,10 +1193,10 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      * case happens on a target table's node group not matching the nodes that we
      * are shipping plan to.
      */
-#ifdef EANBLE_MULTIPLE_NODES
+#ifdef ENABLE_MULTIPLE_NODES
     if (plannedstmt->resultRelations && (!IS_PGXC_DATANODE || NeedExecute(plan))) {
 #else
-    if (plannedstmt->resultRelations && (!StreamThreadAmI()|| NeedExecute(plan))) {
+    if (plannedstmt->resultRelations && (!StreamThreadAmI() || NeedExecute(plan))) {
 #endif
         List *resultRelations = plannedstmt->resultRelations;
         int numResultRelations = list_length(resultRelations);
@@ -1361,6 +1362,15 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      */
     Assert(estate->es_subplanstates == NIL);
 
+    /* Only generate one time when u_sess->debug_query_id = 0 in CN */
+    if ((IS_SINGLE_NODE || IS_PGXC_COORDINATOR) && u_sess->debug_query_id == 0) {
+        u_sess->debug_query_id = generate_unique_id64(&gt_queryId);
+        pgstat_report_queryid(u_sess->debug_query_id);
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    plannedstmt->queryId = u_sess->debug_query_id;
+#endif
+
     if (StreamTopConsumerAmI()) {
         uint64 stream_start_time = time(NULL);
         BuildStreamFlow(plannedstmt);
@@ -1370,12 +1380,6 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
                 (errmsg("BuildStreamFlow stream_start_time:%lu,stream_end_time:%lu, BuildStreamFlow takes %lus.",
                 stream_start_time, stream_end_time, (stream_end_time - stream_start_time))));
         }
-    }
-
-    /* Only generate one time when u_sess->debug_query_id = 0 in CN */
-    if ((IS_SINGLE_NODE || IS_PGXC_COORDINATOR) && u_sess->debug_query_id == 0) {
-        u_sess->debug_query_id = generate_unique_id64(&gt_queryId);
-        pgstat_report_queryid(u_sess->debug_query_id);
     }
 
     if (IS_PGXC_DATANODE) {
@@ -1406,7 +1410,11 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
          * that executes the subplan
          */
         if (subplan && (plannedstmt->subplan_ids == NIL ||
+#ifdef ENABLE_MULTIPLE_NODES
             (IS_PGXC_COORDINATOR && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
+#else
+            (StreamTopConsumerAmI() && list_nth_int(plannedstmt->subplan_ids, i - 1) != 0) ||
+#endif
             plannedstmt->planTree->plan_node_id == list_nth_int(plannedstmt->subplan_ids, i - 1))) {
             estate->es_under_subplan = true;
             subplanstate = ExecInitNode(subplan, estate, sp_eflags);
@@ -1430,12 +1438,20 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      * tree.  This opens files, allocates storage and leaves us ready to start
      * processing tuples.
      */
+#ifdef ENABLE_MULTIPLE_NODES
     if (!IS_PGXC_COORDINATOR && plannedstmt->initPlan != NIL) {
+#else
+    if (!StreamTopConsumerAmI() && plannedstmt->initPlan != NIL) {
+#endif
         plan->initPlan = plannedstmt->initPlan;
         estate->es_subplan_ids = plannedstmt->subplan_ids;
     }
     planstate = ExecInitNode(plan, estate, eflags);
 
+    if (estate->pruningResult) {
+        destroyPruningResult(estate->pruningResult);
+        estate->pruningResult = NULL;
+    }
     /*
      * Get the tuple descriptor describing the type of tuples to return.
      */
@@ -1480,9 +1496,10 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     queryDesc->tupDesc = tupType;
     queryDesc->planstate = planstate;
 
-    if (StreamTopConsumerAmI() && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+    if (plannedstmt->num_streams > 0 && !StreamThreadAmI() &&
+        !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
         /* init stream thread in parallel */
-        StartUpStreamInParallel(plannedstmt, estate);
+        StartUpStreamInParallel(queryDesc->plannedstmt, queryDesc->estate);
     }
 
     gstrace_exit(GS_TRC_ID_InitPlan);
@@ -1632,7 +1649,7 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
         case RELKIND_CONTQUERY:
             /* Should not get here */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("cannot lock rows in contquery \"%s\"", RelationGetRelationName(rel))));
+                errmsg("cannot lock rows in contview \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_MATVIEW:
             /* Should not get here */

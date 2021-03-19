@@ -918,7 +918,12 @@ static JitContext* JitAggregateRangeSelectCodegen(
     AddExecClearTuple(ctx);
 
     // prepare for aggregation
-    prepareAggregate(ctx, &plan->_aggregate);
+    if (!prepareAggregate(ctx, &plan->_aggregate)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT query: failed to prepare aggregate");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
+    }
+
     AddResetStateLimitCounter(ctx);
 
     // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
@@ -953,7 +958,11 @@ static JitContext* JitAggregateRangeSelectCodegen(
 
     // aggregate into tuple (we use tuple's resno column as aggregated sum instead of defining local variable)
     // if row disqualified due to DISTINCT operator then go back to loop test block
-    buildAggregateRow(ctx, &plan->_aggregate, row, JIT_WHILE_COND_BLOCK());
+    if (!buildAggregateRow(ctx, &plan->_aggregate, row, JIT_WHILE_COND_BLOCK())) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT query: unsupported aggregate");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
+    }
 
     // if a limit clause exists, then increment limit counter and check if reached limit
     if (plan->_limit_count > 0) {
@@ -1437,7 +1446,12 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     AddExecClearTuple(ctx);
 
     // prepare for aggregation
-    prepareAggregate(ctx, &plan->_aggregate);
+    if (!prepareAggregate(ctx, &plan->_aggregate)) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range JOIN query: failed to prepare aggregate");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
+    }
+
     AddResetStateLimitCounter(ctx);
 
     // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
@@ -1503,12 +1517,19 @@ static JitContext* JitAggregateRangeJoinCodegen(Query* query, const char* query_
     // aggregate into tuple (we use tuple's resno column as aggregated sum instead of defining local variable)
     // find out to which table the aggreate expression refers, and aggregate it
     // if row disqualified due to DISTINCT operator then go back to inner loop test block
+    bool aggRes = false;
     if (plan->_aggregate._table == ctx->_inner_table_info.m_table) {
-        buildAggregateRow(ctx, &plan->_aggregate, inner_row, JIT_WHILE_COND_BLOCK());
+        aggRes = buildAggregateRow(ctx, &plan->_aggregate, inner_row, JIT_WHILE_COND_BLOCK());
     } else {
         // retrieve the safe copy of the outer row
         llvm::Value* outer_row_copy = AddGetOuterStateRowCopy(ctx);
-        buildAggregateRow(ctx, &plan->_aggregate, outer_row_copy, JIT_WHILE_COND_BLOCK());
+        aggRes = buildAggregateRow(ctx, &plan->_aggregate, outer_row_copy, JIT_WHILE_COND_BLOCK());
+    }
+
+    if (!aggRes) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range JOIN query: unsupported aggregate");
+        DestroyCodeGenContext(ctx);
+        return nullptr;
     }
 
     // if a limit clause exists, then increment limit counter and check if reached limit
@@ -1641,7 +1662,12 @@ static bool JitSubAggregateRangeSelectCodegen(JitLlvmCodeGenContext* ctx, JitCom
     JitRangeSelectPlan* subPlan = (JitRangeSelectPlan*)plan->_sub_query_plans[subQueryIndex];
 
     // prepare for aggregation
-    prepareAggregate(ctx, &subPlan->_aggregate);
+    if (!prepareAggregate(ctx, &subPlan->_aggregate)) {
+        MOT_LOG_TRACE(
+            "Failed to generate jitted code for aggregate range SELECT sub-query: failed to prepare aggregate");
+        return false;
+    }
+
     AddResetStateLimitCounter(ctx);
 
     // pay attention: aggregated range scan is not stateful, since we scan all tuples in one call
@@ -1675,13 +1701,15 @@ static bool JitSubAggregateRangeSelectCodegen(JitLlvmCodeGenContext* ctx, JitCom
     // check for additional filters, if not try to fetch next row
     if (!buildFilterRow(ctx, row, &subPlan->_index_scan._filters, &max_arg, JIT_WHILE_COND_BLOCK())) {
         MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT sub-query: unsupported filter");
-        DestroyCodeGenContext(ctx);
         return false;
     }
 
     // aggregate into tuple (we use tuple's resno column as aggregated sum instead of defining local variable)
     // if row disqualified due to DISTINCT operator then go back to loop test block
-    buildAggregateRow(ctx, &subPlan->_aggregate, row, JIT_WHILE_COND_BLOCK());
+    if (!buildAggregateRow(ctx, &subPlan->_aggregate, row, JIT_WHILE_COND_BLOCK())) {
+        MOT_LOG_TRACE("Failed to generate jitted code for aggregate range SELECT sub-query: unsupported aggregate");
+        return false;
+    }
 
     // if a limit clause exists, then increment limit counter and check if reached limit
     if (subPlan->_limit_count > 0) {

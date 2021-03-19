@@ -16,7 +16,7 @@ top_builddir = ../../../../../
 NAME=client_logic_hooks
 encryption_hooks_dir = "$(top_builddir)/src/common/interfaces/libpq/client_logic_hooks/encryption_hooks"
 
-override CPPFLAGS := -DFRONTEND -DFRONTEND_PARSER -DPGXC -Wno-write-strings -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include  
+override CPPFLAGS := -DFRONTEND -DFRONTEND_PARSER -DPGXC -fstack-protector-all -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/ -I$(top_builddir)/src/include  
 override CPPFLAGS += -I$(top_builddir)/src/common/interfaces/libpq/ -I$(top_builddir)/src/include/libpq/ -I$(top_builddir)/src/include/libpq/client_logic_cache
 override CPPFLAGS += -I$(top_builddir)/src/common/interfaces/libpq/client_logic_hooks -I$(encryption_hooks_dir)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)

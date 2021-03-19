@@ -45,7 +45,6 @@
 #include "spin_lock.h"
 
 namespace MOT {
-#define MAX_THR_NUM 4096
 #define INITIAL_NUM_OBJPOOL 1
 #define NUM_OBJS (uint8_t)(255)
 #define NOT_VALID (uint8_t)(-1)

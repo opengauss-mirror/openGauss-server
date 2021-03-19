@@ -11,6 +11,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_backend_control            | on
  enable_bbox_dump                  | off
  enable_beta_features              | off
+ enable_beta_opfusion              | off
  enable_bitmapscan                 | on
  enable_bloom_filter               | on
  enable_broadcast                  | on
@@ -88,7 +89,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(114 rows)
+(115 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);

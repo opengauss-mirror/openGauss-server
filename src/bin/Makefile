@@ -52,11 +52,10 @@ SUBDIRS = \
 	pg_controldata \
 	pg_resetxlog \
 	gs_guc \
+	pgxc_clean \
 	gsqlerr \
 	pg_basebackup \
 	pg_probackup
-
-
 
 endif
 

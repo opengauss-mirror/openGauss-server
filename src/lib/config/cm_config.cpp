@@ -74,6 +74,13 @@ uint32 max_gtmpath_len = 0;
 uint32 max_etcdpath_len = 0;
 uint32 max_cmpath_len = 0;
 
+/* the local node name and idx */
+uint32 g_local_node_idx = 0;
+char* g_local_node_name = NULL;
+
+// the logical cluster name
+char* g_lcname = NULL;
+
 /* for datanode alarm */
 uint32 g_datanodeid = 0;
 char *g_logicClusterName = NULL;
@@ -513,113 +520,114 @@ int read_config_file(const char* file_path, int* err_no)
         /* read DNs info */
         FREAD(&g_node[ii].datanodeCount, 1, sizeof(uint32), fd);
         /* check datacodeCount not overflow */
-        if (g_node[ii].datanodeCount < CM_MAX_DATANODE_PER_NODE) {
-            for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
-                uint32 nn = 0;
+        if (g_node[ii].datanodeCount > CM_MAX_DATANODE_PER_NODE) {
+            goto read_failed;
+        }
+        for (kk = 0; kk < g_node[ii].datanodeCount; kk++) {
+            uint32 nn = 0;
 
-                /* calculate datanode group number */
-                if (g_node[ii].datanode[kk].datanodeRole == PRIMARY_DN) {
-                        g_cluster_total_instance_group_num++;
-                }
+            /* calculate datanode group number */
+            if (g_node[ii].datanode[kk].datanodeRole == PRIMARY_DN) {
+                    g_cluster_total_instance_group_num++;
+            }
 
-                FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
-                if (!datanodeMirrorIDInit) {
-                    datanodeMirrorIDInit = true;
-                    datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
-                    g_dn_replication_num++;
-                } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
-                    g_dn_replication_num++;
-                }
-                FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
+            FREAD(&g_node[ii].datanode[kk].datanodeId, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeMirrorId, 1, sizeof(uint32), fd);
+            if (!datanodeMirrorIDInit) {
+                datanodeMirrorIDInit = true;
+                datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
+                g_dn_replication_num++;
+            } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
+                g_dn_replication_num++;
+            }
+            FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeLocalDataPath);
 
-                FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
+            FREAD(g_node[ii].datanode[kk].datanodeXlogPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeXlogPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeXlogPath);
 
-                FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
-                g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
-                check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
+            FREAD(g_node[ii].datanode[kk].datanodeSSDDataPath, 1, CM_PATH_LENGTH, fd);
+            g_node[ii].datanode[kk].datanodeSSDDataPath[CM_PATH_LENGTH - 1] = '\0';
+            check_input_for_security(g_node[ii].datanode[kk].datanodeSSDDataPath);
 
-                max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
-                                    ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
-                                    : max_datapath_len;
+            max_datapath_len = (max_datapath_len < strlen(g_node[ii].datanode[kk].datanodeLocalDataPath))
+                                ? strlen(g_node[ii].datanode[kk].datanodeLocalDataPath)
+                                : max_datapath_len;
 
-                FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
-                if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
-                    goto read_failed;
-                }
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
-                }
-                FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
-                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
-                if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
-                    goto read_failed;
-                }
-                for (nn = 0; nn < CM_IP_NUM; nn++) {
-                    FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
-                }
-                FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
-                if (g_multi_az_cluster) {
-                    for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
-                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
+            FREAD(&g_node[ii].datanode[kk].datanodeListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeListenCount > CM_IP_NUM) {
+                goto read_failed;
+            }
+            for (nn = 0; nn < CM_IP_NUM; nn++) {
+                FREAD(g_node[ii].datanode[kk].datanodeListenIP[nn], 1, CM_IP_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeListenIP[nn][CM_IP_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeListenIP[nn]);
+            }
+            FREAD(&g_node[ii].datanode[kk].datanodePort, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeRole, 1, sizeof(uint32), fd);
+            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAListenCount, 1, sizeof(uint32), fd);
+            if (g_node[ii].datanode[kk].datanodeLocalHAListenCount > CM_IP_NUM) {
+                goto read_failed;
+            }
+            for (nn = 0; nn < CM_IP_NUM; nn++) {
+                FREAD(g_node[ii].datanode[kk].datanodeLocalHAIP[nn], 1, CM_IP_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodeLocalHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodeLocalHAIP[nn]);
+            }
+            FREAD(&g_node[ii].datanode[kk].datanodeLocalHAPort, 1, sizeof(uint32), fd);
+            if (g_multi_az_cluster) {
+                for (uint32 dnId = 0; dnId < CM_MAX_DATANODE_STANDBY_NUM; dnId++) {
+                    FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                    g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerDataPath);
 
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount,
-                            1, sizeof(uint32), fd);
-                        if (g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount > CM_IP_NUM) {
-                            goto read_failed;
-                        }
-                        for (nn = 0; nn < CM_IP_NUM; nn++) {
-                            FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                            g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                            check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
-                        }
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                        FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
-                    }
-                } else {
-                    /* former cluster: single primary, single standby and single dummy standby */
-                    FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
-
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
-                    if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
-                            goto read_failed;
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount,
+                        1, sizeof(uint32), fd);
+                    if (g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAListenCount > CM_IP_NUM) {
+                        goto read_failed;
                     }
                     for (nn = 0; nn < CM_IP_NUM; nn++) {
-                        FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
-                        g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
+                        FREAD(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                        g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                        check_input_for_security(g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAIP[nn]);
                     }
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
-                    FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
-                    FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
-                    g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
-                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
-
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
-                    if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
-                            goto read_failed;
-                    }
-                    for (nn = 0; nn < CM_IP_NUM; nn++) {
-                        FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
-                        g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
-                        check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
-                    }
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
-                    FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                    FREAD(&g_node[ii].datanode[kk].peerDatanodes[dnId].datanodePeerRole, 1, sizeof(uint32), fd);
                 }
+            } else {
+                /* former cluster: single primary, single standby and single dummy standby */
+                FREAD(g_node[ii].datanode[kk].datanodePeerDataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodePeerDataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodePeerDataPath);
+
+                FREAD(&g_node[ii].datanode[kk].datanodePeerHAListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodePeerHAListenCount > CM_IP_NUM) {
+                        goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodePeerHAIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeerHAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeerHAIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodePeerHAPort, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodePeerRole, 1, sizeof(uint32), fd);
+                FREAD(g_node[ii].datanode[kk].datanodePeer2DataPath, 1, CM_PATH_LENGTH, fd);
+                g_node[ii].datanode[kk].datanodePeer2DataPath[CM_PATH_LENGTH - 1] = '\0';
+                check_input_for_security(g_node[ii].datanode[kk].datanodePeer2DataPath);
+
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAListenCount, 1, sizeof(uint32), fd);
+                if (g_node[ii].datanode[kk].datanodePeer2HAListenCount > CM_IP_NUM) {
+                        goto read_failed;
+                }
+                for (nn = 0; nn < CM_IP_NUM; nn++) {
+                    FREAD(g_node[ii].datanode[kk].datanodePeer2HAIP[nn], 1, CM_IP_LENGTH, fd);
+                    g_node[ii].datanode[kk].datanodePeer2HAIP[nn][CM_IP_LENGTH - 1] = '\0';
+                    check_input_for_security(g_node[ii].datanode[kk].datanodePeer2HAIP[nn]);
+                }
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2HAPort, 1, sizeof(uint32), fd);
+                FREAD(&g_node[ii].datanode[kk].datanodePeer2Role, 1, sizeof(uint32), fd);
             }
         }
         FREAD(&g_node[ii].etcd, 1, sizeof(uint32), fd);
@@ -1311,3 +1319,294 @@ int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const ch
     return 0;
 }
 
+bool contain_nodename(const char* namelist, const char* name)
+{
+    char* ptr = NULL;
+    char* outer_ptr = NULL;
+    char delims[] = ",";
+    size_t len = 0;
+    char* buffer = NULL;
+    int nRet = 0;
+
+    len = strlen(namelist) + 1;
+    buffer = (char*)calloc(len, sizeof(char));
+    if (buffer == NULL) {
+        fprintf(stderr, "Cannot alloc memory\n");
+        return false;
+    }
+    nRet = snprintf_s(buffer, len, len - 1, "%s", namelist);
+    securec_check_ss_c(nRet, buffer, "\0");
+
+    ptr = strtok_r(buffer, delims, &outer_ptr);
+    while (NULL != ptr) {
+        if (strcmp(ptr, name) == 0) {
+            free(buffer);
+            buffer = NULL;
+            return true;
+        }
+        ptr = strtok_r(NULL, delims, &outer_ptr);
+    }
+
+    free(buffer);
+    buffer = NULL;
+    return false;
+}
+
+int get_dynamic_dn_role(void)
+{
+    char path[MAXPGPATH];
+    int nRet = 0;
+    FILE* fp = NULL;
+    char line_info[MAXPGPATH] = {0};
+    char* node_name = NULL;
+    char* dn_role = NULL;
+    uint32 nodeidx = 0;
+    struct stat statbuf;
+
+    char* gausshome = gs_getenv_r("GAUSSHOME");
+    check_input_for_security(gausshome);
+
+    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, DYNAMIC_DNROLE_FILE);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (lstat(path, &statbuf) != 0) {
+        return 0;
+    }
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return OPEN_FILE_ERROR;
+    }
+
+    while ((fgets(line_info, 1023 - 1, fp)) != NULL) {
+        line_info[(int)strlen(line_info) - 1] = '\0';
+        node_name = strtok_r(line_info, "=", &dn_role);
+        for (nodeidx = 0; node_name && (nodeidx < g_node_num); nodeidx++) {
+            if (strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name)) == 0){
+                g_node[nodeidx].datanode[0].datanodeRole = (uint32)atoi(dn_role);
+                break;
+            }
+        }
+    }
+
+    (void)fclose(fp);
+    return 0;
+}
+
+/*
+ ******************************************************************************
+ Function    : get_nodename_list_by_AZ
+ Description : get node name list by azName, don't include local node
+ Input       : AZName -
+ Output      : nodename list
+ Return      : None
+ ******************************************************************************
+*/
+int get_nodename_list_by_AZ(const char* AZName, const char* data_dir, char** nodeNameList)
+{
+    uint32 nodeidx = 0;
+    uint32 count = 0;
+    uint32 len = 0;
+    uint32 i = 0;
+    uint32 j = 0;
+    AZList* azList = NULL;
+    uint32 tmpAZPriority = 0;
+    char* tmpNodeName = NULL;
+    size_t buflen = 1;
+    char* buffer = NULL;
+    int nRet = 0;
+    size_t curlen = 0;
+
+    // get the node number which in azName
+    for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
+        if (strcmp(g_node[nodeidx].azName, AZName) == 0) {
+            count++;
+        }
+    }
+    // maybe the AZName is incorrect, so return null
+    if (count < 1) {
+        return 0;
+    }
+
+    // init azList, i must less than count
+    azList = (AZList*)malloc(sizeof(AZList) * count);
+    if (NULL == azList) {
+        return OUT_OF_MEMORY;
+    }
+
+    dataNodeInfo* dni = NULL;
+    {
+        uint32 idx = 0;
+        for (idx = 0; idx < g_currentNode->datanodeCount; idx++) {
+            dataNodeInfo* dni_tmp = &(g_currentNode->datanode[idx]);
+            if (strcmp(dni_tmp->datanodeLocalDataPath, data_dir) == 0) {
+                dni = dni_tmp;
+                break;
+            }
+        }
+    }
+
+    if (dni == NULL) {
+        free(azList);
+        azList = NULL;
+        return OPEN_FILE_ERROR;
+    }
+
+    for (nodeidx = 0, i = 0; nodeidx < g_node_num; nodeidx++) {
+        staticNodeConfig* dest = &(g_node[nodeidx]);
+        bool get_dn_in_same_shard = false;
+
+        if (nodeidx != g_local_node_idx && strcmp(dest->azName, AZName) == 0) {
+            uint32 l = 0;
+            for (l = 0; l < dest->datanodeCount && !get_dn_in_same_shard; l++) {
+                dataNodeInfo* dn = &(dest->datanode[l]);
+                int n = 0;
+
+                if (dn->datanodeId == 0)
+                    continue;
+
+                if (dn->datanodeRole == CASCADE_STANDBY_TYPE)
+                    continue;
+
+                for (n = 0; n < CM_MAX_DATANODE_STANDBY_NUM && !get_dn_in_same_shard; n++) {
+                    peerDatanodeInfo* peer_datanode = &(dn->peerDatanodes[n]);
+                    if (strlen(peer_datanode->datanodePeerHAIP[0]) == 0)
+                        continue;
+
+                    if (strcmp(peer_datanode->datanodePeerHAIP[0], dni->datanodeLocalHAIP[0]) == 0 &&
+                        peer_datanode->datanodePeerHAPort == dni->datanodeLocalHAPort) {
+                        char dn_instance_id[64] = {0};
+                        int nRet = snprintf_s(dn_instance_id,
+                            sizeof(dn_instance_id) / sizeof(char),
+                            sizeof(dn_instance_id) / sizeof(char) - 1,
+                            "dn_%4u",
+                            dn->datanodeId);
+                        securec_check_ss_c(nRet, "\0", "\0");
+                        azList[i].nodeName = strdup(dn_instance_id);
+                        azList[i].azPriority = dest->azPriority;
+                        buflen += strlen(azList[i].nodeName) + 1;
+                        i++;
+                        get_dn_in_same_shard = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // the real node name number
+    len = i;
+    // sort by azPriority asc
+    for (i = 0; len > 0 && i < len - 1; i++) {
+        for (j = 0; len > 0 && j < len - i - 1; j++) {
+            if (azList[j].azPriority > azList[j + 1].azPriority) {
+                // swap azPriority
+                tmpAZPriority = azList[j].azPriority;
+                azList[j].azPriority = azList[j + 1].azPriority;
+                azList[j + 1].azPriority = tmpAZPriority;
+                // swap nodename
+                tmpNodeName = strdup(azList[j].nodeName);
+                free(azList[j].nodeName);
+                azList[j].nodeName = NULL;
+                azList[j].nodeName = strdup(azList[j + 1].nodeName);
+                free(azList[j + 1].nodeName);
+                azList[j + 1].nodeName = NULL;
+                azList[j + 1].nodeName = strdup(tmpNodeName);
+                free(tmpNodeName);
+                tmpNodeName = NULL;
+            }
+        }
+    }
+
+    // Exclude the local node name and output the remaining information
+    buffer = (char*)malloc(sizeof(char) * (buflen + 1));
+    if (NULL == buffer) {
+        // free AZList
+        for (i = 0; i < len; i++) {
+            if (azList[i].nodeName != NULL) {
+                free(azList[i].nodeName);
+                azList[i].nodeName = NULL;
+            }
+        }
+
+        free(azList);
+        azList = NULL;
+        return OUT_OF_MEMORY;
+    }
+    nRet = memset_s(buffer, buflen + 1, 0, buflen + 1);
+    securec_check_c(nRet, buffer, "\0");
+
+    for (i = 0; i < len; i++) {
+        if (strcmp(g_local_node_name, azList[i].nodeName) == 0) {
+            continue;
+        }
+        // the type like this: node1,node2,
+        nRet = snprintf_s(buffer + curlen, (buflen + 1 - curlen), (buflen - curlen), "%s,", azList[i].nodeName);
+        securec_check_ss_c(nRet, buffer, "\0");
+        curlen = curlen + nRet;
+    }
+    // skip the last character ','
+    if (strlen(buffer) >= 1) {
+        buffer[strlen(buffer) - 1] = '\0';
+    }
+
+    // free AZList
+    for (i = 0; i < len; i++) {
+        if (azList[i].nodeName != NULL) {
+            free(azList[i].nodeName);
+            azList[i].nodeName = NULL;
+        }
+    }
+
+    free(azList);
+    azList = NULL;
+    *nodeNameList = buffer;
+    return 0;
+}
+
+/*
+ ******************************************************************************
+ Function    : checkPath
+ Description :
+ Input       : fileName
+ Output      : None
+ Return      : None
+ ******************************************************************************
+*/
+int checkPath(const char* fileName)
+{
+    char* retVal = NULL;
+    char realFileName[MAX_REALPATH_LEN + 1] = {0};
+    retVal = realpath(fileName, realFileName);
+    if (NULL == retVal) {
+        return -1;
+    }
+    return 0;
+}
+
+bool has_static_config()
+{
+    char path[MAXPGPATH];
+    int nRet = 0;
+    struct stat statbuf;
+
+    char* gausshome = gs_getenv_r("GAUSSHOME");
+    check_input_for_security(gausshome);
+
+    if (NULL != g_lcname) {
+        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.%s", gausshome, g_lcname, STATIC_CONFIG_FILE);
+    } else {
+        nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, STATIC_CONFIG_FILE);
+    }
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (checkPath(path) != 0) {
+        return false;
+    }
+
+    if (lstat(path, &statbuf) == 0) {
+        return true;
+    }
+
+    return false;
+}

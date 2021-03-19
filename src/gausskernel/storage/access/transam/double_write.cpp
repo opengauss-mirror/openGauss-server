@@ -264,13 +264,14 @@ static bool dw_verify_pg_checksum(PageHeader page_header, BlockNumber blockNum)
 {
     /* new page donot have crc and lsn, we donot recovery it */
     if (PageIsNew(page_header)) {
+        ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: new page")));
         return false;
     }
     if (PageIsChecksumByFNV1A(page_header)) {
         uint16 checksum = pg_checksum_page((char *)page_header, blockNum);
         return checksum == page_header->pd_checksum;
     } else {
-        ereport(FATAL, (errmodule(MOD_DW), errmsg("DW verify checksum: page checksum flag is wrong")));
+        ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: page checksum flag is wrong")));
         return false;
     }
 }
@@ -1206,7 +1207,7 @@ static void dw_batch_flush(knl_g_dw_context* dw_cxt, XLogRecPtr latest_lsn, Thrd
     errno_t rc;
 
     if (!XLogRecPtrIsInvalid(latest_lsn)) {
-        XLogFlush(latest_lsn);
+        XLogWaitFlush(latest_lsn);
         g_instance.ckpt_cxt_ctl->page_writer_xlog_flush_loc = latest_lsn;
     }
 
@@ -1464,7 +1465,7 @@ uint16 dw_single_flush(BufferDesc *buf_desc)
     buf_state = LockBufHdr(buf_desc);
     page_lsn = BufferGetLSN(buf_desc);
     UnlockBufHdr(buf_desc, buf_state);
-    XLogFlush(page_lsn);
+    XLogWaitFlush(page_lsn);
     dw_encrypt_page(buf);
     dw_set_pg_checksum(buf, buf_desc->tag.blockNum);
 

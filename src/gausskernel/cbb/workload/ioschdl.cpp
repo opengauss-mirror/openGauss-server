@@ -61,6 +61,8 @@ extern void WLMCollectInstanceStat(void);
 extern void WLMPersistentInstanceStat(void);
 extern void WLMCleanupHistoryInstanceStat(void);
 
+extern THR_LOCAL bool g_pq_interrupt_happened;
+
 #define UPDATETABLE(table, value, num)  \
     {                                   \
         int i = 0;                      \
@@ -1328,6 +1330,22 @@ static void WLMarbiterSigTermHandler(SIGNAL_ARGS)
     int save_errno = errno;
 
     t_thrd.wlm_cxt.wlm_got_sigterm = true;
+
+    t_thrd.int_cxt.InterruptByCN = true;
+    
+    /*
+     * send SIGUSER2 to pooler
+     */
+    if (!t_thrd.proc_cxt.proc_exit_inprogress) {
+        InterruptPending = true;
+        t_thrd.int_cxt.QueryCancelPending = true;
+        t_thrd.int_cxt.PoolValidateCancelPending = true;
+
+        /*  Set flag to handle SIGUSER2 and SIGTERM during connection */
+        if (t_thrd.proc_cxt.pooler_connection_inprogress) {
+            g_pq_interrupt_happened = true;
+        }
+    }
 
     SetLatch(&t_thrd.wlm_cxt.wlm_mainloop_latch);
 

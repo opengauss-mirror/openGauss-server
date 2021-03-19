@@ -410,7 +410,11 @@ void ExecInitNodeSubPlan(Plan* node, EState* estate, PlanState* result)
         if (NULL == sub_plan)
             continue;
         Assert(IsA(sub_plan, SubPlan));
+#ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR || estate->es_subplan_ids == NIL ||
+#else
+        if (StreamTopConsumerAmI() || estate->es_subplan_ids == NIL ||
+#endif
             node->plan_node_id == list_nth_int(estate->es_subplan_ids, sub_plan->plan_id - 1)) {
             s_state = ExecInitSubPlan(sub_plan, result);
             if (s_state->planstate)
@@ -545,11 +549,12 @@ PlanState* ExecInitNode(Plan* node, EState* estate, int e_flags)
         }
 #endif
         if (result->instrument) {
-        result->instrument->memoryinfo.nodeContext = node_context;
+            result->instrument->memoryinfo.nodeContext = node_context;
 
-        if (u_sess->attr.attr_resource.use_workload_manager &&
-            u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR &&
-            estate->es_can_realtime_statistics && u_sess->exec_cxt.need_track_resource && NeedExecuteActiveSql(node)) {
+            if (u_sess->attr.attr_resource.use_workload_manager &&
+                u_sess->attr.attr_resource.resource_track_level == RESOURCE_TRACK_OPERATOR &&
+                estate->es_can_realtime_statistics && u_sess->exec_cxt.need_track_resource &&
+                NeedExecuteActiveSql(node)) {
                 Qpid qid;
                 qid.plannodeid = node->plan_node_id;
                 qid.procId = u_sess->instr_cxt.gs_query_id->procId;

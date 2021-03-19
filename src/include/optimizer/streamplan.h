@@ -45,7 +45,7 @@ typedef struct ShippingInfo {
 #ifdef ENABLE_MULTIPLE_NODES
 #define IS_STREAM_PLAN (IS_PGXC_COORDINATOR && IS_STREAM && check_stream_support())
 #else
-#define IS_STREAM_PLAN (IS_STREAM && check_stream_support() && u_sess->attr.attr_sql.query_dop_tmp > 1)
+#define IS_STREAM_PLAN (IS_STREAM && check_stream_support())
 #endif
 #define STREAM_IS_LOCAL_NODE(type) (type == LOCAL_DISTRIBUTE || type == LOCAL_ROUNDROBIN || type == LOCAL_BROADCAST)
 #define SET_DOP(dop) (dop > 1 ? dop : 1)

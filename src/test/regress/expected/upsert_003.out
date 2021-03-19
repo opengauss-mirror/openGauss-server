@@ -2,8 +2,6 @@ DROP SCHEMA test_insert_update_003 CASCADE;
 ERROR:  schema "test_insert_update_003" does not exist
 CREATE SCHEMA test_insert_update_003;
 SET CURRENT_SCHEMA TO test_insert_update_003;
--- enable_upsert_to_merge must is off, or upsert will be translated to merge.
-SET enable_upsert_to_merge TO OFF;
 -- test t4 with one primary key with three columns
 CREATE TABLE t4 (
     col1 INT,

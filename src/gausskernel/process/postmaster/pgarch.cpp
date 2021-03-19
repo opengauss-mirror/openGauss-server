@@ -986,6 +986,7 @@ static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn)
     archive_xlog_info.targetLsn = targetLsn;
     archive_xlog_info.term = 0;
     archive_xlog_info.sub_term = 0;
+    archive_xlog_info.tli = 0;
     if (obs_replication_archive(&archive_xlog_info) != 0) {
         g_instance.archive_obs_cxt.pitr_finish_result = false;
         ereport(WARNING,
@@ -1020,7 +1021,7 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) 
             && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush)) {
             walsnd->arch_task_lsn = targetLsn;
-            walsnd->archive_obs_subterm = t_thrd.arch.sync_walsender_term;
+            walsnd->archive_obs_subterm = g_instance.archive_obs_cxt.sync_walsender_term;
             SpinLockRelease(&walsnd->mutex);
             return (WalSnd*)walsnd;
         }
@@ -1036,13 +1037,13 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
         if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole)) {
             if (XLByteLE(targetLsn, walsnd->flush)) {
                 SpinLockRelease(&walsnd->mutex);
-                ereport(LOG,
-                    (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d", 
-                        t_thrd.arch.sync_walsender_idx, i, t_thrd.arch.sync_walsender_term)));
                 walsnd->arch_task_lsn = targetLsn;
                 t_thrd.arch.sync_walsender_idx = i;
-                t_thrd.arch.sync_walsender_term++;
-                walsnd->archive_obs_subterm = t_thrd.arch.sync_walsender_term;
+                g_instance.archive_obs_cxt.sync_walsender_term++;
+                ereport(LOG,
+                    (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d", 
+                        t_thrd.arch.sync_walsender_idx, i, g_instance.archive_obs_cxt.sync_walsender_term)));
+                walsnd->archive_obs_subterm = g_instance.archive_obs_cxt.sync_walsender_term;
                 return (WalSnd*)walsnd;
             }
         }

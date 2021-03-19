@@ -49,15 +49,18 @@ void get_datanode_dynamic_config_change_from_etcd(uint32 group_index);
 void GetDatanodeDynamicConfigChangeFromEtcdNew(uint32 group_index);
 void get_gtm_dynamic_config_change_from_etcd(uint32 group_index);
 void SetStaticPrimaryRole(uint32 group_index, int static_primary__index);
-
+int SetReplaceCnStatusToEtcd();
 void GetNodeReadOnlyStatusFromEtcd();
 errno_t SetNodeReadOnlyStatusToEtcd(const char* bitsString);
 
 int try_etcd_get(char* key, char* value, int max_size, int tryTimes);
-long GetTimeMinus(struct timeval checkEnd, struct timeval checkBegin);
+uint64 GetTimeMinus(struct timeval checkEnd, struct timeval checkBegin);
 int GetInstanceKeyValueFromEtcd(const char *key, InstanceStatusKeyValue *keyValue, const int length);
 
 void server_etcd_init();
+int GetHistoryClusterCurSyncListFromEtcd();
+int GetHistoryClusterExceptSyncListFromEtcd();
+bool SetGroupExpectSyncList(uint32 index, const DatanodeDynamicStatus *statusDnOnline);
 
 void CloseAllEtcdSession();
 EtcdSession GetNextEtcdSession();

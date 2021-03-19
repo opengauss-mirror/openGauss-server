@@ -603,9 +603,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      * Note: We fire BEFORE ROW TRIGGERS for every attempted insertion in an except
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
      */
-    if (state->operation != CMD_MERGE &&
+    if (
 #ifdef ENABLE_MULTIPLE_NODES	
-		state->mt_upsert->us_action == UPSERT_NONE &&
+        state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
 #endif		
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_insert_before_row) {
         slot = ExecBRInsertTriggers(estate, result_rel_info, slot);
@@ -620,9 +620,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
      * Note: We fire INSREAD OF ROW TRIGGERS for every attempted insertion except
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
      */
-    if (state->operation != CMD_MERGE &&
+    if (
 #ifdef ENABLE_MULTIPLE_NODES	
-		state->mt_upsert->us_action == UPSERT_NONE &&
+        state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
 #endif		
         result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_insert_instead_row) {
         slot = ExecIRInsertTriggers(estate, result_rel_info, slot);
@@ -826,8 +826,13 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
     /* AFTER ROW INSERT Triggers
      * Note: We fire AFTER ROW TRIGGERS for every attempted insertion except
      * for a MERGE or INSERT ... ON DUPLICATE KEY UPDATE statement.
+     * But in openGauss, we verify foreign key validity by AFTER ROW TRIGGERS,
+     * so we can not fire it.
      */
-    if (state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
+    if (
+#ifdef ENABLE_MULTIPLE_NODES
+        state->operation != CMD_MERGE && state->mt_upsert->us_action == UPSERT_NONE &&
+#endif
         !useHeapMultiInsert)
         ExecARInsertTriggers(estate, result_rel_info, partition_id, bucket_id, tuple, recheck_indexes);
 
@@ -1302,8 +1307,11 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     result_relation_desc = result_rel_info->ri_RelationDesc;
 
     /* BEFORE ROW UPDATE Triggers */
-    if (node->operation != CMD_MERGE && result_rel_info->ri_TrigDesc &&
-        result_rel_info->ri_TrigDesc->trig_update_before_row) {
+    if (
+#ifdef ENABLE_MULTIPLE_NODES
+        node->operation != CMD_MERGE &&
+#endif
+        result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_update_before_row) {
 #ifdef PGXC
 
         slot = ExecBRUpdateTriggers(estate, epqstate, result_rel_info, oldPartitionOid, 
@@ -1322,8 +1330,11 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
     }
 
     /* INSTEAD OF ROW UPDATE Triggers */
-    if (node->operation != CMD_MERGE && result_rel_info->ri_TrigDesc &&
-        result_rel_info->ri_TrigDesc->trig_update_instead_row) {
+    if (
+#ifdef ENABLE_MULTIPLE_NODES
+        node->operation != CMD_MERGE &&
+#endif
+        result_rel_info->ri_TrigDesc && result_rel_info->ri_TrigDesc->trig_update_instead_row) {
         HeapTupleData oldtup;
 
         Assert(oldtuple != NULL);
@@ -1975,7 +1986,9 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
 #endif
 
     /* AFTER ROW UPDATE Triggers */
+#ifdef ENABLE_MULTIPLE_NODES
     if (node->operation != CMD_MERGE)
+#endif
         ExecARUpdateTriggers(estate,
             result_rel_info,
             oldPartitionOid,
@@ -2062,6 +2075,51 @@ static void fireASTriggers(ModifyTableState* node)
                         errmsg("unknown operation %d when process AFTER EACH STATEMENT triggers", node->operation))));
             break;
     }
+}
+
+/*
+ * Check limit plan can be changed for delete limit
+ */
+bool IsLimitDML(const Limit *limitPlan)
+{
+    if (limitPlan->limitCount == NULL) {
+        return false;
+    }
+    if (limitPlan->limitOffset != NULL && IsA(limitPlan->limitOffset, Const)) {
+        const Const *flag = (Const*)limitPlan->limitOffset;
+        if (flag->ismaxvalue) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+/*
+ * Get limit boundary
+ */
+uint64 GetDeleteLimitCount(ExprContext* econtext, PlanState* scan, Limit *limitPlan)
+{
+    ExprState* limitExpr = ExecInitExpr((Expr*)limitPlan->limitCount, scan);
+    Datum val;
+    bool isNull = false;
+    int64 iCount = 0;
+    val = ExecEvalExprSwitchContext(limitExpr, econtext, &isNull, NULL);
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
+                errmodule(MOD_EXECUTOR),
+                errmsg("LIMIT must not be null for delete.")));
+    }
+    iCount = DatumGetInt64(val);
+    if (iCount <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_ROW_COUNT_IN_LIMIT_CLAUSE),
+                errmodule(MOD_EXECUTOR),
+                errmsg("LIMIT must not be less than 0 for delete.")));
+    }
+    return (uint64)iCount;
 }
 
 /* ----------------------------------------------------------------
@@ -2209,6 +2267,9 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
      * for each row.
      */
     for (;;) {
+        if (estate->deleteLimitCount != 0 && estate->es_processed == estate->deleteLimitCount) {
+            break;
+        }
         /*
          * Reset the per-output-tuple exprcontext.	This is needed because
          * triggers expect to use that context as workspace.  It's a bit ugly
@@ -2391,7 +2452,6 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
         estate->es_result_update_remoterel = update_remote_rel_state;
         estate->es_result_delete_remoterel = delete_remote_rel_state;
 #endif
-
         switch (operation) {
             case CMD_INSERT:
                 slot = ExecInsert(node, slot, plan_slot, estate, node->canSetTag, hi_options, &partition_list);
@@ -2454,9 +2514,8 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
 
     node->mt_done = true;
 
-    /* reset row trigger shipping flag before exiting */
-    u_sess->tri_cxt.exec_row_trigger_on_datanode = false;
-
+    ResetTrigShipFlag();
+    
     return NULL;
 }
 
@@ -2490,6 +2549,8 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         mt_state = (ModifyTableState*)makeNode(DistInsertSelectState);
     else
         mt_state = makeNode(ModifyTableState);
+
+    estate->deleteLimitCount = 0;
 
     if (node->cacheEnt != NULL) {
         ErrorCacheEntry* entry = node->cacheEnt;
@@ -2535,6 +2596,7 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
     mt_state->resultRelInfo = estate->es_result_relations + node->resultRelIndex;
     mt_state->mt_arowmarks = (List**)palloc0(sizeof(List*) * nplans);
     mt_state->mt_nplans = nplans;
+    mt_state->limitExprContext = NULL;
 
     upsertState = (UpsertState*)palloc0(sizeof(UpsertState));
     upsertState->us_action = node->upsertAction;
@@ -2603,7 +2665,17 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         init_gtt_storage(operation, result_rel_info);
         /* Now init the plan for this result rel */
         estate->es_result_relation_info = result_rel_info;
-        mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
+        if (sub_plan->type == T_Limit && operation == CMD_DELETE && IsLimitDML((Limit*)sub_plan)) {
+            /* remove limit plan for delete limit */
+            if (mt_state->limitExprContext == NULL) {
+                mt_state->limitExprContext = CreateExprContext(estate);
+            }
+            mt_state->mt_plans[i] = ExecInitNode(outerPlan(sub_plan), estate, eflags);
+            estate->deleteLimitCount = GetDeleteLimitCount(mt_state->limitExprContext,
+                                                           mt_state->mt_plans[i], (Limit*)sub_plan);
+        } else {
+            mt_state->mt_plans[i] = ExecInitNode(sub_plan, estate, eflags);
+        }
 
         if (operation == CMD_MERGE && RelationInClusterResizing(estate->es_result_relation_info->ri_RelationDesc)) {
             ereport(ERROR,
@@ -2613,10 +2685,10 @@ ModifyTableState* ExecInitModifyTable(ModifyTable* node, EState* estate, int efl
         }
 
         /*
-         * For update/delete case, we need further check if it is in cluster resizing, then
+         * For update/delete/upsert case, we need further check if it is in cluster resizing, then
          * we need open delete_delta rel for this target relation.
          */
-        if (operation == CMD_UPDATE || operation == CMD_DELETE) {
+        if (operation == CMD_UPDATE || operation == CMD_DELETE || node->upsertAction == UPSERT_UPDATE) {
             Relation target_rel = estate->es_result_relation_info->ri_RelationDesc;
             Assert(target_rel != NULL && mt_state->delete_delta_rel == NULL);
             if (RelationInClusterResizing(target_rel) && !RelationInClusterResizingReadOnly(target_rel)) {
@@ -3045,7 +3117,6 @@ void ExecEndModifyTable(ModifyTableState* node)
 
     /* clean up relation handler of delete delta table */
     if (node->delete_delta_rel != NULL) {
-        Assert(node->operation == CMD_UPDATE || node->operation == CMD_DELETE);
         relation_close(node->delete_delta_rel, RowExclusiveLock);
         node->delete_delta_rel = NULL;
     }

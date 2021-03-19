@@ -35,17 +35,22 @@
 bool handle_func_call(const FuncCall *funccall, ExprPartsList *expr_parts_list, StatementData *statement_data)
 {
     if (funccall->funcname != NULL && strcmp(strVal(linitial(funccall->funcname)), "repeat") == 0) {
-        if (funccall->args == NULL) {
+        if (funccall->args == NULL || list_length(funccall->args) != 2) {
             return true;
         }
         if (nodeTag(linitial(funccall->args)) != T_A_Const || nodeTag(lsecond(funccall->args)) != T_A_Const) {
             return true;
         }
+        if (((A_Const *)linitial(funccall->args))->val.type != T_String || 
+            ((A_Const *)lsecond(funccall->args))->val.type != T_Integer) {
+            return true;
+        }
         const char *data = ((A_Const *)linitial(funccall->args))->val.val.str;
         int count = ((A_Const *)lsecond(funccall->args))->val.val.ival;
+
         bool empty_str = false;
-        if (strlen(data) == 0 || count <
-            1) { /* Note. If number is less than 1, the repeat function will return an empty string. or data is empty */
+        /* Note. If number is less than 1, the repeat function will return an empty string. Or data is empty */
+        if (strlen(data) == 0 || count < 1) {
             empty_str = true;
             count = 0;
         }
@@ -79,7 +84,7 @@ bool handle_func_call(const FuncCall *funccall, ExprPartsList *expr_parts_list, 
         free(result);
         return true;
     } else if (funccall->funcname != NULL && strcmp(strVal(linitial(funccall->funcname)), "empty_blob") == 0) {
-        if (funccall->args) {
+        if (funccall->args != NULL && list_length(funccall->args) > 0) {
             return true;
         }
         ExprParts expr_parts;

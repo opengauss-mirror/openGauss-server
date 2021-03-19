@@ -41,7 +41,6 @@
 #include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "workload/workload.h"
-#include "utils/globalpreparestmt.h"
 #include "instruments/instr_waitevent.h"
 #include "pgstat.h"
 #include "access/multi_redo_api.h"
@@ -101,6 +100,29 @@ static void knl_g_ckpt_init(knl_g_ckpt_context* ckpt_cxt)
     SpinLockInit(&(ckpt_cxt->queue_lock));
 }
 
+static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
+{
+    wal_cxt->walInsertStatusTable = NULL;
+    wal_cxt->walFlushWaitLock = NULL;
+    wal_cxt->walBufferInitWaitLock = NULL;
+    wal_cxt->walInitSegLock = NULL;
+    wal_cxt->isWalWriterUp = false;
+    wal_cxt->flushResult = InvalidXLogRecPtr;
+    wal_cxt->sentResult = InvalidXLogRecPtr;
+    wal_cxt->flushResultMutex = PTHREAD_MUTEX_INITIALIZER;
+    wal_cxt->flushResultCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    wal_cxt->XLogFlusherCPU = 0;
+    wal_cxt->isWalWriterSleeping = false;
+    wal_cxt->criticalEntryMutex = PTHREAD_MUTEX_INITIALIZER;
+    wal_cxt->criticalEntryCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    wal_cxt->globalEndPosSegNo = InvalidXLogSegPtr;
+    wal_cxt->walWaitFlushCount = 0;
+    wal_cxt->lastWalStatusEntryFlushed = -1;
+    wal_cxt->lastLRCScanned = WAL_SCANNED_LRC_INIT;
+    wal_cxt->lastLRCFlushed = WAL_SCANNED_LRC_INIT;
+    wal_cxt->num_locks_in_group = 0;
+}
+
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
 {
     Assert(bgwriter_cxt != NULL);
@@ -113,6 +135,7 @@ static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
     bgwriter_cxt->get_buf_num_candidate_list = 0;
     bgwriter_cxt->get_buf_num_clock_sweep = 0;
 }
+
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
 {
     Assert(tests_cxt != NULL);
@@ -200,6 +223,10 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
     }
     predo_cxt->permitFinishRedo = 0;
     predo_cxt->hotStdby = 0;
+    predo_cxt->newestCheckpointLoc = InvalidXLogRecPtr;
+    errno_t rc = memset_s(const_cast<CheckPoint *>(&predo_cxt->newestCheckpoint), sizeof(CheckPoint), 0, 
+        sizeof(CheckPoint));
+    securec_check(rc, "\0", "\0");
     predo_cxt->unali_buf = (char*)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
         NUM_MAX_PAGE_FLUSH_LSN_PARTITIONS * BLCKSZ + BLCKSZ);
     predo_cxt->ali_buf = (char*)TYPEALIGN(BLCKSZ, predo_cxt->unali_buf);
@@ -208,8 +235,33 @@ static void knl_g_parallel_redo_init(knl_g_parallel_redo_context* predo_cxt)
 static void knl_g_cache_init(knl_g_cache_context* cache_cxt)
 {
     cache_cxt->global_cache_mem = NULL;
+    for (int i = 0; i < MAX_GLOBAL_CACHEMEM_NUM; ++i)
+        cache_cxt->global_plancache_mem[i] = NULL;
 }
 
+void knl_g_cachemem_create()
+{
+    g_instance.cache_cxt.global_cache_mem = AllocSetContextCreate(g_instance.instance_context,
+                                                                  "GlobalCacheMemory",
+                                                                  ALLOCSET_DEFAULT_MINSIZE,
+                                                                  ALLOCSET_DEFAULT_INITSIZE,
+                                                                  ALLOCSET_DEFAULT_MAXSIZE,
+                                                                  SHARED_CONTEXT,
+                                                                  DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
+                                                                  false);
+
+    for (int i = 0; i < MAX_GLOBAL_CACHEMEM_NUM; ++i) {  
+        g_instance.cache_cxt.global_plancache_mem[i] = AllocSetContextCreate(g_instance.instance_context,
+                                                                             "GlobalPlanCacheMemory",
+                                                                             ALLOCSET_DEFAULT_MINSIZE,
+                                                                             ALLOCSET_DEFAULT_INITSIZE,
+                                                                             ALLOCSET_DEFAULT_MAXSIZE,
+                                                                             SHARED_CONTEXT,
+                                                                             DEFAULT_MEMORY_CONTEXT_MAX_SIZE,
+                                                                             false);
+    }
+    g_instance.plan_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPlanCache();
+}
 static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
 {
     Assert(comm_cxt != NULL);
@@ -432,6 +484,7 @@ static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
     archive_obs_cxt->barrierLsn = 0;
     archive_obs_cxt->obs_slot_idx = -1;
     archive_obs_cxt->obs_slot_num = 0;
+    archive_obs_cxt->sync_walsender_term = 0;
     archive_obs_cxt->archive_slot = (ReplicationSlot*)MemoryContextAllocZero(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ReplicationSlot));
 }
@@ -443,6 +496,11 @@ static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
 }
 #endif
 
+static void knl_g_hypo_init(knl_g_hypo_context* hypo_cxt)
+{
+    hypo_cxt->HypopgContext = NULL;
+    hypo_cxt->hypo_index_list = NULL;
+}
 
 void knl_instance_init()
 {
@@ -458,6 +516,8 @@ void knl_instance_init()
     g_instance.codegen_IRload_process_count = 0;
     g_instance.t_thrd = &t_thrd;
     g_instance.stat_cxt.track_memory_inited = false;
+    g_instance.proc_base = NULL;
+    g_instance.proc_array_idx = NULL;
 
     /*
      * Set up the process wise memory context. The memory allocated from this
@@ -510,8 +570,10 @@ void knl_instance_init()
     knl_g_mot_init(&g_instance.mot_cxt);
 #endif
 
+    knl_g_wal_init(&g_instance.wal_cxt);
     knl_g_oid_nodename_cache_init(&g_instance.oid_nodename_cache);
     knl_g_archive_obs_init(&g_instance.archive_obs_cxt);
+    knl_g_hypo_init(&g_instance.hypo_cxt);
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)
@@ -530,15 +592,23 @@ void add_numa_alloc_info(void* numaAddr, size_t length)
 void knl_g_set_redo_finish_status(uint32 status)
 {
 #if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
-        pg_memory_barrier();
+    pg_memory_barrier();
 #endif
     pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish), status);
+}
+
+void knl_g_clear_local_redo_finish_status()
+{
+#if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
+    pg_memory_barrier();
+#endif
+    (void)pg_atomic_fetch_and_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish), ~(uint32)REDO_FINISH_STATUS_LOCAL);
 }
 
 bool knl_g_get_local_redo_finish_status()
 {
 #if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
-        pg_memory_barrier();
+    pg_memory_barrier();
 #endif
     uint32 isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
     return (isRedoFinish & REDO_FINISH_STATUS_LOCAL) == REDO_FINISH_STATUS_LOCAL;
@@ -547,7 +617,7 @@ bool knl_g_get_local_redo_finish_status()
 bool knl_g_get_redo_finish_status()
 {
 #if defined(__arm__) || defined(__arm) || defined(__aarch64__) || defined(__aarch64)
-        pg_memory_barrier();
+    pg_memory_barrier();
 #endif
     uint32 isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
     return (isRedoFinish & REDO_FINISH_STATUS_CM) == REDO_FINISH_STATUS_CM;

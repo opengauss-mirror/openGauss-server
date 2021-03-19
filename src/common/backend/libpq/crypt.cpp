@@ -34,14 +34,11 @@
 #include "openssl/evp.h"
 
 
-
 /* IAM authenication: iam role and config path info. */
 #define IAM_ROLE_WITH_DWSDB_PRIV "dws_db_acc"
 #define DWS_IAMAUTH_CONFIG_PATH "/opt/dws/iamauth/"
 #define CLUSTERID_LEN 36 //clusterid example:36cessba-ec3d-478f-a5b7-561a9a5f463f
 #define TENANTID_LEN 32 //tenantid example:9e57dcaa89164a149f1b5f7130c49c52
-
-
 
 
 static bool GetValidPeriod(const char *role, password_info *passInfo);
@@ -54,7 +51,8 @@ static bool GetValidPeriod(const char *role, password_info *passInfo);
 int32 get_password_stored_method(const char* role, char* encrypted_string, int len)
 {
     char* shadow_pass = NULL;
-    password_info pass_info;
+    password_info pass_info = {NULL, 0, 0, false, false};
+    int32 stored_method;
     errno_t rc = EOK;
 
     if (encrypted_string == NULL)
@@ -63,26 +61,33 @@ int32 get_password_stored_method(const char* role, char* encrypted_string, int l
     if (get_stored_password(role, &pass_info)) {
         shadow_pass = pass_info.shadow_pass;
     } else {
+        pfree_ext(pass_info.shadow_pass);
         return ERROR_PASSWORD;
     }
 
     if (isMD5(shadow_pass)) {
-        return MD5_PASSWORD;
+        stored_method = MD5_PASSWORD;
     } else if (isSHA256(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
-        return SHA256_PASSWORD;
+
+        stored_method = SHA256_PASSWORD;
     } else if (isSM3(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SM3_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
-        return SM3_PASSWORD;
+
+        stored_method = SM3_PASSWORD;
+
     } else if (isCOMBINED(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
-        return COMBINED_PASSWORD;
+        stored_method = COMBINED_PASSWORD;
     } else {
-        return PLAIN_PASSWORD;
+        stored_method = PLAIN_PASSWORD;
     }
+
+    pfree_ext(pass_info.shadow_pass);
+    return stored_method;
 }
 
 /*
@@ -155,7 +160,7 @@ int CheckUserValid(Port* port, const char* role)
     TimestampTz vuntil = 0;
     bool isnull_begin = false;
     bool isnull_until = false;
-    password_info pass_info;
+    password_info pass_info = {NULL, 0, 0, false, false};
     int retval = STATUS_ERROR;
 
     if (GetValidPeriod(role, &pass_info)) {
@@ -190,7 +195,7 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
     int CRYPT_digest_ret;
     bool RFC5802_pass = false;
 
-    password_info pass_info;
+    password_info pass_info = {NULL, 0, 0, false, false};
     errno_t errorno = EOK;
 
     if (get_stored_password(role, &pass_info)) {
@@ -539,10 +544,11 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
  */
 int get_stored_iteration(const char* role)
 {
-    password_info pass_info;
+    password_info pass_info = {NULL, 0, 0, false, false};
     int iteration_count = 0;
 
     if (!get_stored_password(role, &pass_info)) {
+        pfree_ext(pass_info.shadow_pass);
         return -1;
     }
 

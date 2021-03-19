@@ -685,28 +685,31 @@ cleanup_capacity:
  *                   -1: failed.
  *                   >=0: reply socket.
  */
-int gs_get_libcomm_reply_socket(int recv_idx)
+static void gs_get_libcomm_reply_socket(int recv_idx, struct sock_id *fd_id)
 {
-    int socket = g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock;
+    fd_id->fd = g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock;
+    fd_id->id = g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock_id;
 
-    if (socket >= 0) {
-        return socket;
+    if (fd_id->fd >= 0) {
+        return;
     }
 
     for (int send_idx = 0; send_idx < g_instance.comm_cxt.counters_cxt.g_cur_node_num; send_idx++) {
         if (strcmp(g_instance.comm_cxt.g_r_node_sock[recv_idx].remote_nodename,
                    g_instance.comm_cxt.g_s_node_sock[send_idx].remote_nodename) == 0) {
-            socket = g_instance.comm_cxt.g_senders->sender_conn[send_idx].socket;
+            fd_id->fd = g_instance.comm_cxt.g_senders->sender_conn[send_idx].socket;
+            fd_id->id = g_instance.comm_cxt.g_senders->sender_conn[send_idx].socket_id;
 
             // save data reply socket in g_r_node_sock
             g_instance.comm_cxt.g_r_node_sock[recv_idx].lock();
-            g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock = socket;
+            g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock = fd_id->fd;
+            g_instance.comm_cxt.g_r_node_sock[recv_idx].libcomm_reply_sock_id = fd_id->id;
             g_instance.comm_cxt.g_r_node_sock[recv_idx].unlock();
             break;
         }
     }
 
-    return socket;
+    return;
 }
 
 /*
@@ -717,7 +720,6 @@ void gs_delay_analysis()
 {
     struct c_mailbox* cmailbox = NULL;
     int node_idx = 0;
-    int socket = -1;
     struct iovec* iov = NULL;
     struct mc_lqueue_item* q_item = NULL;
 
@@ -754,12 +756,13 @@ void gs_delay_analysis()
         msg = (struct libcomm_delay_package*)iov->iov_base;
         uint32 delay = 0;
         int delay_array_idx = -1;
+        struct sock_id fd_id = {-1, -1};
         switch (msg->type) {
             // set reply_time and reply libcomm delay message
             case LIBCOMM_PKG_TYPE_DELAY_REQUEST:
                 // we get reply socket from g_s_node_sock
-                socket = gs_get_libcomm_reply_socket(node_idx);
-                if (socket < 0) {
+                gs_get_libcomm_reply_socket(node_idx, &fd_id);
+                if (fd_id.fd < 0) {
                     break;
                 }
 
@@ -767,7 +770,8 @@ void gs_delay_analysis()
                 msg->reply_time = (uint32)mc_timers_us();
 
                 LibcommSendInfo send_info;
-                send_info.socket = socket;
+                send_info.socket = fd_id.fd;
+                send_info.socket_id = fd_id.id;
                 send_info.node_idx = node_idx;
                 send_info.streamid = 0;
                 send_info.version = 0;
@@ -1612,11 +1616,13 @@ void commAuxiliaryLoop(uint64* last_print_time)
     /* step3: check other request */
     gs_check_requested();
 
-    /* step4: send/receive delay survey messages and analysis */
+    /* step4: send delay survey messages */
     if (g_instance.comm_cxt.g_delay_survey_switch) {
         gs_delay_survey();
-        gs_delay_analysis();
     }
+
+    /* step5: receive delay survey messages and analysis whether switch is on */
+    gs_delay_analysis();
 
 #ifdef LIBCOMM_SPEED_TEST_ENABLE
     libcomm_performance_test();
@@ -1628,8 +1634,14 @@ void commAuxiliaryLoop(uint64* last_print_time)
         gs_online_change_capacity();
     }
 
+    current_time = mc_timers_ms();
+    if ((g_instance.comm_cxt.g_delay_survey_switch) &&
+        (g_instance.comm_cxt.g_delay_survey_start_time + g_print_interval_time < current_time)) {
+        g_instance.comm_cxt.g_delay_survey_switch = false;
+        LIBCOMM_ELOG(LOG, "delay survey switch is close");
+    }
+
     if (g_instance.comm_cxt.commutil_cxt.g_debug_mode) {
-        current_time = mc_timers_ms();
         if (*last_print_time + g_print_interval_time < current_time) {
             print_stream_sock_info();
             *last_print_time = current_time;

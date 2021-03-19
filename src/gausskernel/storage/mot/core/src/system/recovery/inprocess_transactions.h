@@ -40,23 +40,39 @@ public:
 
     bool InsertLogSegment(LogSegment* segment);
 
-    bool FindTransactionId(uint64_t externalId, uint64_t& internalId, bool pop = true);
+    bool FindTransactionId(uint64_t externalId, uint64_t& internalId);
 
     template <typename T>
-    RC ForUniqueTransaction(uint64_t id, const T& func)
+    RC ForUniqueTransaction(uint64_t internalId, uint64_t externalId, const T& func)
     {
-        return OperateOnTransactionsMap(id, func, true, true);
+        const std::lock_guard<std::mutex> lock(m_lock);
+        auto it = m_map.find(internalId);
+        if (it != m_map.end()) {
+            RedoLogTransactionSegments* segments = it->second;
+            RC status = func(segments, it->first);
+            m_map.erase(it);
+            m_extToInt.erase(externalId);
+            m_numEntries--;
+            delete segments;
+            return status;
+        }
+        return RC_ERROR;
     }
 
+    /* Attention: Caller's should acquire the lock by calling Lock() method, before calling this method. */
     template <typename T>
-    RC ForEachTransaction(const T& func, bool pop)
+    RC ForEachTransactionNoLock(const T& func)
     {
-        return OperateOnTransactionsMap(0, func, pop, false);
-    }
-
-    bool IsInProcessTx(uint64_t id)
-    {
-        return (m_extToInt.find(id) != m_extToInt.end());
+        auto it = m_map.begin();
+        while (it != m_map.end()) {
+            RedoLogTransactionSegments* segments = it->second;
+            RC status = func(segments, it->first);
+            if (status != RC_OK) {
+                return status;
+            }
+            ++it;
+        }
+        return RC_OK;
     }
 
     void Lock()
@@ -69,59 +85,35 @@ public:
         m_lock.unlock();
     }
 
-    void UpdateTxIdMap(uint64_t intTx, uint64_t extTx)
+    uint64_t GetNumTxns() const
     {
-        m_extToInt[extTx] = intTx;
+        return m_numEntries;
     }
 
-    size_t GetNumTxns() const
+    void Clear()
     {
-        return m_map.size();
+        const std::lock_guard<std::mutex> lock(m_lock);
+        if (m_numEntries > 0) {
+            auto it = m_map.begin();
+            while (it != m_map.end()) {
+                RedoLogTransactionSegments* segments = it->second;
+                delete segments;
+                ++it;
+            }
+            m_map.clear();
+            m_extToInt.clear();
+            m_numEntries = 0;
+        }
     }
 
 private:
-    template <typename T>
-    RC OperateOnTransactionsMap(uint64_t id, const T& func, bool pop, bool lock)
-    {
-        RC status = RC_OK;
-        if (lock) {
-            m_lock.lock();
-        }
-        auto it = id ? m_map.find(id) : m_map.begin();
-        while (it != m_map.end()) {
-            RedoLogTransactionSegments* segments = it->second;
-            if (pop) {
-                m_map.erase(it);
-                m_numEntries--;
-            }
-            if (lock) {
-                m_lock.unlock();
-            }
-            status = func(segments, it->first);
-            if (pop) {
-                delete segments;
-            }
-            if (id || status != RC_OK) {
-                return status;
-            } else {
-                ++it;
-            }
-            if (lock) {
-                m_lock.lock();
-            }
-        }
-        if (lock) {
-            m_lock.unlock();
-        }
-        return RC_OK;
-    }
     std::mutex m_lock;
 
     std::map<uint64_t, RedoLogTransactionSegments*> m_map;
 
     std::map<uint64_t, uint64_t> m_extToInt;
 
-    uint64_t m_numEntries;
+    volatile uint64_t m_numEntries;
 };
 }  // namespace MOT
 

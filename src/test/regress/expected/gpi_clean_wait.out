@@ -21,9 +21,9 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (2 rows)
 
 explain (costs off) select * from test_gpi_more_invalid where a >= 3000;
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
- Index Only Scan using global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Index Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
    Index Cond: (a >= 3000)
 (2 rows)
 
@@ -55,10 +55,10 @@ explain (costs off) select count(*) from test_gpi_more_invalid where a <= 100 an
 (4 rows)
 
 explain (costs off) select count(*) from test_gpi_more_invalid where a > 3000;
-                                        QUERY PLAN                                        
-------------------------------------------------------------------------------------------
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
  Aggregate
-   ->  Index Only Scan using global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid
+   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
          Index Cond: (a > 3000)
 (3 rows)
 
@@ -348,9 +348,11 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 
 abort;
 --failed
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
 WARNING:  system table pg_partition contain relation test_gpi_more_invalid have reloptions wait_clean_gpi=y,must run the vacuum (full) test_gpi_more_invalid first
 WARNING:  skipping "pg_partition" --- only table or database can vacuum it
+set xc_maintenance_mode = off;
 -- test_gpi_more_invalid have wait_clean_gpi=y
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
         relname        | parttype |                    reloptions                     
@@ -366,7 +368,9 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (0 rows)
 
 -- success
+set xc_maintenance_mode = on;
 vacuum full pg_partition;
+set xc_maintenance_mode = off;
 set force_bitmapand = on;
 -- partition 1
 explain (costs off) select * from test_gpi_more_invalid where b = 100000 and c = 100;

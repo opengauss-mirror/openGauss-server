@@ -405,7 +405,8 @@ typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
 #define BASETABLE_SUPPORT_AT_CMD(cmd)                                                                           \
     ((cmd) == AT_SubCluster || (cmd) == AT_ChangeOwner || (cmd) == AT_SetRelOptions ||                          \
         (cmd) == AT_ResetRelOptions || (cmd) == AT_ReplaceRelOptions ||                                         \
-        (cmd) == AT_EnableRls || (cmd) == AT_DisableRls || (cmd) == AT_ForceRls || (cmd) == AT_NoForceRls)      \
+        (cmd) == AT_EnableRls || (cmd) == AT_DisableRls || (cmd) == AT_ForceRls || (cmd) == AT_NoForceRls ||    \
+        (cmd) == AT_AddConstraint || (cmd) == AT_DropConstraint)
 
 #define MATVIEW_SUPPORT_AT_CMD(cmd) ((cmd) == AT_SubCluster || (cmd) == AT_ChangeOwner)
 
@@ -2798,6 +2799,7 @@ void RemoveRelationsonMainExecCN(DropStmt* drop, ObjectAddresses* objects)
                 LockRelationOid(thisobj->objectId, AccessExclusiveLock);
             }
 #ifdef ENABLE_MULTIPLE_NODES
+            PreventDDLIfTsdbDisabled(thisobj->objectId);
             /* check if the rel is timeseries rel, if so, remove jobs */
             RemoveJobsWhenRemoveRelation(thisobj->objectId);
 #endif  /* ENABLE_MULTIPLE_NODES */
@@ -2994,6 +2996,7 @@ void RemoveRelations(DropStmt* drop, StringInfo tmp_queryString, RemoteQueryExec
 #ifdef ENABLE_MULTIPLE_NODES
         /* check if the rel is timeseries rel, if so, remove jobs */
         if (relkind == RELKIND_RELATION) {
+            PreventDDLIfTsdbDisabled(relOid);
             RemoveJobsWhenRemoveRelation(relOid);
         }
 #endif  /* ENABLE_MULTIPLE_NODES */
@@ -3515,6 +3518,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
         }
 
 #ifdef ENABLE_MULTIPLE_NODES
+        PreventDDLIfTsdbDisabled(myrelid);
         /*
          * for timeseries relation, truncate tag table and delta table(if exists) on each DN
          */
@@ -6093,6 +6097,10 @@ void AlterTable(Oid relid, LOCKMODE lockmode, AlterTableStmt* stmt)
     CheckGttTableInUse(rel);
 
     CheckTableNotInUse(rel, "ALTER TABLE");
+
+#ifdef ENABLE_MULTIPLE_NODES
+    PreventDDLIfTsdbDisabled(relid);
+#endif  /* ENABLE_MULTIPLE_NODES */
 
     /*
      * cmd list for 'ALTER FOREIGN TABLE ADD NODE'.
@@ -18384,6 +18392,8 @@ static void ATUnusableGlobalIndex(Relation rel)
     relation_close(sysTable, RowExclusiveLock);
 
     if (dirty) {
+        /* invalidate relation */
+        CacheInvalidateRelcache(rel);
         CommandCounterIncrement();
     }
 }
@@ -22127,6 +22137,40 @@ static List* ATExecReplaceRelOptionListCell(List* options, char* keyName, char* 
     return options;
 }
 
+/*
+ * ATDisableROTCompress is short for: Alter table disable row-oriented-table compress
+ */
+static void ATDisableROTCompress(const Relation rel, const int8 cmprsType)
+{
+    if (!RelationIsRowFormat(rel)) {
+        return;
+    }
+    if (IsCompressedByCmprsInPgclass((RelCompressType)cmprsType)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+             errmsg("row-oriented table does not support compression")));
+    }
+    /*
+     * relcmprs(pg_class's field) of mlog table in materialized view is 0,
+     * and it does not satisfys the following check. Because we have disabled
+     * compression for row-oriented table, we work around it with reporting
+     * an error and forbid coredump.
+     *
+     * Why relcmprs of mlog table is 0? The reason is in GetCreateTableStmt.
+     * It uses row_compress in stmt->into, and this value is created by
+     * rule CreateMatViewStmt in gram.y. It is not convenient for us to set it
+     * to 1 there, otherwise, it is too hack. We can not let users specify
+     * compress/nocompress when creating materialized view, either.
+     *
+     * In summary, checking it here may be the best choice.
+     */
+    if (CHECK_CMPRS_NOT_SUPPORT(RELATION_GET_CMPRS_ATTR(rel))) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+             errmsg("row-oriented table does not support compression.")));
+    }
+}
+
 static void ATExecSetCompress(Relation rel, const char* cmprsId)
 {
     Oid relId = RelationGetRelid(rel);
@@ -22134,11 +22178,7 @@ static void ATExecSetCompress(Relation rel, const char* cmprsId)
     HeapTuple relTuple;
     const int8 cmprsType = getCompressType(cmprsId);
 
-    if (RelationIsRowFormat(rel) && IsCompressedByCmprsInPgclass((RelCompressType)cmprsType)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-             errmsg("row-oriented table does not support compression")));
-    }
+    ATDisableROTCompress(rel, cmprsType);
 
     Assert(!CHECK_CMPRS_NOT_SUPPORT(RELATION_GET_CMPRS_ATTR(rel)));
     Assert(CHECK_CMPRS_VALID(cmprsType));
@@ -23435,7 +23475,7 @@ void CreateWeakPasswordDictionary(CreateWeakPasswordDictionaryStmt* stmt)
     foreach (pwd_obj, stmt->weak_password_string_list) {
         Datum values[Natts_gs_global_config] = {0};
         bool nulls[Natts_gs_global_config] = {false};
-        const char* pwd = (const char *)(lfirst(pwd_obj));
+        const char* pwd = (const char *)(((Value*)lfirst(pwd_obj))->val.str);
         if (password_contain_space(pwd)) {
             continue;
         }

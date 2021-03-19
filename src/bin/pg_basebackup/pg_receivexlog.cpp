@@ -54,7 +54,7 @@ static void free_receivexlog();
 
 static void usage(void)
 {
-    printf(_("%s receives PostgreSQL streaming transaction logs.\n\n"), progname);
+    printf(_("%s receives openGauss streaming transaction logs.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]...\n"), progname);
     printf(_("\nOptions:\n"));
@@ -72,7 +72,11 @@ static void usage(void)
     printf(_("  -w, --no-password      never prompt for password\n"));
     printf(_("  -W, --password         force password prompt (should happen automatically)\n"));
     printf(_("      --slot             replication slot to use\n"));
-    printf(_("\nReport bugs to <pgsql-bugs@postgresql.org>.\n"));
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    printf(_("\nReport bugs to GaussDB support.\n"));
+#else
+    printf(_("\nReport bugs to community@opengauss.org> or join opengauss community <https://opengauss.org>.\n"));
+#endif
 }
 
 static bool stop_streaming(XLogRecPtr segendpos, uint32 timeline, bool segment_finished)

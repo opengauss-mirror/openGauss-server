@@ -876,7 +876,6 @@ void ExtendCSNLOG(TransactionId newestXact)
 void TruncateCSNLOG(TransactionId oldestXact)
 {
     int64 cutoffPage;
-    int i;
 
     /*
      * The cutoff point is the start of the segment containing oldestXact. We
@@ -884,59 +883,7 @@ void TruncateCSNLOG(TransactionId oldestXact)
      */
     cutoffPage = TransactionIdToCSNPage(oldestXact);
 
-    /*
-     * The cutoff point is the start of the segment containing cutoffPage.
-     */
-    cutoffPage -= cutoffPage % SLRU_PAGES_PER_SEGMENT;
-
-    for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
-        SlruCtl ctl = CsnlogCtl(i);
-        SlruShared shared = ctl->shared;
-        int slotno;
-
-        /*
-         * Scan shared memory and remove any pages preceding the cutoff page, to
-         * ensure we won't rewrite them later.  (Since this is normally called in
-         * or just after a checkpoint, any dirty pages should have been flushed
-         * already ... we're just being extra careful here.)
-         */
-        (void)LWLockAcquire(shared->control_lock, LW_EXCLUSIVE);
-
-    restart:
-
-        for (slotno = 0; slotno < shared->num_slots; slotno++) {
-            if (shared->page_status[slotno] == SLRU_PAGE_EMPTY)
-                continue;
-            if (shared->page_number[slotno] >= cutoffPage)
-                continue;
-
-            /*
-             * If page is clean, just change state to EMPTY (expected case).
-             */
-            if (shared->page_status[slotno] == SLRU_PAGE_VALID && !shared->page_dirty[slotno]) {
-                shared->page_status[slotno] = SLRU_PAGE_EMPTY;
-                continue;
-            }
-
-            /*
-             * Hmm, we have (or may have) I/O operations acting on the page, so
-             * we've got to wait for them to finish and then start again. This is
-             * the same logic as in SlruSelectLRUPage.  If page is dirty,
-             * just discard it without writing it
-             */
-            if (shared->page_status[slotno] == SLRU_PAGE_VALID) {
-                shared->page_status[slotno] = SLRU_PAGE_EMPTY;
-            } else {
-                SimpleLruWaitIO(ctl, slotno);
-                goto restart;
-            }
-        }
-
-        LWLockRelease(shared->control_lock);
-    }
-
-    /* Now we can remove the old segment(s) */
-    (void)SlruScanDirectory(CsnlogCtl(0), SlruScanDirCbDeleteCutoff, &cutoffPage);
+    SimpleLruTruncate(CsnlogCtl(0), cutoffPage, true, NUM_CSNLOG_PARTITIONS);
 
     elog(LOG, "truncate CSN log oldestXact %lu, next xid %lu", oldestXact, t_thrd.xact_cxt.ShmemVariableCache->nextXid);
 }

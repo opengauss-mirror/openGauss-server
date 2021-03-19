@@ -724,13 +724,12 @@ inline llvm::Value* AddReadDatumColumn(
 }
 
 /** @brief Adds a call to writeDatumColumn(table_colid, value). */
-inline llvm::Value* AddWriteDatumColumn(
-    JitLlvmCodeGenContext* ctx, int table_colid, llvm::Value* row, llvm::Value* value)
+inline void AddWriteDatumColumn(JitLlvmCodeGenContext* ctx, int table_colid, llvm::Value* row, llvm::Value* value)
 {
     // make sure we have a column before issuing the call
     // we always write to a main table row (whether UPDATE or range UPDATE, so inner_scan value below is false)
     llvm::Value* column = AddGetColumnAt(ctx, table_colid, JIT_RANGE_SCAN_MAIN);
-    return AddFunctionCall(ctx, ctx->writeDatumColumnFunc, row, column, value, nullptr);
+    AddFunctionCall(ctx, ctx->writeDatumColumnFunc, row, column, value, nullptr);
 }
 
 /** @brief Adds a call to buildDatumKey(column, key, value, index_colid, offset, value). */

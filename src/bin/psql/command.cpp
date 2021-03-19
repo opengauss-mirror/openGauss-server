@@ -1051,10 +1051,6 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                 success = false;
             }
 
-            if (useReadline && pset.cur_cmd_interactive) {
-                setHistSize(opt0, newval, false);
-            }
-
             free(newval);
             newval = NULL;
             if (temp_opt != NULL)
@@ -1257,10 +1253,6 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
         } else if (!SetVariable(pset.vars, opt, NULL)) {
             psql_error("\\%s: error while setting variable\n", cmd);
             success = false;
-        }
-
-        if (useReadline && pset.cur_cmd_interactive) {
-            setHistSize(opt, NULL, true);
         }
 
         if (NULL != opt) {
@@ -1830,7 +1822,7 @@ static bool editFile(const char* fname, int lineno)
     char* editor_lineno_arg = NULL;
     char* sys = NULL;
     size_t syssz = 0;
-    int result;
+    int result = 0;
 
     psql_assert(fname);
 
@@ -1881,7 +1873,7 @@ static bool editFile(const char* fname, int lineno)
         }
 
         syssz = strlen(editorName) + strlen(editor_lineno_arg) + 10 /* for integer */
-                + 1 + strlen(fname) + 10 + 1;
+                 + 1 + strlen(fname) + 10 + 1;
     } else {
         syssz = strlen(editorName) + strlen(fname) + 10 + 1;
     }

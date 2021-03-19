@@ -736,7 +736,7 @@ static void write_relmap_file(bool shared, RelMapFile* newmap, bool write_wal, b
             lsn = XLogInsert(RM_RELMAP_ID, XLOG_RELMAP_UPDATE);
 
             /* As always, WAL must hit the disk before the data update does */
-            XLogFlush(lsn);
+            XLogWaitFlush(lsn);
         }
 
         errno = 0;

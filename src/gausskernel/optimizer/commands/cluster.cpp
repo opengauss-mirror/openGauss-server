@@ -70,6 +70,7 @@
 #include "catalog/pg_hashbucket_fn.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
+#include "parser/parse_utilcmd.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/part_merge.h"
 #include "tsdb/utils/ts_relcache.h"
@@ -357,6 +358,14 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
     /* Check for user-requested abort. */
     CHECK_FOR_INTERRUPTS();
 
+    /* cluster on hard-coded catalogs are only executed under maintenance mode */
+    if (tableOid < FirstBootstrapObjectId && !u_sess->attr.attr_common.xc_maintenance_mode && !IsInitdb) {
+        ereport(NOTICE,
+                (errcode(ERRCODE_E_R_E_MODIFYING_SQL_DATA_NOT_PERMITTED),
+                 errmsg("skipping system catalog %u --- use xc_maintenance_mode to CLUSTER it", tableOid)));
+        return;
+    }
+
     gstrace_entry(GS_TRC_ID_cluster_rel);
     /*
      * We grab exclusive access to the target rel and index for the duration
@@ -542,6 +551,11 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
         relation_close(OldHeap, AccessExclusiveLock);
         return;
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (OldHeap->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        set_stream_off();
+    }
+#endif
 
     /*
      * All predicate locks on the tuples or pages are about to be made
@@ -4637,6 +4651,8 @@ static void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool sw
     List* indicesList = RelationGetIndexList(rel1);
     ListCell* cell = NULL;
     char* srcIdxName = NULL;
+    char* tmpIdxName = NULL;
+    char* srcSchema = NULL;
     Oid tmpIdxOid;
     Oid indexOid;
 
@@ -4647,17 +4663,20 @@ static void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool sw
         if (!PointerIsValid(srcIdxName)) {
             continue;
         }
-
+        srcSchema = get_namespace_name(rel1->rd_rel->relnamespace);
+        tmpIdxName = getTmptableIndexName(srcSchema, srcIdxName);
         /*
          * The tmp index name is same as src index name, check generateClonedIndexStmt.
          * Get namespace from tmp table, the index of tmp table must have same namespace with tmp table
          */
-        tmpIdxOid = get_relname_relid(srcIdxName, RelationGetNamespace(rel2));
+        tmpIdxOid = get_relname_relid(tmpIdxName, RelationGetNamespace(rel2));
         Assert(OidIsValid(tmpIdxOid));
 
         /* Swap index relfilenode */
         execute_relfilenode_swap(indexOid, tmpIdxOid, swapBucket);
         pfree_ext(srcIdxName);
+        pfree_ext(tmpIdxName);
+        pfree_ext(srcSchema);
     }
 
     list_free_ext(indicesList);

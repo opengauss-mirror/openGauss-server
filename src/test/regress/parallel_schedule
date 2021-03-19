@@ -779,7 +779,7 @@ test: hw_show_tabledef hw_package_function
 test: cn_node_active
 #test: hw_sslpwd
 test: iud
-test: hotpatch
+##test: Hotpatch
 #blacklist
 # type test: enum rangetypes create_type typed_table rowtypes
 # inherit test: inherit hw_partition_inherit

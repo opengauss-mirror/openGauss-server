@@ -91,7 +91,6 @@ static PartitionMap* GetRelPartitionMap(Relation relation)
  */
 PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation current_relation)
 {
-    PruningResult* res = NULL;
     PruningResult* resPartition = NULL;
     PruningContext context;
 
@@ -102,11 +101,10 @@ PruningResult* GetPartitionInfo(PruningResult* result, EState* estate, Relation 
     context.estate = estate;
     context.relation = current_relation;
     
-    res = copyPruningResult(result);
     if (current_relation->partMap->type == PART_TYPE_LIST || current_relation->partMap->type == PART_TYPE_HASH) {
-        resPartition = partitionEqualPruningWalker(current_relation->partMap->type, res->expr, &context);
+        resPartition = partitionEqualPruningWalker(current_relation->partMap->type, result->expr, &context);
     } else {
-        resPartition = partitionPruningWalker(res->expr, &context);
+        resPartition = partitionPruningWalker(result->expr, &context);
     }
     partitionPruningFromBoundary(&context, resPartition);
     if (PruningResultIsFull(resPartition) ||
