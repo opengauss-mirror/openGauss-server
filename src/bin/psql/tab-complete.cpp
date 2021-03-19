@@ -754,8 +754,12 @@ void initialize_readline(void)
 {
     rl_readline_name = (char *)pset.progname;
 
+#ifdef HAVE_READLINE_READLINE_H
     /* PsqlCompletion is deleted because it's too complex and not be used at all. */
     rl_attempted_completion_function = PsqlCompletion;
+#else
+    rl_attempted_completion_function = NULL;
+#endif
 
     rl_basic_word_break_characters = WORD_BREAKS;
 

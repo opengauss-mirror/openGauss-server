@@ -781,6 +781,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                         fprintf(stderr, _("%s: could not set variable \"%s\"\n"), pset.progname, value);
                         exit(EXIT_FAILURE);
                     }
+                    setHistSize(value, equal_loc + 1, false);
                 }
 
                 free(value);
