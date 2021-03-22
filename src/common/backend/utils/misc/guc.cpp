@@ -14122,7 +14122,6 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
     TupleDesc tupdesc;
     Datum values[3];
     bool isnull[3] = {false, false, false};
-    char* ptr = NULL;
 
     /* need a tuple descriptor representing three TEXT columns */
     tupdesc = CreateTemplateTupleDesc(3, false, TAM_HEAP);
@@ -14140,7 +14139,7 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
         if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
             continue;
 
-        if(NULL != likename && NULL == (ptr = strstr((char*)conf->name, likename))) {
+        if(NULL != likename && NULL == strstr((char*)conf->name, likename)) {
             continue;
         }
 
