@@ -3499,26 +3499,26 @@ static void WalSndCheckTimeOut(TimestampTz now)
     }
 
     /*
-     * Use static last_reply_time to avoid call GetHeartbeatLastReplyTimestamp frequently
+     * Use last_check_timeout_timestamp to avoid call GetHeartbeatLastReplyTimestamp frequently
      * when t_thrd.walsender_cxt.last_reply_timestamp has meet the timeout condition
      * but last heartbeat time doesn't.
      */
-    static TimestampTz last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
+    TimestampTz *last_reply_time = &t_thrd.walsender_cxt.last_check_timeout_timestamp;
     /* t_thrd.walsender_cxt.last_reply_timestamp newer */
-    if (timestamptz_cmp_internal(t_thrd.walsender_cxt.last_reply_timestamp, last_reply_time) > 0) {
-        last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
+    if (timestamptz_cmp_internal(t_thrd.walsender_cxt.last_reply_timestamp, *last_reply_time) > 0) {
+        *last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
     }
 
-    timeout = CalculateTimeout(last_reply_time);
+    timeout = CalculateTimeout(*last_reply_time);
     if (now < timeout) {
         return;
     }
 
     TimestampTz heartbeat = GetHeartbeatLastReplyTimestamp();
     /* If heartbeat newer, use heartbeat to recalculate timeout. */
-    if (timestamptz_cmp_internal(heartbeat, last_reply_time) > 0) {
-        last_reply_time = heartbeat;
-        timeout = CalculateTimeout(last_reply_time);
+    if (timestamptz_cmp_internal(heartbeat, *last_reply_time) > 0) {
+        *last_reply_time = heartbeat;
+        timeout = CalculateTimeout(*last_reply_time);
     }
 
     if (now >= timeout) {
@@ -3529,7 +3529,7 @@ static void WalSndCheckTimeOut(TimestampTz now)
          */
         if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
             WalReplicationTimestampInfo timeStampInfo;
-            WalReplicationTimestampToString(&timeStampInfo, now, timeout, last_reply_time, heartbeat);
+            WalReplicationTimestampToString(&timeStampInfo, now, timeout, *last_reply_time, heartbeat);
             ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."
                                    "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)", 
                                    timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
