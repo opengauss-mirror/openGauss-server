@@ -1116,7 +1116,7 @@ void drop_masking_policy(DropMaskingPolicyStmt *stmt)
     ListCell* policy_obj = NULL;
     /* save Mng logs */
     foreach(policy_obj, stmt->policy_names) {
-        const char* polname = (const char *)(lfirst(policy_obj));
+        const char* polname = (const char *)(((Value*)lfirst(policy_obj))->val.str);
         char buff[BUFFSIZE] = {0};
         char user_name[USERNAME_LEN] = {0};
         char session_ip[MAX_IP_LEN] = {0};
@@ -1137,7 +1137,7 @@ void drop_masking_policy(DropMaskingPolicyStmt *stmt)
     heap_close(policy_relation, RowExclusiveLock);
 
     foreach(policy_obj, stmt->policy_names) {
-        const char* polname = (const char *)(lfirst(policy_obj));
+        const char* polname = (const char *)(((Value*)lfirst(policy_obj))->val.str);
         GsPolicyStruct cur_policy;
         cur_policy.m_name = polname;
         policies_set::iterator it = existing_policies.find(cur_policy);
