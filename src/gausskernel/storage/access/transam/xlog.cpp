@@ -13334,6 +13334,17 @@ XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive)
     }
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
     StopSuspendWalInsert(lastlrc);
+        
+    /*
+     * Clean up session-level lock.
+     *
+    * You might think that WALInsertLockRelease() can be called before
+    * cleaning up session-level lock because session-level lock doesn't need
+     * to be protected with WAL insertion lock. But since
+     * CHECK_FOR_INTERRUPTS() can occur in it, session-level lock must be
+     * cleaned up before it.
+     */
+    u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 
     if (exclusive) {
         /*
@@ -13642,6 +13653,13 @@ void do_pg_abort_backup(void)
     int32 lastlrc = 0;
 
     StartSuspendWalInsert(&lastlrc);
+	/*
+     * Quick exit if session is not keeping around a non-exclusive backup
+     * already started.
+     */
+    if (u_sess->proc_cxt.sessionBackupState != SESSION_BACKUP_NON_EXCLUSIVE)
+        return;
+
     Assert(t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups > 0);
     t_thrd.shemem_ptr_cxt.XLogCtl->Insert.nonExclusiveBackups--;
 
@@ -13652,6 +13670,7 @@ void do_pg_abort_backup(void)
     u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 
     StopSuspendWalInsert(lastlrc);
+    u_sess->proc_cxt.sessionBackupState = SESSION_BACKUP_NONE;
 }
 
 /*

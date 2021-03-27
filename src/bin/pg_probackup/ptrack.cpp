@@ -69,8 +69,10 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
     securec_check_ss_c(rc, "\0", "\0");
 	params[0] = gs_pstrdup(start_lsn);
 
-	res = pgut_execute(backup_conn, "CHECKPOINT;", 0, NULL);
-	PQclear(res);
+    if (!current.from_replica) {
+        res = pgut_execute(backup_conn, "CHECKPOINT;", 0, NULL);
+        PQclear(res);
+    }
 
 	res = pgut_execute(backup_conn, "SELECT pg_cbm_tracked_location()", 0, NULL);
 	if (PQnfields(res) != 1) {
@@ -94,8 +96,7 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 	pagemap.bitmapsize = 0;
 
 	/* Construct database map */
-	for (i = 0; i < PQntuples(res); i++)
-	{
+	for (i = 0; i < PQntuples(res); i++) {
 		page_map_entry *pm_entry = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
 
 		/* get path */
