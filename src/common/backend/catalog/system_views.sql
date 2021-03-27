@@ -1850,6 +1850,10 @@ CREATE VIEW pg_user_mappings AS
 
 REVOKE ALL on pg_user_mapping FROM public;
 
+--some function will use the new column that use
+CREATE OR REPLACE VIEW PG_CATALOG.SYS_DUMMY AS (SELECT 'X'::TEXT AS DUMMY);
+GRANT SELECT ON TABLE SYS_DUMMY TO PUBLIC;
+
 -- these functions are added for supporting default format transformation
 CREATE OR REPLACE FUNCTION to_char(NUMERIC)
 RETURNS VARCHAR2
