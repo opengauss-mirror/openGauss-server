@@ -99,7 +99,7 @@ function check_os() {
 
     local shmall=$(cat /proc/sys/kernel/shmall)
     local pagesize=$(getconf PAGESIZE)
-    if [ $(($shared_buffers/1024/1024-$shmall/1024/1024*$pagesize)) -gt 0 ]; then
+    if [ $(($shared_buffers/1024/1024/1024-$shmall/1024/1024/1024*$pagesize)) -gt 0 ]; then
         echo "The usage of the device [Shared_buffers] space cannot be greater than shmall*PAGESIZE." && exit 1
     fi
 
