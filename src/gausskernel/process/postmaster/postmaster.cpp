@@ -8812,6 +8812,13 @@ static bool IsAlreadyListen(const char* ip, int port)
             if ((0 == strcmp(ip, sock_ip)) && (port == ntohs(saddr.sin_port))) {
                 return true;
             }
+			
+			// check if all IP addresss of local host has been listened already, which using ”*“ for listen address 
+			if((AF_INET6 == saddr.sin_family ) && ((0 == strcmp("::", sock_ip)) && (port == ntohs(saddr.sin_port)))) {
+				return true;
+			} else if ((AF_INET == saddr.sin_family ) && ((0 == strcmp("0.0.0.0", sock_ip)) && (port == ntohs(saddr.sin_port)))) {
+				return true;
+			}
         }
     }
 
