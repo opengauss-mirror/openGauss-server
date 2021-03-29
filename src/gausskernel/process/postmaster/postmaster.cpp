@@ -9510,16 +9510,16 @@ void check_backend_env(const char* input_env_value)
 
 void CleanSystemCaches(bool is_in_read_command)
 {
-    int64 totalsize = 0;
+    int64 usedSize = 0;
 
-    totalsize = ((AllocSet)u_sess->cache_mem_cxt)->totalSpace;
+    usedSize = ((AllocSet)u_sess->cache_mem_cxt)->totalSpace - ((AllocSet)u_sess->cache_mem_cxt)->freeSpace;
 
     /* Over threshold, need to clean cache. */
-    if (totalsize > g_instance.attr.attr_memory.local_syscache_threshold*1024) {
+    if (usedSize > g_instance.attr.attr_memory.local_syscache_threshold*1024) {
         ereport(DEBUG1,
             (errmsg("CleanSystemCaches due to "
                     "SystemCache(%ld) greater than (%d),in_read_command(%d).",
-                totalsize,
+                usedSize,
                  g_instance.attr.attr_memory.local_syscache_threshold*1024,
                 (is_in_read_command ? 1 : 0))));
 
