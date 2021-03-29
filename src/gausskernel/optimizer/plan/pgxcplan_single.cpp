@@ -175,6 +175,7 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
             ReSetNgQueryMem(result);
         }
         t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+        ResourceOwnerDelete(tempOwner);
     }
     PG_CATCH();
     {
