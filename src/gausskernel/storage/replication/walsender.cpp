@@ -221,6 +221,7 @@ int WalSenderMain(void)
     size_t appNameSize;
 
     t_thrd.proc_cxt.MyProgName = "WalSender";
+    (void)ShowThreadName("WalSender");
     if (RecoveryInProgress()) {
         t_thrd.role = WAL_STANDBY_SENDER;
     }
@@ -4390,6 +4391,7 @@ bool WalSndAllInProgress(int type)
     int i;
     int num = 0;
     int allNum = 0;
+    int slot_num = 0;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         /* not contains cascade standby in primary */
@@ -4411,6 +4413,27 @@ bool WalSndAllInProgress(int type)
         SpinLockRelease(&walsnd->mutex);
     }
     if (num >= allNum) {
+        /*
+         * Check if the number of active physical slot is match. In some fault 
+         * scenario, it will appear that the replication slot corresponding to
+         * walsender is not active. So we should considerate the number of active
+         * slot too.
+         */
+        LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+        for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+            ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+            SpinLockAcquire(&s->mutex);
+            if (s->active && s->data.database == InvalidOid) {
+                slot_num++;
+            }
+            SpinLockRelease(&s->mutex);
+        }
+        LWLockRelease(ReplicationSlotControlLock);
+        if (slot_num < num) {
+            ereport(WARNING, (errmsg("The number of walsender %d is not equal to the number of active slot %d.",
+                                     num, slot_num)));
+            return false;
+        }
         return true;
     } else {
         return false;
