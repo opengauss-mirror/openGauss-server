@@ -745,15 +745,15 @@ function install_gaussdb()
                 export DEBUG_TYPE=release
             fi
 
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --with-python CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "memcheck"x ]; then
-            ./configure $shared_opt CFLAGS="-O0" --enable-mot --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0" --enable-mot --with-python --enable-debug --enable-cassert --enable-memory-check CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiurelease"x ]; then
-            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --with-python --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiudebug"x ]; then
-            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --with-python --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
-            #./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+            #./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --with-python --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
             CMAKE_OPT="-DENABLE_MULTIPLE_NODES=OFF -DENABLE_THREAD_SAFETY=ON"
             export DEBUG_TYPE=debug
         fi
