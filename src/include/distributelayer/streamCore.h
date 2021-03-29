@@ -422,7 +422,17 @@ public:
     {
         return m_recursiveVfdInvalid;
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    inline void MarkStreamQuitStatus(StreamObjStatus status)
+    {
+        m_quitStatus = status;
+    }
 
+    inline StreamObjStatus GetStreamQuitStatus()
+    {
+        return m_quitStatus;
+    }
+#endif
     /* Mark recursive vfd is invalid before aborting transaction. */
     static void MarkRecursiveVfdInvalid();
 
@@ -495,6 +505,10 @@ private:
 
     /* Mutex for stream connect sync. */
     static pthread_mutex_t m_streamConnectSyncLock;
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Mark Stream query quit status. */
+    StreamObjStatus m_quitStatus;
+#endif
 };
 
 extern bool IsThreadProcessStreamRecursive();

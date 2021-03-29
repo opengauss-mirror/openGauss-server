@@ -524,6 +524,11 @@ void StreamNodeGroup::signalStreamThreadInNodeGroup(int signo)
                 int ntimes = 1;
                 StreamProducer* producer = (StreamProducer*)m_streamArray[i].streamObj;
 
+                /* thread is is InvalidTid means thread not start up */
+                if (producer->getThreadId() == InvalidTid) {
+                    continue;
+                }
+
                 /*
                  * Signal slot must be already registered if stream thread already inited.
                  * If not, wait 1ms once and then recheck. Sets the maximum total wait
@@ -937,7 +942,12 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     }
 
     if (u_sess->stream_cxt.global_obj != NULL) {
-        if (STREAM_ERROR == status)
+#ifdef ENABLE_MULTIPLE_NODES
+        if (status == STREAM_ERROR)
+#else
+        if (status == STREAM_ERROR ||
+            unlikely(u_sess->stream_cxt.global_obj->GetStreamQuitStatus() == STREAM_ERROR))
+#endif
             u_sess->stream_cxt.global_obj->MarkSyncControllerStopFlagAll();
 
         if (StreamTopConsumerAmI()) {

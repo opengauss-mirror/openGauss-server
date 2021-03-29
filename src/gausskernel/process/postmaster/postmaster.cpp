@@ -9721,6 +9721,8 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
         case THREADPOOL_STREAM: {
             t_thrd.threadpool_cxt.stream = (ThreadPoolStream*)arg->payload;
             t_thrd.threadpool_cxt.group  = t_thrd.threadpool_cxt.stream->GetGroup();
+            StreamProducer* proObj = (StreamProducer*)t_thrd.threadpool_cxt.stream->GetProducer();
+            SetStreamWorkerInfo(proObj);
             break;
         }
 #ifdef ENABLE_MULTIPLE_NODES
