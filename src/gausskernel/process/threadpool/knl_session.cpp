@@ -500,6 +500,10 @@ static void knl_u_proc_init(knl_u_proc_context* proc_cxt)
     proc_cxt->clientIsGsroach = false;
     proc_cxt->IsBinaryUpgrade = false;
     proc_cxt->IsWLMWhiteList = false;
+    proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;
+    proc_cxt->LabelFile = NULL;
+    proc_cxt->TblspcMapFile = NULL;
+    proc_cxt->registerAbortBackupHandlerdone = false;
     proc_cxt->gsRewindAddCount = false;
     proc_cxt->PassConnLimit = false;
     proc_cxt->sessionBackupState = SESSION_BACKUP_NONE;

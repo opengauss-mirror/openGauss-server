@@ -882,6 +882,7 @@ static void threads_handle(pgBackup *dest_backup,
     full_backup->recovery_time = dest_backup->recovery_time;
     full_backup->recovery_xid = dest_backup->recovery_xid;
     full_backup->tli = dest_backup->tli;
+    full_backup->from_replica = dest_backup->from_replica;
 
     pfree(full_backup->external_dir_str);
     full_backup->external_dir_str = pgut_strdup(dest_backup->external_dir_str);

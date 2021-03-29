@@ -994,7 +994,12 @@ typedef struct knl_u_proc_context {
      * */
     enum SessionBackupState sessionBackupState;
     bool registerExclusiveHandlerdone;
-
+    /*
+     * Store label file and tablespace map during non-exclusive backups.
+     */
+    char* LabelFile;
+    char* TblspcMapFile;
+    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */
@@ -2278,6 +2283,7 @@ typedef struct knl_session_context {
     MemoryContext top_transaction_mem_cxt;
     MemoryContext self_mem_cxt;
     MemoryContext top_portal_cxt;
+    MemoryContext probackup_context;
     MemoryContextGroup* mcxt_group;
     /* temp_mem_cxt is a context which will be reset when the session attach to a thread */
     MemoryContext temp_mem_cxt;

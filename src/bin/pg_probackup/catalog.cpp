@@ -1472,7 +1472,14 @@ void anchor_lsn_keep_segments_timelines(InstanceConfig *instance, parray *timeli
             interval->begin_segno = segno;
             GetXLogSegNo(backup->stop_lsn, segno, instance->xlog_seg_size);
 
-            interval->end_segno = segno;
+            /*
+             * On replica it is possible to get STOP_LSN pointing to contrecord,
+             * so set end_segno to the next segment after STOP_LSN just to be safe.
+             */
+            if (backup->from_replica)
+                interval->end_segno = segno + 1;
+            else
+                interval->end_segno = segno;
 
             GetXLogFileName(begin_segno_str, tlinfo->tli, interval->begin_segno, instance->xlog_seg_size);
             GetXLogFileName(end_segno_str, tlinfo->tli, interval->end_segno, instance->xlog_seg_size);
@@ -1808,6 +1815,7 @@ pgBackupWriteControl(FILE *out, pgBackup *backup)
     fio_fprintf(out, "compress-alg = %s\n",
         deparse_compress_alg(backup->compress_alg));
     fio_fprintf(out, "compress-level = %d\n", backup->compress_level);
+    fio_fprintf(out, "from-replica = %s\n", backup->from_replica ? "true" : "false");
 
     fio_fprintf(out, "\n#Compatibility\n");
     fio_fprintf(out, "block-size = %u\n", backup->block_size);
@@ -2055,14 +2063,12 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
             len += nRet;
         }
 
-
         if (file->linked)
         {
             nRet = snprintf_s(line+len, remainLen - len,remainLen - len - 1,",\"linked\":\"%s\"", file->linked);
             securec_check_ss_c(nRet, "\0", "\0");
             len += nRet;
         }
-
 
         if (file->n_blocks > 0)
         {
@@ -2089,6 +2095,7 @@ write_backup_filelist(pgBackup *backup, parray *files, const char *root,
 
         nRet =  snprintf_s(line+len,remainLen - len,remainLen - len - 1, "}\n");
         securec_check_ss_c(nRet, "\0", "\0");
+        len += nRet;
 
         if (sync)
             COMP_FILE_CRC32(true, backup->content_crc, line, strlen(line));
@@ -2191,6 +2198,7 @@ readBackupControlFile(const char *path)
         {'s', 0, "merge-dest-id",		&merge_dest_backup, SOURCE_FILE_STRICT},
         {'s', 0, "compress-alg",		&compress_alg, SOURCE_FILE_STRICT},
         {'u', 0, "compress-level",		&backup->compress_level, SOURCE_FILE_STRICT},
+        {'b', 0, "from-replica",		&backup->from_replica, SOURCE_FILE_STRICT},
         {'s', 0, "external-dirs",		&backup->external_dir_str, SOURCE_FILE_STRICT},
         {'s', 0, "note",				&backup->note, SOURCE_FILE_STRICT},
         {'s', 0, "recovery-name",		&recovery_name, SOURCE_FILE_STRICT},
@@ -2424,6 +2432,7 @@ pgBackupInit(pgBackup *backup)
     backup->checksum_version = 0;
 
     backup->stream = false;
+    backup->from_replica = false;
     backup->parent_backup = INVALID_BACKUP_ID;
     backup->merge_dest_backup = INVALID_BACKUP_ID;
     backup->parent_backup_link = NULL;

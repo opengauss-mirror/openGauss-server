@@ -634,9 +634,10 @@ wal_contains_lsn(const char *archivedir, XLogRecPtr target_lsn,
     res = XLogReadRecord(xlogreader, target_lsn, &errormsg) != NULL;
     /* Didn't find 'target_lsn' and there is no error, return false */
 
-    if (errormsg)
-        elog(WARNING, "Could not read WAL record at %X/%X: %s",
-            (uint32) (target_lsn >> 32), (uint32) (target_lsn), errormsg);
+    if (!current.from_replica)
+        if (errormsg)
+            elog(WARNING, "Could not read WAL record at %X/%X: %s",
+                (uint32) (target_lsn >> 32), (uint32) (target_lsn), errormsg);
 
     CleanupXLogPageRead(xlogreader);
     XLogReaderFree(xlogreader);
@@ -1459,7 +1460,7 @@ XLogThreadWorker(void *arg)
             * Usually SimpleXLogPageRead_local() does it by itself. But here we need
             * to do it manually to support threads.
             */
-            if (reader_data->need_switch && errormsg == NULL)
+            if (reader_data->need_switch)
             {
                 if (SwitchThreadToNextWal(xlogreader, thread_arg))
                     continue;
