@@ -420,7 +420,7 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool isDrop)
     /* We allow dropping active logical replication slots on standby in opengauss. */
     if (active) {
         if ((slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
-ifndef ENABLE_MULTIPLE_NODES
+#ifndef ENABLE_MULTIPLE_NODES
            && !isDrop
 #endif
         )
