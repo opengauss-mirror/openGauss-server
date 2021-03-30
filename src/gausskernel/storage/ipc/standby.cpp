@@ -703,6 +703,7 @@ void DealCSNLogForHotStby(XLogReaderState* record, uint8 info)
             CSNLogSetCommitSeqNo(id[0], (int)childrenxidnum, &id[3], (COMMITSEQNO_COMMIT_INPROGRESS | id[1]));
             RecordCommittingCsnInfo(id[0]);
             for (uint64 i = 0; i < childrenxidnum; ++i) {
+                XactLockTableInsert(id[i + 3]);
                 RecordCommittingCsnInfo(id[i + 3]);
             }
         } else {
