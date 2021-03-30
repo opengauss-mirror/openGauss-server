@@ -26,7 +26,7 @@ function info()
 }
 
 function error() {
-    echo -e "\033[31m$1:\033[0m"
+    echo -e "\033[31m$1\033[0m"
 }
 
 function check_param() {
@@ -35,6 +35,26 @@ function check_param() {
         usage
         exit 1
     fi
+
+    local -i num=0
+    if [ -n "$(echo $password | grep -E --color '^(.*[a-z]+).*$')" ]; then
+      let num=$num+1
+    fi
+    if [ -n "$(echo $password | grep -E --color '^(.*[A-Z]).*$')" ]; then
+      let num=$num+1
+    fi
+    if [ -n "$(echo $password | grep -E --color '^(.*\W).*$')" ]; then
+      let num=$num+1
+    fi
+    if [ -n "$(echo $password | grep -E --color '^(.*[0-9]).*$')" ]; then
+      let num=$num+1
+    fi
+    if [ ${#password} -lt 8 ] || [ $num -lt 3 ]
+    then
+        error "password must be at least 8 character and at least three kinds"
+        exit 1
+    fi
+
     if [ X$user == X"root" ]; then
         error "Error: can not install openGauss with root"
         exit 1
@@ -99,8 +119,10 @@ function check_os() {
 
     local shmall=$(cat /proc/sys/kernel/shmall)
     local pagesize=$(getconf PAGESIZE)
-    if [ $(($shared_buffers/1024/1024/1024-$shmall/1024/1024/1024*$pagesize)) -gt 0 ]; then
+    if [ $(($shmall/1024/1024/1024*$pagesize)) -ne 0 ]; then
+      if [ $(($shared_buffers/1024/1024/1024-$shmall/1024/1024/1024*$pagesize)) -gt 0 ]; then
         echo "The usage of the device [Shared_buffers] space cannot be greater than shmall*PAGESIZE." && exit 1
+      fi
     fi
 
     # check sem
