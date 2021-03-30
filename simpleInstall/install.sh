@@ -253,9 +253,7 @@ function get_param() {
             shift
             ;;
         --multinode)
-            echo
             mode="master_standby"
-            shift
             ;;
         -h|--help)
             usage
