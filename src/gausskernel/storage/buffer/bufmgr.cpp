@@ -2029,9 +2029,16 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
      */
 #ifndef ENABLE_MULTIPLE_NODES
     } else if (RecoveryInProgress()) {
-        if (blockNum >= smgrnblocks(smgr, forkNum))
-            return InvalidBuffer;
+        BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
 
+        /* Update cached blocks */
+        if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
+            totalBlkNum = smgrnblocks(smgr, forkNum);
+        }
+
+        if (blockNum >= totalBlkNum) {
+            return InvalidBuffer;
+        }
 #endif
     }
 

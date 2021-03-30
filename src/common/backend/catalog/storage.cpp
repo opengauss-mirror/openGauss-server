@@ -687,6 +687,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
     rel->rd_smgr->smgr_targblock = InvalidBlockNumber;
     rel->rd_smgr->smgr_fsm_nblocks = InvalidBlockNumber;
     rel->rd_smgr->smgr_vm_nblocks = InvalidBlockNumber;
+    rel->rd_smgr->smgr_cached_nblocks = InvalidBlockNumber;
 
     for (int i = 0; i < rel->rd_smgr->smgr_bcmarry_size; i++)
         rel->rd_smgr->smgr_bcm_nblocks[i] = InvalidBlockNumber;

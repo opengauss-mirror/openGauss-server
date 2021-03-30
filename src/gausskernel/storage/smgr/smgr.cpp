@@ -150,6 +150,7 @@ static void _smgr_init(SMgrRelation reln, int col = 0)
     reln->smgr_targblock = InvalidBlockNumber;
     reln->smgr_fsm_nblocks = InvalidBlockNumber;
     reln->smgr_vm_nblocks = InvalidBlockNumber;
+    reln->smgr_cached_nblocks = InvalidBlockNumber;
 
     reln->smgr_which = 0; /* we only have md.c at present */
 
@@ -809,7 +810,36 @@ void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, 
  */
 BlockNumber smgrnblocks(SMgrRelation reln, ForkNumber forknum)
 {
-    return (*(smgrsw[reln->smgr_which].smgr_nblocks))(reln, forknum);
+    BlockNumber result = InvalidBlockNumber;
+
+    result = (*(smgrsw[reln->smgr_which].smgr_nblocks))(reln, forknum);
+    if (forknum == MAIN_FORKNUM) {
+        reln->smgr_cached_nblocks = result;
+    }
+
+    return result;
+}
+
+/*
+ * smgrnblocks_cached() -- Get the cached number of blocks in the supplied
+ *                          relation.
+ *
+ * Returns an InvalidBlockNumber when not in recovery and when the relation
+ * fork size is not cached. Now, we only support cache main fork.
+ */
+BlockNumber
+smgrnblocks_cached(SMgrRelation reln, ForkNumber forknum)
+{
+    /*
+     * For now, we only use cached values in recovery due to lack of a shared
+     * invalidation mechanism for changes in file size.
+     */
+    if (RecoveryInProgress() && forknum == MAIN_FORKNUM &&
+        reln->smgr_cached_nblocks != InvalidBlockNumber) {
+        return reln->smgr_cached_nblocks;
+    }
+
+    return InvalidBlockNumber;
 }
 
 void smgrtruncatefunc(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
@@ -838,6 +868,9 @@ void smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
      */
     if (forknum == BCM_FORKNUM)
         BCMArrayDropAllBlocks(reln->smgr_rnode.node);
+
+    /* Make the cached size is invalid if we encounter an error. */
+    reln->smgr_cached_nblocks = InvalidBlockNumber;
 
     /*
      * Send a shared-inval message to force other backends to close any smgr
