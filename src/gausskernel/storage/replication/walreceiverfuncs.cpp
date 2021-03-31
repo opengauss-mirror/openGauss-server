@@ -330,6 +330,37 @@ static void set_rcv_slot_name(const char *slotname)
     return;
 }
 
+void KillWalRcvWriter(void)
+{
+    volatile WalRcvData *walRcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    ThreadId writerPid;
+    int i = 1;
+    /*
+     * Shutdown WalRcvWriter thread.
+     */
+    SpinLockAcquire(&walRcv->mutex);
+    writerPid = walRcv->writerPid;
+    SpinLockRelease(&walRcv->mutex);
+    if (writerPid != 0) {
+        (void)gs_signal_send(writerPid, SIGTERM);
+    }
+    ereport(LOG, (errmsg("waiting walrcvwriter: %lu terminate", writerPid)));
+    while (writerPid) {
+        pg_usleep(10000L);    /* sleep 0.01s */
+        SpinLockAcquire(&walRcv->mutex);
+        writerPid = walRcv->writerPid;
+        SpinLockRelease(&walRcv->mutex);
+        if ((writerPid != 0) && (i % 2000 == 0)) {
+            if (gs_signal_send(writerPid, SIGTERM) != 0) {
+                ereport(WARNING, (errmsg("walrcvwriter:%lu may be terminated", writerPid)));
+                break;
+            }
+            i = 1;
+        }
+        i++;
+    }
+}
+
 /*
  * Stop walreceiver (if running) and wait for it to die.
  * Executed by the Startup process.

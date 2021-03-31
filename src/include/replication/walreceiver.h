@@ -223,6 +223,7 @@ extern void WSDataRcvCheck(char* data_buf, Size nbytes);
 /* prototypes for functions in walreceiverfuncs.c */
 extern Size WalRcvShmemSize(void);
 extern void WalRcvShmemInit(void);
+extern void KillWalRcvWriter(void);
 extern void ShutdownWalRcv(void);
 extern bool WalRcvInProgress(void);
 extern void connect_dn_str(char* conninfo, int replIndex);
