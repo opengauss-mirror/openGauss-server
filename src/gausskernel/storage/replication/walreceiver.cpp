@@ -476,6 +476,7 @@ void WalReceiverMain(void)
         case WALRCV_STOPPED:
             SpinLockRelease(&walrcv->mutex);
             ereport(WARNING, (errmsg("walreceiver requested to stop when starting up.")));
+            KillWalRcvWriter();
             proc_exit(1);
             break;
 
@@ -755,44 +756,19 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
 }
 
 /*
- * Mark us as STOPPED in shared memory at exit.
+ * Mark us as STOPPED in proc at exit.
  */
 static void WalRcvDie(int code, Datum arg)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    ThreadId writerPid;
-    int i = 1;
 
     /*
      * Shutdown WalRcvWriter thread, clear the data receive buffer.
      * Ensure that all WAL records received are flushed to disk.
      */
-    SpinLockAcquire(&walrcv->mutex);
-    writerPid = walrcv->writerPid;
-    SpinLockRelease(&walrcv->mutex);
-
-    if (writerPid != 0)
-        (void)gs_signal_send(writerPid, SIGTERM);
-
-    ereport(LOG, (errmsg("waiting walrcvwriter: %lu terminate", writerPid)));
-
-    while (writerPid) {
-        pg_usleep(10000L);  // sleep 0.01s
-
-        SpinLockAcquire(&walrcv->mutex);
-        writerPid = walrcv->writerPid;
-        SpinLockRelease(&walrcv->mutex);
-
-        if ((writerPid != 0) && (i % 2000 == 0)) {
-            if (gs_signal_send(writerPid, SIGTERM) != 0) {
-                ereport(WARNING, (errmsg("walrcvwriter:%lu may be terminated", writerPid)));
-                break;
-            }
-            i = 1;
-        }
-        i++;
-    }
+    KillWalRcvWriter();
+    
     /* we have to set REDO_FINISH_STATUS_LOCAL to false here, or there will be problems in this case:
        extremRTO is on, and DN received force finish signal, if cleanup is blocked, the force finish 
        signal will be ignored!
