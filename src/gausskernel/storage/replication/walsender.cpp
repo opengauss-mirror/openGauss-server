@@ -3531,10 +3531,11 @@ static void WalSndCheckTimeOut(TimestampTz now)
         if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
             WalReplicationTimestampInfo timeStampInfo;
             WalReplicationTimestampToString(&timeStampInfo, now, timeout, *last_reply_time, heartbeat);
-            ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."
-                                   "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)", 
-                                   timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
-                                   timeStampInfo.lastRecStamp, timeStampInfo.heartbeatStamp)));
+            ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."),
+                           (errdetail("now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
+                                      timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
+                                      timeStampInfo.lastRecStamp, timeStampInfo.heartbeatStamp)),
+                           (errhint("try increasing wal_sender_timeout or check system time."))));
         }        
         WalSndShutdown();
     }
