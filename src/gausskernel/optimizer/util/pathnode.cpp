@@ -3963,7 +3963,7 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
             ResultPath *newpath = makeNode(ResultPath);
 
             errno_t errorno = EOK;
-            errorno = memcpy_s(newpath, sizeof(PartIteratorPath), rpath, sizeof(PartIteratorPath));
+            errorno = memcpy_s(newpath, sizeof(ResultPath), rpath, sizeof(ResultPath));
             securec_check(errorno, "", "");
 
             newpath->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
