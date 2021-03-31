@@ -990,7 +990,7 @@ static void check_file_stat(char *file_name)
  *	mdread() -- Read the specified block from a relation.
  *      Now, we don't read from a bucket dir smgr.
  */
-bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
+void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
     off_t seekpos;
     int nbytes;
@@ -1076,11 +1076,6 @@ bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *b
 
     if (nbytes != BLCKSZ) {
         if (nbytes < 0) {
-#ifndef ENABLE_MULTIPLE_NODES
-            if(RecoveryInProgress()) {
-                return false;
-            }
-#endif
             ereport(ERROR, (errcode_for_file_access(),
                             errmsg("could not read block %u in file \"%s\": %m", blocknum, FilePathName(v->mdfd_vfd))));
         }
@@ -1098,19 +1093,11 @@ bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *b
             check_file_stat(FilePathName(v->mdfd_vfd));
             force_backtrace_messages = true;
 
-#ifndef ENABLE_MULTIPLE_NODES
-            if(RecoveryInProgress()) {
-                return false;
-            }
-#endif
             ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
                             errmsg("could not read block %u in file \"%s\": read only %d of %d bytes", blocknum,
                                    FilePathName(v->mdfd_vfd), nbytes, BLCKSZ)));
         }
     }
-
-    /* Target block exists */
-    return true;
 }
 
 /*

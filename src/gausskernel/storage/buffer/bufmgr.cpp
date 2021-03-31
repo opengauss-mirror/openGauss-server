@@ -120,7 +120,7 @@ static void CheckForBufferLeaks(void);
 static int ts_ckpt_progress_comparator(Datum a, Datum b, void *arg);
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence,
     ForkNumber forkNum, BlockNumber blockNum, ReadBufferMode mode, bool isExtend,
-    Block bufBlock, bool *blockExist);
+    Block bufBlock);
 
 /*
  * Return the PrivateRefCount entry for the passed buffer. It is searched
@@ -1753,6 +1753,22 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
         blockNum = smgrnblocks(smgr, forkNum);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* When the parallel redo is enabled, there may be a scenario where
+     * the index is replayed before the page replayed. For single-mode,
+     * readable standby feature, Operators related to index scan access
+     * the index first, then access the table, and you will find that
+     * the tid or the heap(page) does not exist. Because the transaction
+     * was not originally committed, the tid or the heap(page) should not
+     * be visible. So accessing the non-existent heap tuple by the tid
+     * should return that the tuple does not exist without error reporting.
+     */
+    else if (RecoveryInProgress()) {
+        if (blockNum >= smgrnblocks(smgr, forkNum))
+            return InvalidBuffer;
+    }
+#endif
+
     bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
     if (found) {
         u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
@@ -1834,12 +1850,8 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
 
     bufBlock = LocalBufHdrGetBlock(bufHdr);
 
-    bool block_exist = true;
     (void)ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum, mode,
-                                      isExtend, bufBlock, &block_exist);
-    if (!block_exist && RecoveryInProgress()) {
-        return InvalidBuffer;
-    }
+                                      isExtend, bufBlock);
 
     uint32 buf_state = pg_atomic_read_u32(&bufHdr->state);
     buf_state |= BM_VALID;
@@ -1871,12 +1883,8 @@ Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistence, Fork
     XLogRedoBufferGetBlkFunc(bufferslot, &bufBlock);
 
     Assert(bufBlock != NULL);
-    bool block_exist = true;
     (void)ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum, mode,
-                                      isExtend, bufBlock, &block_exist);
-    if (!block_exist && RecoveryInProgress()) {
-        return InvalidBuffer;
-    }
+                                      isExtend, bufBlock);
     XLogRedoBufferSetStateFunc(bufferslot, BM_VALID);
     return RedoBufferSlotGetBuffer(bufferslot);
 }
@@ -1887,7 +1895,7 @@ Buffer ReadBuffer_common_for_direct(RelFileNode rnode, char relpersistence, Fork
  * * 2020-03-05
  */
 static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, ForkNumber forkNum,
-    BlockNumber blockNum, ReadBufferMode mode, bool isExtend, Block bufBlock, bool *blockExist)
+    BlockNumber blockNum, ReadBufferMode mode, bool isExtend, Block bufBlock)
 {
     bool needputtodirty = false;
 
@@ -1932,7 +1940,7 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
 
             INSTR_TIME_SET_CURRENT(io_start);
 
-            *blockExist = smgrread(smgr, forkNum, blockNum, (char*)bufBlock);
+            smgrread(smgr, forkNum, blockNum, (char*)bufBlock);
 
             if (u_sess->attr.attr_common.track_io_timing) {
                 INSTR_TIME_SET_CURRENT(io_time);
@@ -1945,13 +1953,6 @@ static bool ReadBuffer_common_ReadBlock(SMgrRelation smgr, char relpersistence, 
                 INSTR_TIME_SUBTRACT(io_time, io_start);
                 pgstatCountBlocksReadTime4SessionLevel(INSTR_TIME_GET_MICROSEC(io_time));
             }
-
-#ifndef ENABLE_MULTIPLE_NODES
-            /* Block not exists */
-            if (!(*blockExist) && RecoveryInProgress()) {
-                return false;
-            }
-#endif
 
             /* check for garbage data */
             if (!PageIsVerified((Page)bufBlock, blockNum)) {
@@ -2162,21 +2163,7 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
 
     bool block_exist = true;
     bool needputtodirty = ReadBuffer_common_ReadBlock(smgr, relpersistence, forkNum, blockNum,
-                                                      mode, isExtend, bufBlock, &block_exist);
-    /*
-     * When the parallel redo is enabled, there may be a scenario where
-     * the index is replayed before the page replayed. For single-mode,
-     * readable standby feature, Operators related to index scan access
-     * the index first, then access the table, and you will find that
-     * the tid or the heap(page) does not exist. Because the transaction
-     * was not originally committed, the tid or the heap(page) should not
-     * be visible. So accessing the non-existent heap tuple by the tid
-     * should return that the tuple does not exist without error reporting.
-     */
-    if (!block_exist && RecoveryInProgress()) {
-        return InvalidBuffer;
-    }
-
+                                                      mode, isExtend, bufBlock);
     if (needputtodirty) {
         /* set  BM_DIRTY to overwrite later */
         uint32 old_buf_state = LockBufHdr(bufHdr);
