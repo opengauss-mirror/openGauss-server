@@ -403,6 +403,13 @@ void ShutdownWalRcv(void)
  */
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
+    knl_g_disconn_node_context_data disconn_node =
+        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+    if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
+        ereport(LOG, (errmsg("Stop to start walreceiver in disable connect mode")));
+        return;
+    }
+
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     pg_time_t now = (pg_time_t)time(NULL);
