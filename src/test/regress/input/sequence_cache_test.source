@@ -16,6 +16,9 @@ select last_value from test_seq;
 \! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "insert into test_tab(name) values('test7');"
 \! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select last_value from test_seq;"
 \! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select * from test_tab;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "Alter sequence test_seq cache 3;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test9');"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
 drop user test_user cascade;
 drop table if exists test_tab;
 drop sequence if exists test_seq;

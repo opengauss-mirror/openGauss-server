@@ -69,6 +69,16 @@ INSERT 0 1
   7 | test7
 (5 rows)
 
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "Alter sequence test_seq cache 3;"
+ALTER SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test9');"
+INSERT 0 1
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
+ last_value 
+------------
+         11
+(1 row)
+
 drop user test_user cascade;
 drop table if exists test_tab;
 drop sequence if exists test_seq;
