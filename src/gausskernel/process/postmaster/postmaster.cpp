@@ -3329,14 +3329,14 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         clientIsCmAgent = true;
                         u_sess->libpq_cxt.IsConnFromCmAgent = true;
                         ereport(DEBUG5, (errmsg("cm_agent connected")));
+                    } else if (strcmp(valptr, "gs_clean") == 0) {
+                        clientIsGsClean = true;
+                        ereport(DEBUG5, (errmsg("gs_clean connected")));
 #ifdef ENABLE_MULTIPLE_NODES
                     } else if (strcmp(valptr, "dummystandby") == 0) {
                         /* mark remote as dummystandby */
                         t_thrd.postmaster_cxt.senderToDummyStandby = true;
                         ereport(DEBUG5, (errmsg("secondary standby connected")));
-                    } else if (strcmp(valptr, "gs_clean") == 0) {
-                        clientIsGsClean = true;
-                        ereport(DEBUG5, (errmsg("gs_clean connected")));
                     } else if (strcmp(valptr, "gs_roach") == 0) {
                         u_sess->proc_cxt.clientIsGsroach = true;
                         ereport(DEBUG5, (errmsg("gs_roach connected")));
