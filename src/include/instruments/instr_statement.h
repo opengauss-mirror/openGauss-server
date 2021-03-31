@@ -171,7 +171,7 @@ typedef struct StatementStatContext {
     int slow_query_threshold;   /* from knl_session_attr_storage's log_min_duration_statement */
 
     int64 timeModel[TOTAL_TIME_INFO_TYPES];     /* from knl_u_stat_context's localTimeInfoArray */
-    int64 networkInfo[TOTAL_NET_INFO_TYPES];    /* from knl_u_stat_context's localNetInfo */
+    uint64 networkInfo[TOTAL_NET_INFO_TYPES];   /* from knl_u_stat_context's localNetInfo */
     UniqueSQLRowActivity row_activity;          /* row activity */
     UniqueSQLCacheIO cache_io;                  /* cache/IO */
 

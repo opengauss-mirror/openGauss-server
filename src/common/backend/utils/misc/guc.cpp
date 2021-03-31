@@ -19732,7 +19732,8 @@ static void assign_instr_unique_sql_count(int newval, void* extra)
 #define RESET_UNIQUE_SQL_FUNC 5716
 
     /* only let WLMProcessThread do the cleanup */
-    if (AmWLMWorkerProcess() && IS_PGXC_COORDINATOR && u_sess->attr.attr_common.instr_unique_sql_count > newval) {
+    if (AmWLMWorkerProcess() && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
+        u_sess->attr.attr_common.instr_unique_sql_count > newval) {
         bool result = DatumGetBool(OidFunctionCall3(RESET_UNIQUE_SQL_FUNC,
             CStringGetTextDatum("GLOBAL"),
             CStringGetTextDatum("BY_GUC"),
