@@ -809,6 +809,9 @@ bool PageManagerRedoDistributeItems(void **eleArry, uint32 eleNum)
                     RedoPageManagerDoDropAction(preState, hashMap);
                     break;
                 case BLOCK_DATA_DROP_TBLSPC_TYPE:
+                    /* just make sure any other ddl before drop tblspc is done */
+                    XLogBlockParseStateRelease(preState);
+                    break;
                 case BLOCK_DATA_CREATE_DATABASE_TYPE:
                 case BLOCK_DATA_CREATE_TBLSPC_TYPE:
                     RedoPageManagerDistributeBlockRecord(hashMap, NULL);
