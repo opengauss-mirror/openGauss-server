@@ -979,7 +979,18 @@ static bool DispatchDataBaseRecord(XLogReaderState *record, List *expectedTLIs, 
 static bool DispatchTableSpaceRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
-    DispatchRecordWithoutPage(record, expectedTLIs);
+    uint8 info = (XLogRecGetInfo(record) & (~XLR_INFO_MASK));
+    if (info == XLOG_TBLSPC_DROP) {
+        RedoItem *item = GetRedoItemPtr(record);
+        ReferenceRedoItem(item);
+        for (uint32 i = 0; i < g_dispatcher->pageLineNum; ++i) {
+            ReferenceRedoItem(item);
+            AddPageRedoItem(g_dispatcher->pageLines[i].batchThd, item);
+        }
+        AddTxnRedoItem(g_dispatcher->trxnLine.managerThd, item);
+    } else {
+        DispatchRecordWithoutPage(record, expectedTLIs);
+    }    
     g_dispatcher->needImmediateCheckpoint = true;
     return isNeedFullSync;
 }
