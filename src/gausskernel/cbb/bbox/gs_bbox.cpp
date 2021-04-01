@@ -201,9 +201,10 @@ bool check_bbox_corepath(char** newval, void** extra, GucSource source)
     /* determine which path is used for bbox core dump file */
     build_bbox_corepath(core_dump_path, sizeof(core_dump_path), (newval != NULL) ? *newval : NULL);
 
-    if (core_dump_path[0] != '\0' && BBOX_SetCoredumpPath(core_dump_path) == RET_OK)
-        ereport(WARNING,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("bbox_dump_path is set to %s\n", core_dump_path)));
+    if (core_dump_path[0] != '\0' && BBOX_SetCoredumpPath(core_dump_path) == RET_OK) {
+        ereport(LOG,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("bbox_dump_path is set to %s", core_dump_path)));
+    }
 
     char* result = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX), BBOX_PATH_SIZE);
     if (newval != NULL && *newval != NULL)
