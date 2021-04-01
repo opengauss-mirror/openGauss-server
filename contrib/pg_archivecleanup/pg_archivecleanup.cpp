@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
+#include "access/xlog_internal.h"
 
 #ifndef WIN32
 #include <sys/time.h>
@@ -62,14 +63,6 @@ char exclusiveCleanupFileName[MAXPGPATH]; /* the oldest file we
  */
 
 #define XLOG_DATA_FNAME_LEN 24
-/* Reworked from access/xlog_internal.h */
-#define XLogFileName(fname, tli, logSegNo)            \
-    snprintf(fname,                                   \
-        XLOG_DATA_FNAME_LEN + 1,                      \
-        "%08X%08X%08X",                               \
-        tli,                                          \
-        (uint32)((logSegNo) / XLogSegmentsPerXLogId), \
-        (uint32)((logSegNo) % XLogSegmentsPerXLogId))
 #define XLOG_BACKUP_FNAME_LEN 40
 
 /*
@@ -112,10 +105,12 @@ static void CleanupPriorWALFiles(void)
     DIR* xldir = NULL;
     struct dirent* xlde;
     char walfile[MAXPGPATH];
+    errno_t errorno = EOK;
 
     if ((xldir = opendir(archiveLocation)) != NULL) {
         while ((xlde = readdir(xldir)) != NULL) {
-            strncpy(walfile, xlde->d_name, MAXPGPATH);
+            errorno = strncpy_s(walfile, MAXPGPATH, xlde->d_name, MAXPGPATH);
+            securec_check_c(errorno, "", "");
             TrimExtension(walfile, additional_ext);
 
             /*
@@ -138,7 +133,8 @@ static void CleanupPriorWALFiles(void)
                  * extension that might have been chopped off before testing
                  * the sequence.
                  */
-                snprintf(WALFilePath, MAXPGPATH, "%s/%s", archiveLocation, xlde->d_name);
+                errorno = snprintf_s(WALFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archiveLocation, xlde->d_name);
+                securec_check_ss_c(errorno, "\0", "\0");
 
                 if (dryrun) {
                     /*
@@ -180,6 +176,7 @@ static void CleanupPriorWALFiles(void)
 static void SetWALFileNameForCleanup(void)
 {
     bool fnameOK = false;
+    errno_t errorno = EOK;
 
     TrimExtension(restartWALFileName, additional_ext);
 
@@ -192,13 +189,14 @@ static void SetWALFileNameForCleanup(void)
      */
     if (strlen(restartWALFileName) == XLOG_DATA_FNAME_LEN &&
         strspn(restartWALFileName, "0123456789ABCDEF") == XLOG_DATA_FNAME_LEN) {
-        strcpy(exclusiveCleanupFileName, restartWALFileName);
+        errorno = strcpy_s(exclusiveCleanupFileName, MAXPGPATH, restartWALFileName);
+        securec_check_c(errorno, "\0", "\0");
         fnameOK = true;
     } else if (strlen(restartWALFileName) == XLOG_BACKUP_FNAME_LEN) {
         int args;
         uint32 tli = 1, log = 0, seg = 0, offset = 0;
 
-        args = sscanf(restartWALFileName, "%08X%08X%08X.%08X.backup", &tli, &log, &seg, &offset);
+        args = sscanf_s(restartWALFileName, "%08X%08X%08X.%08X.backup", &tli, &log, &seg, &offset);
         if (args == 4) {
             fnameOK = true;
 
@@ -253,6 +251,7 @@ static void usage(void)
 int main(int argc, char** argv)
 {
     int c;
+    errno_t errorno = EOK;
 
     progname = get_progname(argv[0]);
 
@@ -328,7 +327,8 @@ int main(int argc, char** argv)
     SetWALFileNameForCleanup();
 
     if (debug) {
-        snprintf(WALFilePath, MAXPGPATH, "%s/%s", archiveLocation, exclusiveCleanupFileName);
+        errorno = snprintf_s(WALFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archiveLocation, exclusiveCleanupFileName);
+        securec_check_ss_c(errorno, "", "");
         fprintf(stderr, "%s: keep WAL file \"%s\" and later\n", progname, WALFilePath);
     }
 
