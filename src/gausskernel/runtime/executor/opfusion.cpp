@@ -2138,8 +2138,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     start_row = m_limitOffset >= 0 ? m_limitOffset : start_row;
     get_rows = m_limitCount >= 0 ? (m_limitCount + start_row) : max_rows;
     if (m_position == 0) {
+        MemoryContext oldContext = MemoryContextSwitchTo(m_tmpContext);
         m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
         m_scan->Init(max_rows);
+        MemoryContextSwitchTo(oldContext);
     }
     Relation rel = ((m_scan->m_parentRel == NULL) ? m_scan->m_rel : m_scan->m_parentRel);
     Relation partRel = NULL;
