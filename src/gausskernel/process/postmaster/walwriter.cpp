@@ -299,7 +299,7 @@ void WalWriterMain(void)
                 (void)pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
                 g_instance.wal_cxt.isWalWriterSleeping = true;
                 while (pCriticalEntry->status == WAL_NOT_COPIED && !t_thrd.walwriter_cxt.shutdown_requested) {
-                    (void)clock_gettime(CLOCK_MONOTONIC, &time_to_wait);
+                    (void)clock_gettime(CLOCK_REALTIME, &time_to_wait);
                     time_to_wait.tv_nsec += g_sleep_timeout_ms * NANOSECONDS_PER_MILLISECOND;
                     if (time_to_wait.tv_nsec >= NANOSECONDS_PER_SECOND) {
                         time_to_wait.tv_nsec -= NANOSECONDS_PER_SECOND;
