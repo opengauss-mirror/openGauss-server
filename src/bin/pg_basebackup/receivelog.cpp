@@ -283,17 +283,17 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
     off_t currpos = lseek(walfile, 0, SEEK_CUR);
 
     if (currpos == -1) {
-        pg_log(PG_PRINT, _("%s: could not get current position in file %s: %s\n"), progname, walname, strerror(errno));
+        pg_log(PG_PRINT, _("%s: could not get current position in file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
         return false;
     }
 
     if (fsync(walfile) != 0) {
-        pg_log(PG_PRINT, _("%s: could not fsync file %s: %s\n"), progname, walname, strerror(errno));
+        pg_log(PG_PRINT, _("%s: could not fsync file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
         return false;
     }
 
     if (close(walfile) != 0) {
-        pg_log(PG_PRINT, _("%s: could not close file %s: %s\n"), progname, walname, strerror(errno));
+        pg_log(PG_PRINT, _("%s: could not close file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
         return false;
     }
 
@@ -311,11 +311,11 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
         nRet = snprintf_s(newfn, sizeof(newfn), sizeof(newfn) - 1, "%s/%s", basedir, walname);
         securec_check_ss_c(nRet, "", "");
         if (rename(oldfn, newfn) != 0) {
-            pg_log(PG_PRINT, _("%s: could not rename file %s: %s\n"), progname, walname, strerror(errno));
+            pg_log(PG_PRINT, _("%s: could not rename file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
             return false;
         }
     } else {
-        pg_log(PG_PRINT, _("%s: not renaming %s, segment is not complete.\n"), progname, walname);
+        pg_log(PG_PRINT, _("%s: not renaming \"%s/%s\", segment is not complete.\n"), progname, basedir, walname);
     }
 
     lastFlushPosition = pos;
