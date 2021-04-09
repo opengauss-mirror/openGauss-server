@@ -112,8 +112,8 @@ static int applyRemoteGucs(PGconn* conn);
 static void restoreLocalGucs(int nestlevel);
 
 /* Global */
-static remoteConn* pconn = NULL;
-static HTAB* remoteConnHash = NULL;
+static THR_LOCAL remoteConn* pconn = NULL;
+static THR_LOCAL HTAB* remoteConnHash = NULL;
 
 /*
  *	Following is list that holds multiple remote connections.

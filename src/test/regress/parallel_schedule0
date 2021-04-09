@@ -5,7 +5,6 @@
 # this limits the number of connections needed to run the tests.
 # ----------
 
-test: dblink
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
@@ -761,3 +760,6 @@ test: leaky_function_operator
 #test: gs_guc
 
 test: smp
+
+# dblink contrib test
+test: dblink
