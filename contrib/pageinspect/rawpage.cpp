@@ -226,9 +226,9 @@ Datum page_header(PG_FUNCTION_ARGS)
     values[6] = UInt16GetDatum(PageGetPageSize(page));
     values[7] = UInt16GetDatum(PageGetPageLayoutVersion(page));
     if (PageIs8BXidHeapVersion(page)) {
-        values[8] = TransactionIdGetDatum(page->pd_prune_xid + (HeapPageHeader)page->pd_xid_base);
-        values[9] = TransactionIdGetDatum((HeapPageHeader)page->pd_xid_base);
-        values[10] = TransactionIdGetDatum((HeapPageHeader)page->pd_multi_base);
+        values[8] = TransactionIdGetDatum(page->pd_prune_xid + ((HeapPageHeader)page)->pd_xid_base);
+        values[9] = TransactionIdGetDatum(((HeapPageHeader)page)->pd_xid_base);
+        values[10] = TransactionIdGetDatum(((HeapPageHeader)page)->pd_multi_base);
         nulls[8] = false;
         nulls[9] = false;
         nulls[10] = false;
