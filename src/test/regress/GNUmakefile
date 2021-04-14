@@ -210,7 +210,6 @@ tablespace-setup:
 ##
 
 REGRESS_OPTS = --dlpath=. $(EXTRA_REGRESS_OPTS)
-REGRESS_OPTS += --extra-install=contrib/dblink
 REG_CONF = --regconf=regress.conf
 
 check: all tablespace-setup

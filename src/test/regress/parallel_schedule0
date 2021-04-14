@@ -760,6 +760,3 @@ test: leaky_function_operator
 #test: gs_guc
 
 test: smp
-
-# dblink contrib test
-test: dblink
