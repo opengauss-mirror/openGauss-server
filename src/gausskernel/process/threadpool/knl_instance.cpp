@@ -102,6 +102,20 @@ static void knl_g_ckpt_init(knl_g_ckpt_context* ckpt_cxt)
 
 static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
 {
+    int     ret = 0;
+    ret = pthread_condattr_init(&wal_cxt->criticalEntryAtt);
+    if (ret != 0) {
+        elog(FATAL, "Fail to init conattr for walwrite");
+    }
+    ret = pthread_condattr_setclock(&wal_cxt->criticalEntryAtt, CLOCK_MONOTONIC);
+    if (ret != 0) {
+        elog(FATAL, "Fail to setclock walwrite");
+    }
+    ret = pthread_cond_init(&wal_cxt->criticalEntryCV, &wal_cxt->criticalEntryAtt);
+    if (ret != 0) {
+        elog(FATAL, "Fail to init cond for walwrite");
+    }
+
     wal_cxt->walInsertStatusTable = NULL;
     wal_cxt->walFlushWaitLock = NULL;
     wal_cxt->walBufferInitWaitLock = NULL;
@@ -114,7 +128,6 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
     wal_cxt->XLogFlusherCPU = 0;
     wal_cxt->isWalWriterSleeping = false;
     wal_cxt->criticalEntryMutex = PTHREAD_MUTEX_INITIALIZER;
-    wal_cxt->criticalEntryCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
     wal_cxt->globalEndPosSegNo = InvalidXLogSegPtr;
     wal_cxt->walWaitFlushCount = 0;
     wal_cxt->lastWalStatusEntryFlushed = -1;

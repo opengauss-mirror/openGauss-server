@@ -698,6 +698,7 @@ typedef struct knl_g_wal_context {
     volatile bool isWalWriterSleeping;
     pthread_mutex_t criticalEntryMutex;
     pthread_cond_t criticalEntryCV;
+    pthread_condattr_t criticalEntryAtt;
     volatile uint32 walWaitFlushCount; /* only for xlog statistics use */
     volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
     int lastWalStatusEntryFlushed;
