@@ -2520,8 +2520,8 @@ static int applyRemoteGucs(PGconn* conn)
 {
     static const char* const GUCsAffectingIO[] = {"DateStyle", "IntervalStyle"};
 
-    int 	nestlevel = -1;
-    uint32	i;
+    int nestlevel = -1;
+    uint32 i;
 
     for (i = 0; i < lengthof(GUCsAffectingIO); i++) {
         const char* gucName = GUCsAffectingIO[i];
