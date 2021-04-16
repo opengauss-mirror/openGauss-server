@@ -259,7 +259,12 @@ void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Transa
     htup->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI | HEAP_IS_LOCKED | HEAP_MOVED);
     HeapTupleHeaderClearHotUpdated(htup);
     HeapTupleHeaderSetXmax(page, htup, recordxid);
-    HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
+    if (!(xlrec->flags & XLH_DELETE_IS_SUPER)) {
+        HeapTupleHeaderSetXmax(page, htup, recordxid);
+    } else {
+        HeapTupleHeaderSetXmin(page, htup, FrozenTransactionId);
+        HeapTupleHeaderSetXmax(page, htup, FrozenTransactionId);
+    }
 
     /* Mark the page as a candidate for pruning */
     PageSetPrunable(page, recordxid);
