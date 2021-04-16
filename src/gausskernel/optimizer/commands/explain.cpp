@@ -1082,11 +1082,6 @@ void ExplainOnePlan(
         }
     }
 
-#ifndef ENBALE_MULTIPLE_NODE
-    /* Set sync point for waiting all stream threads complete. */
-    StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-#endif /* ENABLE_MULTIPLE_NODES */
-
     /* Create textual dump of plan tree */
     ExplainPrintPlan(es, queryDesc);
 

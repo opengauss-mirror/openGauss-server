@@ -490,7 +490,11 @@ void ExecEndVecStream(VecStreamState* node)
 {
     if (IS_PGXC_DATANODE && node->consumer)
         node->consumer->deInit();
-
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->stream_cxt.global_obj) {
+        u_sess->stream_cxt.global_obj->SigStreamThreadClose();
+    }
+#endif
     PlanState* outer_plan = outerPlanState(node);
 
     if (outer_plan != NULL)

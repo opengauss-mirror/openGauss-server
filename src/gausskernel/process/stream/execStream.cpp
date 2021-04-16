@@ -2275,7 +2275,11 @@ void ExecEndStream(StreamState* node)
 {
     if (IS_PGXC_DATANODE && node->consumer)
         node->consumer->deInit();
-
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->stream_cxt.global_obj) {
+        u_sess->stream_cxt.global_obj->SigStreamThreadClose();
+    }
+#endif
     PlanState* outer_plan = outerPlanState(node);
 
     if (outer_plan != NULL)
@@ -2291,7 +2295,7 @@ void ExecEndStream(StreamState* node)
 bool executorEarlyStop()
 {
     /* Check if query already been stopped. */
-    if (u_sess->exec_cxt.executor_stop_flag == true)
+    if (u_sess->exec_cxt.executorStopFlag == true)
         return true;
     /* Check if query already canceled due to error or cancel/die signal. */
     else if (u_sess->stream_cxt.global_obj && u_sess->stream_cxt.global_obj->isQueryCanceled())

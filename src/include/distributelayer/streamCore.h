@@ -432,13 +432,13 @@ public:
     {
         return m_quitStatus;
     }
+    /* Send stop signal to all stream threads in node group. */
+    void SigStreamThreadClose();
+
+    struct PortalData *m_portal;
 #endif
     /* Mark recursive vfd is invalid before aborting transaction. */
     static void MarkRecursiveVfdInvalid();
-
-#ifndef ENABLE_MULTIPLE_NODES
-    struct PortalData *m_portal;
-#endif
 
 private:
     /* Set the executor stop flag to true. */
@@ -513,5 +513,7 @@ private:
 
 extern bool IsThreadProcessStreamRecursive();
 extern bool InitStreamObject(PlannedStmt* planStmt);
-
+#ifndef ENABLE_MULTIPLE_NODES
+extern void StreamMarkStop();
+#endif
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_ */
