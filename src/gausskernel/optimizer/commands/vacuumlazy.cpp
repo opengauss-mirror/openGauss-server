@@ -321,7 +321,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         &freezeTableLimit);
 
     ereport(LOG,
-        (errmsg("vacuum rel %s freeze %d OldestXmin %lu, FreezeLimit %lu",
+        (errmsg("vacuum rel %s freeze %ld OldestXmin %lu, FreezeLimit %lu",
             onerel->rd_rel->relname.data,
             vacstmt->freeze_min_age,
             u_sess->cmd_cxt.OldestXmin,

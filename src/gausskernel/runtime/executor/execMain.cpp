@@ -2199,7 +2199,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, CmdType operation,
          * If we are supposed to send the tuple somewhere, do so. (In
          * practice, this is probably always the case at this point.)
          */
-        if (sendTuples && !u_sess->exec_cxt.executor_stop_flag) {
+        if (sendTuples && !u_sess->exec_cxt.executorStopFlag) {
             (*dest->receiveSlot)(slot, dest);
         }
 
@@ -2324,7 +2324,7 @@ static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType 
          * If we are supposed to send the tuple somewhere, do so. (In
          * practice, this is probably always the case at this point.)
          */
-        if (sendTuples && !u_sess->exec_cxt.executor_stop_flag) {
+        if (sendTuples && !u_sess->exec_cxt.executorStopFlag) {
             (*dest->sendBatch)(batch, dest);
         }
 

@@ -153,11 +153,9 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
                          * It should be noticed that we can not do early deinit 
                          * within predpush.
                          */
-#ifdef ENABLE_MULTIPLE_NODES
                         if (((PlanState*)node) != NULL && !CheckParamWalker((PlanState*)node)) {
                             ExecEarlyDeinitConsumer((PlanState*)node);
                         }
-#endif
                         ExecEarlyFree((PlanState*)node);
 
                         EARLY_FREE_LOG(elog(LOG, "Early Free: HashJoin early return NULL"
@@ -206,11 +204,10 @@ TupleTableSlot* ExecHashJoin(HashJoinState* node)
                      * It should be noticed that we can not do early deinit 
                      * within predpush.
                      */
-#ifdef ENABLE_MULTIPLE_NODES
                     if (((PlanState*)node) != NULL && !CheckParamWalker((PlanState*)node)) {
                         ExecEarlyDeinitConsumer((PlanState*)node);
                     }
-#endif
+
                     return NULL;
                 }
 

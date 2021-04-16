@@ -205,6 +205,7 @@ static void InitStreamSignal()
     (void)gspqsignal(SIGINT, StatementCancelHandler);
     (void)gspqsignal(SIGTERM, die);
     (void)gspqsignal(SIGALRM, handle_sig_alarm); /* timeout conditions */
+    (void)gspqsignal(SIGUSR1, procsignal_sigusr1_handler);
     (void)gs_signal_unblock_sigusr2();
 
     if (IsUnderPostmaster) {
@@ -283,10 +284,10 @@ void ExtractProduerInfo()
 #endif
 
     if (u_sess->stream_cxt.producer_obj->isDummy()) {
-        u_sess->exec_cxt.executor_stop_flag = true;
+        u_sess->exec_cxt.executorStopFlag = true;
         u_sess->stream_cxt.dummy_thread = true;
     } else {
-        u_sess->exec_cxt.executor_stop_flag = false;
+        u_sess->exec_cxt.executorStopFlag = false;
         u_sess->stream_cxt.dummy_thread = false;
     }
 
@@ -555,7 +556,7 @@ void ResetStreamEnv()
 {
     t_thrd.subrole = NO_SUBROLE;
     u_sess->stream_cxt.dummy_thread = false;
-    u_sess->exec_cxt.executor_stop_flag = false;
+    u_sess->exec_cxt.executorStopFlag = false;
     u_sess->stream_cxt.global_obj = NULL;
     u_sess->stream_cxt.producer_obj = NULL;
     u_sess->instr_cxt.global_instr = NULL;
@@ -640,7 +641,7 @@ void SetStreamWorkerInfo(StreamProducer* proObj)
     // set the stopFlag;
     u_sess->stream_cxt.global_obj = u_sess->stream_cxt.producer_obj->getNodeGroup();
     u_sess->stream_cxt.global_obj->setStopFlagPoint(
-        u_sess->stream_cxt.producer_obj->getNodeGroupIdx(), &u_sess->exec_cxt.executor_stop_flag);
+        u_sess->stream_cxt.producer_obj->getNodeGroupIdx(), &u_sess->exec_cxt.executorStopFlag);
 }
 
 static void ResetStreamWorkerInfo()

@@ -580,23 +580,22 @@ select sum(b)+median(a) as result from t1;
 (1 row)
 
 explain (costs off) select a, count(distinct b) from t1 group by a order by 1 limit 10;
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Limit
-   ->  Limit
-         ->  Sort
-               Sort Key: a
-               ->  Streaming(type: LOCAL GATHER dop: 1/2)
-                     ->  Limit
-                           ->  Sort
-                                 Sort Key: a
-                                 ->  GroupAggregate
-                                       Group By Key: a
-                                       ->  Sort
-                                             Sort Key: a
-                                             ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
-                                                   ->  Seq Scan on t1
-(14 rows)
+   ->  Sort
+         Sort Key: a
+         ->  Streaming(type: LOCAL GATHER dop: 1/2)
+               ->  Limit
+                     ->  Sort
+                           Sort Key: a
+                           ->  GroupAggregate
+                                 Group By Key: a
+                                 ->  Sort
+                                       Sort Key: a
+                                       ->  Streaming(type: LOCAL REDISTRIBUTE dop: 2/2)
+                                             ->  Seq Scan on t1
+(13 rows)
 
 select a, count(distinct b) from t1 group by a order by 1 limit 10;
  a  | count 
