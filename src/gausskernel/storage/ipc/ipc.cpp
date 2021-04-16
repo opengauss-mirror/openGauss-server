@@ -633,12 +633,9 @@ void CloseClientSocket(knl_session_context* sess, bool closesock)
      * GUC configuration, it will leave socket open. So double check it here.
      */
     pgsocket tmpsock = -1;
-    if (sess->proc_cxt.MyProcPort != NULL) {
+    if (sess->proc_cxt.MyProcPort != NULL && closesock) {
         /* if gs_sock is NULL, just clean gs_poll hash table. */
-        MemoryContext oldcontext =
-            MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
         pfree_ext(sess->proc_cxt.MyProcPort->msgLog);
-        MemoryContextSwitchTo(oldcontext);
         gs_close_gsocket(&(sess->proc_cxt.MyProcPort->gs_sock));
     }
     if (t_thrd.postmaster_cxt.KeepSocketOpenForStream == false && (sess->proc_cxt.MyProcPort != NULL) &&

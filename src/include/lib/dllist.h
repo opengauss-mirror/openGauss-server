@@ -67,6 +67,9 @@ public:
     void AddTail(Dlelem* e);
     Dlelem* RemoveHead();
     bool IsEmpty();
+    Dlelem* GetHead();
+    void GetLock();
+    void ReleaseLock();
 
     inline uint64 GetLength()
     {
