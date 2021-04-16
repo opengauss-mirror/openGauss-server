@@ -352,15 +352,7 @@ bool ThreadPoolGroup::IsGroupHang()
         m_idleWorkerNum != 0)
         return false;
 
-    bool ishang = true;
-    AutoMutexLock alock(&m_mutex);
-    alock.lock();
-    for (int i = 0; i < m_expectWorkerNum; i++) {
-        if (m_workers[i].stat.slotStatus != THREAD_SLOT_UNUSE) {
-            ishang = ishang && WORKER_MAY_HANG(m_workers[i].worker->m_waitState);
-        }
-    }
-    alock.unLock();
+    bool ishang = m_listener->GetSessIshang(&m_current_time, &m_sessionId);
     return ishang;
 }
 

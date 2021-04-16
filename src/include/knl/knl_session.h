@@ -2367,6 +2367,8 @@ typedef struct knl_session_context {
     knl_u_gtt_context gtt_ctx;
     /* extension streaming */
     knl_u_streaming_context streaming_cxt;
+
+    instr_time last_access_time;
 } knl_session_context;
 
 enum stp_xact_err_type {

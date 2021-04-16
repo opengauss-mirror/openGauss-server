@@ -9985,7 +9985,7 @@ static void InitializeGUCOptionsFromEnvironment(void)
      * the same.  If we can identify the platform stack depth rlimit, increase
      * default stack depth setting up to whatever is safe (but at most 2MB).
      */
-    stack_rlimit = DEFUALT_STACK_SIZE * 1024L;
+    stack_rlimit = get_stack_depth_rlimit();
 
     if (stack_rlimit > 0) {
         long new_limit = (stack_rlimit - STACK_DEPTH_SLOP) / 1024L;
