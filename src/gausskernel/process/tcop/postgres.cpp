@@ -4849,14 +4849,6 @@ static void exec_execute_message(const char* portal_name, long max_rows)
         u_sess->xact_cxt.pbe_execute_complete = false;
     }
 
-#ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->xact_cxt.pbe_execute_complete == true) {
-        /* Set sync point for waiting all stream threads complete. */
-        StreamNodeGroup::syncQuit(STREAM_COMPLETE);
-        UnRegisterStreamSnapshots();
-    }
-#endif
-
     if (ENABLE_WORKLOAD_CONTROL) {
         if (g_instance.wlm_cxt->dynamic_workload_inited) {
             if (t_thrd.wlm_cxt.parctl_state.simple == 0)
