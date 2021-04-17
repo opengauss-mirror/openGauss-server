@@ -386,7 +386,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
 /*
  * Find a previously created slot and mark it as used by this backend.
  */
-void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool isDrop)
+void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDrop)
 {
     ReplicationSlot *slot = NULL;
     int i;
@@ -421,7 +421,7 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool isDrop)
     if (active) {
         if ((slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
 #ifndef ENABLE_MULTIPLE_NODES
-           && !isDrop
+           && !allowDrop
 #endif
         )
             ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("replication slot \"%s\" is already active", name)));
