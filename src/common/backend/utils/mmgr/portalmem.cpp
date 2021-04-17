@@ -591,6 +591,11 @@ void PortalDrop(Portal portal, bool isTopCommit)
         MemoryContextDelete(portal->copyCxt);
 
     u_sess->parser_cxt.param_message = NULL;
+
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        u_sess->parser_cxt.param_info = NULL;
+    }
+
     /* release portal struct (it's in u_sess->portal_mem_cxt) */
     pfree(portal);
 }

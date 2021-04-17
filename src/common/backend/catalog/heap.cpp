@@ -4060,6 +4060,9 @@ Node* parseParamRef(ParseState* pstate, ParamRef* pref)
         pfree_ext(val);
         if (pref->number == params_info->numParams && u_sess->parser_cxt.ddl_pbe_context != NULL) {
             MemoryContextDelete(u_sess->parser_cxt.ddl_pbe_context);
+            if (((IS_PGXC_COORDINATOR || IS_PGXC_DATANODE) && IsConnFromCoord())) {
+                u_sess->parser_cxt.param_info = NULL;
+            }
             u_sess->parser_cxt.ddl_pbe_context = NULL;
         }
     } else {
