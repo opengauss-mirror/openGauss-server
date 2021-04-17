@@ -1253,7 +1253,7 @@ static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_
         "SessionCacheMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        (1024 * 1024)); /* set max block size to 1MB */
     sess->temp_mem_cxt = AllocSetContextCreate(top_mem_cxt,
         "SessionTempMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,
