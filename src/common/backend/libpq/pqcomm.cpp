@@ -1317,6 +1317,21 @@ static int pq_discardbytes(size_t len)
 {
     size_t amount;
 
+    ereport(WARNING,
+        (errcode(ERRCODE_PROTOCOL_VIOLATION),
+            errmsg("incomplete message, client info [Remote IP: %s PORT: %s FD: %d BLOCK: %d], "
+                "packet info [PqRecvLength: %d PqRecvPointer: %d expectedLen: %d].",
+                u_sess->proc_cxt.MyProcPort->remote_host,
+                (u_sess->proc_cxt.MyProcPort->remote_port != NULL &&
+                 u_sess->proc_cxt.MyProcPort->remote_port[0] != '\0')
+                ? u_sess->proc_cxt.MyProcPort->remote_port : "",
+                u_sess->proc_cxt.MyProcPort->sock,
+                u_sess->proc_cxt.MyProcPort->noblock,
+                t_thrd.libpq_cxt.PqRecvLength,
+                t_thrd.libpq_cxt.PqRecvPointer,
+                (int)len)));
+    PrintUnexpectedBufferContent(t_thrd.libpq_cxt.PqRecvBuffer, t_thrd.libpq_cxt.PqRecvLength);
+
     while (len > 0) {
         while (t_thrd.libpq_cxt.PqRecvPointer >= t_thrd.libpq_cxt.PqRecvLength) {
             if (pq_recvbuf()) { /* If nothing in buffer, then recv some */
@@ -2406,4 +2421,56 @@ static size_t pq_disk_read_data_block(
     src_data -= CRC_HEADER;
 
     return read_len;
+}
+
+/*
+ * To facilitate fault locating, abnormal packets need to be recorded.
+ * For security purposes, the maximum print length does not exceed the buffer length.
+ */
+void PrintUnexpectedBufferContent(const char *buffer, int len)
+{
+    if (buffer == NULL) {
+        Assert(buffer);
+        ereport(ERROR,
+            (errmodule(MOD_COMM_PARAM),
+                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("PrintUnexpectedPqBufferContent: invalid params[buffer: null len: %d]", len)));
+    }
+    if (len <= 0) {
+        return;
+    }
+
+    /* Line-by-line printing with a width limit of 1024 */
+    const int nBytePrintLine = 1024;
+    const int pqBufferSize = PQ_BUFFER_SIZE;
+    const char defaultNullChar = ' ';
+    char tmp[nBytePrintLine + 1] = {0};
+    int i, idx = 0;
+    len = (len > pqBufferSize) ? pqBufferSize : len;
+
+    ereport(WARNING, (errmsg("--------buffer begin--------")));
+    for (i = 0; i < len; i++) {
+        idx = i % nBytePrintLine;
+
+        if (buffer[i] != '\0') {
+            tmp[idx] = buffer[i];
+        } else {
+            tmp[idx] = defaultNullChar;
+        }
+        if ((i + 1) % nBytePrintLine == 0) {
+            ereport(WARNING, (errmsg("%s", tmp)));
+        }
+    }
+
+    /* Output buffer with the remaining length. */
+    if (len % nBytePrintLine != 0) {
+        /* reset dirty data */
+        if (idx <= nBytePrintLine) {
+            errno_t rc = memset_s(tmp + idx + 1, nBytePrintLine - idx, 0, nBytePrintLine - idx);
+            securec_check(rc, "\0", "\0");
+        }
+        ereport(WARNING, (errmsg("%s", tmp)));
+    }
+    ereport(WARNING, (errmsg("--------buffer end--------")));
+    return;
 }
