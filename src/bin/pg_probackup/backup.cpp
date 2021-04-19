@@ -1223,10 +1223,20 @@ void tryToFindCompressedWALFile(bool *file_exists, char *gz_wal_segment_path, ch
 #ifdef HAVE_LIBZ
         *file_exists = fileExists(gz_wal_segment_path, FIO_BACKUP_HOST);
         if (*file_exists)
+        {
             elog(LOG, "Found compressed WAL segment: %s", wal_segment_path);
+            if (current.from_replica)
+            {
+                elog(INFO, "Wait a few minutes to get the target LSN or the last valid record prior to the target LSN");
+            }
+        }
 #endif
     } else {
         elog(LOG, "Found WAL segment: %s", wal_segment_path);
+        if (current.from_replica)
+        {
+            elog(INFO, "Wait a few minutes to get the target LSN or the last valid record prior to the target LSN");
+        }
     }
 }
 
