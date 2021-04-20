@@ -288,7 +288,7 @@ void ThreadPoolSessControl::SendProcSignal(int ctrl_index, ProcSignalReason reas
                     switch (reason) {
                         case PROCSIG_EXECUTOR_FLAG: {
                             if (IS_PGXC_DATANODE && ctrl->sess->debug_query_id == query_id) {
-                                ctrl->sess->exec_cxt.executor_stop_flag = true;
+                                ctrl->sess->exec_cxt.executorStopFlag = true;
                             }
                             break;
                         }

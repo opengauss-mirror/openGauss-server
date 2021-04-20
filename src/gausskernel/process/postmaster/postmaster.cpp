@@ -556,8 +556,6 @@ bool isSingleMode = false;
 #define EXIT_STATUS_0(st) ((st) == 0)
 #define EXIT_STATUS_1(st) (1 == (st))
 
-extern THR_LOCAL bool executorStopFlag;
-
 /*
  * @hdfs
  * deleteHdfsUser() function is used to clean Hdfs User List and
