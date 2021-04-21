@@ -1940,6 +1940,7 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
      ********************************/
     HeapTuple oldtup = NULL;
     unsigned long nprocessed = 0;
+    m_tupDesc = RelationGetDescr(rel);
 
     while ((oldtup = m_scan->getTuple()) != NULL) {
         TM_Result result;
