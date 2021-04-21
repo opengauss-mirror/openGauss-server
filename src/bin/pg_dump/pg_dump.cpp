@@ -728,7 +728,7 @@ int main(int argc, char** argv)
     errorMessages = ConnectDatabase(fout, dbname, pghost, pgport, username, prompt_password, false);
     if (errorMessages != NULL) {
         (void)remove(filename);
-        filename = NULL;
+        GS_FREE(filename);
         exit_horribly(NULL, "connection to database \"%s\" failed: %s ",
             ((dbname != NULL) ? dbname : ""), errorMessages);
     }
