@@ -1,0 +1,84 @@
+drop table if exists test_tab;
+NOTICE:  table "test_tab" does not exist, skipping
+drop sequence if exists test_seq;
+NOTICE:  sequence "test_seq" does not exist, skipping
+create sequence test_seq cache 2;
+create table test_tab(id int default nextVal('test_seq'), name varchar(20));
+create user test_user with password 'openGauss@123';
+grant all privileges to test_user;
+select last_value from test_seq;
+ last_value 
+------------
+          1
+(1 row)
+
+insert into test_tab(name) values('test1');
+select last_value from test_seq;
+ last_value 
+------------
+          2
+(1 row)
+
+insert into test_tab(name) values('test2'),('test3');
+select * from test_tab;
+ id | name  
+----+-------
+  1 | test1
+  2 | test2
+  3 | test3
+(3 rows)
+
+select last_value from test_seq;
+ last_value 
+------------
+          4
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test5');"
+INSERT 0 1
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
+ last_value 
+------------
+          6
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select * from test_tab;"
+ id | name  
+----+-------
+  1 | test1
+  2 | test2
+  3 | test3
+  5 | test5
+(4 rows)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "insert into test_tab(name) values('test7');"
+INSERT 0 1
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select last_value from test_seq;"
+ last_value 
+------------
+          8
+(1 row)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select * from test_tab;"
+ id | name  
+----+-------
+  1 | test1
+  2 | test2
+  3 | test3
+  5 | test5
+  7 | test7
+(5 rows)
+
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "Alter sequence test_seq cache 3;"
+ALTER SEQUENCE
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test9');"
+INSERT 0 1
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
+ last_value 
+------------
+         11
+(1 row)
+
+drop user test_user cascade;
+drop table if exists test_tab;
+drop sequence if exists test_seq;
