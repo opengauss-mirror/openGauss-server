@@ -22,6 +22,7 @@
 #include "knl/knl_variable.h"
 #include "utils/timestamp.h"
 #include "streamutil.h"
+#include "libpq/libpq-int.h"
 #include <sys/time.h>
 #include <stdio.h>
 #include <string.h>
@@ -138,6 +139,17 @@ static void CalculateArgCount(int *argcount)
     return;
 }
 
+static void CheckConnectionHost(PGconn* tmpconn)
+{
+    if (tmpconn == NULL || tmpconn->sock < 0) {
+        fprintf(stderr, "failed to connect %s:%s.\n", 
+            (dbhost == NULL) ? "Unknown" : dbhost,
+            (dbport == NULL) ? "Unknown" : dbport);
+        PQfinish(tmpconn);
+        exit(1);
+    }
+}
+
 /*
  * Connect to the server. Returns a valid PGconn pointer if connected,
  * or NULL on non-permanent error. On permanent error, the function will
@@ -212,10 +224,7 @@ PGconn* GetConnection(void)
          * If there is too little memory even to allocate the PGconn object
          * and PQconnectdbParams returns NULL, we call exit(1) directly.
          */
-        if (tmpconn == NULL) {
-            fprintf(stderr, _("%s: could not connect to server\n"), progname);
-            exit(1);
-        }
+        CheckConnectionHost(tmpconn);
 
         if (PQstatus(tmpconn) == CONNECTION_BAD && PQconnectionNeedsPassword(tmpconn) && dbgetpassword != -1) {
             dbgetpassword = 1; /* ask for password next time */
