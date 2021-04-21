@@ -7937,6 +7937,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 pgstatCountSQL4SessionLevel();
 
                 if (strlen(query_string) + 1 > sizeof(sql)) {
+                    PrintUnexpectedBufferContent(query_string, sizeof(sql));
                     ereport(ERROR,
                         (errcode(ERRCODE_SYSTEM_ERROR),
                             errmsg("Acceptter in pooler stateless resue mode reset connection params %d > sql[%d].",
