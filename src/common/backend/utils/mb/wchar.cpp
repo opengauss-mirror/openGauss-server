@@ -1083,6 +1083,64 @@ static int pg_uhc_dsplen(const unsigned char* s)
  *	* GB18030
  *	 * Added by Bill Huang <bhuang@redhat.com>,<bill_huanghb@ybb.ne.jp>
  *	  */
+static int pg_gb180302wchar_with_len(const unsigned char* from, pg_wchar* to, int len)
+{
+    int cnt = 0;
+    while (len > 0) {
+        if (*from <= 0x7f) { /* ASCII */
+            *to = *from++;
+            --len;
+        } else if (IS_HIGHBIT_SET(*from) &&
+                    (*(from + 1) >= 0x30 && *(from + 1) < 0x40)) {
+            if (len < 4) {
+                break;            /* drop trailing incomplete char */
+            }
+            *to  = *from++ << 24;
+            *to |= *from++ << 16;
+            *to |= *from++ << 8;
+            *to |= *from++;
+            len -= 4;
+        } else {
+            if (len < 2) {
+                break;
+            }
+            *to  = *from++ << 8;
+            *to |= *from++;
+            len -= 2;
+        }
+        ++to;
+        ++cnt;
+    }
+    *to = 0;
+    return cnt;
+}
+
+static int pg_wchar2gb18030_with_len(const pg_wchar* from, unsigned char* to, int len)
+{
+    int cnt = 0;
+    while (len > 0 && *from) {
+        unsigned char c;
+        if ((c = (*from >> 24))) {
+            *to++ = c;
+            *to++ = (*from >> 16) & 0xff;
+            *to++ = (*from >> 8) & 0xff;
+            *to++ = *from & 0xff;
+            cnt += 4;
+        } else if ((c = (*from >> 8))) {
+            *to++ = c;
+            *to++ = *from & 0xff;
+            cnt += 2;
+        } else {
+            *to++ = *from;
+            cnt++;
+        }
+        from++;
+        len--;
+    }
+    *to = 0;
+    return cnt;
+}
+
 static int pg_gb18030_mblen(const unsigned char* s)
 {
     int len;
@@ -1926,10 +1984,15 @@ pg_wchar_tbl pg_wchar_table[] = {
         pg_latin1_dsplen,
         pg_latin1_verifier,
         1},                                                              /* PG_KOI8U */
+    {pg_gb180302wchar_with_len,
+        pg_wchar2gb18030_with_len,
+        pg_gb18030_mblen,
+        pg_gb18030_dsplen,
+        pg_gb18030_verifier,
+        4},                                                              /* PG_GB18030 */
     {0, 0, pg_sjis_mblen, pg_sjis_dsplen, pg_sjis_verifier, 2},          /* PG_SJIS */
     {0, 0, pg_big5_mblen, pg_big5_dsplen, pg_big5_verifier, 2},          /* PG_BIG5 */
     {0, 0, pg_uhc_mblen, pg_uhc_dsplen, pg_uhc_verifier, 2},             /* PG_UHC */
-    {0, 0, pg_gb18030_mblen, pg_gb18030_dsplen, pg_gb18030_verifier, 4}, /* PG_GB18030 */
     {0, 0, pg_johab_mblen, pg_johab_dsplen, pg_johab_verifier, 3},       /* PG_JOHAB */
     {0, 0, pg_sjis_mblen, pg_sjis_dsplen, pg_sjis_verifier, 2}           /* PG_SHIFT_JIS_2004 */
 };
