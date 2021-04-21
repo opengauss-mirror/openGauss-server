@@ -1990,8 +1990,12 @@ static void check_value_min_max(int64 value, int64 min_value, int64 max_value)
             /* isInit is true for DefineSequence, false for AlterSequence, we use it
              * to differentiate them
              */
-            if (strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0 &&
-                strcmp(defel->defname, "cache") != 0) {
+            if (strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0
+#ifndef ENABLE_MULTIPLE_NODES
+                && strcmp(defel->defname, "cache") != 0) {
+#else
+                ) {
+#endif
                 ereport(
                     ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
             }
