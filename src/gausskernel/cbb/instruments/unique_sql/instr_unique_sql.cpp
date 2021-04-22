@@ -543,7 +543,7 @@ static void UpdateUniqueSQLTimeStat(UniqueSQL* entry, int64 timeInfo[])
         int idx;
 
         for (idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
-            entry->timeInfo.TimeInfoArray[idx] += timeInfo[idx];
+            (void)gs_atomic_add_64(&(entry->timeInfo.TimeInfoArray[idx]), timeInfo[idx]);
         }
     }
 }
@@ -552,7 +552,7 @@ static void UpdateUniqueSQLNetInfo(UniqueSQL* entry, const uint64* netInfo)
     if (netInfo == NULL)
         return;
     for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
-        entry->netInfo.netInfoArray[i] += netInfo[i];
+        (void)pg_atomic_fetch_add_u64(&(entry->netInfo.netInfoArray[i]), netInfo[i]);
     }
 }
 
@@ -701,8 +701,8 @@ void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
         // record statement KPI info
         instr_stmt_report_unique_sql_info(NULL, sqlStat->timeInfo, sqlStat->netInfo);
     }
+    (void)gs_lock_test_and_set_64(&entry->updated_time, GetCurrentTimestamp());
     UnlockUniqueSQLHashPartition(hashCode);
-    entry->updated_time = GetCurrentTimestamp();
 }
 
 /*
