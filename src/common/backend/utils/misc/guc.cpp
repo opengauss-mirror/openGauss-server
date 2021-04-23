@@ -7240,7 +7240,7 @@ static void InitConfigureNamesInt64()
              gettext_noop("Minimum age at which VACUUM should freeze a table row."),
              NULL},
             &u_sess->attr.attr_storage.vacuum_freeze_min_age,
-            INT64CONST(5000000000),
+            INT64CONST(2000000000),
             INT64CONST(0),
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
@@ -7266,7 +7266,7 @@ static void InitConfigureNamesInt64()
              gettext_noop("Age at which VACUUM should scan whole table to freeze tuples."),
              NULL},
             &u_sess->attr.attr_storage.vacuum_freeze_table_age,
-            INT64CONST(15000000000),
+            INT64CONST(4000000000),
             INT64CONST(0),
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
@@ -7294,7 +7294,7 @@ static void InitConfigureNamesInt64()
                 NULL},
             &g_instance.attr.attr_storage.autovacuum_freeze_max_age,
             /* see pg_resetxlog if you change the upper-limit value */
-            INT64CONST(20000000000),
+            INT64CONST(4000000000),
             INT64CONST(100000),
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
@@ -9985,7 +9985,7 @@ static void InitializeGUCOptionsFromEnvironment(void)
      * the same.  If we can identify the platform stack depth rlimit, increase
      * default stack depth setting up to whatever is safe (but at most 2MB).
      */
-    stack_rlimit = DEFUALT_STACK_SIZE * 1024L;
+    stack_rlimit = get_stack_depth_rlimit();
 
     if (stack_rlimit > 0) {
         long new_limit = (stack_rlimit - STACK_DEPTH_SLOP) / 1024L;
@@ -19748,7 +19748,8 @@ static void assign_instr_unique_sql_count(int newval, void* extra)
 #define RESET_UNIQUE_SQL_FUNC 5716
 
     /* only let WLMProcessThread do the cleanup */
-    if (AmWLMWorkerProcess() && IS_PGXC_COORDINATOR && u_sess->attr.attr_common.instr_unique_sql_count > newval) {
+    if (AmWLMWorkerProcess() && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) &&
+        u_sess->attr.attr_common.instr_unique_sql_count > newval) {
         bool result = DatumGetBool(OidFunctionCall3(RESET_UNIQUE_SQL_FUNC,
             CStringGetTextDatum("GLOBAL"),
             CStringGetTextDatum("BY_GUC"),

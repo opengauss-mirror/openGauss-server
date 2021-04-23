@@ -82,12 +82,12 @@ static void SyncRepNotifyComplete();
 
 static int SyncRepGetStandbyPriority(void);
 #ifndef ENABLE_MULTIPLE_NODES
-static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr);
+static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTime);
 #endif
-static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr,
-                                       List* sync_standbys);
-static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr,
-                                          List* sync_standbys, uint8 nth);
+static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
+                                       XLogRecPtr* replayPtr, List* sync_standbys);
+static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
+                                          XLogRecPtr* replayPtr, List* sync_standbys, uint8 nth);
 
 
 #ifdef USE_ASSERT_CHECKING
@@ -98,12 +98,6 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
 static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys = NULL);
 static int cmp_lsn(const void *a, const void *b);
 
-/*
- * Time for synchronous each lsn, which is an empirical value. 
- * Unit is microsecond.
- */
-#define SYN_TIME_PER_XLOG 0.00225
-
 #define CATCHUP_XLOG_DIFF(ptr1, ptr2, amount) \
     XLogRecPtrIsInvalid(ptr1) ? false : (XLByteDifference(ptr2, ptr1) < amount)
 
@@ -113,51 +107,33 @@ static int cmp_lsn(const void *a, const void *b);
  * Return true if it is need to wait for catching up(synchronous replication),
  * return false if don't wait for catching up.
  */
-bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN, int mode)
+bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
 {
 #ifndef ENABLE_MULTIPLE_NODES
-    /* When most_available_sync is off and num_sync > 1, return. */
+    /* 
+     * When most_available_sync is off or catchup2normal_wait_time is not set,
+     * return true.
+     */
     if (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync ||
-        t_thrd.syncrep_cxt.SyncRepConfig->num_sync > 1 ||
         g_instance.attr.attr_storage.catchup2normal_wait_time < 0) {
         return true;
     }
 
-    static const uint64 maxXlogDiffAmount =
-        (uint64)floor(g_instance.attr.attr_storage.catchup2normal_wait_time * 1000 / SYN_TIME_PER_XLOG);
-    XLogRecPtr receivePtr;
-    XLogRecPtr writePtr;
-    XLogRecPtr flushPtr;
-    XLogRecPtr replayPtr;
+    static const TimestampTz catchup2normalWaitTime = g_instance.attr.attr_storage.catchup2normal_wait_time * 1000;
+    TimestampTz syncLeftTime = 0;
 
     /* 
-     * if the numberof sync standbys is more than synchronous_standby_names
-     * specifies or there is no sync standbys in catching up, wait for
+     * SyncRepGetSyncLeftTime() return false means that there is at lease one
+     * sync standby, or no standby in catchup, so it is need to wait for 
      * synchronous replication.
      */
-    if (!SyncRepGetCatchupRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr)) {
+    if (!SyncRepGetSyncLeftTime(XactCommitLSN, &syncLeftTime)) {
         return true;
     }
-
-    if (maxXlogDiffAmount == 0) {
+    if (syncLeftTime == 0 || syncLeftTime > catchup2normalWaitTime) {
         return false;
     }
-
-    /* if catchup will be finished soon, wait for synchronous replication. */
-    switch (mode) {
-        case SYNC_REP_WAIT_RECEIVE:
-            return CATCHUP_XLOG_DIFF(receivePtr, XactCommitLSN, maxXlogDiffAmount);
-        case SYNC_REP_WAIT_WRITE:
-            return CATCHUP_XLOG_DIFF(writePtr, XactCommitLSN, maxXlogDiffAmount);
-        case SYNC_REP_WAIT_FLUSH:
-            return CATCHUP_XLOG_DIFF(flushPtr, XactCommitLSN, maxXlogDiffAmount);
-        case SYNC_REP_WAIT_APPLY:
-            return CATCHUP_XLOG_DIFF(replayPtr, XactCommitLSN, maxXlogDiffAmount);
-        default:
-            return true;
-    }
 #endif
-
     return true;
 }
 
@@ -205,7 +181,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
         XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
-        !SynRepWaitCatchup(XactCommitLSN, mode)) {
+        !SynRepWaitCatchup(XactCommitLSN)) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
         return;
@@ -681,40 +657,47 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
 
 #ifndef ENABLE_MULTIPLE_NODES
 /*
- * Calculate the synced Receive, Write, Flush and Replay positions among sync standbys
- * in catching up.
- * 
- * Return false if the number of sync standbys is more than synchronous_standby_names
- * specifies or there is no sync standbys in catching up. Otherwise return true and
- * store the positions into *receivePtr, *writePtr, *flushPtr and *replayPtr.
+ * Obtains the remaining time for synchronizing to the sync standby. 
+ *
+ * If there is at lease one sync standby, or no standby in catchup, no need
+ * to consider standby in catchup, return false. Otherwise return true.
  */
-static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr)
+static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTime)
 {
     List* sync_standbys = NIL;
     List* catchup_standbys = NIL;
     bool am_sync = false;
-    *receivePtr = InvalidXLogRecPtr;
-    *writePtr = InvalidXLogRecPtr;
-    *flushPtr = InvalidXLogRecPtr;
-    *replayPtr = InvalidXLogRecPtr;
+    ListCell* cell = NULL;
+    *leftTime = 0;
 
     /* Get standbys that are considered as synchronous at this moment. */
     sync_standbys = SyncRepGetSyncStandbys(&am_sync, &catchup_standbys);
-    /* Quick exit if there are enough synchronous standbys or no standby in catching up. */
-    if ((t_thrd.syncrep_cxt.SyncRepConfig != NULL &&
-        t_thrd.syncrep_cxt.SyncRepConfig->num_sync <= list_length(sync_standbys)) ||
-        list_length(catchup_standbys) == 0) {
+
+    /* Skip here if there is at lease one sync standby, or no standby in catchup. */
+    if (list_length(sync_standbys) > 0 || list_length(catchup_standbys) == 0) {
         list_free(sync_standbys);
         list_free(catchup_standbys);
         return false;
     }
-    if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
-        SyncRepGetOldestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, catchup_standbys);
-    } else {
-        SyncRepGetNthLatestSyncRecPtr(
-            receivePtr, writePtr, flushPtr, replayPtr, catchup_standbys,
-            t_thrd.syncrep_cxt.SyncRepConfig->num_sync - list_length(sync_standbys));
+
+    /*
+     * Scan through all sync standbys and calculate the left time
+     * for sync.
+     */
+    foreach (cell, catchup_standbys) {
+        WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
+        SpinLockAcquire(&walsnd->mutex);
+        TimestampTz syncNeededTime;
+        XLogRecPtr xrp = walsnd->receive;
+        double rate = walsnd->catchupRate;
+        SpinLockRelease(&walsnd->mutex);
+
+        syncNeededTime = (TimestampTz)(rate * XLByteDifference(XactCommitLSN, xrp));
+        if (*leftTime == 0 || *leftTime > syncNeededTime) {
+            *leftTime = syncNeededTime;
+        }
     }
+
     list_free(sync_standbys);
     list_free(catchup_standbys);
     return true;
@@ -724,8 +707,8 @@ static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr
 /*
  * Calculate the oldest Write, Flush and Apply positions among sync standbys.
  */
-static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr,
-                                       List* sync_standbys)
+static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
+                                       XLogRecPtr* replayPtr, List* sync_standbys)
 {
     ListCell *cell = NULL;
 
@@ -762,8 +745,8 @@ static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* write
  * Calculate the Nth latest Write, Flush and Apply positions among sync
  * standbys.
  */
-static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr,
-                                          List* sync_standbys, uint8 nth)
+static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr,
+                                          XLogRecPtr* replayPtr, List* sync_standbys, uint8 nth)
 {
     ListCell *cell = NULL;
     XLogRecPtr *receive_array = NULL;
@@ -1134,9 +1117,9 @@ static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys
         if (walsnd->sync_standby_priority == 0)
             continue;
 
-        if (walsnd->state == WALSNDSTATE_CATCHUP && catchup_standbys != NULL) {
+        if ((walsnd->state == WALSNDSTATE_CATCHUP || walsnd->peer_state == CATCHUP_STATE) &&
+            catchup_standbys != NULL) {
             *catchup_standbys = lappend_int(*catchup_standbys, i);
-            continue;
         }
 
         /* Must have a valid flush position */
@@ -1206,9 +1189,9 @@ static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standb
         if (this_priority == 0)
             continue;
 
-        if (walsnd->state == WALSNDSTATE_CATCHUP && catchup_standbys != NULL) {
+        if ((walsnd->state == WALSNDSTATE_CATCHUP || walsnd->peer_state == CATCHUP_STATE) && 
+            catchup_standbys != NULL) {
             *catchup_standbys = lappend_int(*catchup_standbys, i);
-            continue;
         }
 
         /* Must have a valid flush position */

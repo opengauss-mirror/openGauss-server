@@ -1,12 +1,12 @@
 ## 1 概述
 
-本章节主要介绍采用openGauss简化安装脚本（以下简称安装脚本），一键式安装openGauss数据库所必须的系统环境及安装步骤。
+本章节主要介绍采用openGauss极简安装脚本（以下简称安装脚本），一键式安装openGauss数据库所必须的系统环境及安装步骤。
 
 ## 2 安装环境要求
 
 ### 2.1 openGauss环境要求
 
-安装openGauss的具体环境要求，请参考《openGauss安装指南》中的“2.3.1节软硬件环境要求”章节。
+安装openGauss的具体环境要求，请参考《openGauss安装指南》中的“软硬件环境要求”章节。
 
 ### 2.2 安装脚本环境要求
 
@@ -22,72 +22,31 @@
 | openEuler | x86_64     |
 | CentOS    | x86_64     |
 
-#### 软件依赖要求
-
-安装脚本依赖于其它软件的支持，如表2所示。
-
-**表2** 软件依赖要求
-
-| 所需软件  | 建议版本 |
-| --------- | -------- |
-| firewalld | -        |
-| python    | 3        |
 
 ## 3 安装openGauss
 
-### 3.1 安装前准备
 
-#### 导入安装脚本
+### 执行安装
 
-安装脚本包含了多个文件，其用途如表3所示。导入安装脚本时，建议直接导入tar包至安装环境中，随后在安装环境中进行解压，否则可能出现window与unix风格不兼容的问题。若出现此类问题，可以使用dos2unix命令对安装脚本进行格式转换。
-
-**表3** 安装脚本清单
-
-| 文件名称     | 用途                   |
-| ------------ | ---------------------- |
-| install.sh   | 简化安装主程序         |
-| common.sh    | 公共命令               |
-| README.md    | 参考文档               |
-| template.xml | xml模板                |
-| finance.sql  | 金融数据模型展示数据库 |
-| school.sql   | 学校数据模型展示数据库 |
-
-#### 导入openGauss数据库安装包
-
-安装脚本支持以下两种方式导入openGauss数据库安装包：
-
-- 手动导入
-
-在[openGauss官网](https://opengauss.org/zh/download.html)下载对应版本安装包拷贝至安装环境中，存放路径为安装脚本的上层目录。
-
-- 自动导入
-
-配置安装环境外网访问，并确保安装脚本上层路径不存在openGauss数据库安装包。当运行安装脚本时，会自动下载对应版本安装包进行安装。
-
-### 3.2 执行安装
-
-使用如下命令执行安装脚本。
+使用如下命令执行单节点安装脚本。
 
 ```shell
-sh install.sh -U user_name -G user_group -h host_ip -p port [-D install_path]
+sh install.sh -w password
 ```
 
+使用如下命令执行一主一备安装脚本。
+
+```shell
+sh install.sh -w password --multinode
+```
 #### 参数说明
 
-- user_name为openGauss数据库的安装用户。
-- user_group为openGauss数据库安装用户所属用户组。
-- host_ip为主机在后端存储网络中的IP地址（内网IP）。
-- host_port为数据库节点的基础端口号。
-- install_path为openGauss数据库安装路径，该参数为可选参数。
+- [-w password] gs_initdb password, this argument is necessary for installation
+- [-p port] port of openGauss single node, or master node; default value is 5432
+- [--multinode] install one master and one slave openGauss node
 
-以上参数的详细信息，请参考《openGauss安装指南》中的3.1节创建XML配置文件。
+以上参数的详细信息，请参考《openGauss安装指南》.
 
-#### 注意事项
-
-- 不指定install_path参数时，数据库默认安装在/opt/user_name路径下。
-
-- 无论采用何种方式导入openGauss安装包，安装脚本都会在/home/user_name/openGaussTar路径下建立本地安装包文件。该路径支持修改，请在install.sh中修改install_location参数，但是需要与安装路径install_path不同。
-- 安装脚本必须在root下执行，且同一时刻只有1个安装脚本正在运行。
 
 ## 4 导入展示数据库
 

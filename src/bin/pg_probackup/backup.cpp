@@ -39,6 +39,8 @@ static uint32 stream_stop_timeout = 0;
 /* Time in which we started to wait for streaming end */
 static time_t stream_stop_begin = 0;
 
+static const uint32 archive_timeout_deno = 5;
+
 //const char *progname = "pg_probackup";
 
 /* list of files contained in backup */
@@ -63,6 +65,7 @@ typedef struct
 
     XLogRecPtr	startpos;
     TimeLineID	starttli;
+    bool        renamepartial;
 } StreamThreadArg;
 
 static pthread_t stream_thread;
@@ -268,6 +271,12 @@ static void start_stream_wal(const char *database_path, PGconn *backup_conn)
     stream_thread_arg.starttli = current.tli;
 
     thread_interrupted = false;
+
+    if (current.from_replica) {
+        stream_thread_arg.renamepartial = true;
+    } else {
+        stream_thread_arg.renamepartial = false;
+    }
     pthread_create(&stream_thread, NULL, StreamLog, &stream_thread_arg);
 }
 
@@ -442,6 +451,27 @@ static void sync_files(parray *database_map, const char *database_path, parray *
 {
     time_t  start_time, end_time;
     char    pretty_time[20];
+
+    /* In case of backup from replica >= 9.6 we must fix minRecPoint,
+     * First we must find pg_control in backup_files_list.
+     */
+    if (current.from_replica && !exclusive_backup)
+    {
+        pgFile *pg_control = NULL;
+        for (int i = 0; i < parray_num(backup_files_list); i++)
+        {
+            pgFile *tmp_file = (pgFile *)parray_get(backup_files_list, (size_t)i);
+            if (tmp_file->external_dir_num == 0 &&
+                (strcmp(tmp_file->rel_path, XLOG_CONTROL_FILE) == 0))
+            {
+                pg_control = tmp_file;
+                break;
+            }
+        }
+        if (!pg_control)
+            elog(ERROR, "Failed to find file \"%s\" in backup filelist.", XLOG_CONTROL_FILE);
+        set_min_recovery_point(pg_control, database_path, current.stop_lsn);
+    }
     
     /* close and sync page header map */
     if (current.hdr_map.fp)
@@ -735,18 +765,12 @@ PGconn *
 pgdata_basic_setup(const ConnectionOptions conn_opt, PGNodeInfo *nodeInfo)
 {
     PGconn *cur_conn;
-    bool    from_replica;
     errno_t rc = 0;
 
     /* Create connection for PostgreSQL */
     cur_conn = pgut_connect(conn_opt.pghost, conn_opt.pgport,
                                             conn_opt.pgdatabase,
                                             conn_opt.pguser);
-
-    from_replica = pg_is_in_recovery(cur_conn);
-    if (from_replica) {
-        elog(ERROR, "gs_probackup is not supported on standby\n");
-    }
 
     /* Confirm data block size and xlog block size are compatible */
     confirm_block_size(cur_conn, "block_size", BLCKSZ);
@@ -755,10 +779,12 @@ pgdata_basic_setup(const ConnectionOptions conn_opt, PGNodeInfo *nodeInfo)
     nodeInfo->wal_block_size = XLOG_BLCKSZ;
     nodeInfo->pgpro_support = pgpro_support(cur_conn);
 
-
+    current.from_replica = pg_is_in_recovery(cur_conn);
 
     nodeInfo->server_version = PQserverVersion(conn);
-    exclusive_backup = true;
+    if (!current.from_replica) {
+        exclusive_backup = true;
+    }
 
     current.checksum_version = 0;
 
@@ -867,6 +893,10 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
      * fill basic info about instance
      */
     backup_conn = pgdata_basic_setup(instance_config.conn_opt, &nodeInfo);
+
+    if (current.from_replica) {
+        elog(INFO, "Backup %s is going to be taken from standby", base36enc((unsigned long int)start_time));
+    }
 
     /*
      * Ensure that backup directory was initialized for the same PostgreSQL
@@ -1186,6 +1216,30 @@ bool inform_user_wal_seg_absent(bool is_start_lsn, uint32 *try_count, bool segme
     return true;
 }
 
+/* Try to find compressed WAL file */
+void tryToFindCompressedWALFile(bool *file_exists, char *gz_wal_segment_path, char *wal_segment_path)
+{
+    if (!(*file_exists)) {
+#ifdef HAVE_LIBZ
+        *file_exists = fileExists(gz_wal_segment_path, FIO_BACKUP_HOST);
+        if (*file_exists)
+        {
+            elog(LOG, "Found compressed WAL segment: %s", wal_segment_path);
+            if (current.from_replica)
+            {
+                elog(INFO, "Wait a few minutes to get the target LSN or the last valid record prior to the target LSN");
+            }
+        }
+#endif
+    } else {
+        elog(LOG, "Found WAL segment: %s", wal_segment_path);
+        if (current.from_replica)
+        {
+            elog(INFO, "Wait a few minutes to get the target LSN or the last valid record prior to the target LSN");
+        }
+    }
+}
+
 /*
  * Wait for target LSN or WAL segment, containing target LSN.
  *
@@ -1259,10 +1313,7 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
     }
 
     /* TODO: remove this in 3.0 (it is a cludge against some old bug with archive_timeout) */
-    if (instance_config.archive_timeout > 0)
-        timeout = instance_config.archive_timeout;
-    else
-        timeout = ARCHIVE_TIMEOUT_DEFAULT;
+    timeout = (instance_config.archive_timeout > 0) ? instance_config.archive_timeout : ARCHIVE_TIMEOUT_DEFAULT;
 
     if (segment_only)
         elog(LOG, "Looking for segment: %s", wal_segment);
@@ -1282,20 +1333,9 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
         if (!file_exists)
         {
             file_exists = fileExists(wal_segment_path, FIO_BACKUP_HOST);
-
-            /* Try to find compressed WAL file */
-            if (!file_exists)
-            {
-#ifdef HAVE_LIBZ
-                file_exists = fileExists(gz_wal_segment_path, FIO_BACKUP_HOST);
-                if (file_exists)
-                    elog(LOG, "Found compressed WAL segment: %s", wal_segment_path);
-#endif
-                }
-                else
-                    elog(LOG, "Found WAL segment: %s", wal_segment_path);
-            }
-
+            tryToFindCompressedWALFile(&file_exists, gz_wal_segment_path, wal_segment_path);
+        }
+        
             if (file_exists)
             {
                 /* Do not check for target LSN */
@@ -1312,6 +1352,32 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
                 {
                     elog(LOG, "Found LSN: %X/%X", (uint32) (target_lsn >> 32), (uint32) target_lsn);
                     return target_lsn;
+                }
+
+                /*
+                 * If we failed to get target LSN in a reasonable time, try
+                 * to get LSN of last valid record prior to the target LSN. But only
+                 * in case of a backup from a replica.
+                 * Note, that with NullXRecOff target_lsn we do not wait
+                 * for 'timeout / 5' seconds before going for previous record,
+                 * because such LSN cannot be delivered at all.
+                 *
+                 * There are two cases for this:
+                 * 1. Replica returned readpoint LSN which just do not exists. We want to look
+                 *  for previous record in the same(!) WAL segment which endpoint points to this LSN.
+                 * 2. Replica returened endpoint LSN with NullXRecOff. We want to look
+                 *  for previous record which endpoint points greater or equal LSN in previous WAL segment.
+                 */
+                if (current.from_replica &&
+                    (XRecOffIsNull(target_lsn) || try_count > timeout / archive_timeout_deno)) {
+                    XLogRecPtr res = get_prior_record_lsn(wal_segment_dir, current.start_lsn, target_lsn, tli,
+                                                          in_prev_segment, instance_config.xlog_seg_size);
+                    if (!XLogRecPtrIsInvalid(res)) {
+                        /* LSN of the prior record was found */
+                        elog(LOG, "Found prior LSN: %X/%X",
+                             (uint32) (res >> 32), (uint32) res);
+                        return res;
+                    }
                 }
             }
 
@@ -1392,9 +1458,11 @@ static void get_valid_stop_lsn(pgBackup *backup, bool *stop_lsn_exists, XLogRecP
             !XRecOffIsValid(lsn_tmp) ||
             lsn_tmp < stop_backup_lsn_tmp)
         {
-            elog(ERROR, "Failed to get next WAL record after %X/%X",
-                (uint32) (stop_backup_lsn_tmp >> 32),
-                (uint32) (stop_backup_lsn_tmp));
+            /* Backup from master should error out here */
+            if (!backup->from_replica)
+                elog(ERROR, "Failed to get next WAL record after %X/%X",
+                     (uint32)(stop_backup_lsn_tmp >> 32),
+                     (uint32)(stop_backup_lsn_tmp));
 
             /* No luck, falling back to looking up for previous record */
             elog(WARNING, "Failed to get next WAL record after %X/%X, "
@@ -1666,8 +1734,10 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
     res = pgut_execute(conn, "SET datestyle = 'ISO, DMY';", 0, NULL);
     PQclear(res);
 
-    /* Create restore point */
-    if (backup != NULL)
+    /* Create restore point
+     * Only if backup is from master.
+     */
+    if (backup != nullptr && !backup->from_replica)
     {
         create_restore_point(backup, conn);
     }
@@ -1686,22 +1756,7 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
      * wait for pg_stop_backup() forever.
      */
     PgStopBackupSent(conn, &stop_backup_query);
-
-    if (!pg_stop_backup_is_sent)
-    {
-        bool    sent = false;
-
-        stop_backup_query = "SELECT"
-                                        " pg_catalog.txid_snapshot_xmax(pg_catalog.txid_current_snapshot()),"
-                                        " current_timestamp(0)::timestamptz,"
-                                        " pg_catalog.pg_stop_backup() as lsn";
-
-        sent = pgut_send(conn, stop_backup_query, 0, NULL, WARNING);
-        pg_stop_backup_is_sent = true;
-        if (!sent)
-            elog(ERROR, "Failed to send pg_stop_backup query");
-    }
-
+    
     /* After we have sent pg_stop_backup, we don't need this callback anymore */
     pgut_atexit_pop(backup_stopbackup_callback, pg_startbackup_conn);
 
@@ -1769,9 +1824,13 @@ pg_stop_backup(pgBackup *backup, PGconn *pg_startbackup_conn,
          * If replica returned valid STOP_LSN of not actually existing record,
          * look for previous record with endpoint >= STOP_LSN.
          */
-        if (!stop_lsn_exists)
+        if (!stop_lsn_exists) {
+            if (backup->from_replica) {
+                stop_backup_lsn = stop_backup_lsn_tmp;
+            }
             stop_backup_lsn = wait_wal_lsn(stop_backup_lsn_tmp, false, backup->tli,
                                            false, false, ERROR, stream_wal);
+        } 
 
         if (stream_wal)
         {
@@ -2068,16 +2127,14 @@ parse_filelist_filenames(parray *files, const char *root)
 
             while (unlogged_file_num >= 0 &&
                 (unlogged_file_reloid != 0) &&
-                (unlogged_file->relOid == unlogged_file_reloid))
-            {
+                (unlogged_file->relOid == unlogged_file_reloid)) {
                 pgFileFree(unlogged_file);
                 parray_remove(files, unlogged_file_num);
 
                 unlogged_file_num--;
                 i--;
 
-                unlogged_file = (pgFile *) parray_get(files,
-                                                                unlogged_file_num);
+                unlogged_file = (pgFile *) parray_get(files, unlogged_file_num);
             }
         }
     }
@@ -2220,8 +2277,7 @@ stop_streaming(XLogRecPtr xlogpos, uint32 timeline, bool segment_finished)
 
     if (!XLogRecPtrIsInvalid(stop_backup_lsn))
     {
-        if (xlogpos >= stop_backup_lsn)
-        {
+        if (xlogpos >= stop_backup_lsn) {
             stop_stream_lsn = xlogpos;
             return true;
         }
@@ -2324,12 +2380,12 @@ StreamLog(void *arg)
 #else
     if(ReceiveXlogStream(stream_arg->conn, stream_arg->startpos, stream_arg->starttli,
                             NULL, (const char *) stream_arg->basedir, stop_streaming,
-                            standby_message_timeout_local, false) == false)
+                            standby_message_timeout_local, stream_arg->renamepartial) == false)
         elog(ERROR, "Problem in receivexlog");
 #endif
 
     elog(LOG, "finished streaming WAL at %X/%X (timeline %u)",
-        (uint32) (stop_stream_lsn >> 32), (uint32) stop_stream_lsn, stream_arg->starttli);
+         (uint32) (stop_stream_lsn >> 32), (uint32) stop_stream_lsn, stream_arg->starttli);
     stream_arg->ret = 0;
 
     PQfinish(stream_arg->conn);

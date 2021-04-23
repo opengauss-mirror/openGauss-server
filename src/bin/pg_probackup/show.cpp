@@ -373,6 +373,10 @@ print_backup_json_object(PQExpBuffer buf, pgBackup *backup)
     json_add_key(buf, "compress-level", json_level);
     appendPQExpBuffer(buf, "%d", backup->compress_level);
 
+    json_add_value(buf, "from-replica",
+                   backup->from_replica ? "true" : "false", json_level,
+                   true);
+
     json_add_key(buf, "block-size", json_level);
     appendPQExpBuffer(buf, "%u", backup->block_size);
 

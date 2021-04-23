@@ -386,7 +386,7 @@ void ReplicationSlotCreate(const char *name, ReplicationSlotPersistency persiste
 /*
  * Find a previously created slot and mark it as used by this backend.
  */
-void ReplicationSlotAcquire(const char *name, bool isDummyStandby)
+void ReplicationSlotAcquire(const char *name, bool isDummyStandby, bool allowDrop)
 {
     ReplicationSlot *slot = NULL;
     int i;
@@ -417,8 +417,13 @@ void ReplicationSlotAcquire(const char *name, bool isDummyStandby)
     /* If we did not find the slot or it was already active, error out. */
     if (slot == NULL)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("replication slot \"%s\" does not exist", name)));
+    /* We allow dropping active logical replication slots on standby in opengauss. */
     if (active) {
-        if (slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
+        if ((slot->data.database != InvalidOid || isDummyStandby != slot->data.isDummyStandby)
+#ifndef ENABLE_MULTIPLE_NODES
+           && !allowDrop
+#endif
+        )
             ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("replication slot \"%s\" is already active", name)));
         else {
             ereport(WARNING,
@@ -546,7 +551,8 @@ void ReplicationSlotDrop(const char *name, bool for_backup)
      */
     Assert(t_thrd.slot_cxt.MyReplicationSlot == NULL);
 
-    ReplicationSlotAcquire(name, false);
+    /* We allow dropping active logical replication slots on standby in opengauss. */
+    ReplicationSlotAcquire(name, false, RecoveryInProgress());
     if (t_thrd.slot_cxt.MyReplicationSlot->archive_obs != NULL) {
         markObsSlotOperate(0);
     }

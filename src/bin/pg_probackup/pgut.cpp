@@ -528,7 +528,7 @@ PGconn* pgut_connect(const char *host, const char *port,
     i++;
 
     rc = snprintf_s(rwtimeoutStr, sizeof(rwtimeoutStr), sizeof(rwtimeoutStr) - 1, "%d",
-                    rw_timeout ? 120 : rw_timeout);  /* default rw_timeout 120 */
+                    rw_timeout ? rw_timeout : 120);  /* default rw_timeout 120 */
     securec_check_ss_c(rc, "", "");
     keywords[i] = "rw_timeout";                    /* param rw_timeout      */
     values[i] = rwtimeoutStr;                      /* rw_timeout value      */
@@ -637,7 +637,7 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     i++;
 
     rc = snprintf_s(rwtimeoutStr, sizeof(rwtimeoutStr), sizeof(rwtimeoutStr) - 1, "%d",
-                    rw_timeout ? 120 : rw_timeout); /* default rw_timeout 120 */
+                    rw_timeout ? rw_timeout : 120); /* default rw_timeout 120 */
     securec_check_ss_c(rc, "", "");
     keywords[i] = "rw_timeout";                     /* param rw_timeout      */
     values[i] = rwtimeoutStr;                       /* rw_timeout value  */

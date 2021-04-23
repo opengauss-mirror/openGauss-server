@@ -2773,6 +2773,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6200 | mot_session_memory_detail
  6201 | mot_global_memory_detail
  6202 | mot_local_memory_detail
+ 6203 | pg_start_backup
+ 6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt_sm4

@@ -288,3 +288,22 @@ bool DllistWithLock::IsEmpty()
     END_CRIT_SECTION();
     return ret;
 }
+
+Dlelem* DllistWithLock::GetHead()
+{
+    Dlelem* head = NULL;
+    head = m_list.dll_head;
+    return head;
+}
+
+void DllistWithLock::GetLock()
+{
+    START_CRIT_SECTION();
+    SpinLockAcquire(&(m_lock));
+}
+
+void DllistWithLock::ReleaseLock()
+{
+    SpinLockRelease(&(m_lock));
+    END_CRIT_SECTION();
+}

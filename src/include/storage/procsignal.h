@@ -44,6 +44,7 @@ typedef enum {
     PROCSIG_MEMORYCONTEXT_DUMP,   /* dump memory context on all backends */
     PROCSIG_UPDATE_WORKLOAD_DATA, /* update workload data */
     PROCSIG_SPACE_LIMIT,          /* space limitation */
+    PROCSIG_STREAM_STOP_CHECK,    /* check local connections close or not */
 #endif
 
     /* Recovery conflict reasons */

@@ -422,13 +422,23 @@ public:
     {
         return m_recursiveVfdInvalid;
     }
-
-    /* Mark recursive vfd is invalid before aborting transaction. */
-    static void MarkRecursiveVfdInvalid();
-
 #ifndef ENABLE_MULTIPLE_NODES
+    inline void MarkStreamQuitStatus(StreamObjStatus status)
+    {
+        m_quitStatus = status;
+    }
+
+    inline StreamObjStatus GetStreamQuitStatus()
+    {
+        return m_quitStatus;
+    }
+    /* Send stop signal to all stream threads in node group. */
+    void SigStreamThreadClose();
+
     struct PortalData *m_portal;
 #endif
+    /* Mark recursive vfd is invalid before aborting transaction. */
+    static void MarkRecursiveVfdInvalid();
 
 private:
     /* Set the executor stop flag to true. */
@@ -495,9 +505,15 @@ private:
 
     /* Mutex for stream connect sync. */
     static pthread_mutex_t m_streamConnectSyncLock;
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Mark Stream query quit status. */
+    StreamObjStatus m_quitStatus;
+#endif
 };
 
 extern bool IsThreadProcessStreamRecursive();
 extern bool InitStreamObject(PlannedStmt* planStmt);
-
+#ifndef ENABLE_MULTIPLE_NODES
+extern void StreamMarkStop();
+#endif
 #endif /* SRC_INCLUDE_DISTRIBUTELAYER_STREAMCORE_H_ */

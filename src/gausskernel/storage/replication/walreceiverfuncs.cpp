@@ -330,6 +330,37 @@ static void set_rcv_slot_name(const char *slotname)
     return;
 }
 
+void KillWalRcvWriter(void)
+{
+    volatile WalRcvData *walRcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    ThreadId writerPid;
+    int i = 1;
+    /*
+     * Shutdown WalRcvWriter thread.
+     */
+    SpinLockAcquire(&walRcv->mutex);
+    writerPid = walRcv->writerPid;
+    SpinLockRelease(&walRcv->mutex);
+    if (writerPid != 0) {
+        (void)gs_signal_send(writerPid, SIGTERM);
+    }
+    ereport(LOG, (errmsg("waiting walrcvwriter: %lu terminate", writerPid)));
+    while (writerPid) {
+        pg_usleep(10000L);    /* sleep 0.01s */
+        SpinLockAcquire(&walRcv->mutex);
+        writerPid = walRcv->writerPid;
+        SpinLockRelease(&walRcv->mutex);
+        if ((writerPid != 0) && (i % 2000 == 0)) {
+            if (gs_signal_send(writerPid, SIGTERM) != 0) {
+                ereport(WARNING, (errmsg("walrcvwriter:%lu may be terminated", writerPid)));
+                break;
+            }
+            i = 1;
+        }
+        i++;
+    }
+}
+
 /*
  * Stop walreceiver (if running) and wait for it to die.
  * Executed by the Startup process.
@@ -403,6 +434,13 @@ void ShutdownWalRcv(void)
  */
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
+    knl_g_disconn_node_context_data disconn_node =
+        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+    if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
+        ereport(LOG, (errmsg("Stop to start walreceiver in disable connect mode")));
+        return;
+    }
+
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     pg_time_t now = (pg_time_t)time(NULL);

@@ -159,6 +159,9 @@ private:
 
     ThreadStreamSentry* m_streams;
     DllistWithLock* m_freeStreamList;
+
+    instr_time m_current_time;
+    uint64 m_sessionId;
 };
 
 #endif /* THREAD_POOL_GROUP_H */

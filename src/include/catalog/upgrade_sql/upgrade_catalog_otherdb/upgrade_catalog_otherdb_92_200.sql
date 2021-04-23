@@ -2321,7 +2321,7 @@ WHERE totalsize > 0;
 GRANT SELECT ON TABLE pg_catalog.pgxc_get_table_skewness TO PUBLIC;
 
 
-create or replace function table_skewness(table_name text, column_name text,
+create or replace function pg_catalog.table_skewness(table_name text, column_name text,
                         OUT seqNum text, OUT Num text, OUT Ratio text, row_num text default '0')
 RETURNS setof record
 AS $$
@@ -2393,3 +2393,21 @@ out catalog_version_no pg_catalog.int4,
 out system_identifier pg_catalog.int8,
 out pg_control_last_modified pg_catalog.timestamptz)
 RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_control_system';
+
+DROP FUNCTION IF EXISTS pg_catalog.pg_start_backup(IN backupid TEXT, IN fast BOOL, IN exclusive BOOL) CASCADE;
+DROP FUNCTION IF EXISTS pg_catalog.pg_stop_backup(IN exclusive BOOL) CASCADE;
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6203;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_start_backup
+(IN backupid pg_catalog.text,
+IN fast pg_catalog.bool,
+IN exclusive pg_catalog.bool)
+RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_start_backup_v2';
+
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6204;
+CREATE OR REPLACE FUNCTION pg_catalog.pg_stop_backup
+(IN exclusive pg_catalog.bool,
+out lsn pg_catalog.text,
+out labelfile pg_catalog.text,
+out spcmapfile pg_catalog.text)
+RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_stop_backup_v2';

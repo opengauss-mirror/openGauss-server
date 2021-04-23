@@ -5340,6 +5340,122 @@ static AlterDataSourceStmt* _copyAlterDataSourceStmt(const AlterDataSourceStmt* 
     return newnode;
 }
 
+static CreatePolicyLabelStmt* _copyCreatePolicyLabelStmt(const CreatePolicyLabelStmt* from)
+{
+    CreatePolicyLabelStmt* newnode = makeNode(CreatePolicyLabelStmt);
+    COPY_SCALAR_FIELD(if_not_exists);
+    COPY_STRING_FIELD(label_type);
+    COPY_STRING_FIELD(label_name);
+    COPY_NODE_FIELD(label_items);
+    return newnode;
+}
+
+static AlterPolicyLabelStmt* _copyAlterPolicyLabelStmt(const AlterPolicyLabelStmt* from)
+{
+    AlterPolicyLabelStmt* newnode = makeNode(AlterPolicyLabelStmt);
+    COPY_STRING_FIELD(stmt_type);
+    COPY_STRING_FIELD(label_name);
+    COPY_NODE_FIELD(label_items);
+    return newnode;
+}
+
+static DropPolicyLabelStmt* _copyDropPolicyLabelStmt(const DropPolicyLabelStmt* from)
+{
+    DropPolicyLabelStmt* newnode = makeNode(DropPolicyLabelStmt);
+    COPY_SCALAR_FIELD(if_exists);
+    COPY_NODE_FIELD(label_names);
+    return newnode;
+}
+
+static CreateAuditPolicyStmt* _copyCreateAuditPolicyStmt(const CreateAuditPolicyStmt* from)
+{
+    CreateAuditPolicyStmt* newnode = makeNode(CreateAuditPolicyStmt);
+    COPY_SCALAR_FIELD(if_not_exists);
+    COPY_STRING_FIELD(policy_type);
+    COPY_STRING_FIELD(policy_name);
+    COPY_NODE_FIELD(policy_targets);
+    COPY_NODE_FIELD(policy_filters);
+    COPY_SCALAR_FIELD(policy_enabled);
+    return newnode;
+}
+
+static AlterAuditPolicyStmt* _copyAlterAuditPolicyStmt(const AlterAuditPolicyStmt* from)
+{
+    AlterAuditPolicyStmt* newnode = makeNode(AlterAuditPolicyStmt);
+    COPY_SCALAR_FIELD(missing_ok);
+    COPY_STRING_FIELD(policy_name);
+    COPY_STRING_FIELD(policy_action);
+    COPY_STRING_FIELD(policy_type);
+    COPY_NODE_FIELD(policy_items);
+    COPY_NODE_FIELD(policy_filters);
+    COPY_STRING_FIELD(policy_comments);
+    COPY_NODE_FIELD(policy_enabled);
+    return newnode;
+}
+
+static DropAuditPolicyStmt* _copyDropAuditPolicyStmt(const DropAuditPolicyStmt* from)
+{
+    DropAuditPolicyStmt* newnode = makeNode(DropAuditPolicyStmt);
+    COPY_SCALAR_FIELD(missing_ok);
+    COPY_NODE_FIELD(policy_names);
+    return newnode;
+}
+
+static CreateMaskingPolicyStmt* _copyCreateMaskingPolicyStmt(const CreateMaskingPolicyStmt* from)
+{
+    CreateMaskingPolicyStmt* newnode = makeNode(CreateMaskingPolicyStmt);
+    COPY_SCALAR_FIELD(if_not_exists);
+    COPY_STRING_FIELD(policy_name);
+    COPY_NODE_FIELD(policy_data);
+    COPY_NODE_FIELD(policy_condition);
+    COPY_NODE_FIELD(policy_filters);
+    COPY_SCALAR_FIELD(policy_enabled);
+    return newnode;
+}
+
+static AlterMaskingPolicyStmt* _copyAlterMaskingPolicyStmt(const AlterMaskingPolicyStmt* from)
+{
+    AlterMaskingPolicyStmt* newnode = makeNode(AlterMaskingPolicyStmt);
+    COPY_STRING_FIELD(policy_name);
+    COPY_STRING_FIELD(policy_action);
+    COPY_NODE_FIELD(policy_items);
+    COPY_NODE_FIELD(policy_condition);
+    COPY_NODE_FIELD(policy_filters);
+    COPY_STRING_FIELD(policy_comments);
+    COPY_NODE_FIELD(policy_enabled);
+    return newnode;
+}
+
+static DropMaskingPolicyStmt* _copyDropMaskingPolicyStmt(const DropMaskingPolicyStmt* from)
+{
+    DropMaskingPolicyStmt* newnode = makeNode(DropMaskingPolicyStmt);
+    COPY_SCALAR_FIELD(if_exists);
+    COPY_NODE_FIELD(policy_names);
+    return newnode;
+}
+
+static MaskingPolicyCondition* _copyMaskingPolicyCondition(const MaskingPolicyCondition* from)
+{
+    MaskingPolicyCondition* newnode = makeNode(MaskingPolicyCondition);
+    COPY_NODE_FIELD(fqdn);
+    COPY_STRING_FIELD(_operator);
+    COPY_NODE_FIELD(arg);
+    return newnode;
+}
+
+static PolicyFilterNode* _copyPolicyFilterNode(const PolicyFilterNode* from)
+{
+    PolicyFilterNode* newnode = makeNode(PolicyFilterNode);
+    COPY_STRING_FIELD(node_type);
+    COPY_STRING_FIELD(op_value);
+    COPY_STRING_FIELD(filter_type);
+    COPY_NODE_FIELD(values);
+    COPY_SCALAR_FIELD(has_not_operator);
+    COPY_NODE_FIELD(left);
+    COPY_NODE_FIELD(right);
+    return newnode;
+}
+
 static CreateRlsPolicyStmt* _copyCreateRlsPolicyStmt(const CreateRlsPolicyStmt* from)
 {
     CreateRlsPolicyStmt* newnode = makeNode(CreateRlsPolicyStmt);
@@ -6824,6 +6940,39 @@ void* copyObject(const void* from)
             break;
         case T_ReindexStmt:
             retval = _copyReindexStmt((ReindexStmt*)from);
+            break;
+        case T_CreatePolicyLabelStmt:
+            retval = _copyCreatePolicyLabelStmt((CreatePolicyLabelStmt*)from);
+            break;
+        case T_AlterPolicyLabelStmt:
+            retval = _copyAlterPolicyLabelStmt((AlterPolicyLabelStmt*)from);
+            break;
+        case T_DropPolicyLabelStmt:
+            retval = _copyDropPolicyLabelStmt((DropPolicyLabelStmt*)from);
+            break;
+        case T_CreateAuditPolicyStmt:
+            retval = _copyCreateAuditPolicyStmt((CreateAuditPolicyStmt*)from);
+            break;
+        case T_AlterAuditPolicyStmt:
+            retval = _copyAlterAuditPolicyStmt((AlterAuditPolicyStmt*)from);
+            break;
+        case T_DropAuditPolicyStmt:
+            retval = _copyDropAuditPolicyStmt((DropAuditPolicyStmt*)from);
+            break;
+        case T_CreateMaskingPolicyStmt:
+            retval = _copyCreateMaskingPolicyStmt((CreateMaskingPolicyStmt*)from);
+            break;
+        case T_AlterMaskingPolicyStmt:
+            retval = _copyAlterMaskingPolicyStmt((AlterMaskingPolicyStmt*)from);
+            break;
+        case T_DropMaskingPolicyStmt:
+            retval = _copyDropMaskingPolicyStmt((DropMaskingPolicyStmt*)from);
+            break;
+        case T_MaskingPolicyCondition:
+            retval = _copyMaskingPolicyCondition((MaskingPolicyCondition*)from);
+            break;
+        case T_PolicyFilterNode:
+            retval = _copyPolicyFilterNode((PolicyFilterNode*)from);
             break;
         case T_CreateWeakPasswordDictionaryStmt:
             retval = _copyCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)from);

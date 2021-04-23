@@ -2189,6 +2189,8 @@ typedef struct knl_t_walsender_context {
     bool walSndCaughtUp;
     /* Notify primary to advance logical replication slot. */
     struct pg_conn* advancePrimaryConn;
+    /* Timestamp of the last check-timeout time in WalSndCheckTimeOut. */
+    TimestampTz last_check_timeout_timestamp;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {

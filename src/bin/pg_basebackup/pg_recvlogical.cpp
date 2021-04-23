@@ -669,9 +669,9 @@ static int getOptions(const int argc, char* const* argv)
                 break;
             case 'p':
                 check_env_value_c(optarg);
-                if (atoi(optarg) <= 0) {
+                if (checkIsDigit(optarg) == 0) {
                     fprintf(stderr, _("%s: invalid port number \"%s\"\n"), progname, optarg);
-                    return 1;
+                    exit(1);
                 }
                 dbport = pg_strdup(optarg);
                 break;
@@ -736,8 +736,7 @@ static int getOptions(const int argc, char* const* argv)
 
                 fsync_interval = atoi(optarg) * 1000;
                 if (fsync_interval < 0) {
-                    fprintf(stderr, _("%s: invalid fsync interval \"%s\"\n"), progname, optarg);
-                    return -1;
+                    fsync_interval = 0;
                 }
                 break;
             case 'S':

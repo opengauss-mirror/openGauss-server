@@ -207,7 +207,7 @@ extern void ReplicationSlotCreate(const char* name, ReplicationSlotPersistency p
     Oid databaseId, XLogRecPtr restart_lsn, char* extra_content = NULL, bool encrypted = false);
 extern void ReplicationSlotPersist(void);
 extern void ReplicationSlotDrop(const char* name, bool for_backup = false);
-extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby);
+extern void ReplicationSlotAcquire(const char* name, bool isDummyStandby, bool allowDrop = false);
 extern bool IsReplicationSlotActive(const char *name);
 bool ReplicationSlotFind(const char* name);
 extern void ReplicationSlotRelease(void);

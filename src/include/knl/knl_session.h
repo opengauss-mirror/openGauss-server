@@ -110,8 +110,6 @@ typedef struct knl_u_executor_context {
 
     bool exec_result_checkqual_fail;
 
-    bool executor_stop_flag;
-
     bool under_stream_runtime;
     bool under_auto_explain;
 
@@ -994,7 +992,12 @@ typedef struct knl_u_proc_context {
      * */
     enum SessionBackupState sessionBackupState;
     bool registerExclusiveHandlerdone;
-
+    /*
+     * Store label file and tablespace map during non-exclusive backups.
+     */
+    char* LabelFile;
+    char* TblspcMapFile;
+    bool  registerAbortBackupHandlerdone;    /* unterminated backups handler flag */
 } knl_u_proc_context;
 
 /* maximum possible number of fields in a date string */
@@ -2278,6 +2281,7 @@ typedef struct knl_session_context {
     MemoryContext top_transaction_mem_cxt;
     MemoryContext self_mem_cxt;
     MemoryContext top_portal_cxt;
+    MemoryContext probackup_context;
     MemoryContextGroup* mcxt_group;
     /* temp_mem_cxt is a context which will be reset when the session attach to a thread */
     MemoryContext temp_mem_cxt;
@@ -2363,6 +2367,8 @@ typedef struct knl_session_context {
     knl_u_gtt_context gtt_ctx;
     /* extension streaming */
     knl_u_streaming_context streaming_cxt;
+
+    instr_time last_access_time;
 } knl_session_context;
 
 enum stp_xact_err_type {

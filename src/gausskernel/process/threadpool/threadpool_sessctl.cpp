@@ -156,8 +156,6 @@ void ThreadPoolSessControl::FreeSlot(int ctrl_index)
 
     knl_sess_control *ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
     Assert(ctrl->elem.dle_list == &m_activelist);
-    DLRemove(&ctrl->elem);
-    DLAddHead(&m_freelist, &ctrl->elem);
 
     m_activeSessionCount--;
     volatile sig_atomic_t* plock = &ctrl->lock;
@@ -170,6 +168,8 @@ void ThreadPoolSessControl::FreeSlot(int ctrl_index)
                 ctrl->sess = NULL;
                 /*  restore the value. */
                 ctrl->lock = 0;
+                DLRemove(&ctrl->elem);
+                DLAddHead(&m_freelist, &ctrl->elem);
                 break;
             }
         }
@@ -221,14 +221,6 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
     }
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
-    knl_session_context* sess = ctrl->sess;
-    /* Session may be NULL when the session exits during the clean connection process.
-       We do nothing if the session is NULL */
-    if (sess == NULL) {
-        return ESRCH;
-    }
-    /* Check user permission, and we dont have user id for cancel request. */
-    CheckPermissionForSendSignal(sess);
     volatile sig_atomic_t* plock = &ctrl->lock;
     sig_atomic_t val;
     do {
@@ -236,6 +228,17 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
             /*  perform an atomic compare and swap. */
             val = __sync_val_compare_and_swap(plock, 0, 1);
             if (val == 0) {
+                knl_session_context* sess = ctrl->sess;
+                /* Session may be NULL when the session exits during the clean connection process.
+                   We do nothing if the session is NULL */
+                if (sess == NULL) {
+                    /*  restore the value */
+                    ctrl->lock = 0;
+                    status = ESRCH;
+                    break;
+                }
+                /* Check user permission, and we dont have user id for cancel request. */
+                CheckPermissionForSendSignal(sess);
                 if (sess->status == KNL_SESS_ATTACH) {
                     t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
                     t_thrd.sig_cxt.session_id = sess->session_id;
@@ -285,7 +288,7 @@ void ThreadPoolSessControl::SendProcSignal(int ctrl_index, ProcSignalReason reas
                     switch (reason) {
                         case PROCSIG_EXECUTOR_FLAG: {
                             if (IS_PGXC_DATANODE && ctrl->sess->debug_query_id == query_id) {
-                                ctrl->sess->exec_cxt.executor_stop_flag = true;
+                                ctrl->sess->exec_cxt.executorStopFlag = true;
                             }
                             break;
                         }

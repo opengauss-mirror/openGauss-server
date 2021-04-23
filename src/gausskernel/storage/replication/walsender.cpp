@@ -117,6 +117,11 @@ long g_logical_slot_sleep_time = 0;
 #define AmWalSenderToDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY)
 #define AmWalSenderOnDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_DUMMYSTANDBY_STANDBY)
 
+/*
+ * calculate catchup late every 1000ms
+ */
+#define CALCULATE_CATCHUP_RATE_TIME 1000
+
 /* Statistics for log control */
 static const int MICROSECONDS_PER_SECONDS = 1000000;
 static const int MILLISECONDS_PER_SECONDS = 1000;
@@ -208,6 +213,7 @@ static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
 static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogRecPtr* sndFlush, XLogRecPtr* sndReplay);
 static void ProcessArchiveFeedbackMessage(void);
 static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term);
+static void CalCatchupRate();
 
 char *DataDir = ".";
 
@@ -221,6 +227,7 @@ int WalSenderMain(void)
     size_t appNameSize;
 
     t_thrd.proc_cxt.MyProgName = "WalSender";
+    (void)ShowThreadName("WalSender");
     if (RecoveryInProgress()) {
         t_thrd.role = WAL_STANDBY_SENDER;
     }
@@ -3324,13 +3331,8 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                 }
             }
         } else {
-            if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_STREAMING &&
-                !XLByteLT(t_thrd.walsender_cxt.catchup_threshold,
-                          INT2UINT64(g_instance.attr.attr_storage.MaxSendSize) * 1024)) {
-                ereport(DEBUG1, (errmsg("standby \"%s\" has now caught up with primary",
-                                        u_sess->attr.attr_common.application_name)));
-                WalSndSetState(WALSNDSTATE_CATCHUP);
-                t_thrd.walsender_cxt.catchup_threshold = 0;
+            if (t_thrd.walsender_cxt.MyWalSnd->state == WALSNDSTATE_CATCHUP) {
+                CalCatchupRate();
             }
         }
 
@@ -3499,26 +3501,26 @@ static void WalSndCheckTimeOut(TimestampTz now)
     }
 
     /*
-     * Use static last_reply_time to avoid call GetHeartbeatLastReplyTimestamp frequently
+     * Use last_check_timeout_timestamp to avoid call GetHeartbeatLastReplyTimestamp frequently
      * when t_thrd.walsender_cxt.last_reply_timestamp has meet the timeout condition
      * but last heartbeat time doesn't.
      */
-    static TimestampTz last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
+    TimestampTz *last_reply_time = &t_thrd.walsender_cxt.last_check_timeout_timestamp;
     /* t_thrd.walsender_cxt.last_reply_timestamp newer */
-    if (timestamptz_cmp_internal(t_thrd.walsender_cxt.last_reply_timestamp, last_reply_time) > 0) {
-        last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
+    if (timestamptz_cmp_internal(t_thrd.walsender_cxt.last_reply_timestamp, *last_reply_time) > 0) {
+        *last_reply_time = t_thrd.walsender_cxt.last_reply_timestamp;
     }
 
-    timeout = CalculateTimeout(last_reply_time);
+    timeout = CalculateTimeout(*last_reply_time);
     if (now < timeout) {
         return;
     }
 
     TimestampTz heartbeat = GetHeartbeatLastReplyTimestamp();
     /* If heartbeat newer, use heartbeat to recalculate timeout. */
-    if (timestamptz_cmp_internal(heartbeat, last_reply_time) > 0) {
-        last_reply_time = heartbeat;
-        timeout = CalculateTimeout(last_reply_time);
+    if (timestamptz_cmp_internal(heartbeat, *last_reply_time) > 0) {
+        *last_reply_time = heartbeat;
+        timeout = CalculateTimeout(*last_reply_time);
     }
 
     if (now >= timeout) {
@@ -3529,11 +3531,12 @@ static void WalSndCheckTimeOut(TimestampTz now)
          */
         if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
             WalReplicationTimestampInfo timeStampInfo;
-            WalReplicationTimestampToString(&timeStampInfo, now, timeout, last_reply_time, heartbeat);
-            ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."
-                                   "now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)", 
-                                   timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
-                                   timeStampInfo.lastRecStamp, timeStampInfo.heartbeatStamp)));
+            WalReplicationTimestampToString(&timeStampInfo, now, timeout, *last_reply_time, heartbeat);
+            ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."),
+                           (errdetail("now time(%s) timeout time(%s) last recv time(%s) heartbeat time(%s)",
+                                      timeStampInfo.nowTimeStamp, timeStampInfo.timeoutStamp,
+                                      timeStampInfo.lastRecStamp, timeStampInfo.heartbeatStamp)),
+                           (errhint("try increasing wal_sender_timeout or check system time."))));
         }        
         WalSndShutdown();
     }
@@ -3616,6 +3619,9 @@ static void InitWalSnd(void)
             walsnd->log_ctrl.pre_rate2 = 0;
             walsnd->log_ctrl.prev_RPO = -1;
             walsnd->log_ctrl.current_RPO = -1;
+            walsnd->lastCalTime = 0;
+            walsnd->lastCalWrite = InvalidXLogRecPtr;
+            walsnd->catchupRate = 0;
             walsnd->log_ctrl.just_keep_alive = false;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
@@ -4390,6 +4396,7 @@ bool WalSndAllInProgress(int type)
     int i;
     int num = 0;
     int allNum = 0;
+    int slot_num = 0;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         /* not contains cascade standby in primary */
@@ -4411,6 +4418,27 @@ bool WalSndAllInProgress(int type)
         SpinLockRelease(&walsnd->mutex);
     }
     if (num >= allNum) {
+        /*
+         * Check if the number of active physical slot is match. In some fault 
+         * scenario, it will appear that the replication slot corresponding to
+         * walsender is not active. So we should considerate the number of active
+         * slot too.
+         */
+        LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+        for (i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+            ReplicationSlot *s = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[i];
+            SpinLockAcquire(&s->mutex);
+            if (s->active && s->data.database == InvalidOid) {
+                slot_num++;
+            }
+            SpinLockRelease(&s->mutex);
+        }
+        LWLockRelease(ReplicationSlotControlLock);
+        if (slot_num < num) {
+            ereport(WARNING, (errmsg("The number of walsender %d is not equal to the number of active slot %d.",
+                                     num, slot_num)));
+            return false;
+        }
         return true;
     } else {
         return false;
@@ -5443,4 +5471,34 @@ static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
 XLogSegNo WalGetSyncCountWindow(void)
 {
     return (XLogSegNo)(uint32)u_sess->attr.attr_storage.wal_keep_segments;
+}
+
+/*
+ * Calculate catchup rate of standby to estimate how long
+ * the standby will be caught up with primary.
+ */
+static void CalCatchupRate() {
+    if (g_instance.attr.attr_storage.catchup2normal_wait_time < 0) {
+        return;
+    }
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+
+    SpinLockAcquire(&walsnd->mutex);
+    XLogRecPtr write = walsnd->write;
+    TimestampTz now = GetCurrentTimestamp();
+
+    if (XLByteEQ(walsnd->lastCalWrite, InvalidXLogRecPtr)) {
+        walsnd->lastCalWrite = write;
+        walsnd->lastCalTime = now;
+        SpinLockRelease(&walsnd->mutex);
+        return;
+    }
+    if (TimestampDifferenceExceeds(walsnd->lastCalTime, now, CALCULATE_CATCHUP_RATE_TIME)) {
+        double tempRate = (double)(now - walsnd->lastCalTime) /
+                          (double)XLByteDifference(write, walsnd->lastCalWrite);
+        walsnd->catchupRate = walsnd->catchupRate == 0 ? tempRate : (walsnd->catchupRate + tempRate) / 2;
+        walsnd->lastCalWrite = write;
+        walsnd->lastCalTime = now;
+    }
+    SpinLockRelease(&walsnd->mutex);
 }

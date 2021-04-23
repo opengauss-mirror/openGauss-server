@@ -174,8 +174,8 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -e -v -r -j %d > /dev/null 2>&1",
-                    g_instance.attr.attr_network.PoolerPort,
+                    "gs_clean -a -p %d -h localhost -e -v -r -j %d > /dev/null 2>&1",
+                    g_instance.attr.attr_network.PostPortNumber,
                     u_sess->attr.attr_storage.twophase_clean_workers);
                 securec_check_ss(rc, "\0", "\0");
 #endif

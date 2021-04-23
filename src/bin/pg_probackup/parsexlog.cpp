@@ -634,9 +634,10 @@ wal_contains_lsn(const char *archivedir, XLogRecPtr target_lsn,
     res = XLogReadRecord(xlogreader, target_lsn, &errormsg) != NULL;
     /* Didn't find 'target_lsn' and there is no error, return false */
 
-    if (errormsg)
-        elog(WARNING, "Could not read WAL record at %X/%X: %s",
-            (uint32) (target_lsn >> 32), (uint32) (target_lsn), errormsg);
+    if (!current.from_replica)
+        if (errormsg)
+            elog(WARNING, "Could not read WAL record at %X/%X: %s",
+                (uint32) (target_lsn >> 32), (uint32) (target_lsn), errormsg);
 
     CleanupXLogPageRead(xlogreader);
     XLogReaderFree(xlogreader);
@@ -1053,8 +1054,9 @@ static int switch_next_wal_segment(XLogReaderData *reader_data, bool *isreturn)
 
     if (fileExists(reader_data->xlogpath, FIO_LOCAL_HOST))
     {
-        elog(LOG, "Thread [%d]: Opening WAL segment \"%s\"",
-            reader_data->thread_num, reader_data->xlogpath);
+        if (!current.from_replica)
+            elog(LOG, "Thread [%d]: Opening WAL segment \"%s\"",
+                reader_data->thread_num, reader_data->xlogpath);
 
         reader_data->xlogexists = true;
         reader_data->xlogfile = fio_open(reader_data->xlogpath,
@@ -1459,7 +1461,7 @@ XLogThreadWorker(void *arg)
             * Usually SimpleXLogPageRead_local() does it by itself. But here we need
             * to do it manually to support threads.
             */
-            if (reader_data->need_switch && errormsg == NULL)
+            if (reader_data->need_switch)
             {
                 if (SwitchThreadToNextWal(xlogreader, thread_arg))
                     continue;

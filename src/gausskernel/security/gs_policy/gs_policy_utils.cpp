@@ -195,7 +195,7 @@ bool process_new_filters(const List *policy_filters, gs_stl::gs_string *flat_tre
                 List *filter_item_objects = (List *) n->values;
                 ListCell   *filter_obj = NULL;
                 foreach(filter_obj, filter_item_objects) {
-                    const char *filter_value = (const char *)(lfirst(filter_obj));
+                    const char *filter_value = (const char *)(((Value*)lfirst(filter_obj))->val.str);
                     if (!verify_ip_role_app(n->filter_type, filter_value, flat_tree)) {
                         return false;
                     }

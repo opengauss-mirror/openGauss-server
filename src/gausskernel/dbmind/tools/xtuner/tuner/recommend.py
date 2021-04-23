@@ -28,6 +28,8 @@ SIZE_UNIT_MAP = {"kB": 1,
                  "MB": 1024,
                  "GB": 1024 * 1024}
 
+def round4(v):
+    return v + (4 - v % 4)
 
 def recommend_knobs(mode, metric):
     advisor = OpenGaussKnobAdvisor(metric)
@@ -250,16 +252,16 @@ class OpenGaussKnobAdvisor:
             default = 0.25 * mem_total
 
         # The value of this knob means the number of maximum cached blocks.
-        recommend = default / self.metric.block_size
+        recommend = round4(default / self.metric.block_size)
         if self.metric.is_64bit:
             database_blocks = self.metric.all_database_size / self.metric.block_size
             if database_blocks < recommend:
                 self.report.print_warn("The total size of all databases is less than the memory size. "
                                        "Therefore, it is unnecessary to set shared_buffers to a large value.")
 
-            recommend = min(database_blocks, recommend)
-            upper = recommend * 1.15
-            lower = min(0.15 * mem_total / self.metric.block_size, recommend)
+            recommend = round4(min(database_blocks, recommend))
+            upper = round4(recommend * 1.15)
+            lower = round4(min(0.15 * mem_total / self.metric.block_size, recommend))
 
             return Knob.new_instance(name="shared_buffers",
                                      value_default=recommend,
@@ -268,8 +270,8 @@ class OpenGaussKnobAdvisor:
                                      value_min=lower,
                                      restart=True)
         else:
-            upper = min(recommend, 2 * SIZE_UNIT_MAP["GB"] / self.metric.block_size)  # 32-bit OS only can use 2 GB mem.
-            lower = min(0.15 * mem_total / self.metric.block_size, recommend)
+            upper = round4(min(recommend, 2 * SIZE_UNIT_MAP["GB"] / self.metric.block_size))  # 32-bit OS only can use 2 GB mem.
+            lower = round4(min(0.15 * mem_total / self.metric.block_size, recommend))
             return Knob.new_instance(name="shared_buffers",
                                      value_default=recommend,
                                      knob_type=Knob.TYPE.INT,

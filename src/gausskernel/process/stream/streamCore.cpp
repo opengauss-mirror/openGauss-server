@@ -461,7 +461,7 @@ int StreamNodeGroup::registerStream(StreamObj* obj)
         return streamIdx;
     } else {
         AutoContextSwitch streamContext(u_sess->stream_cxt.stream_runtime_mem_cxt);
-        m_streamArray[0].stopFlag = &u_sess->exec_cxt.executor_stop_flag;
+        m_streamArray[0].stopFlag = &u_sess->exec_cxt.executorStopFlag;
         m_streamArray[0].consumerList = lcons(obj, m_streamArray[0].consumerList);
         m_streamArray[0].status = STREAM_INPROGRESS;
         return 0;
@@ -550,7 +550,38 @@ void StreamNodeGroup::signalStreamThreadInNodeGroup(int signo)
         }
     }
 }
-
+#ifndef ENABLE_MULTIPLE_NODES
+void StreamNodeGroup::SigStreamThreadClose()
+{
+    if (StreamTopConsumerAmI() && m_streamArray) {
+        for (int i = 0; i < m_streamNum; i++) {
+            if (m_streamArray[i].streamObj != NULL && m_streamArray[i].streamObj->getThreadId() != InvalidTid) {
+                int ntimes = 1;
+                StreamProducer* producer = (StreamProducer*)m_streamArray[i].streamObj;
+                /*
+                 * Signal slot must be already registered if stream thread already inited.
+                 * If not, wait 1ms once and then recheck. Sets the maximum total wait
+                 * time as 30s.
+                 */
+                while (producer->getThreadInit() == false) {
+                    /* sleep 1ms */
+                    pg_usleep(1000);
+                    ntimes++;
+                    if (ntimes == 30000) {
+                        /* wait 30s, just break here */
+                        break;
+                    }
+                }
+                /*
+                 * mark before send signal,
+                 * used for signal handle to check signal whether signal is vaild.
+                 */
+                (void)SendProcSignal(producer->getThreadId(), PROCSIG_STREAM_STOP_CHECK, InvalidBackendId);
+            }
+        }
+    }
+}
+#endif
 /*
  * @Description: Cancel all stream thread registered in node group
  *
@@ -937,7 +968,12 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
     }
 
     if (u_sess->stream_cxt.global_obj != NULL) {
-        if (STREAM_ERROR == status)
+#ifdef ENABLE_MULTIPLE_NODES
+        if (status == STREAM_ERROR)
+#else
+        if (status == STREAM_ERROR ||
+            unlikely(u_sess->stream_cxt.global_obj->GetStreamQuitStatus() == STREAM_ERROR))
+#endif
             u_sess->stream_cxt.global_obj->MarkSyncControllerStopFlagAll();
 
         if (StreamTopConsumerAmI()) {
@@ -1812,5 +1848,10 @@ bool InitStreamObject(PlannedStmt* planStmt)
         return true;
     }
     return false;
+}
+
+void StreamMarkStop()
+{
+    u_sess->exec_cxt.executorStopFlag = true;
 }
 #endif

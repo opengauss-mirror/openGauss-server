@@ -168,7 +168,7 @@ TupleTableSlot* ExecWorkTableScan(WorkTableScanState* node)
              * producer logic in ExecutePlan to handle ends-up steps
              */
             if (controller->executor_stop) {
-                u_sess->exec_cxt.executor_stop_flag = true;
+                u_sess->exec_cxt.executorStopFlag = true;
                 return NULL;
             }
 

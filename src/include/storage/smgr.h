@@ -60,6 +60,7 @@ typedef struct SMgrRelationData {
     BlockNumber smgr_targblock;   /* current insertion target block */
     BlockNumber smgr_fsm_nblocks; /* last known size of fsm fork */
     BlockNumber smgr_vm_nblocks;  /* last known size of vm fork */
+    BlockNumber smgr_cached_nblocks; /* last known size of main fork*/
 
     int smgr_bcmarry_size;
     BlockNumber* smgr_bcm_nblocks; /* last known size of bcm fork */
@@ -102,10 +103,11 @@ extern void smgrdounlink(SMgrRelation reln, bool isRedo);
 extern void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo);
 extern void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
 extern void smgrprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
-extern bool smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
+extern void smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void smgrwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
 extern void smgrwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
 extern BlockNumber smgrnblocks(SMgrRelation reln, ForkNumber forknum);
+extern BlockNumber smgrnblocks_cached(SMgrRelation reln, ForkNumber forknum);
 extern void smgrtruncatefunc(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
 extern void smgrtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
 extern void smgrimmedsync(SMgrRelation reln, ForkNumber forknum);
@@ -127,7 +129,7 @@ extern bool mdexists(SMgrRelation reln, ForkNumber forknum);
 extern void mdunlink(const RelFileNodeBackend& rnode, ForkNumber forknum, bool isRedo);
 extern void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
 extern void mdprefetch(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
-extern bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
+extern void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
 extern void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
 extern void mdwriteback(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
 extern BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum);

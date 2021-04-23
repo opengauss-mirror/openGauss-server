@@ -556,8 +556,6 @@ bool isSingleMode = false;
 #define EXIT_STATUS_0(st) ((st) == 0)
 #define EXIT_STATUS_1(st) (1 == (st))
 
-extern THR_LOCAL bool executorStopFlag;
-
 /*
  * @hdfs
  * deleteHdfsUser() function is used to clean Hdfs User List and
@@ -3329,14 +3327,14 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                         clientIsCmAgent = true;
                         u_sess->libpq_cxt.IsConnFromCmAgent = true;
                         ereport(DEBUG5, (errmsg("cm_agent connected")));
+                    } else if (strcmp(valptr, "gs_clean") == 0) {
+                        clientIsGsClean = true;
+                        ereport(DEBUG5, (errmsg("gs_clean connected")));
 #ifdef ENABLE_MULTIPLE_NODES
                     } else if (strcmp(valptr, "dummystandby") == 0) {
                         /* mark remote as dummystandby */
                         t_thrd.postmaster_cxt.senderToDummyStandby = true;
                         ereport(DEBUG5, (errmsg("secondary standby connected")));
-                    } else if (strcmp(valptr, "gs_clean") == 0) {
-                        clientIsGsClean = true;
-                        ereport(DEBUG5, (errmsg("gs_clean connected")));
                     } else if (strcmp(valptr, "gs_roach") == 0) {
                         u_sess->proc_cxt.clientIsGsroach = true;
                         ereport(DEBUG5, (errmsg("gs_roach connected")));
@@ -4058,9 +4056,6 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (
 #ifdef ENABLE_MULTIPLE_NODES
             IS_PGXC_COORDINATOR &&
-#else
-            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
-             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
             g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
             signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGHUP);
@@ -4644,6 +4639,9 @@ static void ProcessDemoteRequest(void)
                     Assert(!dummyStandbyMode);
                     signal_child(g_instance.pid_cxt.BgWriterPID, SIGTERM);
                 }
+                if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+                    signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
+
                 /* and the walwriter too */
                 if (g_instance.pid_cxt.WalWriterPID != 0)
                     signal_child(g_instance.pid_cxt.WalWriterPID, SIGTERM);
@@ -4714,6 +4712,9 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.HeartbeatPID != 0)
                 signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
+
+            if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
+                signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
 
             if (g_instance.pid_cxt.WLMCollectPID != 0) {
                 WLMProcessThreadShutDown();
@@ -5564,9 +5565,6 @@ static void reaper(SIGNAL_ARGS)
         if (
 #ifdef ENABLE_MULTIPLE_NODES
             IS_PGXC_COORDINATOR &&
-#else
-            (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE ||
-             t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) &&
 #endif
             pid == g_instance.pid_cxt.TwoPhaseCleanerPID) {
             g_instance.pid_cxt.TwoPhaseCleanerPID = 0;
@@ -8812,6 +8810,13 @@ static bool IsAlreadyListen(const char* ip, int port)
             if ((0 == strcmp(ip, sock_ip)) && (port == ntohs(saddr.sin_port))) {
                 return true;
             }
+			
+			// check if all IP addresss of local host has been listened already, which using ”*“ for listen address 
+			if((AF_INET6 == saddr.sin_family ) && ((0 == strcmp("::", sock_ip)) && (port == ntohs(saddr.sin_port)))) {
+				return true;
+			} else if ((AF_INET == saddr.sin_family ) && ((0 == strcmp("0.0.0.0", sock_ip)) && (port == ntohs(saddr.sin_port)))) {
+				return true;
+			}
         }
     }
 
@@ -9510,16 +9515,16 @@ void check_backend_env(const char* input_env_value)
 
 void CleanSystemCaches(bool is_in_read_command)
 {
-    int64 totalsize = 0;
+    int64 usedSize = 0;
 
-    totalsize = ((AllocSet)u_sess->cache_mem_cxt)->totalSpace;
+    usedSize = ((AllocSet)u_sess->cache_mem_cxt)->totalSpace - ((AllocSet)u_sess->cache_mem_cxt)->freeSpace;
 
     /* Over threshold, need to clean cache. */
-    if (totalsize > g_instance.attr.attr_memory.local_syscache_threshold*1024) {
+    if (usedSize > g_instance.attr.attr_memory.local_syscache_threshold*1024) {
         ereport(DEBUG1,
             (errmsg("CleanSystemCaches due to "
                     "SystemCache(%ld) greater than (%d),in_read_command(%d).",
-                totalsize,
+                usedSize,
                  g_instance.attr.attr_memory.local_syscache_threshold*1024,
                 (is_in_read_command ? 1 : 0))));
 
@@ -9721,6 +9726,8 @@ void SetExtraThreadInfo(knl_thread_arg* arg)
         case THREADPOOL_STREAM: {
             t_thrd.threadpool_cxt.stream = (ThreadPoolStream*)arg->payload;
             t_thrd.threadpool_cxt.group  = t_thrd.threadpool_cxt.stream->GetGroup();
+            StreamProducer* proObj = (StreamProducer*)t_thrd.threadpool_cxt.stream->GetProducer();
+            SetStreamWorkerInfo(proObj);
             break;
         }
 #ifdef ENABLE_MULTIPLE_NODES

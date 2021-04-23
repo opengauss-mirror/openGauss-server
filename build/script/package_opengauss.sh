@@ -61,8 +61,10 @@ elif [ X"$kernel" == X"euleros" ]; then
     dist_version="EulerOS"
 elif [ X"$kernel" == X"kylin" ]; then
     dist_version="Kylin"
+elif [ X"$kernel" = X"ubuntu" ]; then
+    dist_version="Ubuntu"
 else
-    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64) platform."
+    echo "We only support openEuler(aarch64), EulerOS(aarch64), CentOS, Kylin(aarch64) and Ubuntu(x86) platform."
     echo "Kernel is $kernel"
     exit 1
 fi
@@ -108,7 +110,7 @@ function print_help()
 }
 
 #######################################################################
-##version 1.1.0
+##version 2.0.0
 #######################################################################
 function read_srv_version()
 {
@@ -310,6 +312,7 @@ function target_file_copy()
     copy_files_list "$1" $2
 
     cp ${SCRIPT_DIR}/version.cfg ${BUILD_DIR}/temp
+    cp -rf ${SCRIPT_DIR}/../../simpleInstall ${BUILD_DIR}/temp
     if [ $? -ne 0 ]; then
         die "copy ${SCRIPT_DIR}/version.cfg to ${BUILD_DIR}/temp failed"
     fi
