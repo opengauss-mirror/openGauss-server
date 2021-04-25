@@ -2834,6 +2834,22 @@ bar
       </varlistentry>
 
       <varlistentry>
+        <term><varname>HISTSIZE</varname></term>
+        <listitem>
+        <para>
+        The number of commands to store in the command history. The
+        default value is 500.
+        </para>
+        <note>
+        <para>
+        This feature was shamelessly plagiarized from
+        <application>Bash</application>.
+        </para>
+        </note>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>HOST</varname></term>
         <listitem>
         <para>
