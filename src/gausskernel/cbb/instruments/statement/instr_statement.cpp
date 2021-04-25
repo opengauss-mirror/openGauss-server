@@ -1579,13 +1579,13 @@ void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
 
     if (timeInfo != NULL) {
         for (int idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
-            ssctx->timeModel[idx] += timeInfo[idx];
+            (void)gs_atomic_add_64(&ssctx->timeModel[idx], timeInfo[idx]);
         }
     }
 
     if (netInfo != NULL) {
         for (int i = 0; i < TOTAL_NET_INFO_TYPES; i++) {
-            ssctx->networkInfo[i] += netInfo[i];
+            (void)pg_atomic_fetch_add_u64(&ssctx->networkInfo[i], netInfo[i]);
         }
     }
 }

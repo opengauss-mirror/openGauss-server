@@ -97,7 +97,6 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
 {
     exec_cxt->remotequery_list = NIL;
     exec_cxt->exec_result_checkqual_fail = false;
-    exec_cxt->executor_stop_flag = false;
     exec_cxt->under_stream_runtime = false;
     exec_cxt->under_auto_explain =  false;
     exec_cxt->extension_is_valid = false;
@@ -1254,7 +1253,7 @@ static void alloc_context_from_top(knl_session_context* sess, MemoryContext top_
         "SessionCacheMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+        (1024 * 1024)); /* set max block size to 1MB */
     sess->temp_mem_cxt = AllocSetContextCreate(top_mem_cxt,
         "SessionTempMemoryContext",
         ALLOCSET_DEFAULT_MINSIZE,

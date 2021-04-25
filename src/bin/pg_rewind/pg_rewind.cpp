@@ -305,14 +305,15 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         delete_all_file(bkup_file, true);
         PG_CHECKBUILD_AND_RETURN();
     }
+    if (replication_type == RT_WITH_DUMMY_STANDBY) {
+        /* Backup local data into pg_rewind_bak dir */
+        rv = backupFileMap(filemap);
+        PG_CHECKRETURN_AND_RETURN(rv);
+        pg_log(PG_PROGRESS, "backup target files success\n");
 
-    /* Backup local data into pg_rewind_bak dir */
-    rv = backupFileMap(filemap);
-    PG_CHECKRETURN_AND_RETURN(rv);
-    pg_log(PG_PROGRESS, "backup target files success\n");
-
-    MoveOldXlogFiles(checkSeg, movedXlogPath);
-    PG_CHECKBUILD_AND_RETURN();
+        MoveOldXlogFiles(checkSeg, movedXlogPath);
+        PG_CHECKBUILD_AND_RETURN();
+    }
     pg_log(PG_WARNING, _("starting background WAL receiver\n"));
     nRet = snprintf_s(xlog_start, MAXFNAMELEN, MAXFNAMELEN - 1, "%X/%X", (uint32)(chkptredo >> 32), (uint32)chkptredo);
     securec_check_ss_c(nRet, "", "");
@@ -460,8 +461,10 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     }
 
     /* Remove pg_rewind_bak dir */
-    delete_all_file(bkup_file, true);
-    PG_CHECKBUILD_AND_RETURN();
+    if (access(bkup_file, F_OK) == 0) {
+        delete_all_file(bkup_file, true);
+        PG_CHECKBUILD_AND_RETURN();
+    }
 
     if (datadir_target != NULL) {
         free(datadir_target);

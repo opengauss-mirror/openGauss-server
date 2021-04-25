@@ -251,7 +251,7 @@ static inline void recursive_union_sleep(long usec)
         recursive_union_sleep(CHECK_INTERVAL);                             \
                                                                            \
         /* Check if current thread is required to exit from top consumer*/ \
-        if (u_sess->exec_cxt.executor_stop_flag) {                         \
+        if (u_sess->exec_cxt.executorStopFlag) {                         \
             break;                                                         \
         }                                                                  \
     }

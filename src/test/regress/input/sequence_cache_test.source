@@ -1,0 +1,24 @@
+drop table if exists test_tab;
+drop sequence if exists test_seq;
+create sequence test_seq cache 2;
+create table test_tab(id int default nextVal('test_seq'), name varchar(20));
+create user test_user with password 'openGauss@123';
+grant all privileges to test_user;
+select last_value from test_seq;
+insert into test_tab(name) values('test1');
+select last_value from test_seq;
+insert into test_tab(name) values('test2'),('test3');
+select * from test_tab;
+select last_value from test_seq;
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test5');"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select * from test_tab;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "insert into test_tab(name) values('test7');"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select last_value from test_seq;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c  "select * from test_tab;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "Alter sequence test_seq cache 3;"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "insert into test_tab(name) values('test9');"
+\! @abs_bindir@/gsql -d regression -p @portstring@ -U test_user -W openGauss@123 -c "select last_value from test_seq;"
+drop user test_user cascade;
+drop table if exists test_tab;
+drop sequence if exists test_seq;

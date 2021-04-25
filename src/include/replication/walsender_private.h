@@ -120,6 +120,17 @@ typedef struct WalSnd {
     LogCtrlData log_ctrl;
     unsigned int archive_flag;
     Latch* arch_latch;
+
+    /* 
+     * lastCalTime is last time calculating catchupRate, and lastCalWrite
+     * is last calculating write lsn.
+     */
+    TimestampTz lastCalTime;
+    XLogRecPtr lastCalWrite;
+    /*
+     * Time needed for synchronous per xlog while catching up.
+     */
+    double catchupRate;
 } WalSnd;
 
 extern THR_LOCAL WalSnd* MyWalSnd;

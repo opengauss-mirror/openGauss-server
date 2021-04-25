@@ -1935,7 +1935,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
      * freeze_min_age to avoid having CLUSTER freeze tuples earlier than a
      * plain VACUUM would.
      */
-    vacuum_set_xid_limits(OldHeap, freeze_min_age, freeze_table_age, &OldestXmin, &FreezeXid, NULL);
+    vacuum_set_xid_limits(OldHeap, 0, freeze_table_age, &OldestXmin, &FreezeXid, NULL);
 
     /*
      * FreezeXid will become the table's new relfrozenxid, and that mustn't go
@@ -2113,7 +2113,7 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
     /*
      * compute xids used to freeze and weed out dead tuples.
      */
-    vacuum_set_xid_limits(oldHeap, freezeMinAge, freezeTableAge, &oldestXmin, &freezeXid, NULL);
+    vacuum_set_xid_limits(oldHeap, 0, freezeTableAge, &oldestXmin, &freezeXid, NULL);
 
     /*
      * FreezeXid will become the table's new relfrozenxid, and that mustn't go

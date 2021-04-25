@@ -51,8 +51,10 @@ elif [ X"$kernel" == X"openeuler" ]; then
     dist_version="OPENEULER"
 elif [ X"$kernel" == X"kylin" ]; then
     dist_version="KYLIN"
+elif [ X"$kernel" = X"ubuntu" ]; then
+    dist_version="UBUNTU"
 else
-    echo "Only support EulerOS, OPENEULER(aarch64), CentOS and Kylin(aarch64) platform."
+    echo "Only support EulerOS, OPENEULER(aarch64), CentOS, Kylin(aarch64) and Ubuntu(x86) platform."
     echo "Kernel is $kernel"
     exit 1
 fi
