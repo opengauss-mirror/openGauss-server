@@ -549,6 +549,7 @@ static const SchemaQuery Query_for_list_of_matviews = {
         "  UNION ALL SELECT 'constraints' "                                    \
         "  UNION ALL SELECT 'transaction' "                                    \
         "  UNION ALL SELECT 'session' "                                        \
+        "  UNION ALL SELECT 'local' "                                          \
         "  UNION ALL SELECT 'role' "                                           \
         "  UNION ALL SELECT 'tablespace' "                                     \
         "  UNION ALL SELECT 'all') ss "                                        \
@@ -633,6 +634,12 @@ static const SchemaQuery Query_for_list_of_matviews = {
 #define Query_for_list_of_available_extensions " SELECT pg_catalog.quote_ident(name) "           \
         "   FROM pg_catalog.pg_available_extensions " \
         "  WHERE substring(pg_catalog.quote_ident(name),1,%d)='%s' AND installed_version IS NULL"
+
+#define Query_for_list_of_available_extension_versions \
+" SELECT pg_catalog.quote_ident(version) "\
+"   FROM pg_catalog.pg_available_extension_versions "\
+"  WHERE (%d = pg_catalog.length('%s'))"\
+"    AND pg_catalog.quote_ident(name)='%s'"
 
 #define Query_for_list_of_prepared_statements " SELECT pg_catalog.quote_ident(name) "          \
         "   FROM pg_catalog.pg_prepared_statements " \
@@ -888,7 +895,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
 
     static const char* const sqlCommands[] = {
         "ABORT", "ALTER", "ANALYSE", "ANALYZE", "BEGIN", "CALL", "CHECKPOINT", "CLOSE", "CLUSTER",
-        "COMMENT", "COMMIT", "COPY", "CREATE", "DEALLOCATE", "DECLARE",
+        "COMMENT", "COMMIT", "COPY", "CREATE", "CURSOR", "DEALLOCATE", "DECLARE",
         "DELETE FROM", "DISCARD", "DO", "DROP", "END", "EXECUTE", "EXPLAIN", "FETCH",
         "GRANT", "INSERT", "LISTEN", "LOAD", "LOCK", "MOVE", "NOTIFY", "PREPARE",
         "REASSIGN", "REFRESH MATERIALIZED VIEW", "REINDEX", "RELEASE", "RESET", "REVOKE", "ROLLBACK",
@@ -1146,6 +1153,31 @@ static char** PsqlCompletion(const char *text, int start, int end)
         static const char* const listAlterExtension[] = {"ADD", "DROP", "UPDATE", "SET SCHEMA", NULL};
 
         COMPLETE_WITH_LIST(listAlterExtension);
+    }
+
+    /* ALTER EXTENSION <name> UPDATE */
+    else if (pg_strcasecmp(PREV4_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "EXTENSION") == 0 &&
+            pg_strcasecmp(PREV_WD, "UPDATE") == 0) {
+        COMPLETE_WITH_CONST("TO");
+    }
+
+    /* ALTER EXTENSION <name> UPDATE TO */
+    else if (pg_strcasecmp(PREV5_WD, "ALTER") == 0 && pg_strcasecmp(PREV4_WD, "EXTENSION") == 0 &&
+            pg_strcasecmp(PREV2_WD, "UPDATE") == 0 && pg_strcasecmp(PREV_WD, "TO") == 0) {
+        completion_info_charp = PREV3_WD;
+        COMPLETE_WITH_QUERY(Query_for_list_of_available_extension_versions);
+    }
+
+    /* ALTER EXTENSION <name> ADD/DROP */
+    else if (pg_strcasecmp(PREV4_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "EXTENSION") == 0 &&
+            (pg_strcasecmp(PREV_WD, "ADD") == 0 || pg_strcasecmp(PREV_WD, "DROP"))) {
+        static const char* const listAlterExtensionMemberObject[] = {
+            "AGGREGATE", "CAST", "COLLATION", "CONVERSION", "DOMAIN", "EVENT TRIGGER", "FOREIGN DATA WRAPPER",
+            "FOREIGN TABLE", "FUNCTION", "MATERIALIZED VIEW", "OPERATOR", "OPERATOR CLASS", "OPERATOR FAMILY ",
+            "PROCEDURAL LANGUAGE", "LANGUAGE", "SCHEMA", "SEQUENCE", "SERVER", "TABLE", "TEXT SEARCH CONFIGURATION",
+            "TEXT SEARCH DICTIONARY", "TEXT SEARCH PARSER", "TEXT SEARCH TEMPLATE", "TYPE", "VIEW", NULL};
+
+        COMPLETE_WITH_LIST(listAlterExtensionMemberObject);
     }
 
     /* ALTER FOREIGN */
@@ -1844,6 +1876,24 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_LIST(listCsv);
     }
 
+    /* CREATE CAST */
+    else if (pg_strcasecmp(PREV2_WD, "CREATE") == 0 && pg_strcasecmp(PREV_WD, "CAST") == 0) {
+        COMPLETE_WITH_CONST("(");
+    }
+    else if (pg_strcasecmp(PREV4_WD, "CREATE") == 0 && pg_strcasecmp(PREV3_WD, "CAST") == 0 &&
+            pg_strcasecmp(PREV2_WD, "(") == 0) {
+        COMPLETE_WITH_CONST("AS");
+    }
+    else if (pg_strcasecmp(PREV6_WD, "CREATE") == 0 && pg_strcasecmp(PREV5_WD, "CAST") == 0 &&
+            pg_strcasecmp(PREV4_WD, "(") == 0 && pg_strcasecmp(PREV2_WD, "AS") == 0) {
+        COMPLETE_WITH_CONST(")");
+    }
+    else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "CAST") == 0 &&
+            pg_strcasecmp(PREV_WD, "(") != 0) {
+        static const char* const listCreateCastOptions[] = {"WITH FUNCTION", "WITHOUT FUNCTION", "WITH INOUT", NULL};
+        COMPLETE_WITH_LIST(listCreateCastOptions);
+    }
+
     /* CREATE DATABASE */
     else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "DATABASE") == 0) {
         static const char* const listDatabase[] = {
@@ -1869,8 +1919,10 @@ static char** PsqlCompletion(const char *text, int start, int end)
     else if (pg_strcasecmp(PREV2_WD, "CREATE") == 0 && pg_strcasecmp(PREV_WD, "EXTENSION") == 0)
         COMPLETE_WITH_QUERY(Query_for_list_of_available_extensions);
     /* CREATE EXTENSION <name> */
-    else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "EXTENSION") == 0)
-        COMPLETE_WITH_CONST("WITH SCHEMA");
+    else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "EXTENSION") == 0) {
+        static const char* const listCreateExtension[] = {"WITH SCHEMA", "VERSION", "FROM", NULL};
+        COMPLETE_WITH_LIST(listCreateExtension);
+    }
 
     /* CREATE FOREIGN */
     else if (pg_strcasecmp(PREV2_WD, "CREATE") == 0 && pg_strcasecmp(PREV_WD, "FOREIGN") == 0) {
@@ -2341,8 +2393,8 @@ static char** PsqlCompletion(const char *text, int start, int end)
     }
 
     /* CURSOR */
-    else if (pg_strcasecmp(PREV_WD, "CURSOR") == 0) {
-        static const char* const listDeclareCursor[] = {"WITH HOLD", "WITHOUT HOLD", "FOR", NULL};
+    else if (pg_strcasecmp(PREV2_WD, "CURSOR") == 0) {
+        static const char* const listDeclareCursor[] = {"BINARY", "NO SCROLL","WITH HOLD", "WITHOUT HOLD", "FOR", NULL};
 
         COMPLETE_WITH_LIST(listDeclareCursor);
     }
@@ -2906,7 +2958,8 @@ static char** PsqlCompletion(const char *text, int start, int end)
     else if (pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "ROLE") == 0)
         COMPLETE_WITH_QUERY(Query_for_list_of_roles);
     /* Complete SET SESSION with AUTHORIZATION or CHARACTERISTICS... */
-    else if (pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "SESSION") == 0) {
+    else if (pg_strcasecmp(PREV2_WD, "SET") == 0 &&
+            (pg_strcasecmp(PREV_WD, "SESSION") == 0 || pg_strcasecmp(PREV_WD, "LOCAL") == 0)) {
         static const char* const myList[] = {"AUTHORIZATION", "CHARACTERISTICS AS TRANSACTION", NULL};
 
         COMPLETE_WITH_LIST(myList);
@@ -2921,7 +2974,8 @@ static char** PsqlCompletion(const char *text, int start, int end)
     /* Complete SET <var> with "TO" */
     else if (pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV4_WD, "UPDATE") != 0 &&
              pg_strcasecmp(PREV_WD, "TABLESPACE") != 0 && pg_strcasecmp(PREV_WD, "SCHEMA") != 0 &&
-             PREV_WD[strlen(PREV_WD) - 1] != ')' && pg_strcasecmp(PREV4_WD, "DOMAIN") != 0)
+             PREV_WD[strlen(PREV_WD) - 1] != ')' && pg_strcasecmp(PREV4_WD, "DOMAIN") != 0 &&
+             pg_strcasecmp(PREV_WD, "CONSTRAINTS") != 0)
         COMPLETE_WITH_CONST("TO");
     /* Suggest possible variable values */
     else if (pg_strcasecmp(PREV3_WD, "SET") == 0 && (pg_strcasecmp(PREV_WD, "TO") == 0 || strcmp(PREV_WD, "=") == 0)) {
