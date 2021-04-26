@@ -249,6 +249,45 @@ bool SensitiveStrCheck(const char* target)
     }
 }
 
+void setHistSize(const char* targetName, const char* targetValue, bool setToDefault)
+{
+#ifndef ENABLE_LLT
+    char* end = NULL;
+    long int result;
+#define MAXHISTSIZE 500
+#define DEFHISTSIZE 32
+    if (targetName == NULL) {
+        return;
+    }
+    if (strcmp(targetName, "HISTSIZE") == 0) {
+        if (!setToDefault) {
+            if (targetValue == NULL || strlen(targetValue) == 0) {
+                fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value can not be null\n");
+                return;
+            } else {
+                errno = 0;
+                result = strtol(targetValue, &end, 0);
+                if ((errno == ERANGE && (result == LONG_MAX || result == LONG_MIN)) || (errno != 0 && result == 0)) {
+                    fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value overflows\n");
+                    return;
+                }
+                if (*end || result < 0) {
+                    fprintf(stderr, "warning:\"HISTSIZE\" is not changed,because its value must be positive integer\n");
+                    return;
+                }
+            }
+            if (result > MAXHISTSIZE) {
+                fprintf(stderr, "warning:\"HISTSIZE\" is set to 500,because its value can not be greater than 500\n");
+                result = MAXHISTSIZE;
+            }
+        } else {
+            result = DEFHISTSIZE;
+        }
+        stifle_history((int)result);
+    }
+#endif
+}
+
 /*
  * Put any startup stuff related to input in here. It's good to maintain
  * abstraction this way.

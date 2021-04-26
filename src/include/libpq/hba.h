@@ -29,7 +29,7 @@ typedef enum UserAuth {
     uaCert,
     uaPeer,
     uaIAM,
-    uaSm3
+    uaSM3
 } UserAuth;
 
 typedef enum IPCompareMethod { ipCmpMask, ipCmpSameHost, ipCmpSameNet, ipCmpAll } IPCompareMethod;

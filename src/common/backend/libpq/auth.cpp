@@ -261,7 +261,7 @@ static void auth_failed(Port* port, int status)
                 break;
             case uaMD5:
             case uaSHA256:
-            case uaSm3:
+            case uaSM3:
             case uaIAM:
                 errstr = gettext_noop("Invalid username/password,login denied.");
                 /* We use it to indicate if a .pgpass password failed. */
@@ -619,7 +619,7 @@ void ClientAuthentication(Port* port)
             sendAuthRequest(port, AUTH_REQ_SHA256);
             status = recv_and_check_password_packet(port);
             break;
-        case uaSm3:
+        case uaSM3:
             /*Forbid remote connection with initial user.*/
             if (isRemoteInitialUser(port)) {
                 ereport(FATAL,
@@ -799,7 +799,7 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 /*
  * Send an authentication request packet to the frontend.
  */
-static bool GenerateFakeSalt(char* encrypt_string, Port* port)
+static bool GenerateFakeEncryptString(char* encrypt_string, Port* port)
 {
     int retval = 0;
     errno_t rc = EOK;
@@ -811,15 +811,11 @@ static bool GenerateFakeSalt(char* encrypt_string, Port* port)
     char fake_storedkey[STORED_KEY_LENGTH * 2 + 1] = {0};
     
     GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
-
-
     retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
     if (retval != 1) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                 errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
-
-        return false;
     }	
 
     retval = RAND_priv_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
@@ -827,7 +823,6 @@ static bool GenerateFakeSalt(char* encrypt_string, Port* port)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                 errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
-        return false;
     }
     sha_bytes_to_hex64((uint8*)fake_salt_bytes, fake_salt);
     sha_bytes_to_hex64((uint8*)fake_serverkey_bytes, fake_serverkey);
@@ -883,11 +878,11 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
              * username. We construct a fake encrypted password here and send it the client.
              */
 
-            if (!GenerateFakeSalt(encrypt_string , port)) {
+            if (!GenerateFakeEncryptString(encrypt_string , port)) {
 
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random storedkey")));
+                        errmsg("Failed to Generate Encrypt String")));
             }
 
             /* Construct the stored method. */
@@ -991,15 +986,15 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
         pq_sendbytes(&buf, salt, SALT_LENGTH * 2);
     } else if ((AUTH_REQ_SM3 != areq && SM3_PASSWORD == stored_method && AUTH_REQ_OK != areq) ||  
                (AUTH_REQ_SM3 == areq && SM3_PASSWORD !=stored_method )) {
-       if (!GenerateFakeSalt(encrypt_string , port)) {
+       if (!GenerateFakeEncryptString(encrypt_string , port)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                    errmsg("Failed to Generate the random storedkey")));
+                    errmsg("Failed to Generate Encrypt String")));
 
         }
         stored_method = SM3_PASSWORD;
         areq = AUTH_REQ_SM3;
-        port->hba->auth_method = uaSm3;
+        port->hba->auth_method = uaSM3;
         pq_sendint32(&buf, (int32)areq);
     } else {
         /* Be careful about areq == AUTH_REQ_OK condition. */

@@ -403,7 +403,7 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
             }
             break;
         }
-        case uaSm3: {
+        case uaSM3: {
             char stored_key[STORED_KEY_BYTES_LENGTH + 1] = {0};
             char stored_key_string[STORED_KEY_STRING_LENGTH + 1] = {0};
             char hmac_result[HMAC_LENGTH + 1] = {0};

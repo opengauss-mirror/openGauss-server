@@ -5493,7 +5493,8 @@ static void CalCatchupRate() {
         SpinLockRelease(&walsnd->mutex);
         return;
     }
-    if (TimestampDifferenceExceeds(walsnd->lastCalTime, now, CALCULATE_CATCHUP_RATE_TIME)) {
+    if (TimestampDifferenceExceeds(walsnd->lastCalTime, now, CALCULATE_CATCHUP_RATE_TIME) &&
+        XLByteLT(walsnd->lastCalWrite, write)) {
         double tempRate = (double)(now - walsnd->lastCalTime) /
                           (double)XLByteDifference(write, walsnd->lastCalWrite);
         walsnd->catchupRate = walsnd->catchupRate == 0 ? tempRate : (walsnd->catchupRate + tempRate) / 2;

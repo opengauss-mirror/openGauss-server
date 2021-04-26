@@ -1051,6 +1051,12 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                 success = false;
             }
 
+#ifdef USE_READLINE
+            if (useReadline && pset.cur_cmd_interactive) {
+                setHistSize(opt0, newval, false);
+            }
+#endif
+
             free(newval);
             newval = NULL;
             if (temp_opt != NULL)
@@ -1254,6 +1260,12 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
             psql_error("\\%s: error while setting variable\n", cmd);
             success = false;
         }
+
+#ifdef USE_READLINE
+        if (useReadline && pset.cur_cmd_interactive) {
+            setHistSize(opt, NULL, true);
+        }
+#endif
 
         if (NULL != opt) {
             free(opt);

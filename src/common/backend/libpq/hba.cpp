@@ -1065,7 +1065,7 @@ static HbaLine* parse_hba_line(List* line, int line_num)
         if (parsedline->conntype == ctLocal && u_sess->proc_cxt.IsInnerMaintenanceTools)
             parsedline->auth_method = uaTrust;
         else
-            parsedline->auth_method = uaSm3;
+            parsedline->auth_method = uaSM3;
     } else if (strcmp(token->string, "pam") == 0)
 #ifdef USE_PAM
         parsedline->auth_method = uaPAM;
@@ -1492,7 +1492,7 @@ static void check_hba(hbaPort* port)
                 password_info pass_info;
                 if (get_stored_password(port->user_name, &pass_info)) {
                     if (isSM3(pass_info.shadow_pass)) {
-                        hba->auth_method = uaSm3;
+                        hba->auth_method = uaSM3;
                     }			        
                 }
             }
