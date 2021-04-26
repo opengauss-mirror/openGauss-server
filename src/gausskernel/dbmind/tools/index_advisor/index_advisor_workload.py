@@ -22,11 +22,18 @@ import re
 import shlex
 import subprocess
 import time
+import select
+import logging
 
+ENABLE_MULTI_NODE = False
 SAMPLE_NUM = 5
 MAX_INDEX_COLUMN_NUM = 5
 MAX_INDEX_NUM = 10
+MAX_INDEX_STORAGE = None
+FULL_ARRANGEMENT_THRESHOLD = 20
 BASE_CMD = ''
+SHARP = '#'
+SCHEMA = None
 SQL_TYPE = ['select', 'delete', 'insert', 'update']
 SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',
                r'([^\\])"((")|(.*?([^\\])"))',
@@ -34,12 +41,33 @@ SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',
                r'([^a-zA-Z])-?\d+(\.\d+)?',
                r'(\'\d+\\.*?\')']
 
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+
+def read_input_from_pipe():
+    """
+    Read stdin input if there is "echo 'str1 str2' | python xx.py",
+     return the input string
+    """
+    input_str = ""
+    r_handle, _, _ = select.select([sys.stdin], [], [], 0)
+    if not r_handle:
+        return ""
+
+    for item in r_handle:
+        if item == sys.stdin:
+            input_str = sys.stdin.read().strip()
+    return input_str
+
 
 class PwdAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        if values is None:
-            values = getpass.getpass()
-        setattr(namespace, self.dest, values)
+        password = read_input_from_pipe()
+        if password:
+            logging.warning("Read password from pipe.")
+        else:
+            password = getpass.getpass("Password for database user:")
+        setattr(namespace, self.dest, password)
 
 
 class QueryItem:
@@ -55,17 +83,14 @@ class IndexItem:
         self.table = tbl
         self.columns = cols
         self.benefit = 0
+        self.storage = 0
 
-
-def get_file_size(filename):
-    if os.path.isfile(filename):
-        return os.stat(filename).st_size
-    else:
-        return -1
 
 
 def run_shell_cmd(target_sql_list):
     cmd = BASE_CMD + ' -c \"'
+    if SCHEMA:
+        cmd += 'set current_schema = %s; ' % SCHEMA
     for target_sql in target_sql_list:
         cmd += target_sql + ';'
     cmd += '\"'
@@ -73,8 +98,8 @@ def run_shell_cmd(target_sql_list):
     (stdout, stderr) = proc.communicate()
     stdout, stderr = stdout.decode(), stderr.decode()
     if 'gsql' in stderr or 'failed to connect' in stderr:
-        raise ConnectionError("An error occurred while connecting to the database.\n" + "Details: " + stderr)
-
+        raise ConnectionError("An error occurred while connecting to the database.\n"
+                              + "Details: " + stderr)
     return stdout
 
 
@@ -84,26 +109,34 @@ def run_shell_sql_cmd(sql_file):
     proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (stdout, stderr) = proc.communicate()
     stdout, stderr = stdout.decode(), stderr.decode()
-    if stderr:
-        print(stderr)
 
     return stdout
 
 
-def print_header_boundary(header):
-    term_width = int(os.get_terminal_size().columns / 2)
-    side_width = (term_width - len(header))
+def green(text):
+    return '\033[32m%s\033[0m' % text
 
-    print('#' * side_width + header + '#' * side_width)
+
+def print_header_boundary(header):
+    # Output a header first, which looks more beautiful.
+    try:
+        term_width = os.get_terminal_size().columns
+        # The width of each of the two sides of the terminal.
+        side_width = (term_width - len(header)) // 2
+    except (AttributeError, OSError):
+        side_width = 0
+    title = SHARP * side_width + header + SHARP * side_width
+    print(green(title))
 
 
 def load_workload(file_path):
     wd_dict = {}
     workload = []
 
-    with open(file_path, 'r') as f:
-        for sql in f.readlines():
-            sql = sql.strip('\n;')
+    with open(file_path, 'r') as file:
+        raw_text = ''.join(file.readlines())
+        sqls = raw_text.split(';')
+        for sql in sqls:
             if any(tp in sql.lower() for tp in SQL_TYPE):
                 if sql not in wd_dict.keys():
                     wd_dict[sql] = 1
@@ -133,7 +166,8 @@ def get_workload_template(workload):
             templates[sql_template]['samples'].append(item.statement)
         else:
             if random.randint(0, templates[sql_template]['cnt']) < SAMPLE_NUM:
-                templates[sql_template]['samples'][random.randint(0, SAMPLE_NUM - 1)] = item.statement
+                templates[sql_template]['samples'][random.randint(0, SAMPLE_NUM - 1)] = \
+                    item.statement
 
     return templates
 
@@ -144,9 +178,9 @@ def workload_compression(input_path):
     workload = load_workload(input_path)
     templates = get_workload_template(workload)
 
-    for key in templates.keys():
-        for sql in templates[key]['samples']:
-            compressed_workload.append(QueryItem(sql, templates[key]['cnt'] / SAMPLE_NUM))
+    for _, elem in templates.items():
+        for sql in elem['samples']:
+            compressed_workload.append(QueryItem(sql, elem['cnt'] / SAMPLE_NUM))
     return compressed_workload
 
 
@@ -168,22 +202,33 @@ def parse_explain_plan(plan):
     return cost_total
 
 
+def update_index_storage(res, index_config, hypo_index_num):
+    index_id = re.findall(r'<\d+>', res)[0].strip('<>')
+    index_size_sql = 'select * from hypopg_estimate_size(%s);' % index_id
+    res = run_shell_cmd([index_size_sql]).split('\n')
+    for item in res:
+        if re.match(r'\d+', item.strip()):
+            index_config[hypo_index_num].storage = float(item.strip()) / 1024 / 1024
+
+
 def estimate_workload_cost_file(workload, index_config=None):
     total_cost = 0
     sql_file = str(time.time()) + '.sql'
     found_plan = False
-
-    with open(sql_file, 'w') as wf:
+    hypo_index = False
+    with open(sql_file, 'w') as file:
         if index_config:
             # create hypo-indexes
-            wf.write('SET enable_hypo_index = on;\n')
+            if SCHEMA:
+                file.write('SET current_schema = %s;\n' % SCHEMA)
+            file.write('SET enable_hypo_index = on;\n')
             for index in index_config:
-                wf.write('SELECT hypopg_create_index(\'CREATE INDEX ON ' + index.table
-                         + '(' + index.columns + ')\');\n')
+                file.write("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)');\n" %
+                         (index.table, index.columns))
+        if ENABLE_MULTI_NODE:
+            file.write('set enable_fast_query_shipping = off;\n')
         for query in workload:
-            wf.write('EXPLAIN ' + query.statement + ';\n')
-        if index_config:
-            wf.write('SELECT hypopg_reset_index();')
+            file.write('EXPLAIN ' + query.statement + ';\n')
 
     result = run_shell_sql_cmd(sql_file).split('\n')
     if os.path.exists(sql_file):
@@ -191,11 +236,14 @@ def estimate_workload_cost_file(workload, index_config=None):
 
     # parse the result of explain plans
     i = 0
+    hypo_index_num = 0
     for line in result:
         if 'QUERY PLAN' in line:
             found_plan = True
         if 'ERROR' in line:
             workload.pop(i)
+        if 'hypopg_create_index' in line:
+            hypo_index = True
         if found_plan and '(cost=' in line:
             if i >= len(workload):
                 raise ValueError("The size of workload is not correct!")
@@ -205,19 +253,26 @@ def estimate_workload_cost_file(workload, index_config=None):
             total_cost += query_cost
             found_plan = False
             i += 1
+        if hypo_index:
+            if 'btree' in line and MAX_INDEX_STORAGE:
+                hypo_index = False
+                update_index_storage(line, index_config, hypo_index_num)
+                hypo_index_num += 1
     while i < len(workload):
         workload[i].cost_list.append(0)
         i += 1
+    if index_config:
+        run_shell_cmd(['SELECT hypopg_reset_index();'])
 
     return total_cost
 
 
 def make_single_advisor_sql(ori_sql):
     sql = 'select gs_index_advise(\''
-    for ch in ori_sql:
-        if ch == '\'':
+    for elem in ori_sql:
+        if elem == '\'':
             sql += '\''
-        sql += ch
+        sql += elem
     sql += '\');'
 
     return sql
@@ -225,7 +280,7 @@ def make_single_advisor_sql(ori_sql):
 
 def parse_single_advisor_result(res):
     table_index_dict = {}
-    if len(res) > 2 and res[0:2] == (' ('):
+    if len(res) > 2 and res[0:2] == ' (':
         items = res.split(',', 1)
         table = items[0][2:]
         indexes = re.split('[()]', items[1][:-1].strip('\"'))
@@ -263,10 +318,13 @@ def query_index_check(query, query_index_dict):
 
     # create hypo-indexes
     sql_list = ['SET enable_hypo_index = on;']
+    if ENABLE_MULTI_NODE:
+        sql_list.append('SET enable_fast_query_shipping = off;')
     for table in query_index_dict.keys():
         for columns in query_index_dict[table]:
             if columns != '':
-                sql_list.append('SELECT hypopg_create_index(\'CREATE INDEX ON ' + table + '(' + columns + ')\')')
+                sql_list.append("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)')" %
+                                (table, columns))
     sql_list.append('explain ' + query)
     sql_list.append('SELECT hypopg_reset_index()')
     result = run_shell_cmd(sql_list).split('\n')
@@ -289,7 +347,8 @@ def query_index_check(query, query_index_dict):
                             continue
                         if table not in valid_indexes.keys():
                             valid_indexes[table] = []
-                        valid_indexes[table].append(columns)
+                        if columns not in valid_indexes[table]:
+                            valid_indexes[table].append(columns)
 
     return valid_indexes
 
@@ -342,6 +401,8 @@ def generate_candidate_indexes(workload, iterate=False):
             if table not in index_dict.keys():
                 index_dict[table] = set()
             for columns in valid_index_dict[table]:
+                if len(workload[k].valid_index_list) >= FULL_ARRANGEMENT_THRESHOLD:
+                    break
                 workload[k].valid_index_list.append(IndexItem(table, columns))
                 if columns not in index_dict[table]:
                     print("table: ", table, "columns: ", columns)
@@ -358,10 +419,12 @@ def generate_candidate_indexes_file(workload):
 
     if len(workload) > 0:
         run_shell_cmd([workload[0].statement])
-    with open(sql_file, 'w') as wf:
+    with open(sql_file, 'w') as file:
+        if SCHEMA:
+            file.write('SET current_schema = %s;\n' % SCHEMA)
         for query in workload:
             if 'select' in query.statement.lower():
-                wf.write(make_single_advisor_sql(query.statement) + '\n')
+                file.write(make_single_advisor_sql(query.statement) + '\n')
 
     result = run_shell_sql_cmd(sql_file).split('\n')
     if os.path.exists(sql_file):
@@ -370,16 +433,16 @@ def generate_candidate_indexes_file(workload):
     for line in result:
         table_index_dict = parse_single_advisor_result(line.strip('\n'))
         # filter duplicate indexes
-        for table in table_index_dict.keys():
+        for table, columns in table_index_dict.items():
             if table not in index_dict.keys():
                 index_dict[table] = set()
-            for columns in table_index_dict[table]:
-                if columns == "":
+            for column in columns:
+                if column == "":
                     continue
-                if columns not in index_dict[table]:
-                    print("table: ", table, "columns: ", columns)
-                    index_dict[table].add(columns)
-                    candidate_indexes.append(IndexItem(table, columns))
+                if column not in index_dict[table]:
+                    print("table: ", table, "columns: ", column)
+                    index_dict[table].add(column)
+                    candidate_indexes.append(IndexItem(table, column))
 
     return candidate_indexes
 
@@ -454,6 +517,7 @@ def find_subsets_num(config, atomic_config_total):
             is_exist = False
             for index in config:
                 if atomic_index.table == index.table and atomic_index.columns == index.columns:
+                    index.storage = atomic_index.storage
                     is_exist = True
                     break
             if not is_exist:
@@ -481,24 +545,24 @@ def infer_workload_cost(workload, config, atomic_config_total):
     if len(atomic_subsets_num) == 0:
         raise ValueError("No atomic configs found for current config!")
 
-    for i in range(len(workload)):
-        if max(atomic_subsets_num) >= len(workload[i].cost_list):
+    for ind, obj in enumerate(workload):
+        if max(atomic_subsets_num) >= len(obj.cost_list):
             raise ValueError("Wrong atomic config for current query!")
         # compute the cost for selection
         min_cost = sys.maxsize
         for num in atomic_subsets_num:
-            if num < len(workload[i].cost_list) and workload[i].cost_list[num] < min_cost:
-                min_cost = workload[i].cost_list[num]
+            if num < len(obj.cost_list) and obj.cost_list[num] < min_cost:
+                min_cost = obj.cost_list[num]
         total_cost += min_cost
 
         # compute the cost for updating indexes
-        if 'insert' in workload[i].statement.lower() or 'delete' in workload[i].statement.lower():
+        if 'insert' in obj.statement.lower() or 'delete' in obj.statement.lower():
             for index in config:
                 index_num = get_index_num(index, atomic_config_total)
                 if index_num == -1:
                     raise ValueError("The index isn't found for current query!")
-                if 0 <= index_num < len(workload[i].cost_list):
-                    total_cost += workload[i].cost_list[index_num] - workload[i].cost_list[0]
+                if 0 <= index_num < len(workload[ind].cost_list):
+                    total_cost += obj.cost_list[index_num] - obj.cost_list[0]
 
     return total_cost
 
@@ -513,9 +577,9 @@ def simple_index_advisor(input_path):
 
     print_header_boundary(" Determine optimal indexes ")
     ori_total_cost = estimate_workload_cost_file(workload)
-    for i in range(len(candidate_indexes)):
-        new_total_cost = estimate_workload_cost_file(workload, [candidate_indexes[i]])
-        candidate_indexes[i].benefit = ori_total_cost - new_total_cost
+    for _, obj in enumerate(candidate_indexes):
+        new_total_cost = estimate_workload_cost_file(workload, [obj])
+        obj.benefit = ori_total_cost - new_total_cost
     candidate_indexes = sorted(candidate_indexes, key=lambda item: item.benefit, reverse=True)
 
     # filter out duplicate index
@@ -537,20 +601,28 @@ def simple_index_advisor(input_path):
             final_index_set[index.table].append(index)
 
     cnt = 0
-    for table in final_index_set.keys():
-        for index in final_index_set[table]:
+    index_current_storage = 0
+    for table, indexs in final_index_set.items():
+        for index in indexs:
+            if cnt == MAX_INDEX_NUM:
+                break
+            if MAX_INDEX_STORAGE and (index_current_storage + index.storage) > MAX_INDEX_STORAGE:
+                continue
+            index_current_storage += index.storage
             print("create index ind" + str(cnt) + " on " + table + "(" + index.columns + ");")
             cnt += 1
-        if cnt == MAX_INDEX_NUM:
-            break
+        else:
+            continue
+        break
 
 
 def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes):
     opt_config = []
     index_num_record = set()
     min_cost = sys.maxsize
-
-    while len(opt_config) < MAX_INDEX_NUM:
+    for i in range(len(candidate_indexes)):
+        if i == 1 and min_cost == sys.maxsize:
+            break
         cur_min_cost = sys.maxsize
         cur_index = None
         cur_index_num = -1
@@ -565,6 +637,11 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
                 cur_index = index
                 cur_index_num = k
         if cur_index and cur_min_cost < min_cost:
+            if MAX_INDEX_STORAGE and sum([obj.storage for obj in opt_config]) + \
+                    cur_index.storage > MAX_INDEX_STORAGE:
+                continue
+            if len(opt_config) == MAX_INDEX_NUM:
+                break
             min_cost = cur_min_cost
             opt_config.append(cur_index)
             index_num_record.add(cur_index_num)
@@ -593,11 +670,15 @@ def complex_index_advisor(input_path):
     opt_config = greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes)
 
     cnt = 0
+    index_current_storage = 0
     for index in opt_config:
-        print("create index ind" + str(cnt) + " on " + index.table + "(" + index.columns + ");")
-        cnt += 1
+        if MAX_INDEX_STORAGE and (index_current_storage + index.storage) > MAX_INDEX_STORAGE:
+            continue
         if cnt == MAX_INDEX_NUM:
             break
+        index_current_storage += index.storage
+        print("create index ind" + str(cnt) + " on " + index.table + "(" + index.columns + ");")
+        cnt += 1
 
 
 def main():
@@ -606,22 +687,38 @@ def main():
     arg_parser.add_argument("d", help="Name of database")
     arg_parser.add_argument("--h", help="Host for database")
     arg_parser.add_argument("-U", help="Username for database log-in")
-    arg_parser.add_argument("-W", help="Password for database user", action=PwdAction)
+    arg_parser.add_argument("-W", help="Password for database user", nargs="?", action=PwdAction)
     arg_parser.add_argument("f", help="File containing workload queries (One query per line)")
+    arg_parser.add_argument("--schema", help="Schema name for the current business data")
     arg_parser.add_argument("--max_index_num", help="Maximum number of suggested indexes", type=int)
-    arg_parser.add_argument("--multi_iter_mode", action='store_true', help="Whether to use multi-iteration algorithm",
-                            default=False)
+    arg_parser.add_argument("--max_index_storage",
+                            help="Maximum storage of suggested indexes/MB", type=int)
+    arg_parser.add_argument("--multi_iter_mode", action='store_true',
+                            help="Whether to use multi-iteration algorithm", default=False)
+    arg_parser.add_argument("--multi_node", action='store_true',
+                            help="Whether to support distributed scenarios", default=False)
     args = arg_parser.parse_args()
 
-    global MAX_INDEX_NUM, BASE_CMD
+    global MAX_INDEX_NUM, BASE_CMD, ENABLE_MULTI_NODE, MAX_INDEX_STORAGE, SCHEMA
+    if args.max_index_num is not None and args.max_index_num <= 0:
+        raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
+                                         args.max_index_num)
+    if args.max_index_storage is not None and args.max_index_storage <= 0:
+        raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
+                                         args.max_index_storage)
+    if args.schema:
+        SCHEMA = args.schema
     MAX_INDEX_NUM = args.max_index_num or 10
+    ENABLE_MULTI_NODE = args.multi_node
+    MAX_INDEX_STORAGE = args.max_index_storage
     BASE_CMD = 'gsql -p ' + args.p + ' -d ' + args.d
     if args.h:
         BASE_CMD += ' -h ' + args.h
     if args.U:
         BASE_CMD += ' -U ' + args.U
         if args.U != getpass.getuser() and not args.W:
-            raise ValueError('Enter the \'-W\' parameter for user ' + args.U + ' when executing the script.')
+            raise ValueError('Enter the \'-W\' parameter for user '
+                             + args.U + ' when executing the script.')
     if args.W:
         BASE_CMD += ' -W ' + args.W
 
