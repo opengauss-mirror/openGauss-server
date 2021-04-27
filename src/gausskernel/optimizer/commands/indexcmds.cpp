@@ -3191,11 +3191,17 @@ static bool CheckSimpleAttrsConsistency(HeapTuple tarTuple, const int16* currAtt
     Form_pg_index indexTuple = (Form_pg_index)GETSTRUCT(tarTuple);
     int tarKeyNum = GetIndexKeyAttsByTuple(NULL, tarTuple);
     bool ret = true;
+    AttrNumber* indkeyValues = NULL;
     int i;
     if (tarKeyNum == currKeyNum) {
-        qsort(indexTuple->indkey.values, currKeyNum, sizeof(int16), AttrComparator);
+        size_t indkeyValuesSize = sizeof(AttrNumber) * currKeyNum;
+        indkeyValues = (AttrNumber*)palloc0(indkeyValuesSize);
+        errno_t rc = memcpy_s(indkeyValues, indkeyValuesSize, indexTuple->indkey.values, indkeyValuesSize);
+        securec_check(rc, "\0", "\0");
+
+        qsort(indkeyValues, currKeyNum, sizeof(AttrNumber), AttrComparator);
         for (i = 0; i < currKeyNum; i++) {
-            if (indexTuple->indkey.values[i] != currAttrsArray[i]) {
+            if (indkeyValues[i] != currAttrsArray[i]) {
                 break;
             }
         }
@@ -3203,6 +3209,7 @@ static bool CheckSimpleAttrsConsistency(HeapTuple tarTuple, const int16* currAtt
             ret = false;
         }
     }
+    pfree_ext(indkeyValues);
     return ret;
 }
 

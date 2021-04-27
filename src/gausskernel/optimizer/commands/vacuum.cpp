@@ -943,7 +943,7 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
     *freezeLimit = limit;
 
     if (freezeTableLimit != NULL) {
-        int freezetable;
+        int64 freezetable;
 
         /*
          * Determine the table freeze age to use: as specified by the caller,

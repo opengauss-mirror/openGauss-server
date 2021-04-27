@@ -1573,8 +1573,8 @@ typedef struct VacuumStmt {
     int flags;            /* flags to distinguish partition or btree */
                           /* the values for this flags are in vacuum.h */
     Oid rely_oid;         /* for btree, it is the heap btree or it is InvalidOid */
-    int freeze_min_age;   /* min freeze age, or -1 to use default */
-    int freeze_table_age; /* age at which to scan whole table */
+    int64 freeze_min_age;   /* min freeze age, or -1 to use default */
+    int64 freeze_table_age; /* age at which to scan whole table */
     RangeVar* relation;   /* single table to process, or NULL */
     List* va_cols;        /* list of column names, or NIL for all */
 

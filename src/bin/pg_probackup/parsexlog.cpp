@@ -1054,8 +1054,9 @@ static int switch_next_wal_segment(XLogReaderData *reader_data, bool *isreturn)
 
     if (fileExists(reader_data->xlogpath, FIO_LOCAL_HOST))
     {
-        elog(LOG, "Thread [%d]: Opening WAL segment \"%s\"",
-            reader_data->thread_num, reader_data->xlogpath);
+        if (!current.from_replica)
+            elog(LOG, "Thread [%d]: Opening WAL segment \"%s\"",
+                reader_data->thread_num, reader_data->xlogpath);
 
         reader_data->xlogexists = true;
         reader_data->xlogfile = fio_open(reader_data->xlogpath,

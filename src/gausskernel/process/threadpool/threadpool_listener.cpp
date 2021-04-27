@@ -321,6 +321,8 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
                 break;
            }
         } else {
+            INSTR_TIME_SET_CURRENT(session->last_access_time);
+
             /* Add new session to the head so the connection request can be quickly processed. */
             if (session->status == KNL_SESS_UNINIT) {
                 m_readySessionList->AddHead(&session->elem);
@@ -343,4 +345,27 @@ void ThreadPoolListener::DelSessionFromEpoll(knl_session_context* session)
 void ThreadPoolListener::RemoveWorkerFromList(ThreadPoolWorker* worker)
 {
     m_freeWorkerList->Remove(&worker->m_elem);
+}
+
+bool ThreadPoolListener::GetSessIshang(instr_time* current_time,   uint64* sessionId)
+{
+    bool ishang = true;
+    m_readySessionList->GetLock();
+
+    Dlelem* elem = m_readySessionList->GetHead();
+    if (elem == NULL) {
+        m_readySessionList->ReleaseLock();
+        return false;
+    }
+    knl_session_context* head_sess = (knl_session_context *)(elem->dle_val);
+    if (INSTR_TIME_GET_MICROSEC(head_sess->last_access_time) == INSTR_TIME_GET_MICROSEC(*current_time) &&
+        head_sess->session_id == *sessionId) {
+        ishang = true;
+    } else {
+        *current_time = head_sess->last_access_time;
+        *sessionId = head_sess->session_id;
+        ishang = false;
+    }
+    m_readySessionList->ReleaseLock();
+    return ishang;
 }

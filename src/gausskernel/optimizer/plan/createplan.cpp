@@ -8386,6 +8386,12 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
             result_plan = (Plan*)sortPlan;
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (result_plan->dop == 1 && IsA(result_plan, Limit)) {
+        return result_plan;
+    }
+#endif
+
     /*
      * "stream" node make this plan as replicated, and LIMIT on this plan could produce random results
      * if it is evaluated on different DN nodes. so enforcing LIMIT results are produced on ONE random DN

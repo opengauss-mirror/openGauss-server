@@ -24,6 +24,7 @@
 #include "storage/cucache_mgr.h"
 #include "pgxc/pgxc.h"
 #include "postmaster/pagewriter.h"
+#include "utils/palloc.h"
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
@@ -126,7 +127,8 @@ void InitBufferPool(void)
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
 
         Size queue_mem_size = g_instance.ckpt_cxt_ctl->dirty_page_queue_size * sizeof(DirtyPageQueueSlot);
-        g_instance.ckpt_cxt_ctl->dirty_page_queue = (DirtyPageQueueSlot *)malloc(queue_mem_size);
+        g_instance.ckpt_cxt_ctl->dirty_page_queue =
+            (DirtyPageQueueSlot *)palloc_huge(CurrentMemoryContext, queue_mem_size);
         if (g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
             ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
         }

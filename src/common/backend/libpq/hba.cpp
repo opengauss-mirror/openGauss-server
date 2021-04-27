@@ -1384,20 +1384,12 @@ DIRECT_TRUST:
  */
 bool IsLoopBackAddr(Port* port)
 {
-    struct sockaddr* remote_addr = (struct sockaddr*)&(port->raddr.addr);
+    const SockAddr remote_addr = port->raddr;
     char remote_ip[IP_LEN] = {0};
-    char* result = NULL;
 
-    /* parse the remote ip address */
-    if (AF_INET6 == remote_addr->sa_family) {
-        result = inet_net_ntop(AF_INET6, &((struct sockaddr_in*)remote_addr)->sin_addr, IPV6_MAXLEN, remote_ip, IP_LEN);
-    } else if (AF_INET == remote_addr->sa_family) {
-        result = inet_net_ntop(AF_INET, &((struct sockaddr_in*)remote_addr)->sin_addr, IPV4_MAXLEN, remote_ip, IP_LEN);
-    }
+    (void)pg_getnameinfo_all(&remote_addr.addr, remote_addr.salen, remote_ip, sizeof(remote_ip), NULL, 0,
+                             NI_NUMERICHOST | NI_NUMERICSERV);
 
-    if (result == NULL) {
-        ereport(WARNING, (errmsg("inet_net_ntop remote failed, error: %d", EAFNOSUPPORT)));
-    }
     /* only the remote ip equal to 127.0.0.1 or ::1, return true */
     if (strlen(remote_ip) != 0 && (strcmp(remote_ip, LOOP_IP_STRING) == 0 || strcmp(remote_ip, LOOP_IPV6_IP) == 0)) {
         return true;
