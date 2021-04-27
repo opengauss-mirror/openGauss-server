@@ -405,8 +405,7 @@ class ModelInfo:
                 self.model_logger.warning(
                     'The params of model is not complete, and the params are as following: {}'.format(params_dict))
                 return False
-            else:
-                return True
+        return True
 
 
 
@@ -484,7 +483,7 @@ class RnnModel():
             self.model_info.feature_length = feature_length
             shutil.rmtree(self.model_info.model_path, ignore_errors=True)
             shutil.rmtree(os.path.realpath(
-                os.path.join(settings.PATH_LOG, self.model_info.model_name), ignore_errors=True))
+                os.path.join(settings.PATH_LOG, self.model_info.model_name)), ignore_errors=True)
         arr_startup = np.array(arr_startup, dtype=float).reshape((-1, 1))
         arr_total = np.array(arr_total, dtype=float).reshape((-1, 1))
         arr_row = np.array(arr_row, dtype=float).reshape((-1, 1))
