@@ -1021,10 +1021,6 @@ const char *hypo_explain_get_index_name_hook(Oid indexId)
  */
 Datum hypopg_display_index(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
-#endif
-
     ReturnSetInfo *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
     MemoryContext per_query_ctx;
     MemoryContext oldcontext;
@@ -1065,6 +1061,7 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
         Datum values[HYPO_INDEX_NB_COLS];
         bool nulls[HYPO_INDEX_NB_COLS];
         StringInfoData index_columns;
+        char *rel_name = NULL;
         int i = 0;
         int keyno;
 
@@ -1073,9 +1070,13 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
         rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
         securec_check(rc, "\0", "\0");
 
+        rel_name = get_rel_name(entry->relid);
+        if (rel_name == NULL) {
+            break;
+        }
         values[i++] = CStringGetTextDatum(entry->indexname);
         values[i++] = ObjectIdGetDatum(entry->oid);
-        values[i++] = CStringGetTextDatum(get_rel_name(entry->relid));
+        values[i++] = CStringGetTextDatum(rel_name);
 
         initStringInfo(&index_columns);
         appendStringInfo(&index_columns, "(");
@@ -1104,10 +1105,6 @@ Datum hypopg_display_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_create_index(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
-#endif
-
     char *sql = TextDatumGetCString(PG_GETARG_TEXT_PP(0));
     List *parsetree_list;
     ListCell *parsetree_item;
@@ -1183,10 +1180,6 @@ Datum hypopg_create_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_drop_index(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
-#endif
-
     Oid indexid = PG_GETARG_OID(0);
 
     PG_RETURN_BOOL(hypo_index_remove(indexid));
@@ -1197,10 +1190,6 @@ Datum hypopg_drop_index(PG_FUNCTION_ARGS)
  */
 Datum hypopg_estimate_size(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
-#endif
-
     BlockNumber pages;
     double tuples;
     Oid indexid = PG_GETARG_OID(0);
@@ -1228,10 +1217,6 @@ Datum hypopg_estimate_size(PG_FUNCTION_ARGS)
  */
 Datum hypopg_reset_index(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("not support for distributed scenarios yet.")));
-#endif
-
     hypo_index_reset();
     PG_RETURN_VOID();
 }
