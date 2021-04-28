@@ -6893,6 +6893,21 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 #endif
+		/* The I/O upper limit of batch flush dirty page every second */
+        {{"gpc_clean_timeout",
+            PGC_SIGHUP,
+            CLIENT_CONN,
+            gettext_noop("Set the maximum allowed duration of any unused global plancache."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_common.gpc_clean_timeout,
+            30 * 60,    /* 30min */
+            5 * 60,    /* 5min */
+            24 * 60 * 60,    /* 24h */
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
 

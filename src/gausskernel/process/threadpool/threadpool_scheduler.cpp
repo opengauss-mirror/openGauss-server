@@ -46,17 +46,31 @@
 #define MAX_HANG_TIME 100
 #define REDUCE_THREAD_TIME 100
 #define SHUTDOWN_THREAD_TIME 1000
-#define GPC_CLEAN_TIME 600
+#define GPC_CLEAN_TIME 300
 
 static void SchedulerSIGKILLHandler(SIGNAL_ARGS)
 {
     proc_exit(0);
 }
 
+static void SchedulerSIGHUPHandler(SIGNAL_ARGS)
+{
+    t_thrd.threadpool_cxt.scheduler->m_getSIGHUP = true;
+}
+
+static void reloadConfigFileIfNecessary()
+{
+    if (t_thrd.threadpool_cxt.scheduler->m_getSIGHUP) {
+        t_thrd.threadpool_cxt.scheduler->m_getSIGHUP = false;
+        ProcessConfigFile(PGC_SIGHUP);
+    }
+}
+
 void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 {
     int gpc_count = 0;
 
+    (void)gspqsignal(SIGHUP, SchedulerSIGHUPHandler);
     (void)gspqsignal(SIGKILL, SchedulerSIGKILLHandler);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -70,6 +84,7 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 
     while (true) {
         pg_usleep(SCHEDULER_TIME_UNIT);
+        reloadConfigFileIfNecessary();
         scheduler->DynamicAdjustThreadPool();
         scheduler->GPCScheduleCleaner(&gpc_count);
         g_threadPoolControler->GetSessionCtrl()->CheckSessionTimeout();
@@ -85,6 +100,7 @@ ThreadPoolScheduler::ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups)
     m_freeTestCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_freeStreamCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_gpcContext = NULL;
+    m_getSIGHUP = false;
 }
 
 ThreadPoolScheduler::~ThreadPoolScheduler()

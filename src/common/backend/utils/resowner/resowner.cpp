@@ -431,6 +431,8 @@ static void ResourceOwnerFreeOwner(ResourceOwner owner)
         pfree(owner->partmaprefs);
     if (owner->fakepartrefs)
         pfree(owner->fakepartrefs);
+    if (owner->globalMemContexts)
+        pfree(owner->globalMemContexts);
     pfree(owner);
 }
 
@@ -1700,7 +1702,7 @@ void ResourceOwnerEnlargeGMemContext(ResourceOwner owner)
     if (owner->globalMemContexts == NULL) {
         newmax = 2;
         owner->globalMemContexts = (MemoryContext*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), newmax * sizeof(MemoryContext));
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), newmax * sizeof(MemoryContext));
     } else {
         newmax = owner->maxGlobalMemContexts * 2;
         owner->globalMemContexts = (MemoryContext*)repalloc(owner->globalMemContexts, newmax * sizeof(MemoryContext));

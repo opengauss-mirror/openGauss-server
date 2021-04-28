@@ -46,6 +46,7 @@ public:
         return m_has_shutdown;
     }
     MemoryContext m_gpcContext;
+    bool m_getSIGHUP;
 private:
     void AdjustWorkerPool(int idx);
     void AdjustStreamPool(int idx);

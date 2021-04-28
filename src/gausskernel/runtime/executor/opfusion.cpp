@@ -55,51 +55,126 @@ extern void opfusion_executeEnd(PlannedStmt* plannedstmt, const char *queryStrin
 
 OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list)
 {
-    m_context = AllocSetContextCreate(
-        context, "OpfusionContext", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
-    m_tmpContext = AllocSetContextCreate(context,
-                                        "OpfusionTemporaryContext",
-                                        ALLOCSET_DEFAULT_MINSIZE,
-                                        ALLOCSET_DEFAULT_INITSIZE,
-                                        ALLOCSET_DEFAULT_MAXSIZE);
+    /* for shared plancache, we only need to init local variables */
+    if (psrc && psrc->opFusionObj && ((OpFusion*)(psrc->opFusionObj))->m_global->m_is_global) {
+        Assert (psrc->gpc.status.InShareTable());
+        m_global = ((OpFusion*)(psrc->opFusionObj))->m_global;
+        InitLocals(context);
+        m_global->m_psrc->gpc.status.AddRefcount();
+    } else {
+        InitGlobals(context, psrc, plantree_list);
+        InitLocals(context);
+    }
+}
+
+void OpFusion::InitGlobals(MemoryContext context, CachedPlanSource* psrc, List* plantree_list)
+{
+    bool is_shared = psrc && psrc->gpc.status.InShareTable();
+    bool needShardCxt = !is_shared && psrc && psrc->gpc.status.IsSharePlan();
+    MemoryContext cxt = NULL;
+    if (needShardCxt) {
+        cxt = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
+                                    "SharedOpfusionContext",
+                                    ALLOCSET_DEFAULT_MINSIZE,
+                                    ALLOCSET_DEFAULT_INITSIZE,
+                                    ALLOCSET_DEFAULT_MAXSIZE,
+                                    SHARED_CONTEXT);
+    } else {
+        cxt = AllocSetContextCreate(context,
+                                    "OpfusionContext",
+                                    ALLOCSET_DEFAULT_MINSIZE,
+                                    ALLOCSET_DEFAULT_INITSIZE,
+                                    ALLOCSET_DEFAULT_MAXSIZE,
+                                    STANDARD_CONTEXT);
+    }
+
+    MemoryContext old_context = MemoryContextSwitchTo(cxt);
+    m_global = (OpFusionGlobalVariable*)palloc0(sizeof(OpFusionGlobalVariable));
+    m_global->m_context = cxt;
 
     if (psrc == NULL && plantree_list != NULL) {
-        m_is_pbe_query = false;
-        m_psrc = NULL;
-        m_cacheplan = NULL;
-        m_planstmt = (PlannedStmt*)linitial(plantree_list);
+        m_global->m_is_pbe_query = false;
+        m_global->m_psrc = NULL;
+        m_global->m_cacheplan = NULL;
+        m_global->m_planstmt = (PlannedStmt*)linitial(plantree_list);
     } else if (plantree_list == NULL && psrc != NULL) {
-        m_is_pbe_query = true;
-        m_psrc = psrc;
-        m_cacheplan = psrc->cplan ? psrc->cplan : psrc->gplan;
-        m_cacheplan->refcount++;
-        m_planstmt = (PlannedStmt*)linitial(m_cacheplan->stmt_list);
+        Assert(psrc->gplan != NULL);
+        m_global->m_is_pbe_query = true;
+        m_global->m_psrc = psrc;
+        m_global->m_cacheplan = psrc->gplan;
+        m_global->m_cacheplan->refcount++;
+        (void)pg_atomic_add_fetch_u32((volatile uint32*)&m_global->m_cacheplan->global_refcount, 1);
+        m_global->m_planstmt = (PlannedStmt*)linitial(m_global->m_cacheplan->stmt_list);
     } else {
         Assert(0);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("Both cacheplan and planstmt are NULL")));
     }
+    m_global->m_reloid = 0;
+    m_global->m_attrno = NULL;
+    m_global->m_tupDesc = NULL;
+    m_global->m_paramNum = 0;
+    m_global->m_paramLoc = NULL;
+    m_global->m_is_global = false;
+    m_global->m_natts = 0;
+    m_global->m_table_type = TAM_HEAP;
+    m_global->m_is_bucket_rel = false;
+    (void)MemoryContextSwitchTo(old_context);
+}
 
-    m_outParams = NULL;
-    m_params = NULL;
-	m_isFirst = true;
-    m_rformats = NULL;
-    m_isCompleted = false;
-    m_position = 0;
-    m_isInsideRec = false;
-    m_tmpvals = NULL;
-	m_reloid = 0;
-    m_isnull = NULL;
-    m_attrno = NULL;
-    m_reslot = NULL;
-    m_receiver = NULL;
-	m_tupDesc = NULL;
-    m_values = NULL;
-    m_paramNum = 0;
-    m_paramLoc = NULL;
-	m_tmpisnull = NULL;
-    m_portalName = NULL;
-    m_snapshot = NULL;
-    m_scan = NULL;
+void OpFusion::InitLocals(MemoryContext context)
+{
+    m_local.m_tmpContext = AllocSetContextCreate(context,
+                                                 "OpfusionTemporaryContext",
+                                                 ALLOCSET_DEFAULT_MINSIZE,
+                                                 ALLOCSET_DEFAULT_INITSIZE,
+                                                 ALLOCSET_DEFAULT_MAXSIZE);
+    m_local.m_localContext = AllocSetContextCreate(context,
+                                                   "OpfusionLocalContext",
+                                                   ALLOCSET_DEFAULT_MINSIZE,
+                                                   ALLOCSET_DEFAULT_INITSIZE,
+                                                   ALLOCSET_DEFAULT_MAXSIZE);
+    m_local.m_outParams = NULL;
+    m_local.m_isFirst = true;
+    m_local.m_rformats = NULL;
+    m_local.m_isCompleted = false;
+    m_local.m_position = 0;
+    m_local.m_isInsideRec = false;
+    m_local.m_tmpvals = NULL;
+    m_local.m_isnull = NULL;
+    m_local.m_reslot = NULL;
+    m_local.m_receiver = NULL;
+    m_local.m_values = NULL;
+    m_local.m_tmpisnull = NULL;
+    m_local.m_portalName = NULL;
+    m_local.m_snapshot = NULL;
+    m_local.m_scan = NULL;
+    m_local.m_params = NULL;
+    m_local.m_resOwner = NULL;
+}
+
+/* clear local variables before global it */
+void OpFusion::SaveInGPC(OpFusion* obj)
+{
+    Assert(!obj->IsGlobal());
+    Assert(obj->m_global->m_context->is_shared);
+    /* only can change global flag here */
+    obj->m_global->m_is_global = true;
+    removeFusionFromHtab(obj->m_local.m_portalName);
+    MemoryContextDelete(obj->m_local.m_tmpContext);
+    MemoryContextDelete(obj->m_local.m_localContext);
+    int rc = -1;
+    rc = memset_s((void*)&obj->m_local, sizeof(OpFusionLocaleVariable), 0, sizeof(OpFusionLocaleVariable));
+    securec_check(rc, "\0", "\0");
+    MemoryContextSeal(obj->m_global->m_context);
+}
+
+void OpFusion::DropGlobalOpfusion(OpFusion* obj)
+{
+    Assert(obj->IsGlobal());
+    MemoryContextUnSeal(obj->m_global->m_context);
+    ReleaseCachedPlan(obj->m_global->m_cacheplan, false);
+    MemoryContextDelete(obj->m_global->m_context);
+    delete obj;
 }
 
 #ifdef ENABLE_MOT
@@ -126,10 +201,6 @@ FusionType OpFusion::GetMotFusionType(PlannedStmt* plannedStmt)
 FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List* plantree_list)
 {
     if (IsInitdb == true) {
-        return NONE_FUSION;
-    }
-
-    if (ENABLE_GPC) {
         return NONE_FUSION;
     }
 
@@ -203,7 +274,7 @@ void OpFusion::checkPermission()
     if (!(IS_PGXC_DATANODE && (IsConnFromCoord() || IsConnFromDatanode()))) {
         check = true;
     }
-    if (m_planstmt->in_compute_pool) {
+    if (m_global->m_planstmt->in_compute_pool) {
         check = false;
     }
 
@@ -212,16 +283,18 @@ void OpFusion::checkPermission()
     }
 
     if (check) {
-        (void)ExecCheckRTPerms(m_planstmt->rtable, true);
+        (void)ExecCheckRTPerms(m_global->m_planstmt->rtable, true);
     }
 }
 
 void OpFusion::executeInit()
 {
-    if (m_isFirst == true) {
+    if (m_local.m_isFirst == true) {
         checkPermission();
     }
-
+    if (m_local.m_resOwner == NULL) {
+        m_local.m_resOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    }
     if (IS_SINGLE_NODE && ENABLE_WORKLOAD_CONTROL) {
         u_sess->debug_query_id = generate_unique_id64(&gt_queryId);
         WLMCreateDNodeInfoOnDN(NULL);
@@ -229,17 +302,17 @@ void OpFusion::executeInit()
     }
 
     if (u_sess->attr.attr_common.XactReadOnly) {
-        ExecCheckXactReadOnly(m_planstmt);
+        ExecCheckXactReadOnly(m_global->m_planstmt);
     }
 
 #ifdef ENABLE_MOT
-    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
-            u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
+    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan &&
+            u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
 #endif
-        if (m_snapshot == NULL) {
-            m_snapshot = RegisterSnapshot(GetTransactionSnapshot());
+        if (m_local.m_snapshot == NULL) {
+            m_local.m_snapshot = RegisterSnapshot(GetTransactionSnapshot());
         }
-        PushActiveSnapshot(m_snapshot);
+        PushActiveSnapshot(m_local.m_snapshot);
 #ifdef ENABLE_MOT
     }
 #endif
@@ -252,19 +325,19 @@ void OpFusion::auditRecord()
         IsPostmasterEnvironment) {
         char* object_name = NULL;
 
-        switch (m_planstmt->commandType) {
+        switch (m_global->m_planstmt->commandType) {
             case CMD_INSERT:
             case CMD_DELETE:
             case CMD_UPDATE:
                 if (u_sess->attr.attr_security.Audit_DML != 0) {
-                    object_name = pgaudit_get_relation_name(m_planstmt->rtable);
-                    pgaudit_dml_table(object_name, m_is_pbe_query ? m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
+                    object_name = pgaudit_get_relation_name(m_global->m_planstmt->rtable);
+                    pgaudit_dml_table(object_name, m_global->m_is_pbe_query ? m_global->m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
                 }
                 break;
             case CMD_SELECT:
                 if (u_sess->attr.attr_security.Audit_DML_SELECT != 0) {
-                    object_name = pgaudit_get_relation_name(m_planstmt->rtable);
-                    pgaudit_dml_table_select(object_name, m_is_pbe_query ? m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
+                    object_name = pgaudit_get_relation_name(m_global->m_planstmt->rtable);
+                    pgaudit_dml_table_select(object_name, m_global->m_is_pbe_query ? m_global->m_psrc->query_string : t_thrd.postgres_cxt.debug_query_string);
                 }
                 break;
             /* Not support others */
@@ -274,13 +347,15 @@ void OpFusion::auditRecord()
     }
 }
 
-void OpFusion::executeEnd(const char* portal_name, bool* isQueryCompleted)
+bool OpFusion::executeEnd(const char* portal_name, bool* isQueryCompleted)
 {
 #ifdef ENABLE_MOT
-    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan &&
-          u_sess->exec_cxt.CurrentOpFusionObj->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
+    if (!(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan &&
+          u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_cacheplan->storageEngineType == SE_TYPE_MOT)) {
 #endif
-        opfusion_executeEnd(m_planstmt, ((m_psrc == NULL)?(NULL):(m_psrc->query_string)), GetActiveSnapshot());
+        opfusion_executeEnd(m_global->m_planstmt,
+                            ((m_global->m_psrc == NULL) ? NULL : (m_global->m_psrc->query_string)),
+                            GetActiveSnapshot());
 
         PopActiveSnapshot();
 #ifdef ENABLE_MOT
@@ -292,36 +367,41 @@ void OpFusion::executeEnd(const char* portal_name, bool* isQueryCompleted)
     MemoryContextCheck(TopMemoryContext, false);
 
     /* Check per-query memory context before Opfusion temp memory */
-    MemoryContextCheck(m_tmpContext, true);
+    MemoryContextCheck(m_local.m_tmpContext, true);
 #endif
+    bool has_completed = m_local.m_isCompleted;
+    m_local.m_isFirst = false;
 
     /* reset the context. */
-    if (m_isCompleted) {
-        UnregisterSnapshot(m_snapshot);
-        m_snapshot = NULL;
-        MemoryContextDeleteChildren(m_tmpContext);
+    if (m_local.m_isCompleted) {
+        UnregisterSnapshot(m_local.m_snapshot);
+        m_local.m_snapshot = NULL;
+        MemoryContextDeleteChildren(m_local.m_tmpContext);
         /* reset the context. */
-        MemoryContextReset(m_tmpContext);
+        MemoryContextReset(m_local.m_tmpContext);
         /* clear hash table */
         removeFusionFromHtab(portal_name);
-        m_outParams = NULL;
-        m_isCompleted = false;
+        m_local.m_outParams = NULL;
+        m_local.m_isCompleted = false;
         if (isQueryCompleted)
             *isQueryCompleted = true;
         u_sess->xact_cxt.pbe_execute_complete = true;
+        m_local.m_resOwner = NULL;
     } else {
         if (isQueryCompleted)
             *isQueryCompleted = false;
         u_sess->xact_cxt.pbe_execute_complete = false;
+        if (ENABLE_GPC)
+            Assert(locateFusion(m_local.m_portalName) != NULL);
     }
-    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
 
-    m_isFirst = false;
     auditRecord();
     if (u_sess->attr.attr_common.pgstat_track_activities && u_sess->attr.attr_common.pgstat_track_sql_count) {
-        report_qps_type(m_planstmt->commandType);
+        report_qps_type(m_global->m_planstmt->commandType);
         report_qps_type(CMD_DML);
     }
+
+    return has_completed;
 }
 
 bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted)
@@ -355,7 +435,13 @@ bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLe
                 u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
                 u_sess->exec_cxt.need_track_resource = old_status;
                 gstrace_exit(GS_TRC_ID_BypassExecutor);
-                u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
+                bool completed = false;
+                completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
+                if (completed && u_sess->exec_cxt.CurrentOpFusionObj->IsGlobal()) {
+                    Assert(ENABLE_GPC);
+                    tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
+                }
+                u_sess->exec_cxt.CurrentOpFusionObj = NULL;
                 UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
                 break;
             }
@@ -399,9 +485,9 @@ bool OpFusion::process(int op, StringInfo msg, char* completionTag, bool isTopLe
 
 void OpFusion::CopyFormats(int16* formats, int numRFormats)
 {
-    MemoryContext old_context = MemoryContextSwitchTo(m_tmpContext);
+    MemoryContext old_context = MemoryContextSwitchTo(m_local.m_tmpContext);
     int natts;
-    if (m_tupDesc == NULL) {
+    if (m_global->m_tupDesc == NULL) {
         Assert(0);
         return;
     }
@@ -410,8 +496,8 @@ void OpFusion::CopyFormats(int16* formats, int numRFormats)
             (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("r_formats can not be NULL when num of rformats is not 0")));
     }
-    natts = m_tupDesc->natts;
-    m_rformats = (int16*)palloc(natts * sizeof(int16));
+    natts = m_global->m_tupDesc->natts;
+    m_local.m_rformats = (int16*)palloc(natts * sizeof(int16));
     if (numRFormats > 1) {
         /* format specified for each column */
         if (numRFormats != natts)
@@ -419,18 +505,18 @@ void OpFusion::CopyFormats(int16* formats, int numRFormats)
                 (errcode(ERRCODE_PROTOCOL_VIOLATION),
                     errmsg("bind message has %d result formats but query has %d columns", numRFormats, natts)));
         errno_t errorno = EOK;
-        errorno = memcpy_s(m_rformats, natts * sizeof(int16), formats, natts * sizeof(int16));
+        errorno = memcpy_s(m_local.m_rformats, natts * sizeof(int16), formats, natts * sizeof(int16));
         securec_check(errorno, "\0", "\0");
     } else if (numRFormats > 0) {
         /* single format specified, use for all columns */
         int16 format1 = formats[0];
         for (int i = 0; i < natts; i++) {
-            m_rformats[i] = format1;
+            m_local.m_rformats[i] = format1;
         }
     } else {
         /* use default format for all columns */
         for (int i = 0; i < natts; i++) {
-            m_rformats[i] = 0;
+            m_local.m_rformats[i] = 0;
         }
     }
     MemoryContextSwitchTo(old_context);
@@ -438,7 +524,7 @@ void OpFusion::CopyFormats(int16* formats, int numRFormats)
 
 void OpFusion::useOuterParameter(ParamListInfo params)
 {
-    m_outParams = params;
+    m_local.m_outParams = params;
 }
 
 
@@ -452,45 +538,58 @@ void* OpFusion::FusionFactory(
     if (ftype > BYPASS_OK) {
         return NULL;
     }
-
+    void* opfusionObj = NULL;
+    MemoryContext objCxt = NULL;
+    if (psrc && psrc->gpc.status.InShareTable()) {
+        /* global plansource cannot new bypass on plansource context, must generate on local context */
+        objCxt = context;
+    } else {
+        /* for opfusion for plansource may global later, generate on global context */
+        if (psrc && psrc->gpc.status.IsSharePlan())
+            objCxt = GLOBAL_PLANCACHE_MEMCONTEXT;
+        else
+            objCxt = context;
+    }
     switch (ftype) {
         case SELECT_FUSION:
-            return New(context) SelectFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) SelectFusion(context, psrc, plantree_list, params);
+            break;
         case INSERT_FUSION:
-            return New(context) InsertFusion(context, psrc, plantree_list, params);
-
+            opfusionObj =  New(objCxt) InsertFusion(context, psrc, plantree_list, params);
+            break;
         case UPDATE_FUSION:
-            return New(context) UpdateFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) UpdateFusion(context, psrc, plantree_list, params);
+            break;
         case DELETE_FUSION:
-            return New(context) DeleteFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) DeleteFusion(context, psrc, plantree_list, params);
+            break;
         case SELECT_FOR_UPDATE_FUSION:
-            return New(context) SelectForUpdateFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) SelectForUpdateFusion(context, psrc, plantree_list, params);
+            break;
 #ifdef ENABLE_MOT
         case MOT_JIT_SELECT_FUSION:
-            return New(context) MotJitSelectFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) MotJitSelectFusion(context, psrc, plantree_list, params);
+            break;
         case MOT_JIT_MODIFY_FUSION:
-            return New(context) MotJitModifyFusion(context, psrc, plantree_list, params);
+            opfusionObj = New(objCxt) MotJitModifyFusion(context, psrc, plantree_list, params);
+            break;
 #endif
-
         case AGG_INDEX_FUSION:
-            return New(context) AggFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) AggFusion(context, psrc, plantree_list, params);
+            break;
         case SORT_INDEX_FUSION:
-            return New(context) SortFusion(context, psrc, plantree_list, params);
-
+            opfusionObj = New(objCxt) SortFusion(context, psrc, plantree_list, params);
+            break;
         case NONE_FUSION:
-            return NULL;
-
+            opfusionObj = NULL;
+            break;
         default:
-            return NULL;
+            opfusionObj = NULL;
+            break;
     }
-
-    return NULL;
+    if (opfusionObj != NULL && !((OpFusion*)opfusionObj)->m_global->m_is_global)
+        ((OpFusion*)opfusionObj)->m_global->m_type = ftype;
+    return opfusionObj;
 }
 
 void OpFusion::updatePreAllocParamter(StringInfo input_message)
@@ -502,7 +601,7 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
     int num_params;
     int num_rformats;
     int paramno;
-    ParamListInfo params = m_params;
+    ParamListInfo params = m_local.m_params;
     /* Get the parameter format codes */
     num_pformats = pq_getmsgint(input_message, 2);
     if (num_pformats > 0) {
@@ -516,13 +615,13 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
 
     /* Get the parameter value count */
     num_params = pq_getmsgint(input_message, 2);
-    if (unlikely(num_params != m_paramNum)) {
+    if (unlikely(num_params != m_global->m_paramNum)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT), errmsg("unmatched parameter number")));
     }
-    MemoryContextSwitchTo(m_tmpContext);
+    (void)MemoryContextSwitchTo(m_local.m_tmpContext);
     if (num_params > 0) {
         for (paramno = 0; paramno < num_params; paramno++) {
-            Oid ptype = m_psrc->param_types[paramno];
+            Oid ptype = m_global->m_psrc->param_types[paramno];
             int32 plength;
             Datum pval;
             bool isNull = false;
@@ -671,10 +770,11 @@ void OpFusion::updatePreAllocParamter(StringInfo input_message)
 
 void OpFusion::describe(StringInfo msg)
 {
-    if (m_psrc->resultDesc != NULL) {
+    if (m_global->m_psrc->resultDesc != NULL) {
         StringInfoData buf;
         initStringInfo(&buf);
-        SendRowDescriptionMessage(&buf, m_tupDesc, m_planstmt->planTree->targetlist, m_rformats);
+        SendRowDescriptionMessage(&buf, m_global->m_tupDesc,
+                                  m_global->m_planstmt->planTree->targetlist, m_local.m_rformats);
         pfree_ext(buf.data);
     } else {
         pq_putemptymessage('n');
@@ -683,8 +783,8 @@ void OpFusion::describe(StringInfo msg)
 
 void OpFusion::setPreparedDestReceiver(DestReceiver* preparedDest)
 {
-    m_receiver = preparedDest;
-    m_isInsideRec = false;
+    m_local.m_receiver = preparedDest;
+    m_local.m_isInsideRec = false;
 }
 
 /* evaluate datum from node, simple node types such as Const, Param, Var excludes FuncExpr and OpExpr */
@@ -698,7 +798,7 @@ Datum OpFusion::EvalSimpleArg(Node* arg, bool* is_null, Datum* values, bool* isN
             *is_null = isNulls[(((Var*)arg)->varattno - 1)];
             return values[(((Var*)arg)->varattno - 1)];
         case T_Param: {
-            ParamListInfo param_list = m_outParams != NULL ? m_outParams : m_params;
+            ParamListInfo param_list = m_local.m_outParams != NULL ? m_local.m_outParams : m_local.m_params;
 
             if (param_list->params[(((Param*)arg)->paramid - 1)].isnull) {
                 *is_null = true;
@@ -794,19 +894,23 @@ void OpFusion::tearDown(OpFusion* opfusion)
         return;
     }
 
-    removeFusionFromHtab(opfusion->m_portalName);
+    removeFusionFromHtab(opfusion->m_local.m_portalName);
 
-    if (opfusion->m_cacheplan != NULL) {
-        ReleaseCachedPlan(opfusion->m_cacheplan, false);
+    if (!opfusion->IsGlobal()) {
+        if (opfusion->m_global->m_cacheplan != NULL) {
+            ReleaseCachedPlan(opfusion->m_global->m_cacheplan, false);
+        }
+        if (opfusion->m_global->m_psrc != NULL) {
+            opfusion->m_global->m_psrc->is_checked_opfusion = false;
+            opfusion->m_global->m_psrc->opFusionObj = NULL;
+        }
+        MemoryContextDelete(opfusion->m_global->m_context);
+    } else {
+        opfusion->m_global->m_psrc->gpc.status.SubRefCount();
     }
 
-    if (opfusion->m_psrc != NULL) {
-        opfusion->m_psrc->is_checked_opfusion = false;
-        opfusion->m_psrc->opFusionObj = NULL;
-    }
-
-    MemoryContextDelete(opfusion->m_tmpContext);
-    MemoryContextDelete(opfusion->m_context);
+    MemoryContextDelete(opfusion->m_local.m_tmpContext);
+    MemoryContextDelete(opfusion->m_local.m_localContext);
 
     delete opfusion;
 
@@ -818,6 +922,7 @@ void OpFusion::clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc)
     if (opfusion == NULL)
         return;
     if (psrc->cplan != NULL) {
+        Assert (!psrc->gpc.status.InShareTable());
         tearDown(opfusion);
     }
 }
@@ -825,36 +930,45 @@ void OpFusion::clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc)
 /* just for select and select for */
 void OpFusion::setReceiver()
 {
-    if (m_isInsideRec) {
-        m_receiver = CreateDestReceiver((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
+    if (m_local.m_isInsideRec) {
+        m_local.m_receiver = CreateDestReceiver((CommandDest)t_thrd.postgres_cxt.whereToSendOutput);
     }
 
-    ((DR_printtup*)m_receiver)->sendDescrip = false;
-    if (m_receiver->mydest == DestRemote || m_receiver->mydest == DestRemoteExecute) {
-        ((DR_printtup*)m_receiver)->formats = m_rformats;
+    ((DR_printtup*)m_local.m_receiver)->sendDescrip = false;
+    if (m_local.m_receiver->mydest == DestRemote || m_local.m_receiver->mydest == DestRemoteExecute) {
+        ((DR_printtup*)m_local.m_receiver)->formats = m_local.m_rformats;
     }
-    (*m_receiver->rStartup)(m_receiver, CMD_SELECT, m_tupDesc);
-    if (!m_is_pbe_query) {
-        StringInfoData buf = ((DR_printtup*)m_receiver)->buf;
+    (*m_local.m_receiver->rStartup)(m_local.m_receiver, CMD_SELECT, m_global->m_tupDesc);
+    if (!m_global->m_is_pbe_query) {
+        StringInfoData buf = ((DR_printtup*)m_local.m_receiver)->buf;
         initStringInfo(&buf);
-        SendRowDescriptionMessage(&buf, m_tupDesc, m_planstmt->planTree->targetlist, m_rformats);
+        SendRowDescriptionMessage(&buf, m_global->m_tupDesc,
+                                  m_global->m_planstmt->planTree->targetlist, m_local.m_rformats);
     }
 }
 
 void OpFusion::initParams(ParamListInfo params)
 {
-    m_outParams = params;
-
+    m_local.m_outParams = params;
     /* init params */
-    if (m_is_pbe_query && params != NULL) {
-        m_paramNum = params->numParams;
-        m_params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + m_paramNum * sizeof(ParamExternData));
-        m_params->paramFetch = NULL;
-        m_params->paramFetchArg = NULL;
-        m_params->parserSetup = NULL;
-        m_params->parserSetupArg = NULL;
-        m_params->params_need_process = false;
-        m_params->numParams = m_paramNum;
+    if (m_global->m_is_pbe_query && !IsGlobal() && params != NULL) {
+        m_global->m_paramNum = params->numParams;
+        m_local.m_params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) +
+                                                 m_global->m_paramNum * sizeof(ParamExternData));
+        m_local.m_params->paramFetch = NULL;
+        m_local.m_params->paramFetchArg = NULL;
+        m_local.m_params->parserSetup = NULL;
+        m_local.m_params->parserSetupArg = NULL;
+        m_local.m_params->params_need_process = false;
+        m_local.m_params->numParams = m_global->m_paramNum;
+    } else if (IsGlobal() && m_global->m_paramNum > 0) {
+        m_local.m_params = (ParamListInfo)palloc(offsetof(ParamListInfoData, params) + m_global->m_paramNum * sizeof(ParamExternData));
+        m_local.m_params->paramFetch = NULL;
+        m_local.m_params->paramFetchArg = NULL;
+        m_local.m_params->parserSetup = NULL;
+        m_local.m_params->parserSetupArg = NULL;
+        m_local.m_params->params_need_process = false;
+        m_local.m_params->numParams = m_global->m_paramNum;
     }
 }
 
@@ -869,14 +983,14 @@ bool OpFusion::isQueryCompleted()
 
 void OpFusion::bindClearPosition()
 {
-    m_isCompleted = false;
-    m_position = 0;
-    m_outParams = NULL;
-    m_snapshot = NULL;
+    m_local.m_isCompleted = false;
+    m_local.m_position = 0;
+    m_local.m_outParams = NULL;
+    m_local.m_snapshot = NULL;
 
-    MemoryContextDeleteChildren(m_tmpContext);
+    MemoryContextDeleteChildren(m_local.m_tmpContext);
     /* reset the context. */
-    MemoryContextReset(m_tmpContext);
+    MemoryContextReset(m_local.m_tmpContext);
 }
 
 void OpFusion::initFusionHtab()
@@ -901,34 +1015,89 @@ void OpFusion::ClearInUnexpectSituation()
         hash_seq_init(&seq, u_sess->pcache_cxt.pn_fusion_htab);
         while ((entry = (pnFusionObj *)hash_seq_search(&seq)) != NULL) {
             OpFusion* curr = entry->opfusion;
-            if (curr->m_portalName == NULL || strcmp(curr->m_portalName, entry->portalname) == 0) {
+            if (curr->IsGlobal()) {
+                curr->clean();
+                OpFusion::tearDown(curr);
+            } else if (curr->m_local.m_portalName == NULL ||
+                       strcmp(curr->m_local.m_portalName, entry->portalname) == 0) {
                     curr->clean();
                     /* only opfusion has reference on cachedplan, no need any more */
-                    if (curr->m_cacheplan && curr->m_cacheplan->refcount == 1) {
-                        ReleaseCachedPlan(curr->m_cacheplan, false);
-                        MemoryContextDelete(curr->m_tmpContext);
-                        MemoryContextDelete(curr->m_context);
+                    if (curr->m_global->m_cacheplan && curr->m_global->m_cacheplan->refcount == 1) {
+                        ReleaseCachedPlan(curr->m_global->m_cacheplan, false);
+                        MemoryContextDelete(curr->m_local.m_tmpContext);
+                        MemoryContextDelete(curr->m_local.m_localContext);
+                        MemoryContextDelete(curr->m_global->m_context);
                         delete curr;
                     }
             }
-            hash_search(u_sess->pcache_cxt.pn_fusion_htab, entry->portalname, HASH_REMOVE, NULL);
+            removeFusionFromHtab(entry->portalname);
         }
     }
     u_sess->exec_cxt.CurrentOpFusionObj = NULL;
 }
 
+void OpFusion::ClearInSubUnexpectSituation(ResourceOwner owner)
+{
+    if (u_sess->pcache_cxt.pn_fusion_htab != NULL) {
+        HASH_SEQ_STATUS seq;
+        pnFusionObj *entry = NULL;
+        hash_seq_init(&seq, u_sess->pcache_cxt.pn_fusion_htab);
+        while ((entry = (pnFusionObj *)hash_seq_search(&seq)) != NULL) {
+            OpFusion* curr = entry->opfusion;
+            if (curr->m_local.m_resOwner != owner)
+                continue;
+            if (curr->IsGlobal()) {
+                curr->clean();
+                OpFusion::tearDown(curr);
+            } else if (curr->m_local.m_portalName == NULL ||
+                       strcmp(curr->m_local.m_portalName, entry->portalname) == 0) {
+                    curr->clean();
+                    /* only opfusion has reference on cachedplan, no need any more */
+                    if (curr->m_global->m_cacheplan && curr->m_global->m_cacheplan->refcount == 1) {
+                        ReleaseCachedPlan(curr->m_global->m_cacheplan, false);
+                        MemoryContextDelete(curr->m_local.m_tmpContext);
+                        MemoryContextDelete(curr->m_local.m_localContext);
+                        MemoryContextDelete(curr->m_global->m_context);
+                        delete curr;
+                    }
+            }
+            removeFusionFromHtab(entry->portalname);
+        }
+    }
+}
+
+
 void OpFusion::clean()
 {
-    UnregisterSnapshot(m_snapshot);
-    m_snapshot = NULL;
-    m_position = 0;
-    m_outParams = NULL;
-    if (m_scan)
-        m_scan->End(true);
-    m_isCompleted = false;
-    MemoryContextDeleteChildren(m_tmpContext);
-    /* reset the context. */
-    MemoryContextReset(m_tmpContext);
+    ResourceOwner oldResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    bool hasChangeResOwner = false;
+    if (m_local.m_resOwner && m_local.m_resOwner != oldResourceOwner) {
+        t_thrd.utils_cxt.CurrentResourceOwner = m_local.m_resOwner;
+        hasChangeResOwner = true;
+    }
+    PG_TRY();
+    {
+        UnregisterSnapshot(m_local.m_snapshot);
+        m_local.m_snapshot = NULL;
+        m_local.m_position = 0;
+        m_local.m_outParams = NULL;
+        if (m_local.m_scan)
+            m_local.m_scan->End(true);
+        m_local.m_isCompleted = false;
+        MemoryContextDeleteChildren(m_local.m_tmpContext);
+        /* reset the context. */
+        MemoryContextReset(m_local.m_tmpContext);
+    }
+    PG_CATCH();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = oldResourceOwner;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    t_thrd.utils_cxt.CurrentResourceOwner = oldResourceOwner;
+    if (hasChangeResOwner) {
+        m_local.m_resOwner = NULL;
+    }
 }
 
 void OpFusion::storeFusion(const char *portalname)
@@ -937,13 +1106,13 @@ void OpFusion::storeFusion(const char *portalname)
     if (!u_sess->pcache_cxt.pn_fusion_htab)
         initFusionHtab();
 
-    removeFusionFromHtab(m_portalName);
+    removeFusionFromHtab(m_local.m_portalName);
     entry = (pnFusionObj *)(hash_search(u_sess->pcache_cxt.pn_fusion_htab, portalname, HASH_ENTER, NULL));
     entry->opfusion = this;
 
-    MemoryContext old_cxt = MemoryContextSwitchTo(m_context);
-    pfree_ext(m_portalName);
-    m_portalName = pstrdup(portalname);
+    MemoryContext old_cxt = MemoryContextSwitchTo(m_local.m_localContext);
+    pfree_ext(m_local.m_portalName);
+    m_local.m_portalName = pstrdup(portalname);
     MemoryContextSwitchTo(old_cxt);
 }
 
@@ -980,62 +1149,73 @@ void OpFusion::refreshCurFusion(StringInfo msg)
     msg->cursor = oldCursor;
 }
 
-/* judge plan node is partiterator */
-Node* JudgePlanIsPartIterator(Plan* plan)
-{
-    Node* node = NULL;
-    if (IsA(plan, PartIterator)) {
-        node = (Node*)plan->lefttree;
-    } else {
-        node = (Node*)plan;
-    }
-    return node;
-}
 
 SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_tmpvals = NULL;
-    m_values = NULL;
-    m_isnull = NULL;
-    m_paramLoc = NULL;
-    m_tmpisnull = NULL;
-    m_attrno = NULL;
-    m_reloid = 0;
+    MemoryContext old_context = NULL;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((SelectFusion*)(psrc->opFusionObj))->m_c_global;
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
 
-    MemoryContext old_context = MemoryContextSwitchTo(m_context);
-    Node* node = NULL;
+void SelectFusion::InitGlobals()
+{
+    m_global->m_reloid = 0;
+    m_c_global = (SelectFusionGlobalVariable*)palloc0(sizeof(SelectFusionGlobalVariable));
 
-    m_limitCount = -1;
-    m_limitOffset = -1;
+    m_c_global->m_limitCount = -1;
+    m_c_global->m_limitOffset = -1;
 
     /* get limit num */
-    if (IsA(m_planstmt->planTree, Limit)) {
-        Limit* limit = (Limit*)m_planstmt->planTree;
-        node = JudgePlanIsPartIterator(m_planstmt->planTree->lefttree);
+    if (IsA(m_global->m_planstmt->planTree, Limit)) {
+        Limit* limit = (Limit*)m_global->m_planstmt->planTree;
         if (limit->limitCount != NULL && IsA(limit->limitCount, Const) && !((Const*)limit->limitCount)->constisnull) {
-            m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
+            m_c_global->m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
         }
         if (limit->limitOffset != NULL && IsA(limit->limitOffset, Const) &&
             !((Const*)limit->limitOffset)->constisnull) {
-            m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
+            m_c_global->m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
         }
-    } else {
-        node = JudgePlanIsPartIterator(m_planstmt->planTree);
     }
+}
 
+void SelectFusion::InitLocals(ParamListInfo params)
+{
+    m_local.m_tmpvals = NULL;
+    m_local.m_values = NULL;
+    m_local.m_isnull = NULL;
+    m_local.m_tmpisnull = NULL;
     initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion(node, m_planstmt, m_outParams);
-    m_tupDesc = m_scan->m_tupDesc;
-    m_reslot = NULL;
-    MemoryContextSwitchTo(old_context);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+    
+    Node* node = NULL;
+    if (IsA(m_global->m_planstmt->planTree, Limit)) {
+        node = JudgePlanIsPartIterator(m_global->m_planstmt->planTree->lefttree);
+    } else {
+        node = JudgePlanIsPartIterator(m_global->m_planstmt->planTree);
+    }
+    m_local.m_scan = ScanFusion::getScanFusion(node, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    if (!IsGlobal()) {
+        MemoryContext old_context = MemoryContextSwitchTo(m_global->m_context);
+        m_global->m_tupDesc = CreateTupleDescCopy(m_local.m_scan->m_tupDesc);
+        MemoryContextSwitchTo(old_context);
+    }
+    m_local.m_reslot = NULL;
 }
 
 bool SelectFusion::execute(long max_rows, char* completionTag)
 {
-    MemoryContext oldContext = MemoryContextSwitchTo(m_tmpContext);
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
 
     bool success = false;
     int64 start_row = 0;
@@ -1044,50 +1224,50 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     /*******************
      * step 1: prepare *
      *******************/
-    start_row = m_limitOffset >= 0 ? m_limitOffset : start_row;
-    get_rows = m_limitCount >= 0 ? (m_limitCount + start_row) : max_rows;
+    start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : start_row;
+    get_rows = m_c_global->m_limitCount >= 0 ? (m_c_global->m_limitCount + start_row) : max_rows;
 
     /**********************
      * step 2: begin scan *
      **********************/
-    if (m_position == 0) {
-        m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
-        m_scan->Init(max_rows);
+    if (m_local.m_position == 0) {
+        m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
+        m_local.m_scan->Init(max_rows);
     }
     setReceiver();
 
     unsigned long nprocessed = 0;
     /* put selected tuple into receiver */
     TupleTableSlot* offset_reslot = NULL;
-    while (nprocessed < (unsigned long)start_row && (offset_reslot = m_scan->getTupleSlot()) != NULL) {
+    while (nprocessed < (unsigned long)start_row && (offset_reslot = m_local.m_scan->getTupleSlot()) != NULL) {
         tpslot_free_heaptuple(offset_reslot);
         nprocessed++;
     }
-    while (nprocessed < (unsigned long)get_rows && (m_reslot = m_scan->getTupleSlot()) != NULL) {
+    while (nprocessed < (unsigned long)get_rows && (m_local.m_reslot = m_local.m_scan->getTupleSlot()) != NULL) {
         CHECK_FOR_INTERRUPTS();
         nprocessed++;
-        (*m_receiver->receiveSlot)(m_reslot, m_receiver);
-        tpslot_free_heaptuple(m_reslot);
+        (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
+        tpslot_free_heaptuple(m_local.m_reslot);
     }
-    if (!ScanDirectionIsNoMovement(*(m_scan->m_direction))) {
+    if (!ScanDirectionIsNoMovement(*(m_local.m_scan->m_direction))) {
         if (max_rows == 0 || nprocessed < (unsigned long)max_rows) {
-            m_isCompleted = true;
+            m_local.m_isCompleted = true;
         }
-        m_position += nprocessed;
+        m_local.m_position += nprocessed;
     } else {
-        m_isCompleted = true;
+        m_local.m_isCompleted = true;
     }
     success = true;
 
     /****************
      * step 3: done *
      ****************/
-    if (m_isInsideRec) {
-        (*m_receiver->rDestroy)(m_receiver);
+    if (m_local.m_isInsideRec) {
+        (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
-    m_scan->End(m_isCompleted);
-    if (m_isCompleted) {
-        m_position = 0;
+    m_local.m_scan->End(m_local.m_isCompleted);
+    if (m_local.m_isCompleted) {
+        m_local.m_position = 0;
     }
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
@@ -1099,10 +1279,10 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
 
 void SelectFusion::close()
 {
-    if (m_isCompleted == false) {
-        m_scan->End(true);
-        m_isCompleted = true;
-        m_position = 0;
+    if (m_local.m_isCompleted == false) {
+        m_local.m_scan->End(true);
+        m_local.m_isCompleted = true;
+        m_local.m_position = 0;
     }
 }
 
@@ -1111,28 +1291,40 @@ MotJitSelectFusion::MotJitSelectFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    MemoryContext oldContext = MemoryContextSwitchTo(m_context);
-    Node* node = NULL;
-    node = (Node*)m_planstmt->planTree;
-    initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-
-    if (m_planstmt->planTree->targetlist) {
-        m_tupDesc = ExecCleanTypeFromTL(m_planstmt->planTree->targetlist, false);
+    MemoryContext old_context = NULL;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
+void MotJitSelectFusion::InitGlobals()
+{
+    if (m_global->m_planstmt->planTree->targetlist) {
+        m_global->m_tupDesc = ExecCleanTypeFromTL(m_global->m_planstmt->planTree->targetlist, false);
     } else {
         ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                  errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                 errmsg("unrecognized node type: %d when executing executor node.", (int)nodeTag(node))));
+                 errmsg("unrecognized node type: %d when executing executor node.",
+                        (int)nodeTag(m_global->m_planstmt->planTree))));
     }
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
-    MemoryContextSwitchTo(oldContext);
 }
+void MotJitSelectFusion::InitLocals(ParamListInfo params)
+{
 
+    initParams(params);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+
+}
 bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 {
-    ParamListInfo params = (m_outParams != NULL) ? m_outParams : m_params;
+    ParamListInfo params = (m_local.m_outParams != NULL) ? m_local.m_outParams : m_local.m_params;
     bool success = false;
     setReceiver();
     unsigned long nprocessed = 0;
@@ -1141,7 +1333,8 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
     while (!finish) {
         uint64_t tpProcessed = 0;
         int scanEnded = 0;
-        rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
+        rc = JitExec::JitExecQuery(m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot,
+                                   &tpProcessed, &scanEnded);
         if (scanEnded || (tpProcessed == 0) || (rc != 0)) {
             // raise flag so that next round we will bail out (current tuple still must be reported to user)
             finish = true;
@@ -1149,8 +1342,8 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
         CHECK_FOR_INTERRUPTS();
         if (tpProcessed > 0) {
             nprocessed++;
-            (*m_receiver->receiveSlot)(m_reslot, m_receiver);
-            (void)ExecClearTuple(m_reslot);
+            (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
+            (void)ExecClearTuple(m_local.m_reslot);
             if ((max_rows != FETCH_ALL) && (nprocessed == (unsigned long)max_rows)) {
                 finish = true;
             }
@@ -1159,12 +1352,12 @@ bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 
     success = true;
 
-    if (m_isInsideRec) {
-        (*m_receiver->rDestroy)(m_receiver);
+    if (m_local.m_isInsideRec) {
+        (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
 
-    m_position = 0;
-    m_isCompleted = true;
+    m_local.m_position = 0;
+    m_local.m_isCompleted = true;
 
     errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
                                  "SELECT %lu", nprocessed);
@@ -1210,41 +1403,30 @@ void ExecDoneStepInFusion(Relation bucketRel, EState* estate)
     }
 }
 
-InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
-    : OpFusion(context, psrc, plantree_list)
+void InsertFusion::InitGlobals()
 {
-    m_tmpisnull = NULL;
-    m_tmpvals = NULL;
-    m_attrno = NULL;
+    m_c_global = (InsertFusionGlobalVariable*)palloc0(sizeof(InsertFusionGlobalVariable));
 
-    MemoryContext old_context = MemoryContextSwitchTo(m_context);
-    ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
-
-    m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
-    Relation rel = heap_open(m_reloid, AccessShareLock);
-
-    m_estate = CreateExecutorState();
-    m_estate->es_range_table = m_planstmt->rtable;
-
+    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     BaseResult* baseresult = (BaseResult*)linitial(node->plans);
     List* targetList = baseresult->plan.targetlist;
-    m_tupDesc = ExecTypeFromTL(targetList, false, false, rel->rd_tam_type);
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
-    m_values = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_curVarValue = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_curVarIsnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
 
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    m_global->m_natts = RelationGetDescr(rel)->natts;
+    m_global->m_table_type = rel->rd_tam_type;
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+    m_global->m_tupDesc = ExecTypeFromTL(targetList, false, false, m_global->m_table_type);
     heap_close(rel, AccessShareLock);
 
-    /* init param */
-    m_paramNum = 0;
-    m_paramLoc = (ParamLoc*)palloc0(RelationGetDescr(rel)->natts * sizeof(ParamLoc));
-    m_targetParamNum = 0;
-
-    m_targetFuncNum = 0;
-    m_targetFuncNodes = (FuncExprInfo*)palloc0(RelationGetDescr(rel)->natts * sizeof(FuncExprInfo));
+    /* init param func const */
+    m_global->m_paramNum = 0;
+    m_global->m_paramLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
+    m_c_global->m_targetParamNum = 0;
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
+    m_c_global->m_targetConstNum = 0;
+    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
 
     ListCell* lc = NULL;
     int i = 0;
@@ -1255,76 +1437,111 @@ InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* 
     foreach (lc, targetList) {
         res = (TargetEntry*)lfirst(lc);
         expr = res->expr;
-
         Assert(
             IsA(expr, Const) || IsA(expr, Param) || IsA(expr, FuncExpr) || IsA(expr, RelabelType) || IsA(expr, OpExpr));
         while (IsA(expr, RelabelType)) {
             expr = ((RelabelType*)expr)->arg;
         }
 
+        m_c_global->m_targetConstLoc[i].constLoc = -1;
         if (IsA(expr, FuncExpr)) {
             func = (FuncExpr*)expr;
-
-            m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
-            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
-            m_targetFuncNodes[m_targetFuncNum].funcid = func->funcid;
-            m_targetFuncNodes[m_targetFuncNum].args = func->args;
-            ++m_targetFuncNum;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = func->funcid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = func->args;
+            ++m_c_global->m_targetFuncNum;
         } else if (IsA(expr, Param)) {
             Param* param = (Param*)expr;
-            m_paramLoc[m_targetParamNum].paramId = param->paramid;
-            m_paramLoc[m_targetParamNum++].scanKeyIndx = i;
+            m_global->m_paramLoc[m_c_global->m_targetParamNum].paramId = param->paramid;
+            m_global->m_paramLoc[m_c_global->m_targetParamNum++].scanKeyIndx = i;
         } else if (IsA(expr, Const)) {
             Assert(IsA(expr, Const));
-            m_isnull[i] = ((Const*)expr)->constisnull;
-            m_values[i] = ((Const*)expr)->constvalue;
+            m_c_global->m_targetConstLoc[i].constValue = ((Const*)expr)->constvalue;
+            m_c_global->m_targetConstLoc[i].constIsNull = ((Const*)expr)->constisnull;
+            m_c_global->m_targetConstLoc[i].constLoc = i;
         } else if (IsA(expr, OpExpr)) {
             opexpr = (OpExpr*)expr;
-
-            m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
-            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
-            m_targetFuncNodes[m_targetFuncNum].funcid = opexpr->opfuncid;
-            m_targetFuncNodes[m_targetFuncNum].args = opexpr->args;
-            ++m_targetFuncNum;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = opexpr->opfuncid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = opexpr->args;
+            ++m_c_global->m_targetFuncNum;
         }
-
         i++;
     }
+    m_c_global->m_targetConstNum = i;
+
+}
+void InsertFusion::InitLocals(ParamListInfo params)
+{
+    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+    m_local.m_values = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
+    m_c_local.m_curVarValue = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
+    m_c_local.m_curVarIsnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
 
     initParams(params);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+}
 
-    m_receiver = NULL;
-    m_isInsideRec = true;
-
+InsertFusion::InsertFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
+    : OpFusion(context, psrc, plantree_list)
+{
+    MemoryContext old_context = NULL;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((InsertFusion*)(psrc->opFusionObj))->m_c_global;
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
     MemoryContextSwitchTo(old_context);
 }
 
 void InsertFusion::refreshParameterIfNecessary()
 {
-    ParamListInfo parms = m_outParams != NULL ? m_outParams : m_params;
+    ParamListInfo parms = m_local.m_outParams != NULL ? m_local.m_outParams : m_local.m_params;
     bool func_isnull = false;
     /* save cur var value */
-    for (int i = 0; i < m_tupDesc->natts; i++) {
-        m_curVarValue[i] = m_values[i];
-        m_curVarIsnull[i] = m_isnull[i];
+    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+        m_c_local.m_curVarValue[i] = m_local.m_values[i];
+        m_c_local.m_curVarIsnull[i] = m_local.m_isnull[i];
     }
-
+    /* refresh const value */
+    for (int i = 0; i < m_c_global->m_targetConstNum; i++) {
+        if (m_c_global->m_targetConstLoc[i].constLoc >= 0) {
+            m_local.m_values[m_c_global->m_targetConstLoc[i].constLoc] = m_c_global->m_targetConstLoc[i].constValue;
+            m_local.m_isnull[m_c_global->m_targetConstLoc[i].constLoc] = m_c_global->m_targetConstLoc[i].constIsNull;
+        }
+    }
     /* calculate func result */
-    for (int i = 0; i < m_targetFuncNum; ++i) {
-        ELOG_FIELD_NAME_START(m_targetFuncNodes[i].resname);
-        if (m_targetFuncNodes[i].funcid != InvalidOid) {
+    for (int i = 0; i < m_c_global->m_targetFuncNum; ++i) {
+        ELOG_FIELD_NAME_START(m_c_global->m_targetFuncNodes[i].resname);
+        if (m_c_global->m_targetFuncNodes[i].funcid != InvalidOid) {
             func_isnull = false;
-            m_values[m_targetFuncNodes[i].resno - 1] = CalFuncNodeVal(
-                m_targetFuncNodes[i].funcid, m_targetFuncNodes[i].args, &func_isnull, m_curVarValue, m_curVarIsnull);
-            m_isnull[m_targetFuncNodes[i].resno - 1] = func_isnull;
+            m_local.m_values[m_c_global->m_targetFuncNodes[i].resno - 1] =
+                CalFuncNodeVal(m_c_global->m_targetFuncNodes[i].funcid,
+                               m_c_global->m_targetFuncNodes[i].args,
+                               &func_isnull,
+                               m_c_local.m_curVarValue,
+                               m_c_local.m_curVarIsnull);
+            m_local.m_isnull[m_c_global->m_targetFuncNodes[i].resno - 1] = func_isnull;
         }
         ELOG_FIELD_NAME_END;
     }
     /* mapping params */
-    if (m_targetParamNum > 0) {
-        for (int i = 0; i < m_targetParamNum; i++) {
-            m_values[m_paramLoc[i].scanKeyIndx] = parms->params[m_paramLoc[i].paramId - 1].value;
-            m_isnull[m_paramLoc[i].scanKeyIndx] = parms->params[m_paramLoc[i].paramId - 1].isnull;
+    if (m_c_global->m_targetParamNum > 0) {
+        for (int i = 0; i < m_c_global->m_targetParamNum; i++) {
+            m_local.m_values[m_global->m_paramLoc[i].scanKeyIndx] =
+                parms->params[m_global->m_paramLoc[i].paramId - 1].value;
+            m_local.m_isnull[m_global->m_paramLoc[i].scanKeyIndx] =
+                parms->params[m_global->m_paramLoc[i].paramId - 1].isnull;
         }
     }
 }
@@ -1339,13 +1556,13 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /*******************
      * step 1: prepare *
      *******************/
-    Relation rel = heap_open(m_reloid, RowExclusiveLock);
+    Relation rel = heap_open(m_global->m_reloid, RowExclusiveLock);
     Relation bucket_rel = NULL;
     int2 bucketid = InvalidBktId;
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
-    m_estate->es_result_relation_info = result_rel_info;
+    m_c_local.m_estate->es_result_relation_info = result_rel_info;
 
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
@@ -1359,24 +1576,25 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /************************
      * step 2: begin insert *
      ************************/
-    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_values, m_isnull, HEAP_TUPLE);
+    HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values,
+                                                         m_local.m_isnull, HEAP_TUPLE);
     Assert(tuple != NULL);
     if (RELATION_IS_PARTITIONED(rel)) {
-        m_estate->esfRelations = NULL;
+        m_c_local.m_estate->esfRelations = NULL;
         partOid = heapTupleGetPartitionId(rel, tuple);
         part = partitionOpen(rel, partOid, RowExclusiveLock);
         partRel = partitionGetRelation(rel, part);
     }
 
-    if (m_is_bucket_rel) {
+    if (m_global->m_is_bucket_rel) {
         bucketid = computeTupleBucketId(result_rel_info->ri_RelationDesc, tuple);
         bucket_rel = InitBucketRelation(bucketid, rel, part);
     }
 
-    (void)ExecStoreTuple(tuple, m_reslot, InvalidBuffer, false);
+    (void)ExecStoreTuple(tuple, m_local.m_reslot, InvalidBuffer, false);
 
     if (rel->rd_att->constr) {
-        ExecConstraints(result_rel_info, m_reslot, m_estate);
+        ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
     }
     Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
     (void)tableam_tuple_insert(bucket_rel == NULL ? destRel : bucket_rel, tuple, mycid, 0, NULL);
@@ -1393,9 +1611,9 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     /* insert index entries for tuple */
     List* recheck_indexes = NIL;
     if (result_rel_info->ri_NumIndices > 0) {
-        recheck_indexes = ExecInsertIndexTuples(m_reslot,
+        recheck_indexes = ExecInsertIndexTuples(m_local.m_reslot,
                                                 &(tuple->t_self),
-                                                m_estate,
+                                                m_c_local.m_estate,
                                                 RELATION_IS_PARTITIONED(rel) ? partRel : NULL,
                                                 RELATION_IS_PARTITIONED(rel) ? part : NULL,
                                                 bucketid, NULL);
@@ -1404,9 +1622,9 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
     tableam_tops_free_tuple(tuple);
 
-    (void)ExecClearTuple(m_reslot);
+    (void)ExecClearTuple(m_local.m_reslot);
     success = true;
-    m_isCompleted = true;
+    m_local.m_isCompleted = true;
     /****************
      * step 3: done *
      ****************/
@@ -1414,7 +1632,7 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
     heap_close(rel, RowExclusiveLock);
 
-    ExecDoneStepInFusion(bucket_rel, m_estate);
+    ExecDoneStepInFusion(bucket_rel, m_c_local.m_estate);
 
     if (RELATION_IS_PARTITIONED(rel)) {
         partitionClose(rel, part, RowExclusiveLock);
@@ -1432,27 +1650,40 @@ MotJitModifyFusion::MotJitModifyFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    MemoryContext oldContext = MemoryContextSwitchTo(m_context);
-    ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
-    m_cmdType = node->operation;
+    MemoryContext old_context = NULL;
 
-    m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
 
-    m_estate = CreateExecutorState();
-    m_estate->es_range_table = m_planstmt->rtable;
-
+void MotJitModifyFusion::InitGlobals()
+{
+    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     BaseResult* baseresult = (BaseResult*)linitial(node->plans);
     List* targetList = baseresult->plan.targetlist;
-    m_tupDesc = ExecTypeFromTL(targetList, false);
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
+    m_global->m_tupDesc = ExecTypeFromTL(targetList, false);
+    m_global->m_paramNum = 0;
+}
+
+void MotJitModifyFusion::InitLocals(ParamListInfo params)
+{
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    m_c_local.m_cmdType = node->operation;
+    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
 
     /* init param */
-    m_paramNum = 0;
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
     initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-
-    MemoryContextSwitchTo(oldContext);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
 }
 
 bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
@@ -1460,13 +1691,14 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
     bool success = false;
     uint64_t tpProcessed = 0;
     int scanEnded = 0;
-    ParamListInfo params = (m_outParams != NULL) ? m_outParams : m_params;
-    int rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
+    ParamListInfo params = (m_local.m_outParams != NULL) ? m_local.m_outParams : m_local.m_params;
+    int rc = JitExec::JitExecQuery(m_global->m_cacheplan->mot_jit_context, params, m_local.m_reslot,
+                                   &tpProcessed, &scanEnded);
     if (rc == 0) {
-        (void)ExecClearTuple(m_reslot);
+        (void)ExecClearTuple(m_local.m_reslot);
         success = true;
         errno_t ret = EOK;
-        switch (m_cmdType)
+        switch (m_c_local.m_cmdType)
         {
             case CMD_INSERT:
                 ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
@@ -1488,7 +1720,7 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
         }
     }
 
-    m_isCompleted = true;
+    m_local.m_isCompleted = true;
 
     return success;
 }
@@ -1498,14 +1730,14 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
 {
     HeapTuple new_tuple;
 
-    tableam_tops_deform_tuple(tuple, m_tupDesc, m_values, m_isnull);
+    tableam_tops_deform_tuple(tuple, m_global->m_tupDesc, m_local.m_values, m_local.m_isnull);
 
     refreshTargetParameterIfNecessary();
 
     /*
      * create a new tuple from the values and isnull arrays
      */
-    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_values, m_isnull, HEAP_TUPLE);
+    new_tuple = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_values, m_local.m_isnull, HEAP_TUPLE);
 
     /*
      * copy the identification info of the old tuple: t_ctid, t_self, and OID
@@ -1520,7 +1752,7 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
     new_tuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
 
-    Assert(m_tupDesc->tdhasoid == false);
+    Assert(m_global->m_tupDesc->tdhasoid == false);
 
     return new_tuple;
 }
@@ -1528,65 +1760,66 @@ HeapTuple UpdateFusion::heapModifyTuple(HeapTuple tuple)
 UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_attrno = NULL;
-    m_paramLoc = NULL;
-    m_tmpisnull = NULL;
-    m_tmpvals = NULL;
+    MemoryContext old_context = NULL;
 
-    MemoryContext old_context = MemoryContextSwitchTo(m_context);
-    ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((UpdateFusion*)(psrc->opFusionObj))->m_c_global;
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
+
+void UpdateFusion::InitGlobals()
+{
+    m_c_global = (UpdateFusionGlobalVariable*)palloc0(sizeof(UpdateFusionGlobalVariable));
+
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
     Plan *updatePlan = (Plan *)linitial(node->plans);
     IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(updatePlan);
-
-    m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
-    Relation rel = heap_open(m_reloid, AccessShareLock);
-
-    m_estate = CreateExecutorState();
-    m_estate->es_range_table = m_planstmt->rtable;
-
-    m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
-    m_values = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
-
+    
+    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+    m_global->m_natts = RelationGetDescr(rel)->natts;
+    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
     heap_close(rel, AccessShareLock);
 
-    if (m_is_bucket_rel) {
-        // ctid + tablebucketid
-        Assert(RelationGetDescr(rel)->natts + 2 == list_length(indexscan->scan.plan.targetlist));
+#ifdef USE_ASSERT_CHECKING
+    if (m_global->m_is_bucket_rel) {
+        /* ctid + tablebucketid */
+        Assert(m_global->m_natts + 2 == list_length(indexscan->scan.plan.targetlist));
     } else {
-        // ctid
+        /* ctid */
         if (indexscan->scan.isPartTbl) {
-            Assert(RelationGetDescr(rel)->natts + 2 == list_length(indexscan->scan.plan.targetlist));
+            Assert(m_global->m_natts + 2 == list_length(indexscan->scan.plan.targetlist));
         } else {
-            Assert(RelationGetDescr(rel)->natts + 1 == list_length(indexscan->scan.plan.targetlist));
+            Assert(m_global->m_natts + 1 == list_length(indexscan->scan.plan.targetlist));
         }
     }
-    m_outParams = params;
-
+#endif
     /* init target, include param and const */
-    m_targetParamNum = 0;
-    m_targetValues = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_targetIsnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_targetParamLoc = (ParamLoc*)palloc0(RelationGetDescr(rel)->natts * sizeof(ParamLoc));
-    m_targetConstLoc = (int*)palloc0(RelationGetDescr(rel)->natts * sizeof(int));
-    m_curVarValue = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_curVarIsnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_targetVarLoc = (VarLoc*)palloc0(RelationGetDescr(rel)->natts * sizeof(VarLoc));
-
-    m_targetFuncNum = 0;
-    m_targetFuncNodes = (FuncExprInfo*)palloc0(RelationGetDescr(rel)->natts * sizeof(FuncExprInfo));
-    m_varNum = 0;
+    m_c_global->m_targetParamNum = 0;
+    m_c_global->m_targetParamLoc = (ParamLoc*)palloc0(m_global->m_natts * sizeof(ParamLoc));
+    m_c_global->m_targetConstLoc = (ConstLoc*)palloc0(m_global->m_natts * sizeof(ConstLoc));
+    m_c_global->m_targetVarLoc = (VarLoc*)palloc0(m_global->m_natts * sizeof(VarLoc));
+    m_c_global->m_targetFuncNum = 0;
+    m_c_global->m_targetFuncNodes = (FuncExprInfo*)palloc0(m_global->m_natts * sizeof(FuncExprInfo));
+    m_c_global->m_varNum = 0;
 
     int i = 0;
     ListCell* lc = NULL;
     OpExpr* opexpr = NULL;
     FuncExpr* func = NULL;
     Expr* expr = NULL;
+
     foreach (lc, indexscan->scan.plan.targetlist) {
-        // ignore ctid + tablebucketid or ctid at last
-        if (i >= RelationGetDescr(rel)->natts) {
+        /* ignore ctid + tablebucketid or ctid at last */
+        if (i >= m_global->m_natts) {
             break;
         }
 
@@ -1597,89 +1830,112 @@ UpdateFusion::UpdateFusion(MemoryContext context, CachedPlanSource* psrc, List* 
             expr = ((RelabelType*)expr)->arg;
         }
 
-        m_targetConstLoc[i] = -1;
+        m_c_global->m_targetConstLoc[i].constLoc = -1;
         if (IsA(expr, Param)) {
             Param* param = (Param*)expr;
-            m_targetParamLoc[m_targetParamNum].paramId = param->paramid;
-            m_targetParamLoc[m_targetParamNum++].scanKeyIndx = i;
+            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum].paramId = param->paramid;
+            m_c_global->m_targetParamLoc[m_c_global->m_targetParamNum++].scanKeyIndx = i;
         } else if (IsA(expr, Const)) {
-            m_targetIsnull[i] = ((Const*)expr)->constisnull;
-            m_targetValues[i] = ((Const*)expr)->constvalue;
-            m_targetConstLoc[i] = i;
+            m_c_global->m_targetConstLoc[i].constValue = ((Const*)expr)->constvalue;
+            m_c_global->m_targetConstLoc[i].constIsNull = ((Const*)expr)->constisnull;
+            m_c_global->m_targetConstLoc[i].constLoc = i;
         } else if (IsA(expr, Var)) {
             Var* var = (Var*)expr;
-            m_targetVarLoc[m_varNum].varNo = var->varattno;
-            m_targetVarLoc[m_varNum++].scanKeyIndx = i;
+            m_c_global->m_targetVarLoc[m_c_global->m_varNum].varNo = var->varattno;
+            m_c_global->m_targetVarLoc[m_c_global->m_varNum++].scanKeyIndx = i;
         } else if (IsA(expr, OpExpr)) {
             opexpr = (OpExpr*)expr;
-
-            m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
-            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
-            m_targetFuncNodes[m_targetFuncNum].funcid = opexpr->opfuncid;
-            m_targetFuncNodes[m_targetFuncNum].args = opexpr->args;
-            ++m_targetFuncNum;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = opexpr->opfuncid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = opexpr->args;
+            ++m_c_global->m_targetFuncNum;
         } else if (IsA(expr, FuncExpr)) {
             func = (FuncExpr*)expr;
-
-            m_targetFuncNodes[m_targetFuncNum].resno = res->resno;
-            m_targetFuncNodes[m_targetFuncNum].resname = res->resname;
-            m_targetFuncNodes[m_targetFuncNum].funcid = func->funcid;
-            m_targetFuncNodes[m_targetFuncNum].args = func->args;
-            ++m_targetFuncNum;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resno = res->resno;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].resname = res->resname;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].funcid = func->funcid;
+            m_c_global->m_targetFuncNodes[m_c_global->m_targetFuncNum].args = func->args;
+            ++m_c_global->m_targetFuncNum;
         }
-
         i++;
     }
+    m_c_global->m_targetConstNum = i;
+}
 
-    m_targetNum = i;
+void UpdateFusion::InitLocals(ParamListInfo params)
+{
+    m_local.m_tmpisnull = NULL;
+    m_local.m_tmpvals = NULL;
+    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
 
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+
+    m_local.m_values = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
+
+    m_c_local.m_curVarValue = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
+    m_c_local.m_curVarIsnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
+
+    m_local.m_outParams = params;
     initParams(params);
 
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_planstmt, m_outParams);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
 
-    MemoryContextSwitchTo(old_context);
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    Plan *updatePlan = (Plan *)linitial(node->plans);
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(updatePlan);
+    m_local.m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
 }
 
 void UpdateFusion::refreshTargetParameterIfNecessary()
 {
-    ParamListInfo parms = m_outParams != NULL ? m_outParams : m_params;
+    ParamListInfo parms = m_local.m_outParams != NULL ? m_local.m_outParams : m_local.m_params;
     /* save cur var value */
-    for (int i = 0; i < m_tupDesc->natts; i++) {
-        m_curVarValue[i] = m_values[i];
-        m_curVarIsnull[i] = m_isnull[i];
+    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+        m_c_local.m_curVarValue[i] = m_local.m_values[i];
+        m_c_local.m_curVarIsnull[i] = m_local.m_isnull[i];
     }
-    if (m_varNum > 0) {
-        for (int i = 0; i < m_varNum; i++) {
-            m_values[m_targetVarLoc[i].scanKeyIndx] = m_curVarValue[m_targetVarLoc[i].varNo - 1];
-            m_isnull[m_targetVarLoc[i].scanKeyIndx] = m_curVarIsnull[m_targetVarLoc[i].varNo - 1];
+    if (m_c_global->m_varNum > 0) {
+        for (int i = 0; i < m_c_global->m_varNum; i++) {
+            m_local.m_values[m_c_global->m_targetVarLoc[i].scanKeyIndx] =
+                m_c_local.m_curVarValue[m_c_global->m_targetVarLoc[i].varNo - 1];
+            m_local.m_isnull[m_c_global->m_targetVarLoc[i].scanKeyIndx] =
+                m_c_local.m_curVarIsnull[m_c_global->m_targetVarLoc[i].varNo - 1];
         }
     }
     /* mapping value for update from target */
-    if (m_targetParamNum > 0) {
-        Assert(m_targetParamNum > 0);
-        for (int i = 0; i < m_targetParamNum; i++) {
-            m_values[m_targetParamLoc[i].scanKeyIndx] = parms->params[m_targetParamLoc[i].paramId - 1].value;
-            m_isnull[m_targetParamLoc[i].scanKeyIndx] = parms->params[m_targetParamLoc[i].paramId - 1].isnull;
+    if (m_c_global->m_targetParamNum > 0) {
+        Assert(m_c_global->m_targetParamNum > 0);
+        for (int i = 0; i < m_c_global->m_targetParamNum; i++) {
+            m_local.m_values[m_c_global->m_targetParamLoc[i].scanKeyIndx] =
+                parms->params[m_c_global->m_targetParamLoc[i].paramId - 1].value;
+            m_local.m_isnull[m_c_global->m_targetParamLoc[i].scanKeyIndx] =
+                parms->params[m_c_global->m_targetParamLoc[i].paramId - 1].isnull;
         }
     }
 
-    for (int i = 0; i < m_targetNum; i++) {
-        if (m_targetConstLoc[i] >= 0) {
-            m_values[i] = m_targetValues[m_targetConstLoc[i]];
-            m_isnull[i] = m_targetIsnull[m_targetConstLoc[i]];
+    for (int i = 0; i < m_c_global->m_targetConstNum; i++) {
+        if (m_c_global->m_targetConstLoc[i].constLoc >= 0) {
+            m_local.m_values[m_c_global->m_targetConstLoc[i].constLoc] = m_c_global->m_targetConstLoc[i].constValue;
+            m_local.m_isnull[m_c_global->m_targetConstLoc[i].constLoc] = m_c_global->m_targetConstLoc[i].constIsNull;
         }
     }
     /* calculate func result */
-    for (int i = 0; i < m_targetFuncNum; ++i) {
-        ELOG_FIELD_NAME_START(m_targetFuncNodes[i].resname);
-        if (m_targetFuncNodes[i].funcid != InvalidOid) {
+    for (int i = 0; i < m_c_global->m_targetFuncNum; ++i) {
+        ELOG_FIELD_NAME_START(m_c_global->m_targetFuncNodes[i].resname);
+        if (m_c_global->m_targetFuncNodes[i].funcid != InvalidOid) {
             bool func_isnull = false;
-            m_values[m_targetFuncNodes[i].resno - 1] =
-                CalFuncNodeVal(m_targetFuncNodes[i].funcid, m_targetFuncNodes[i].args, &func_isnull,
-                               m_curVarValue, m_curVarIsnull);
-            m_isnull[m_targetFuncNodes[i].resno - 1] = func_isnull;
+            m_local.m_values[m_c_global->m_targetFuncNodes[i].resno - 1] =
+                CalFuncNodeVal(m_c_global->m_targetFuncNodes[i].funcid,
+                               m_c_global->m_targetFuncNodes[i].args,
+                               &func_isnull,
+                               m_c_local.m_curVarValue,
+                               m_c_local.m_curVarIsnull);
+            m_local.m_isnull[m_c_global->m_targetFuncNodes[i].resno - 1] = func_isnull;
         }
         ELOG_FIELD_NAME_END;
     }
@@ -1693,11 +1949,11 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
     /*******************
      * step 1: prepare *
      *******************/
-    m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
+    m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
 
-    m_scan->Init(max_rows);
+    m_local.m_scan->Init(max_rows);
 
-    Relation rel = ((m_scan->m_parentRel) == NULL ? m_scan->m_rel : m_scan->m_parentRel);
+    Relation rel = ((m_local.m_scan->m_parentRel) == NULL ? m_local.m_scan->m_rel : m_local.m_scan->m_parentRel);
     Relation partRel = NULL;
     Partition part = NULL;
     Relation bucket_rel = NULL;
@@ -1705,14 +1961,14 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
-    m_estate->es_result_relation_info = result_rel_info;
-    m_estate->es_output_cid = GetCurrentCommandId(true);
+    m_c_local.m_estate->es_result_relation_info = result_rel_info;
+    m_c_local.m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
         ExecOpenIndices(result_rel_info, false);
     }
 
-    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
+    InitPartitionByScanFusion(rel, &partRel, &part, m_c_local.m_estate, m_local.m_scan);
 
     /*********************************
      * step 2: begin scan and update *
@@ -1721,9 +1977,8 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
     HeapTuple tup = NULL;
     unsigned long nprocessed = 0;
     List* recheck_indexes = NIL;
-    m_tupDesc = RelationGetDescr(rel);
 
-    while ((oldtup = m_scan->getTuple()) != NULL) {
+    while ((oldtup = m_local.m_scan->getTuple()) != NULL) {
         CHECK_FOR_INTERRUPTS();
         TM_Result result;
         TM_FailureData tmfd;
@@ -1733,25 +1988,25 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
         Relation parentRel = RELATION_IS_PARTITIONED(rel) ? rel : NULL;
         tup = heapModifyTuple(oldtup);
 
-        m_scan->UpdateCurrentRel(&rel);
-        if (m_is_bucket_rel) {
+        m_local.m_scan->UpdateCurrentRel(&rel);
+        if (m_global->m_is_bucket_rel) {
             Assert(tup->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, tup));
             bucketid = tup->t_bucketId;
             bucket_rel = InitBucketRelation(bucketid, rel, part);
         }
 
-        (void)ExecStoreTuple(tup, m_reslot, InvalidBuffer, false);
+        (void)ExecStoreTuple(tup, m_local.m_reslot, InvalidBuffer, false);
         if (rel->rd_att->constr)
-            ExecConstraints(result_rel_info, m_reslot, m_estate);
+            ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
 
         bool update_indexes = false;
         result = tableam_tuple_update(bucket_rel == NULL ? destRel : bucket_rel,
                                       bucket_rel == NULL ? parentRel : rel,
                                       &oldtup->t_self,
                                       tup,
-                                      m_estate->es_output_cid,
+                                      m_c_local.m_estate->es_output_cid,
                                       InvalidSnapshot,
-                                      m_estate->es_snapshot,
+                                      m_c_local.m_estate->es_snapshot,
                                       true,
                                       &tmfd,
                                       &update_indexes,
@@ -1759,7 +2014,7 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 
         switch (result) {
             case TM_SelfModified:
-                if (tmfd.cmax != m_estate->es_output_cid)
+                if (tmfd.cmax != m_c_local.m_estate->es_output_cid)
                     ereport(ERROR,
                             (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
                              errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
@@ -1784,9 +2039,9 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
                 }
                 nprocessed++;
                 if (result_rel_info->ri_NumIndices > 0 && update_indexes) {
-                    recheck_indexes = ExecInsertIndexTuples(m_reslot,
+                    recheck_indexes = ExecInsertIndexTuples(m_local.m_reslot,
                                                             &(tup->t_self),
-                                                            m_estate,
+                                                            m_c_local.m_estate,
                                                             RELATION_IS_PARTITIONED(rel) ? partRel : NULL,
                                                             RELATION_IS_PARTITIONED(rel) ? part : NULL,
                                                             bucketid, NULL);
@@ -1805,7 +2060,7 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
                 bool* isnullfornew = NULL;
                 Datum* valuesfornew = NULL;
                 HeapTuple copyTuple;
-                copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                copyTuple = heap_lock_updated(m_c_local.m_estate->es_output_cid,
                                               bucket_rel == NULL ? destRel : bucket_rel,
                                               LockTupleExclusive,
                                               &tmfd.ctid,
@@ -1816,12 +2071,12 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
                     break;
                 }
 
-                valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-                isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
+                valuesfornew = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
+                isnullfornew = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
 
                 tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
 
-                if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                if (m_local.m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
                     pfree_ext(valuesfornew);
                     pfree_ext(isnullfornew);
                     break;
@@ -1852,16 +2107,16 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 
     tableam_tops_free_tuple(tup);
 
-    (void)ExecClearTuple(m_reslot);
+    (void)ExecClearTuple(m_local.m_reslot);
     success = true;
 
     /****************
      * step 3: done *
      ****************/
     ExecCloseIndices(result_rel_info);
-    m_isCompleted = true;
-    m_scan->End(true);
-    ExecDoneStepInFusion(bucket_rel, m_estate);
+    m_local.m_isCompleted = true;
+    m_local.m_scan->End(true);
+    ExecDoneStepInFusion(bucket_rel, m_c_local.m_estate);
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "UPDATE %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
@@ -1872,39 +2127,53 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
 DeleteFusion::DeleteFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_paramLoc = NULL;
-    m_tmpvals = NULL;
-    m_tmpisnull = NULL;
-    m_attrno = NULL;
+    MemoryContext old_context = NULL;
 
-    MemoryContext old_context = MemoryContextSwitchTo(m_context);
-    ModifyTable* node = (ModifyTable*)m_planstmt->planTree;
-
-    Plan *deletePlan = (Plan *)linitial(node->plans);
-
-    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(deletePlan);
-
-    m_reloid = getrelid(linitial_int(m_planstmt->resultRelations), m_planstmt->rtable);
-    Relation rel = heap_open(m_reloid, AccessShareLock);
-
-    m_estate = CreateExecutorState();
-    m_estate->es_range_table = m_planstmt->rtable;
-
-    m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
-    m_values = (Datum*)palloc0(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc0(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
-
-    heap_close(rel, AccessShareLock);
-    initParams(params);
-
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_planstmt, m_outParams);
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
     MemoryContextSwitchTo(old_context);
 }
 
+void DeleteFusion::InitLocals(ParamListInfo params)
+{
+    m_local.m_tmpvals = NULL;
+    m_local.m_tmpisnull = NULL;
+
+    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+    m_local.m_values = (Datum*)palloc0(m_global->m_natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc0(m_global->m_natts * sizeof(bool));
+    initParams(params);
+
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+
+    ModifyTable* node = (ModifyTable*)m_global->m_planstmt->planTree;
+    Plan *deletePlan = (Plan *)linitial(node->plans);
+    IndexScan* indexscan = (IndexScan *)JudgePlanIsPartIterator(deletePlan);
+    m_local.m_scan = ScanFusion::getScanFusion((Node*)indexscan, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+}
+
+void DeleteFusion::InitGlobals()
+{
+    m_global->m_reloid = getrelid(linitial_int(m_global->m_planstmt->resultRelations), m_global->m_planstmt->rtable);
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+
+    m_global->m_natts = RelationGetDescr(rel)->natts;
+    m_global->m_tupDesc = CreateTupleDescCopy(RelationGetDescr(rel));
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+
+    heap_close(rel, AccessShareLock);
+
+}
 bool DeleteFusion::execute(long max_rows, char* completionTag)
 {
     bool success = false;
@@ -1913,11 +2182,11 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
     /*******************
      * step 1: prepare *
      *******************/
-    m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
+    m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
 
-    m_scan->Init(max_rows);
+    m_local.m_scan->Init(max_rows);
 
-    Relation rel = ((m_scan->m_parentRel) == NULL ? m_scan->m_rel : m_scan->m_parentRel);
+    Relation rel = ((m_local.m_scan->m_parentRel) == NULL ? m_local.m_scan->m_rel : m_local.m_scan->m_parentRel);
     Relation bucket_rel = NULL;
     int2 bucketid = InvalidBktId;
 
@@ -1926,27 +2195,26 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
-    m_estate->es_result_relation_info = result_rel_info;
-    m_estate->es_output_cid = GetCurrentCommandId(true);
+    m_c_local.m_estate->es_result_relation_info = result_rel_info;
+    m_c_local.m_estate->es_output_cid = GetCurrentCommandId(true);
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
         ExecOpenIndices(result_rel_info, false);
     }
 
-    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
+    InitPartitionByScanFusion(rel, &partRel, &part, m_c_local.m_estate, m_local.m_scan);
 
     /********************************
      * step 2: begin scan and delete*
      ********************************/
     HeapTuple oldtup = NULL;
     unsigned long nprocessed = 0;
-    m_tupDesc = RelationGetDescr(rel);
 
-    while ((oldtup = m_scan->getTuple()) != NULL) {
+    while ((oldtup = m_local.m_scan->getTuple()) != NULL) {
         TM_Result result;
         TM_FailureData tmfd;
-        m_scan->UpdateCurrentRel(&rel);
-        if (m_is_bucket_rel) {
+        m_local.m_scan->UpdateCurrentRel(&rel);
+        if (m_global->m_is_bucket_rel) {
             Assert(oldtup->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, oldtup));
             bucketid = oldtup->t_bucketId;
             bucket_rel = InitBucketRelation(bucketid, rel, part);
@@ -1956,8 +2224,8 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
         Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
         result = tableam_tuple_delete(bucket_rel == NULL ? destRel : bucket_rel,
                              &oldtup->t_self,
-                             m_estate->es_output_cid,
-                             //m_estate->es_snapshot,
+                             m_c_local.m_estate->es_output_cid,
+                             //m_c_local.m_estate->es_snapshot,
                              InvalidSnapshot,
                              NULL,
                              true,
@@ -1966,7 +2234,7 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
 
         switch (result) {
             case TM_SelfModified:
-                if (tmfd.cmax != m_estate->es_output_cid)
+                if (tmfd.cmax != m_c_local.m_estate->es_output_cid)
                     ereport(ERROR,
                             (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
                              errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
@@ -1999,7 +2267,7 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
                 bool* isnullfornew = NULL;
                 Datum* valuesfornew = NULL;
                 HeapTuple copyTuple;
-                copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                copyTuple = heap_lock_updated(m_c_local.m_estate->es_output_cid,
                                               bucket_rel == NULL ? destRel : bucket_rel,
                                               LockTupleExclusive,
                                               &tmfd.ctid,
@@ -2007,10 +2275,10 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
                 if (copyTuple == NULL) {
                     break;
                 }
-                valuesfornew = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-                isnullfornew = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
+                valuesfornew = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
+                isnullfornew = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
                 tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
-                if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                if (m_local.m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
                     break;
                 }
                 oldtup->t_self = tmfd.ctid;
@@ -2036,16 +2304,16 @@ bool DeleteFusion::execute(long max_rows, char* completionTag)
         }
     }
 
-    (void)ExecClearTuple(m_reslot);
+    (void)ExecClearTuple(m_local.m_reslot);
     success = true;
 
     /****************
      * step 3: done *
      ****************/
     ExecCloseIndices(result_rel_info);
-    m_isCompleted = true;
-    m_scan->End(true);
-    ExecDoneStepInFusion(bucket_rel, m_estate);
+    m_local.m_isCompleted = true;
+    m_local.m_scan->End(true);
+    ExecDoneStepInFusion(bucket_rel, m_c_local.m_estate);
 
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "DELETE %lu", nprocessed);
@@ -2058,46 +2326,79 @@ SelectForUpdateFusion::SelectForUpdateFusion(
     MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_paramLoc = NULL;
+    MemoryContext old_context = NULL;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((SelectForUpdateFusion*)(psrc->opFusionObj))->m_c_global;
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
 
-    MemoryContext old_context = MemoryContextSwitchTo(m_context);
+void SelectForUpdateFusion::InitLocals(ParamListInfo params)
+{
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+    m_c_local.m_estate = CreateExecutorState();
+    m_c_local.m_estate->es_range_table = m_global->m_planstmt->rtable;
+
+    m_local.m_values = (Datum*)palloc(m_global->m_natts * sizeof(Datum));
+    m_local.m_tmpvals = (Datum*)palloc(m_global->m_natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc(m_global->m_natts * sizeof(bool));
+    m_local.m_tmpisnull = (bool*)palloc(m_global->m_natts * sizeof(bool));
+
+    initParams(params);
+
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+
     IndexScan* node = NULL;
-    m_limitCount = -1;
-    m_limitOffset = -1;
+    if (IsA(m_global->m_planstmt->planTree, Limit)) {
+        node = (IndexScan *)JudgePlanIsPartIterator(m_global->m_planstmt->planTree->lefttree->lefttree);
+    } else {
+        node = (IndexScan *)JudgePlanIsPartIterator(m_global->m_planstmt->planTree->lefttree);
+    }
+    m_local.m_scan = ScanFusion::getScanFusion((Node*)node, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+}
+
+void SelectForUpdateFusion::InitGlobals()
+{
+    m_c_global = (SelectForUpdateFusionGlobalVariable*)palloc0(sizeof(SelectForUpdateFusionGlobalVariable));
+
+    IndexScan* node = NULL;
+    m_c_global->m_limitCount = -1;
+    m_c_global->m_limitOffset = -1;
 
     /* get limit num */
-    if (IsA(m_planstmt->planTree, Limit)) {
-        Limit* limit = (Limit*)m_planstmt->planTree;
-        node = (IndexScan *)JudgePlanIsPartIterator(m_planstmt->planTree->lefttree->lefttree);
+    if (IsA(m_global->m_planstmt->planTree, Limit)) {
+        Limit* limit = (Limit*)m_global->m_planstmt->planTree;
+        node = (IndexScan *)JudgePlanIsPartIterator(m_global->m_planstmt->planTree->lefttree->lefttree);
         if (limit->limitOffset != NULL && IsA(limit->limitOffset, Const) &&
             !((Const*)limit->limitOffset)->constisnull) {
-            m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
+            m_c_global->m_limitOffset = DatumGetInt64(((Const*)limit->limitOffset)->constvalue);
         }
         if (limit->limitCount != NULL && IsA(limit->limitCount, Const) && !((Const*)limit->limitCount)->constisnull) {
-            m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
+            m_c_global->m_limitCount = DatumGetInt64(((Const*)limit->limitCount)->constvalue);
         }
     } else {
-        node = (IndexScan *)JudgePlanIsPartIterator(m_planstmt->planTree->lefttree);
+        node = (IndexScan *)JudgePlanIsPartIterator(m_global->m_planstmt->planTree->lefttree);
     }
 
     List* targetList = node->scan.plan.targetlist;
-    m_reloid = getrelid(node->scan.scanrelid, m_planstmt->rtable);
-    Relation rel = heap_open(m_reloid, AccessShareLock);
+    m_global->m_reloid = getrelid(node->scan.scanrelid, m_global->m_planstmt->rtable);
 
+    Relation rel = heap_open(m_global->m_reloid, AccessShareLock);
+    m_global->m_natts = RelationGetDescr(rel)->natts;
     Assert(list_length(targetList) >= 2);
-    m_tupDesc = ExecCleanTypeFromTL(targetList, false, rel->rd_tam_type);
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
+    m_global->m_tupDesc = ExecCleanTypeFromTL(targetList, false, rel->rd_tam_type);
+    m_global->m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
+    heap_close(rel, AccessShareLock);
 
-    m_estate = CreateExecutorState();
-    m_estate->es_range_table = m_planstmt->rtable;
-
-    m_attrno = (int16*)palloc(m_tupDesc->natts * sizeof(int16));
-    m_values = (Datum*)palloc(RelationGetDescr(rel)->natts * sizeof(Datum));
-    m_tmpvals = (Datum*)palloc(m_tupDesc->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc(RelationGetDescr(rel)->natts * sizeof(bool));
-    m_tmpisnull = (bool*)palloc(m_tupDesc->natts * sizeof(bool));
-    m_is_bucket_rel = RELATION_OWN_BUCKET(rel);
-
+    m_global->m_attrno = (int16*)palloc(m_global->m_natts * sizeof(int16));
     ListCell* lc = NULL;
     int cur_resno = 1;
     TargetEntry* res = NULL;
@@ -2106,21 +2407,16 @@ SelectForUpdateFusion::SelectForUpdateFusion(
         if (res->resjunk) {
             continue;
         }
-        m_attrno[cur_resno - 1] = res->resorigcol;
+        m_global->m_attrno[cur_resno - 1] = res->resorigcol;
         cur_resno++;
     }
-    Assert(m_tupDesc->natts == cur_resno - 1);
-    heap_close(rel, AccessShareLock);
-    initParams(params);
-
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion((Node*)node, m_planstmt, m_outParams);
-    MemoryContextSwitchTo(old_context);
+    Assert(m_global->m_tupDesc->natts == cur_resno - 1);
 }
+
 
 bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
 {
+    MemoryContext oldContext = MemoryContextSwitchTo(m_local.m_tmpContext);
     bool success = false;
     int64 start_row = 0;
     int64 get_rows = 0;
@@ -2128,22 +2424,13 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     /*******************
      * step 1: prepare *
      *******************/
-    IndexScan* node = NULL;
-    if (m_limitCount >= 0 || m_limitOffset >= 0) {
-        node = (IndexScan*)m_planstmt->planTree->lefttree->lefttree;
-    } else {
-        node = (IndexScan*)m_planstmt->planTree->lefttree;
+    start_row = m_c_global->m_limitOffset >= 0 ? m_c_global->m_limitOffset : start_row;
+    get_rows = m_c_global->m_limitCount >= 0 ? (m_c_global->m_limitCount + start_row) : max_rows;
+    if (m_local.m_position == 0) {
+        m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
+        m_local.m_scan->Init(max_rows);
     }
-
-    start_row = m_limitOffset >= 0 ? m_limitOffset : start_row;
-    get_rows = m_limitCount >= 0 ? (m_limitCount + start_row) : max_rows;
-    if (m_position == 0) {
-        MemoryContext oldContext = MemoryContextSwitchTo(m_tmpContext);
-        m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
-        m_scan->Init(max_rows);
-        MemoryContextSwitchTo(oldContext);
-    }
-    Relation rel = ((m_scan->m_parentRel == NULL) ? m_scan->m_rel : m_scan->m_parentRel);
+    Relation rel = ((m_local.m_scan->m_parentRel == NULL) ? m_local.m_scan->m_rel : m_local.m_scan->m_parentRel);
     Relation partRel = NULL;
     Relation bucket_rel = NULL;
     Partition part = NULL;
@@ -2151,15 +2438,15 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
 
     ResultRelInfo* result_rel_info = makeNode(ResultRelInfo);
     InitResultRelInfo(result_rel_info, rel, 1, 0);
-    m_estate->es_result_relation_info = result_rel_info;
-    m_estate->es_output_cid = GetCurrentCommandId(true);
+    m_c_local.m_estate->es_result_relation_info = result_rel_info;
+    m_c_local.m_estate->es_output_cid = GetCurrentCommandId(true);
 
 
     if (result_rel_info->ri_RelationDesc->rd_rel->relhasindex) {
         ExecOpenIndices(result_rel_info, false);
     }
 
-    InitPartitionByScanFusion(rel, &partRel, &part, m_estate, m_scan);
+    InitPartitionByScanFusion(rel, &partRel, &part, m_c_local.m_estate, m_local.m_scan);
     /**************************************
      * step 2: begin scan and update xmax *
      **************************************/
@@ -2172,43 +2459,44 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
     TM_Result result;
     TM_FailureData tmfd;
     Buffer buffer;
-    while (nprocessed < (unsigned long)start_row && (tuple = m_scan->getTuple()) != NULL) {
+    while (nprocessed < (unsigned long)start_row && (tuple = m_local.m_scan->getTuple()) != NULL) {
         nprocessed++;
     }
 
-    while (nprocessed < (unsigned long)get_rows && (tuple = m_scan->getTuple()) != NULL) {
-        m_scan->UpdateCurrentRel(&rel);
+    while (nprocessed < (unsigned long)get_rows && (tuple = m_local.m_scan->getTuple()) != NULL) {
+        m_local.m_scan->UpdateCurrentRel(&rel);
         CHECK_FOR_INTERRUPTS();
-        tableam_tops_deform_tuple(tuple, RelationGetDescr(rel), m_values, m_isnull);
+        tableam_tops_deform_tuple(tuple, RelationGetDescr(rel), m_local.m_values, m_local.m_isnull);
 
-        for (int i = 0; i < m_tupDesc->natts; i++) {
-            Assert(m_attrno[i] > 0);
-            m_tmpvals[i] = m_values[m_attrno[i] - 1];
-            m_tmpisnull[i] = m_isnull[m_attrno[i] - 1];
+        for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+            Assert(m_global->m_attrno[i] > 0);
+            m_local.m_tmpvals[i] = m_local.m_values[m_global->m_attrno[i] - 1];
+            m_local.m_tmpisnull[i] = m_local.m_isnull[m_global->m_attrno[i] - 1];
         }
 
-        tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, HEAP_TUPLE);
+        tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_tmpvals,
+                                                    m_local.m_tmpisnull, HEAP_TUPLE);
 
         Assert(tmptup != NULL);
 
         {
-            if (m_is_bucket_rel) {
+            if (m_global->m_is_bucket_rel) {
                 Assert(tuple->t_bucketId == computeTupleBucketId(result_rel_info->ri_RelationDesc, tuple));
                 bucketid = tuple->t_bucketId;
                 bucket_rel = InitBucketRelation(bucketid, rel, part);
             }
 
             (void)ExecStoreTuple(tmptup, /* tuple to store */
-                m_reslot,                /* slot to store in */
+                m_local.m_reslot,                /* slot to store in */
                 InvalidBuffer,           /* TO DO: survey */
                 false);                  /* don't pfree this pointer */
 
             Relation destRel = RELATION_IS_PARTITIONED(rel) ? partRel : rel;
-            tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
+            tableam_tslot_getsomeattrs(m_local.m_reslot, m_global->m_tupDesc->natts);
             result = tableam_tuple_lock(bucket_rel == NULL ? destRel : bucket_rel,
                                         tuple,
                                         &buffer,
-                                        m_estate->es_output_cid,
+                                        m_c_local.m_estate->es_output_cid,
                                         LockTupleExclusive,
                                         false,
                                         &tmfd, false, false, false, InvalidSnapshot, NULL, false);
@@ -2246,8 +2534,8 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
                 case TM_Ok:
                     /* done successfully */
                     nprocessed++;
-                    (*m_receiver->receiveSlot)(m_reslot, m_receiver);
-                    tpslot_free_heaptuple(m_reslot);
+                    (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
+                    tpslot_free_heaptuple(m_local.m_reslot);
                     break;
 
                 case TM_Updated: {
@@ -2261,7 +2549,7 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
                     bool* isnullfornew = NULL;
                     Datum* valuesfornew = NULL;
                     HeapTuple copyTuple;
-                    copyTuple = heap_lock_updated(m_estate->es_output_cid,
+                    copyTuple = heap_lock_updated(m_c_local.m_estate->es_output_cid,
                                                   bucket_rel == NULL ? destRel : bucket_rel,
                                                   LockTupleExclusive,
                                                   &tmfd.ctid,
@@ -2274,28 +2562,29 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
 
                     tableam_tops_deform_tuple(copyTuple, RelationGetDescr(rel), valuesfornew, isnullfornew);
 
-                    if (m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
+                    if (m_local.m_scan->EpqCheck(valuesfornew, isnullfornew) == false) {
                         pfree_ext(valuesfornew);
                         pfree_ext(isnullfornew);
                         break;
                     }
 
-                    for (int i = 0; i < m_tupDesc->natts; i++) {
-                        m_tmpvals[i] = valuesfornew[m_attrno[i] - 1];
-                        m_tmpisnull[i] = isnullfornew[m_attrno[i] - 1];
+                    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+                        m_local.m_tmpvals[i] = valuesfornew[m_global->m_attrno[i] - 1];
+                        m_local.m_tmpisnull[i] = isnullfornew[m_global->m_attrno[i] - 1];
                     }
 
-                    tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, m_tmpvals, m_tmpisnull, HEAP_TUPLE);
+                    tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, m_local.m_tmpvals,
+                                                                m_local.m_tmpisnull, HEAP_TUPLE);
                     Assert(tmptup != NULL);
 
                     (void)ExecStoreTuple(tmptup, /* tuple to store */
-                        m_reslot,                /* slot to store in */
+                        m_local.m_reslot,                /* slot to store in */
                         InvalidBuffer,           /* TO DO: survey */
                         false);                  /* don't pfree this pointer */
 
-                    tableam_tslot_getsomeattrs(m_reslot, m_tupDesc->natts);
+                    tableam_tslot_getsomeattrs(m_local.m_reslot, m_global->m_tupDesc->natts);
                                 nprocessed++;
-                                (*m_receiver->receiveSlot)(m_reslot, m_receiver);
+                                (*m_local.m_receiver->receiveSlot)(m_local.m_reslot, m_local.m_receiver);
                                 tuple->t_self = tmfd.ctid;
                                 tuple = copyTuple;
                                 pfree(valuesfornew);
@@ -2318,16 +2607,16 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
         }
     }
 
-    if (!ScanDirectionIsNoMovement(*(m_scan->m_direction))) {
+    if (!ScanDirectionIsNoMovement(*(m_local.m_scan->m_direction))) {
         if (max_rows == 0 || nprocessed < (unsigned long)max_rows) {
-            m_isCompleted = true;
+            m_local.m_isCompleted = true;
         }
-        m_position += nprocessed;
+        m_local.m_position += nprocessed;
     } else {
-        m_isCompleted = true;
+        m_local.m_isCompleted = true;
     }
 
-    (void)ExecClearTuple(m_reslot);
+    (void)ExecClearTuple(m_local.m_reslot);
 
     success = true;
     /****************
@@ -2335,52 +2624,54 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
      ****************/
     ExecCloseIndices(result_rel_info);
 
-    m_scan->End(m_isCompleted);
-	if (m_isCompleted) {
-        m_position = 0;
+    m_local.m_scan->End(m_local.m_isCompleted);
+	if (m_local.m_isCompleted) {
+        m_local.m_position = 0;
     }
-    ExecDoneStepInFusion(bucket_rel, m_estate);
+    ExecDoneStepInFusion(bucket_rel, m_c_local.m_estate);
 
-    if (m_isInsideRec) {
-        (*m_receiver->rDestroy)(m_receiver);
+    if (m_local.m_isInsideRec) {
+        (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
     errno_t errorno =
         snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1, "SELECT %lu", nprocessed);
     securec_check_ss(errorno, "\0", "\0");
+    (void)MemoryContextSwitchTo(oldContext);
 
     return success;
 }
 
 void SelectForUpdateFusion::close()
 {
-    if (m_isCompleted == false) {
-        m_scan->End(true);
-        m_isCompleted = true;
-        m_position = 0;
+    if (m_local.m_isCompleted == false) {
+        m_local.m_scan->End(true);
+        m_local.m_isCompleted = true;
+        m_local.m_position = 0;
     }
 }
+
 AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_tmpvals = NULL;
-    m_values = NULL;
-    m_isnull = NULL;
-    m_tmpisnull = NULL;
+    MemoryContext old_context = NULL;
 
-    m_paramLoc = NULL;
-    m_attrno = NULL;
-    m_reloid = 0;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    } else {
+        m_c_global = ((AggFusion*)(psrc->opFusionObj))->m_c_global;
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
 
-    MemoryContext oldContext = MemoryContextSwitchTo(m_context);
-
-    Agg *aggnode = (Agg *)m_planstmt->planTree;
-    Node* scan = JudgePlanIsPartIterator(aggnode->plan.lefttree);
-
-    initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion(scan, m_planstmt, m_outParams);
-    m_reslot = NULL;
+void AggFusion::InitGlobals()
+{
+    m_c_global = (AggFusionGlobalVariable*)palloc0(sizeof(AggFusionGlobalVariable));
+    m_global->m_reloid = 0;
+    Agg *aggnode = (Agg *)m_global->m_planstmt->planTree;
 
     /* agg init */
     List *targetList = aggnode->plan.targetlist;
@@ -2389,16 +2680,16 @@ AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantr
 
     switch (aggref->aggfnoid) {
         case INT2SUMFUNCOID:
-            m_aggSumFunc = &AggFusion::agg_int2_sum;
+            m_c_global->m_aggSumFunc = &AggFusion::agg_int2_sum;
             break;
         case INT4SUMFUNCOID:
-            m_aggSumFunc = &AggFusion::agg_int4_sum;
+            m_c_global->m_aggSumFunc = &AggFusion::agg_int4_sum;
             break;
         case INT8SUMFUNCOID:
-            m_aggSumFunc = &AggFusion::agg_int8_sum;
+            m_c_global->m_aggSumFunc = &AggFusion::agg_int8_sum;
             break;
         case NUMERICSUMFUNCOID:
-            m_aggSumFunc = &AggFusion::agg_numeric_sum;
+            m_c_global->m_aggSumFunc = &AggFusion::agg_numeric_sum;
             break;
         default:
             elog(ERROR, "unsupported aggfnoid %u for bypass.", aggref->aggfnoid);
@@ -2412,22 +2703,30 @@ AggFusion::AggFusion(MemoryContext context, CachedPlanSource* psrc, List* plantr
     }
     ReleaseSysCache(aggTuple);
 
-    m_tupDesc = ExecTypeFromTL(targetList, false);
+    m_global->m_tupDesc = ExecTypeFromTL(targetList, false);
+    m_global->m_attrno = (int16 *) palloc(m_global->m_tupDesc->natts * sizeof(int16));
 
-    m_attrno = (int16 *) palloc(m_tupDesc->natts * sizeof(int16));
-
-    /* m_tupDesc->natts always be 1 currently. */
+    /* m_global->m_tupDesc->natts always be 1 currently. */
     TargetEntry *res = NULL;
     res = (TargetEntry *)linitial(aggref->args);
     Var *var = (Var *)res->expr;
-    m_attrno[0] = var->varattno;
-    m_isCompleted = true;
+    m_global->m_attrno[0] = var->varattno;
+}
 
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc);
-    m_values = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
+void AggFusion::InitLocals(ParamListInfo params)
+{
+    initParams(params);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
 
-    MemoryContextSwitchTo(oldContext);
+    Agg *aggnode = (Agg *)m_global->m_planstmt->planTree;
+    Node* scan = JudgePlanIsPartIterator(aggnode->plan.lefttree);
+    m_local.m_scan = ScanFusion::getScanFusion(scan, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc);
+    m_local.m_values = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
 }
 
 bool AggFusion::execute(long max_rows, char *completionTag)
@@ -2435,32 +2734,32 @@ bool AggFusion::execute(long max_rows, char *completionTag)
     max_rows = FETCH_ALL;
     bool success = false;
 
-    TupleTableSlot *reslot = m_reslot;
-    Datum* values = m_values;
-    bool * isnull = m_isnull;
-    for (int i = 0; i < m_tupDesc->natts; i++) {
+    TupleTableSlot *reslot = m_local.m_reslot;
+    Datum* values = m_local.m_values;
+    bool * isnull = m_local.m_isnull;
+    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
         isnull[i] = true;
     }
 
     /* step 2: begin scan */
-    m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
+    m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
 
-    m_scan->Init(max_rows);
+    m_local.m_scan->Init(max_rows);
 
     setReceiver();
 
     long nprocessed = 0;
     TupleTableSlot *slot = NULL;
-    while ((slot = m_scan->getTupleSlot()) != NULL) {
+    while ((slot = m_local.m_scan->getTupleSlot()) != NULL) {
         CHECK_FOR_INTERRUPTS();
         nprocessed++;
 
         {
-            AutoContextSwitch memSwitch(m_tmpContext);
-            for (int i = 0; i < m_tupDesc->natts; i++) {
-                reslot->tts_values[i] = slot->tts_values[m_attrno[i] - 1];
-                reslot->tts_isnull[i] = slot->tts_isnull[m_attrno[i] - 1];
-                (this->*m_aggSumFunc)(&values[i], isnull[i],
+            AutoContextSwitch memSwitch(m_local.m_tmpContext);
+            for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+                reslot->tts_values[i] = slot->tts_values[m_global->m_attrno[i] - 1];
+                reslot->tts_isnull[i] = slot->tts_isnull[m_global->m_attrno[i] - 1];
+                (this->*(m_c_global->m_aggSumFunc))(&values[i], isnull[i],
                         &reslot->tts_values[i], reslot->tts_isnull[i]);
                 isnull[i] = false;
             }
@@ -2471,24 +2770,24 @@ bool AggFusion::execute(long max_rows, char *completionTag)
         }
     }
 
-    HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_tupDesc, values, isnull, HEAP_TUPLE);
+    HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull, HEAP_TUPLE);
     (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
 
-    tableam_tslot_getsomeattrs(reslot, m_tupDesc->natts);
+    tableam_tslot_getsomeattrs(reslot, m_global->m_tupDesc->natts);
 
-    (*m_receiver->receiveSlot)(reslot, m_receiver);
+    (*m_local.m_receiver->receiveSlot)(reslot, m_local.m_receiver);
 
-    tpslot_free_heaptuple(m_reslot);
+    tpslot_free_heaptuple(m_local.m_reslot);
 
     success = true;
 
     /* step 3: done */
-    if (m_isInsideRec == true) {
-        (*m_receiver->rDestroy)(m_receiver);
+    if (m_local.m_isInsideRec == true) {
+        (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
 
-    m_isCompleted = true;
-    m_scan->End(true);
+    m_local.m_isCompleted = true;
+    m_local.m_scan->End(true);
 
     errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
             "SELECT %lu", nprocessed);
@@ -2640,21 +2939,42 @@ void AggFusion::agg_numeric_sum(Datum *transVal, bool transIsNull, Datum *inVal,
 SortFusion::SortFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {
-    m_tmpvals = NULL;
-    m_values = NULL;
-    m_isnull = NULL;
-    m_tmpisnull = NULL;
+    MemoryContext old_context = NULL;
+    if (!IsGlobal()) {
+        old_context = MemoryContextSwitchTo(m_global->m_context);
+        InitGlobals();
+        MemoryContextSwitchTo(old_context);
+    }
+    old_context = MemoryContextSwitchTo(m_local.m_localContext);
+    InitLocals(params);
+    MemoryContextSwitchTo(old_context);
+}
 
-    m_paramLoc = NULL;
-    m_attrno = NULL;
-    m_reloid = 0;
+void SortFusion::InitLocals(ParamListInfo params)
+{
+    Plan *node = (Plan*)m_global->m_planstmt->planTree->lefttree;
+    Sort *sortnode = (Sort *)m_global->m_planstmt->planTree;
+    m_c_local.m_scanDesc = ExecTypeFromTL(node->targetlist, false);
+    initParams(params);
+    m_local.m_receiver = NULL;
+    m_local.m_isInsideRec = true;
+    m_local.m_scan = ScanFusion::getScanFusion((Node*)sortnode->plan.lefttree, m_global->m_planstmt,
+                                               m_local.m_outParams ? m_local.m_outParams : m_local.m_params);
+    m_c_local.m_scanDesc->tdTableAmType = m_local.m_scan->m_tupDesc->tdTableAmType;
+    if (!IsGlobal())
+        m_global->m_tupDesc->tdTableAmType = m_local.m_scan->m_tupDesc->tdTableAmType;
 
-    MemoryContext oldContext = MemoryContextSwitchTo(m_context);
+    m_local.m_reslot = MakeSingleTupleTableSlot(m_global->m_tupDesc, false, m_local.m_scan->m_tupDesc->tdTableAmType);
+    m_local.m_values = (Datum*)palloc0(m_global->m_tupDesc->natts * sizeof(Datum));
+    m_local.m_isnull = (bool*)palloc0(m_global->m_tupDesc->natts * sizeof(bool));
+}
 
-    Sort *sortnode = (Sort *)m_planstmt->planTree;
-    m_tupDesc = ExecCleanTypeFromTL(sortnode->plan.targetlist, false);
-
-    m_attrno = (int16 *) palloc(m_tupDesc->natts * sizeof(int16));
+void SortFusion::InitGlobals()
+{
+    m_global->m_reloid = 0;
+    Sort *sortnode = (Sort *)m_global->m_planstmt->planTree;
+    m_global->m_tupDesc = ExecCleanTypeFromTL(sortnode->plan.targetlist, false);
+    m_global->m_attrno = (int16 *)palloc(m_global->m_tupDesc->natts * sizeof(int16));
 
     ListCell *lc = NULL;
     int cur_resno = 1;
@@ -2664,27 +2984,9 @@ SortFusion::SortFusion(MemoryContext context, CachedPlanSource* psrc, List* plan
             continue;
 
         Var *var = (Var *)res->expr;
-        m_attrno[cur_resno - 1] = var->varattno;
+        m_global->m_attrno[cur_resno - 1] = var->varattno;
         cur_resno++;
     }
-
-    Plan *node = (Plan*)m_planstmt->planTree->lefttree;
-    m_scanDesc = ExecTypeFromTL(node->targetlist, false);
-
-    initParams(params);
-    m_receiver = NULL;
-    m_isInsideRec = true;
-    m_scan = ScanFusion::getScanFusion((Node*)sortnode->plan.lefttree, m_planstmt, m_outParams);
-    m_tupDesc->tdTableAmType = m_scan->m_tupDesc->tdTableAmType;
-    m_scanDesc->tdTableAmType = m_scan->m_tupDesc->tdTableAmType;
-    m_reslot = NULL;
-    m_isCompleted = true;
-
-    m_reslot = MakeSingleTupleTableSlot(m_tupDesc, false, m_scan->m_tupDesc->tdTableAmType);
-    m_values = (Datum*)palloc0(m_tupDesc->natts * sizeof(Datum));
-    m_isnull = (bool*)palloc0(m_tupDesc->natts * sizeof(bool));
-
-    MemoryContextSwitchTo(oldContext);
 }
 
 bool SortFusion::execute(long max_rows, char *completionTag)
@@ -2692,29 +2994,29 @@ bool SortFusion::execute(long max_rows, char *completionTag)
     max_rows = FETCH_ALL;
     bool success = false;
 
-    TupleTableSlot *reslot = m_reslot;
-    Datum *values = m_values;
-    bool  *isnull = m_isnull;
-    for (int i = 0; i < m_tupDesc->natts; i++) {
+    TupleTableSlot *reslot = m_local.m_reslot;
+    Datum *values = m_local.m_values;
+    bool  *isnull = m_local.m_isnull;
+    for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
         isnull[i] = true;
     }
 
     /* prepare */
-    m_scan->refreshParameter(m_outParams == NULL ? m_params : m_outParams);
+    m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
 
-    m_scan->Init(max_rows);
+    m_local.m_scan->Init(max_rows);
 
     setReceiver();
 
     Tuplesortstate *tuplesortstate = NULL;
-    Sort       *sortnode = (Sort *)m_planstmt->planTree;
+    Sort       *sortnode = (Sort *)m_global->m_planstmt->planTree;
     int64       sortMem = SET_NODEMEM(sortnode->plan.operatorMemKB[0], sortnode->plan.dop);
     int64       maxMem = (sortnode->plan.operatorMaxMem > 0) ?
         SET_NODEMEM(sortnode->plan.operatorMaxMem, sortnode->plan.dop) : 0;
 
     {
-        AutoContextSwitch memSwitch(m_context);
-        tuplesortstate = tuplesort_begin_heap(m_scanDesc,
+        AutoContextSwitch memSwitch(m_local.m_tmpContext);
+        tuplesortstate = tuplesort_begin_heap(m_c_local.m_scanDesc,
                 sortnode->numCols,
                 sortnode->sortColIdx,
                 sortnode->sortOperators,
@@ -2730,7 +3032,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
     /* receive data from indexscan node */
     long nprocessed = 0;
     TupleTableSlot *slot = NULL;
-    while ((slot = m_scan->getTupleSlot()) != NULL) {
+    while ((slot = m_local.m_scan->getTupleSlot()) != NULL) {
         tuplesort_puttupleslot(tuplesortstate, slot);
     }
 
@@ -2738,17 +3040,18 @@ bool SortFusion::execute(long max_rows, char *completionTag)
     tuplesort_performsort(tuplesortstate);
 
     /* send sorted data to client */
-    slot = MakeSingleTupleTableSlot(m_scanDesc);
+    slot = MakeSingleTupleTableSlot(m_c_local.m_scanDesc);
     while (tuplesort_gettupleslot(tuplesortstate, true, slot, NULL)) {
-        tableam_tslot_getsomeattrs(slot, m_scanDesc->natts);
-        for (int i = 0; i < m_tupDesc->natts; i++) {
-            values[i] = slot->tts_values[m_attrno[i] - 1];
-            isnull[i] = slot->tts_isnull[m_attrno[i] - 1];
+        tableam_tslot_getsomeattrs(slot, m_c_local.m_scanDesc->natts);
+        for (int i = 0; i < m_global->m_tupDesc->natts; i++) {
+            values[i] = slot->tts_values[m_global->m_attrno[i] - 1];
+            isnull[i] = slot->tts_isnull[m_global->m_attrno[i] - 1];
         }
 
-        HeapTuple tmptup = (HeapTuple) tableam_tops_form_tuple(m_tupDesc, values, isnull,  TableAMGetTupleType(m_tupDesc->tdTableAmType));
+        HeapTuple tmptup = (HeapTuple)tableam_tops_form_tuple(m_global->m_tupDesc, values, isnull, 
+                                                              TableAMGetTupleType(m_global->m_tupDesc->tdTableAmType));
         (void)ExecStoreTuple(tmptup, reslot, InvalidBuffer, false);
-        (*m_receiver->receiveSlot)(reslot, m_receiver);
+        (*m_local.m_receiver->receiveSlot)(reslot, m_local.m_receiver);
         tableam_tops_free_tuple(tmptup);
 
         CHECK_FOR_INTERRUPTS();
@@ -2761,12 +3064,12 @@ bool SortFusion::execute(long max_rows, char *completionTag)
     success = true;
 
     /* step 3: done */
-    if (m_isInsideRec == true) {
-        (*m_receiver->rDestroy)(m_receiver);
+    if (m_local.m_isInsideRec == true) {
+        (*m_local.m_receiver->rDestroy)(m_local.m_receiver);
     }
 
-    m_isCompleted = true;
-    m_scan->End(true);
+    m_local.m_isCompleted = true;
+    m_local.m_scan->End(true);
 
     errno_t errorno = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
             "SELECT %lu", nprocessed);

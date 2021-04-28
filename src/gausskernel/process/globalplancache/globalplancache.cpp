@@ -33,6 +33,7 @@
 #include "executor/lightProxy.h"
 #include "executor/spi_priv.h"
 #include "optimizer/nodegroups.h"
+#include "opfusion/opfusion.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
 #include "utils/dynahash.h"
@@ -248,6 +249,10 @@ bool GlobalPlanCache::TryStore(CachedPlanSource *plansource,  PreparedStatement 
         INSTR_TIME_SET_CURRENT(entry->val.last_use_time);
         /* off the link */
         plansource->next_saved = NULL;
+        plansource->is_checked_opfusion = true;
+        if (plansource->opFusionObj != NULL) {
+            OpFusion::SaveInGPC((OpFusion*)(plansource->opFusionObj));
+        }
         /* initialize the ref count .*/
 #ifdef ENABLE_MULTIPLE_NODES
         /* dn only count reference on cur_stmt_psrc, no prepare statement.
@@ -386,6 +391,9 @@ void GlobalPlanCache::DropInvalid()
                 curr->magic = 0;
                 MemoryContextUnSeal(curr->context);
                 MemoryContextUnSeal(curr->query_context);
+                if (curr->opFusionObj) {
+                    OpFusion::DropGlobalOpfusion((OpFusion*)(curr->opFusionObj));
+                }
                 MemoryContextDelete(curr->context);
 
                 cell = next;
@@ -553,7 +561,7 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
     GPC_LOG("recreate plan", oldsource, oldsource->stmt_name);
     CachedPlanSource *newsource = CopyCachedPlan(oldsource, true);
     MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
-    newsource->stream_enabled = IsStreamSupport();
+    newsource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
     u_sess->exec_cxt.CurrentOpFusionObj = NULL;
     Assert (oldsource->gpc.status.IsSharePlan());
     newsource->gpc.status.ShareInit();
@@ -949,6 +957,9 @@ void GlobalPlanCache::CleanUpByTime()
                         cur_plansource->magic = 0;
                         MemoryContextUnSeal(cur_plansource->context);
                         MemoryContextUnSeal(cur_plansource->query_context);
+                        if (cur_plansource->opFusionObj) {
+                            OpFusion::DropGlobalOpfusion((OpFusion*)(cur_plansource->opFusionObj));
+                        }
                         MemoryContextDelete(cur_plansource->context);
                         m_array[bucket_id].count--;
                     }
