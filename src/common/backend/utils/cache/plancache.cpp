@@ -115,15 +115,6 @@ static bool check_stream_plan(Plan* plan);
 static bool is_upsert_query_with_update_param(Node* raw_parse_tree);
 static void GPCFillPlanCache(CachedPlanSource* plansource, bool isBuildingCustomPlan);
 
-bool IsStreamSupport()
-{
-#ifdef ENABLE_MULTIPLE_NODES
-    return u_sess->attr.attr_sql.enable_stream_operator;
-#else
-    return u_sess->opt_cxt.query_dop > 1;
-#endif
-}
-
 /*
  * InitPlanCache: initialize module during InitPostgres.
  *
@@ -137,6 +128,25 @@ void InitPlanCache(void)
     CacheRegisterSyscacheCallback(NAMESPACEOID, PlanCacheSysCallback, (Datum)0);
     CacheRegisterSyscacheCallback(OPEROID, PlanCacheSysCallback, (Datum)0);
     CacheRegisterSyscacheCallback(AMOPOPID, PlanCacheSysCallback, (Datum)0);
+}
+
+/* ddl no need to global it */
+static bool IsSupportGPCStmt(const Node* node)
+{
+    bool isSupportGPC = false;
+    switch (nodeTag(node)) {
+        case T_InsertStmt:
+        case T_DeleteStmt:
+        case T_UpdateStmt:
+        case T_MergeStmt:
+        case T_SelectStmt:
+            isSupportGPC = false;
+            break;
+        default:
+            isSupportGPC = true;
+            break;
+    }
+    return isSupportGPC;
 }
 
 /*
@@ -174,15 +184,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     MemoryContext oldcxt;
 
     Assert(query_string != NULL); /* required as of 8.4 */
-    bool enable_pbe_gpc = false;
-    if (stmt_name != NULL && stmt_name[0] != '\0') {
-#ifdef ENABLE_MULTIPLE_NODES
-        /* TransactionStmt do not support shared plan */
-        enable_pbe_gpc = (ENABLE_CN_GPC && raw_parse_tree && !IsA(raw_parse_tree, TransactionStmt)) || ENABLE_DN_GPC;
-#else
-        enable_pbe_gpc = ENABLE_GPC && raw_parse_tree && !IsA(raw_parse_tree, TransactionStmt);
-#endif
-    }
+    bool isSupportGPC = raw_parse_tree && IsSupportGPCStmt(raw_parse_tree);
+    bool enable_pbe_gpc = ENABLE_GPC && stmt_name != NULL && stmt_name[0] != '\0' && !isSupportGPC;
 
     if(!enable_pbe_gpc && !(ENABLE_CN_GPC && enable_spi_gpc)) {
        /*
@@ -239,7 +242,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->context = source_context;
 #ifdef PGXC
     plansource->stmt_name = (stmt_name ? pstrdup(stmt_name) : NULL);
-    plansource->stream_enabled = IsStreamSupport();
+    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -355,7 +358,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
 #endif
 
 #ifdef PGXC
-    plansource->stream_enabled = IsStreamSupport();
+    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -998,7 +1001,7 @@ static bool CheckCachedPlan(CachedPlanSource* plansource)
     }
 
     /* If stream_operator alreadly change, need build plan again.*/
-    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != IsStreamSupport()) {
+    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != u_sess->attr.attr_sql.enable_stream_operator) {
         return false;
     }
 
@@ -1291,7 +1294,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     MemoryContextSwitchTo(oldcxt);
 
     /* Set plan real u_sess->attr.attr_sql.enable_stream_operator.*/
-    plansource->stream_enabled = IsStreamSupport();
+    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
     //in shared hash table, we can not share the plan, we should throw error before this logic.
 
     plan->is_share = false;
@@ -2660,12 +2663,13 @@ void DropCachedPlanInternal(CachedPlanSource* plansource)
         }
         plansource->lightProxyObj = NULL;
     } else {
-        if (plansource->opFusionObj != NULL) {
+        if (!plansource->gpc.status.InShareTable() && plansource->opFusionObj != NULL) {
             OpFusion *opfusion = (OpFusion *)plansource->opFusionObj;
-            if (opfusion->m_portalName == NULL || OpFusion::locateFusion(opfusion->m_portalName) == NULL) {
+            if (opfusion->m_local.m_portalName == NULL ||
+                OpFusion::locateFusion(opfusion->m_local.m_portalName) == NULL) {
                 OpFusion::tearDown(opfusion);
             } else {
-                opfusion->m_psrc = NULL;
+                opfusion->m_global->m_psrc = NULL;
             }
             plansource->opFusionObj = NULL;
         }

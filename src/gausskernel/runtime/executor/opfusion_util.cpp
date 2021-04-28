@@ -1129,3 +1129,16 @@ void tpslot_free_heaptuple(TupleTableSlot* reslot)
         reslot->tts_tuple = NULL;
     }
 }
+
+/* judge plan node is partiterator */
+Node* JudgePlanIsPartIterator(Plan* plan)
+{
+    Node* node = NULL;
+    if (IsA(plan, PartIterator)) {
+        node = (Node*)plan->lefttree;
+    } else {
+        node = (Node*)plan;
+    }
+    return node;
+}
+

@@ -233,12 +233,19 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
     if (psrc->opFusionObj != NULL) {
-        ((OpFusion*)psrc->opFusionObj)->setPreparedDestReceiver(dest);
-        ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramLI);
-        ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+        OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
+        if (opFusionObj->IsGlobal()) {
+            opFusionObj = (OpFusion *)OpFusion::FusionFactory(opFusionObj->m_global->m_type,
+                                                              u_sess->cache_mem_cxt, psrc, NULL, params);
+            Assert(opFusionObj != NULL);
+        }
+        opFusionObj->setPreparedDestReceiver(dest);
+        opFusionObj->useOuterParameter(paramLI);
+        opFusionObj->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
 
-        CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
-        if (cps != NULL && cps->gplan) {
+        CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
+        bool needBucketId = cps != NULL && cps->gplan;
+        if (needBucketId) {
             setCachedPlanBucketId(cps->gplan, paramLI);
         }
 
@@ -310,10 +317,12 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         eflags = 0;
         count = FETCH_ALL;
     }
-    bool checkSQLBypass = IS_PGXC_DATANODE && (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    bool checkSQLBypass = IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
+                          (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
     if (checkSQLBypass) {
         psrc->opFusionObj =
-            OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL), psrc->context, psrc, NULL, paramLI);
+            OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL),
+                                    u_sess->cache_mem_cxt, psrc, NULL, paramLI);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
             ((OpFusion*)psrc->opFusionObj)->setPreparedDestReceiver(dest);
