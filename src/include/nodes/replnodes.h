@@ -103,7 +103,8 @@ typedef struct AdvanceReplicationCmd {
     NodeTag type;
     ReplicationKind kind;
     char* slotname;
-    XLogRecPtr restartpoint;
+    XLogRecPtr restart_lsn;
+    XLogRecPtr confirmed_flush;
 } AdvanceReplicationCmd;
 
 /* ----------------------

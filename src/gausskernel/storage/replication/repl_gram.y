@@ -317,15 +317,16 @@ start_logical_replication:
 				}
 			;
 	
-/* ADVANCE_REPLICATION SLOT slot LOGICAL %X/%X options */
+/* ADVANCE_REPLICATION SLOT slot LOGICAL %X/%X %X/%X */
 advance_logical_replication:
-            K_ADVANCE_REPLICATION K_SLOT IDENT K_LOGICAL RECPTR
+            K_ADVANCE_REPLICATION K_SLOT IDENT K_LOGICAL RECPTR RECPTR
 				{
 					AdvanceReplicationCmd *cmd;
 					cmd = makeNode(AdvanceReplicationCmd);
 					cmd->kind = REPLICATION_KIND_LOGICAL;;
 					cmd->slotname = $3;
-					cmd->restartpoint = $5;
+					cmd->restart_lsn = $5;
+					cmd->confirmed_flush = $6;
 					$$ = (Node *) cmd;
 				}
 			;
