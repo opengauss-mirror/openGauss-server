@@ -1063,15 +1063,17 @@ void CloseLogicalAdvanceConnect()
 }
 
 /* Notify the primary to advance logical replication slot. */
-void NotifyPrimaryAdvance(XLogRecPtr flush)
+void NotifyPrimaryAdvance(XLogRecPtr restart, XLogRecPtr flush)
 {
     char query[256];
     PGresult* res = NULL;
     int nRet = 0;
 
     nRet = snprintf_s(query, sizeof(query), sizeof(query) - 1,
-                      "ADVANCE_REPLICATION SLOT \"%s\" LOGICAL %X/%X",
+                      "ADVANCE_REPLICATION SLOT \"%s\" LOGICAL %X/%X %X/%X",
                       NameStr(t_thrd.slot_cxt.MyReplicationSlot->data.name),
+                      (uint32)(restart >> 32),
+                      (uint32)restart,
                       (uint32)(flush >> 32),
                       (uint32)flush);
 
