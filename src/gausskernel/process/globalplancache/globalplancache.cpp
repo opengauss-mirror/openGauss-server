@@ -561,7 +561,7 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
     GPC_LOG("recreate plan", oldsource, oldsource->stmt_name);
     CachedPlanSource *newsource = CopyCachedPlan(oldsource, true);
     MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
-    newsource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    newsource->stream_enabled = IsStreamSupport();
     u_sess->exec_cxt.CurrentOpFusionObj = NULL;
     Assert (oldsource->gpc.status.IsSharePlan());
     newsource->gpc.status.ShareInit();
