@@ -83,9 +83,14 @@ static Point* lseg_interpt_internal(LSEG* l1, LSEG* l2);
 #define LDELIM_C '<'
 #define RDELIM_C '>'
 
-/* Maximum number of characters printed by pair_encode() */
-/* ...+3+7 : 3 accounts for extra_float_digits max value */
-#define P_MAXLEN (2 * (DBL_DIG + 3 + 7) + 1)
+/* Maximum number of characters printed by pair_encode().
+ * The value range of float8 is -1.79E+308 ~ 1.79E+308.
+ * For point(-1.79E+308,-1.79E+308),
+ * (2 * (DBL_DIG + 3 + 7) + 1 + 1) : 3 accounts for extra_float_digits max value,
+ * 7 accounts for "-.E+308", first number 1 accounts for comma in the middle of numbers,
+ * last number 1 accounts for string terminator.
+ */
+#define P_MAXLEN (2 * (DBL_DIG + 3 + 7) + 1 + 1)
 
 /*
  * Geometric data types are composed of points.
