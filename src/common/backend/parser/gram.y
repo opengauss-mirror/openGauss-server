@@ -9459,6 +9459,14 @@ privilege_target:
 					n->objs = $2;
 					$$ = n;
 				}
+			| PROCEDURE function_with_argtypes_list
+				{
+					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));
+					n->targtype = ACL_TARGET_OBJECT;
+					n->objtype = ACL_OBJECT_FUNCTION;
+					n->objs = $2;
+					$$ = n;
+				}
 			| DATABASE name_list
 				{
 					PrivTarget *n = (PrivTarget *) palloc(sizeof(PrivTarget));

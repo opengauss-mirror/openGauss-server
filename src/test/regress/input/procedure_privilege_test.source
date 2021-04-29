@@ -1,0 +1,33 @@
+DROP SCHEMA IF EXISTS test_sch;
+DROP TABLE IF EXISTS test_sch.test_table;
+CREATE SCHEMA test_sch;
+CREATE TABLE test_sch.test_table(id1 int, id2 varchar(20));
+CREATE OR REPLACE PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) AS
+BEGIN
+    INSERT INTO test_sch.test_table values(num1, num2);
+END;
+/
+
+CALL test_sch.test_pro(1, 'initial');
+
+DROP USER IF EXISTS test_owner CASCADE;
+DROP USER IF EXISTS test_acl CASCADE;
+CREATE USER test_owner WITH PASSWORD 'openGauss@123';
+CREATE USER test_acl WITH PASSWORD 'openGauss@123';
+GRANT ALL PRIVILEGES ON SCHEMA test_sch TO test_acl;
+GRANT INSERT ON TABLE test_sch.test_table TO test_acl;
+REVOKE ALL PRIVILEGES ON PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) FROM test_acl;
+
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_acl -W 'openGauss@123' -c 'ALTER PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) RENAME TO new_test_pro;'
+
+ALTER PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) OWNER TO test_owner;
+GRANT ALL PRIVILEGES ON PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) TO test_acl;
+
+SELECT p.proname, r.rolname FROM PG_PROC AS p, pg_roles AS r WHERE p.proowner=r.oid AND proname='test_pro';
+\! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_acl -W 'openGauss@123' -c 'ALTER PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) RENAME TO new_test_pro;'
+
+SELECT p.proname, r.rolname FROM PG_PROC AS p, pg_roles AS r WHERE p.proowner=r.oid AND proname='new_test_pro';
+
+DROP TABLE IF EXISTS test_sch.test_table;
+DROP USER IF EXISTS test_owner CASCADE;
+DROP USER IF EXISTS test_acl CASCADE;
