@@ -3367,7 +3367,14 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         if (u_sess->attr.attr_common.log_parser_stats)
             ShowUsage("PARSE ANALYSIS STATISTICS");
 
+#ifndef ENABLE_MULTIPLE_NODES
+        /* store normalized uniquesQl text into Query in P phase of PBE, only if auto-cleanup is enabled */
+        if (is_unique_sql_enabled() && g_instance.attr.attr_common.unique_sql_clean_ratio != 0) {
+            query->unique_sql_text = FindCurrentUniqueSQL();
+        }
+#endif
         querytree_list = pg_rewrite_query(query);
+
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
             ListCell* lc = NULL;
