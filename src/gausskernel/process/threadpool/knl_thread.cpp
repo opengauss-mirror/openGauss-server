@@ -1301,6 +1301,7 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->tmpbuf = (StringInfoData*)palloc0(sizeof(StringInfoData));
     walsender_cxt->remotePort = 0;
     walsender_cxt->walSndCaughtUp = false;
+    walsender_cxt->advancePrimaryConn = NULL;
     walsender_cxt->last_check_timeout_timestamp = 0;
 }
 
