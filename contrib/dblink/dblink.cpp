@@ -35,7 +35,7 @@
 
 #include <limits.h>
 
-#include "libpq-fe.h"
+#include "libpq/libpq-fe.h"
 #include "funcapi.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -112,8 +112,8 @@ static int applyRemoteGucs(PGconn* conn);
 static void restoreLocalGucs(int nestlevel);
 
 /* Global */
-static remoteConn* pconn = NULL;
-static HTAB* remoteConnHash = NULL;
+static THR_LOCAL remoteConn* pconn = NULL;
+static THR_LOCAL HTAB* remoteConnHash = NULL;
 
 /*
  *	Following is list that holds multiple remote connections.
@@ -2521,7 +2521,7 @@ static int applyRemoteGucs(PGconn* conn)
     static const char* const GUCsAffectingIO[] = {"DateStyle", "IntervalStyle"};
 
     int nestlevel = -1;
-    int i;
+    uint32 i;
 
     for (i = 0; i < lengthof(GUCsAffectingIO); i++) {
         const char* gucName = GUCsAffectingIO[i];
