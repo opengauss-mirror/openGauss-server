@@ -9204,7 +9204,7 @@ static void ReportGUCOption(struct config_generic* record);
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* pHolder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
-static void ShowAllGUCConfig(DestReceiver* dest);
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
 static char* _ShowOption(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -14163,12 +14163,13 @@ void EmitWarningsOnPlaceholders(const char* className)
 /*
  * SHOW command
  */
-void GetPGVariable(const char* name, DestReceiver* dest)
+void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
 {
-    if (guc_name_compare(name, "all") == 0)
-        ShowAllGUCConfig(dest);
-    else
+    if (guc_name_compare(name, "all") == 0) {
+        ShowAllGUCConfig(likename, dest);
+    } else {
         ShowGUCConfigOption(name, dest);
+    }
 }
 
 TupleDesc GetPGVariableResultDesc(const char* name)
@@ -14224,7 +14225,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
 /*
  * SHOW ALL command
  */
-static void ShowAllGUCConfig(DestReceiver* dest)
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
 {
     bool am_superuser = superuser();
     int i;
@@ -14248,6 +14249,10 @@ static void ShowAllGUCConfig(DestReceiver* dest)
 
         if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
             continue;
+
+        if(NULL != likename && NULL == strstr((char*)conf->name, likename)) {
+            continue;
+        }
 
         /* assign to the values array */
         values[0] = PointerGetDatum(cstring_to_text(conf->name));

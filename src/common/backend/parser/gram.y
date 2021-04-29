@@ -780,7 +780,7 @@ static void parameter_check_execute_direct(const char* query);
 	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLIMITED UNLISTEN UNLOCK UNLOGGED
 	UNTIL UNUSABLE UPDATE USER USING
 
-	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIADIC VARRAY VARYING VCGROUP
+	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
 	WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
@@ -2206,6 +2206,13 @@ VariableShowStmt:
 				{
 					VariableShowStmt *n = makeNode(VariableShowStmt);
 					n->name = "session_authorization";
+					$$ = (Node *) n;
+				}
+			| SHOW VARIABLES LIKE var_name
+				{
+					VariableShowStmt *n = makeNode(VariableShowStmt);
+					n->name = "all";
+					n->likename = $4;
 					$$ = (Node *) n;
 				}
 			| SHOW ALL
@@ -20425,6 +20432,7 @@ unreserved_keyword:
 			| VALIDATION
 			| VALIDATOR
 			| VALUE_P
+			| VARIABLES
 			| VARYING
 			| VERSION_P
 			| VIEW
