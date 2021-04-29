@@ -115,6 +115,15 @@ static bool check_stream_plan(Plan* plan);
 static bool is_upsert_query_with_update_param(Node* raw_parse_tree);
 static void GPCFillPlanCache(CachedPlanSource* plansource, bool isBuildingCustomPlan);
 
+bool IsStreamSupport()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return u_sess->attr.attr_sql.enable_stream_operator;
+#else
+    return u_sess->opt_cxt.query_dop > 1;
+#endif
+}
+
 /*
  * InitPlanCache: initialize module during InitPostgres.
  *
@@ -242,7 +251,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     plansource->context = source_context;
 #ifdef PGXC
     plansource->stmt_name = (stmt_name ? pstrdup(stmt_name) : NULL);
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -358,7 +367,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
 #endif
 
 #ifdef PGXC
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();;
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
@@ -1001,7 +1010,7 @@ static bool CheckCachedPlan(CachedPlanSource* plansource)
     }
 
     /* If stream_operator alreadly change, need build plan again.*/
-    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != u_sess->attr.attr_sql.enable_stream_operator) {
+    if ((!plansource->gpc.status.InShareTable()) && plansource->stream_enabled != IsStreamSupport()) {
         return false;
     }
 
@@ -1294,7 +1303,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     MemoryContextSwitchTo(oldcxt);
 
     /* Set plan real u_sess->attr.attr_sql.enable_stream_operator.*/
-    plansource->stream_enabled = u_sess->attr.attr_sql.enable_stream_operator;
+    plansource->stream_enabled = IsStreamSupport();
     //in shared hash table, we can not share the plan, we should throw error before this logic.
 
     plan->is_share = false;
