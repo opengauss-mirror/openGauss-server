@@ -367,7 +367,7 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
 #endif
 
 #ifdef PGXC
-    plansource->stream_enabled = IsStreamSupport();;
+    plansource->stream_enabled = IsStreamSupport();
     plansource->cplan = NULL;
     plansource->single_exec_node = NULL;
     plansource->is_read_only = false;
