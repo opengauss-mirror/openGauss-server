@@ -240,7 +240,7 @@ bool SensitiveStrCheck(const char* target)
     
     if (strstr(target_copy, "PASSWORD") != NULL || strstr(target_copy, "IDENTIFIED") != NULL ||
         strstr(target_copy, "GS_ENCRYPT_AES128") != NULL || strstr(target_copy, "GS_DECRYPT_AES128") != NULL ||
-        strstr(target_copy, "GS_ENCRYPT_SM4") != NULL || strstr(target_copy, "GS_DECRYPT_SM4") != NULL) {
+        strstr(target_copy, "GS_ENCRYPT_FUNCTION") != NULL || strstr(target_copy, "GS_DECRYPT_FUNCTION") != NULL) {
         free(target_copy);
         return TRUE;
     } else {
