@@ -3535,7 +3535,7 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
         "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
         "           where snapshot_id = %ld and snap_stat_name = 'DB_TIME') snap_2) db_time "
         "  ) s2, "
-        "  (select (bufferAccess.snap_wait - bufferFull.snap_wait) * 100 / greatest(bufferAccess.snap_wait, 1) as walwrite_nowait "
+        "  (select round((bufferAccess.snap_wait - bufferFull.snap_wait) * 100 / greatest(bufferAccess.snap_wait, 1)) as walwrite_nowait "
         "   from "
         "     (select coalesce(snap_2.snap_wait) - coalesce(snap_1.snap_wait, 0) as snap_wait "
         "      from "
