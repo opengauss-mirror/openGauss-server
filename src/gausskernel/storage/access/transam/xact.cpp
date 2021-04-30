@@ -6284,6 +6284,11 @@ static void CommitSubTransaction(bool STP_commit)
 
     ShowTransactionState("CommitSubTransaction");
 
+    /* clean hash table for sub transaction in opfusion */
+    if (IS_PGXC_DATANODE) {
+        OpFusion::ClearInSubUnexpectSituation(s->curTransactionOwner);
+    }
+
     if (s->state != TRANS_INPROGRESS) {
         ereport(WARNING, (errmsg("CommitSubTransaction while in %s state", TransStateAsString(s->state))));
     }
@@ -6415,6 +6420,10 @@ void AbortSubTransaction(bool STP_rollback)
 {
     TransactionState s = CurrentTransactionState;
     t_thrd.xact_cxt.bInAbortTransaction = true;
+    /* clean hash table for sub transaction in opfusion */
+    if (IS_PGXC_DATANODE) {
+        OpFusion::ClearInSubUnexpectSituation(s->curTransactionOwner);
+    }
 
     /*
      * @dfs

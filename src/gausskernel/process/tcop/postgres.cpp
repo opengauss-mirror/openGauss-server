@@ -3323,7 +3323,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
         query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams);
 #else
         query = parse_analyze_varparams(raw_parse_tree, query_string, &paramTypes, &numParams, paramTypeNames);
-#endif		
+#endif
 #ifdef ENABLE_MOT
         /* check cross engine queries  */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -3341,7 +3341,11 @@ static void exec_parse_message(const char* query_string, /* string to execute */
             // MOT LLVM
             TryMotJitCodegenQuery(query_string, psrc, query);
         }
-
+        /* gpc does not support MOT engine */
+        if (ENABLE_CN_GPC && psrc->gpc.status.IsSharePlan() &&
+            (psrc->storageEngineType == SE_TYPE_MOT || psrc->storageEngineType == SE_TYPE_MIXED)) {
+            psrc->gpc.status.SetKind(GPC_UNSHARED);
+        }
         if (!IsTransactionExitStmt(raw_parse_tree) && CheckMotIndexedColumnUpdate(query)) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
@@ -4109,22 +4113,14 @@ static void exec_bind_message(StringInfo input_message)
 #ifdef ENABLE_MOT
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed()) {
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
         ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
-            errmsg("Cross storage engine transaction is not supported")));
-    }
+                errmsg("Cross storage engine transaction is not supported")));
 
     /* block MOT engine queries in sub-transactions */
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed())
         ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-            errmsg("SubTransaction is not supported for memory table")));
-    }
-
-    if (IsTransactionPrepareStmt(psrc->raw_parse_tree) && (IsMOTEngineUsed() || IsMixedEngineUsed())) {
-        /* Explicit prepare transaction is not supported for memory table */
-        ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-            errmsg("Explicit prepare transaction is not supported for memory table")));
-    }
+                errmsg("SubTransaction is not supported for memory table")));
 
     /*
      * MOT JIT Execution:
@@ -4144,21 +4140,26 @@ static void exec_bind_message(StringInfo input_message)
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
     if (psrc->opFusionObj != NULL) {
+        Assert(psrc->cplan == NULL);
         (void)RevalidateCachedQuery(psrc);
 
-        if (psrc->opFusionObj != NULL) {
-            Assert(psrc->cplan == NULL);
-            ((OpFusion*)psrc->opFusionObj)->clean();
-            ((OpFusion*)psrc->opFusionObj)->updatePreAllocParamter(input_message);
-            ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
-            if (portal_name[0] != '\0')
-                ((OpFusion *)psrc->opFusionObj)->storeFusion(portal_name);
-
-            CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
-            if (cps != NULL && cps->gplan) {
-                setCachedPlanBucketId(cps->gplan, ((OpFusion*)psrc->opFusionObj)->m_params);
+        OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
+        if (opFusionObj != NULL) {
+            if (opFusionObj->IsGlobal()) {
+                opFusionObj = (OpFusion *)OpFusion::FusionFactory(opFusionObj->m_global->m_type,
+                                                      u_sess->cache_mem_cxt, psrc, NULL, params);
+                Assert(opFusionObj != NULL);
             }
+            opFusionObj->clean();
+            opFusionObj->updatePreAllocParamter(input_message);
+            opFusionObj->setCurrentOpFusionObj(opFusionObj);
+            if (portal_name[0] != '\0')
+                opFusionObj->storeFusion(portal_name);
 
+            CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
+            if (cps != NULL && cps->gplan) {
+                setCachedPlanBucketId(cps->gplan, opFusionObj->m_local.m_params);
+            }
             if (t_thrd.postgres_cxt.whereToSendOutput == DestRemote)
                 pq_putemptymessage('2');
             gstrace_exit(GS_TRC_ID_exec_bind_message);
@@ -4543,13 +4544,10 @@ static void exec_bind_message(StringInfo input_message)
      */
     PortalDefineQuery(portal, saved_stmt_name, query_string, psrc->commandTag, cplan->stmt_list, cplan);
 
-    if (ENABLE_GPC && psrc->gplan) {
-        portal->stmts = CopyLocalStmt(cplan->stmt_list, u_sess->top_portal_cxt, &portal->copyCxt);
-    }
-
-    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
+    if (IS_PGXC_DATANODE && psrc->cplan == NULL && !psrc->gpc.status.InShareTable() &&
+        psrc->is_checked_opfusion == false) {
         psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
-            u_sess->cache_mem_cxt, psrc, NULL, params);
+                                                    u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
             ((OpFusion*)psrc->opFusionObj)->clean();
@@ -4567,6 +4565,10 @@ static void exec_bind_message(StringInfo input_message)
             gstrace_exit(GS_TRC_ID_exec_bind_message);
             return;
         }
+    }
+
+    if (ENABLE_GPC && psrc->gplan) {
+        portal->stmts = CopyLocalStmt(cplan->stmt_list, u_sess->top_portal_cxt, &portal->copyCxt);
     }
 
     /* Done with the snapshot used for parameter I/O and parsing/planning */
@@ -8404,8 +8406,12 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                         if (IS_PGXC_DATANODE && closeTarget[0] != '\0') {
                             OpFusion* curr = OpFusion::locateFusion(closeTarget);
                             if (curr != NULL) {
-                                curr->clean();
-                                OpFusion::removeFusionFromHtab(closeTarget);
+                                if (curr->IsGlobal()) {
+                                    OpFusion::tearDown(curr);
+                                } else {
+                                    curr->clean();
+                                    OpFusion::removeFusionFromHtab(closeTarget);
+                                }
                             }
                         }
 
@@ -9773,25 +9779,45 @@ void execute_simple_query(const char* query_string)
  *   If query is not SELECT/INSERT/UPDATE/DELETE, return completionTag, else NULL.
  */
 static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int numRFormats, int16* rformats,
-    bool send_DP_msg, CommandDest dest, char* completionTag, const char* stmt_name, List* gpcCopyStmts)
+    bool send_DP_msg, CommandDest dest, char* completionTag,
+    const char* stmt_name, List** gpcCopyStmts, MemoryContext* tmpCxt, PreparedStatement* pstmt)
 {
     CachedPlan* cplan = NULL;
     Portal portal;
 
     DestReceiver* receiver = NULL;
     bool completed = false;
+
+    if (ENABLE_GPC && psrc->stmt_name && psrc->stmt_name[0] != '\0' &&
+        g_instance.plan_cache->CheckRecreateCachePlan(psrc)) {
+        g_instance.plan_cache->RecreateCachePlan(psrc, stmt_name, pstmt, NULL, NULL);
+#ifdef ENABLE_MULTIPLE_NODES
+        psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
+#else
+        psrc = pstmt->plansource;
+#endif
+        t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
+    }
+
+    int generation = psrc->generation;
+
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
-
+        OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
         if (psrc->opFusionObj != NULL) {
             Assert(psrc->cplan == NULL);
-            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
-            ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
-            ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+            if (opFusionObj->IsGlobal()) {
+                opFusionObj = (OpFusion *)OpFusion::FusionFactory(opFusionObj->m_global->m_type,
+                                                      u_sess->cache_mem_cxt, psrc, NULL, params);
+                Assert(opFusionObj != NULL);
+            }
+            opFusionObj->bindClearPosition();
+            opFusionObj->useOuterParameter(params);
+            opFusionObj->setCurrentOpFusionObj(opFusionObj);
 
-            CachedPlanSource* cps = ((OpFusion*)psrc->opFusionObj)->m_psrc;
+            CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, params);
             }
@@ -9856,8 +9882,20 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
         cplan->stmt_list,
         cplan);
 
-    if (ENABLE_GPC && gpcCopyStmts != NULL) {
-        portal->stmts = gpcCopyStmts;
+    if (ENABLE_GPC) {
+        /* generated new gplan, copy it incase someone change it */
+        if (generation != psrc->generation && psrc->gplan) {
+            if (*tmpCxt != NULL)
+                MemoryContextDelete(*tmpCxt);
+            *gpcCopyStmts = CopyLocalStmt(psrc->gplan->stmt_list, u_sess->temp_mem_cxt, tmpCxt);
+        } else if (*gpcCopyStmts == NULL && psrc->gpc.status.InShareTable()) {
+            /* copy for shared plan */
+            if (*tmpCxt != NULL)
+                MemoryContextDelete(*tmpCxt);
+            *gpcCopyStmts = CopyLocalStmt(psrc->gplan->stmt_list, u_sess->temp_mem_cxt, tmpCxt);
+        }
+        if (*gpcCopyStmts != NULL)
+            portal->stmts = *gpcCopyStmts;
     }
 
 #ifdef ENABLE_MOT
@@ -9873,13 +9911,14 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
     }
 #endif
 
-    bool checkSQLBypass  = IS_PGXC_DATANODE && (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
+    bool checkSQLBypass  = IS_PGXC_DATANODE && !psrc->gpc.status.InShareTable() &&
+                           (psrc->cplan == NULL) && (psrc->is_checked_opfusion == false);
     if (checkSQLBypass) {
-        psrc->opFusionObj =
-            OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL), psrc->context, psrc, NULL, params);
+        psrc->opFusionObj = OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL),
+                                                    u_sess->cache_mem_cxt, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
         if (psrc->opFusionObj != NULL) {
-        	((OpFusion*)psrc->opFusionObj)->bindClearPosition();
+            ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
@@ -10342,6 +10381,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
             *portal_name ? portal_name : "<unnamed>",
             *stmt_name ? stmt_name : "<unnamed>",
             batch_count)));
+    PreparedStatement *pstmt = NULL;
 
     /* Find prepared statement */
     if (stmt_name[0] != '\0') {
@@ -10351,7 +10391,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
                         errmsg("dn gpc's prepared statement %s does not exist", stmt_name)));
         } else {
-            PreparedStatement *pstmt = NULL;
             pstmt = FetchPreparedStatement(stmt_name, true, true);
             psrc = pstmt->plansource;
         }
@@ -10859,21 +10898,26 @@ static void exec_batch_bind_execute(StringInfo input_message)
     } else {
         char* completionTag = (char*)palloc0(COMPLETION_TAG_BUFSIZE * sizeof(char));
         List* copyedStmts = NULL;
+        MemoryContext tmpCxt = NULL;
 
         if (u_sess->attr.attr_resource.use_workload_manager && g_instance.wlm_cxt->gscgroup_init_done &&
             !IsAbortedTransactionBlockState()) {
             u_sess->wlm_cxt->cgroup_last_stmt = u_sess->wlm_cxt->cgroup_stmt;
             u_sess->wlm_cxt->cgroup_stmt = WLMIsSpecialCommand(psrc->raw_parse_tree, NULL);
         }
-        if (ENABLE_GPC && psrc->gplan && psrc->gpc.status.IsSharePlan()) {
-            MemoryContext tmpCxt = NULL;
-            copyedStmts = CopyLocalStmt(psrc->gplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
-        }
 
         if (use_original_logic) {
             for (int i = 0; i < batch_count; i++) {
                 exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
-                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name, copyedStmts);
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag,
+                                  stmt_name, &copyedStmts, &tmpCxt, pstmt);
+                if (ENABLE_GPC && stmt_name[0] != '\0') {
+#ifdef ENABLE_MULTIPLE_NODES
+                    psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
+#else
+                    psrc = pstmt->plansource;
+#endif
+                }
             }
 
             /* only send the last commandTag */
@@ -10883,7 +10927,15 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
             for (int i = 0; i < batch_count; i++) {
                 exec_one_in_batch(psrc, params_set[i], numRFormats, rformats,
-                                  (i == 0) ? send_DP_msg : false, dest, completionTag, stmt_name, copyedStmts);
+                                  (i == 0) ? send_DP_msg : false, dest, completionTag,
+                                  stmt_name, &copyedStmts, &tmpCxt, pstmt);
+                if (ENABLE_GPC && stmt_name[0] != '\0') {
+#ifdef ENABLE_MULTIPLE_NODES
+                    psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
+#else
+                    psrc = pstmt->plansource;
+#endif
+                }
 
                 /* Get process_count (X) from completionTag */
                 if (completionTag[0] == 'I') {
@@ -10897,7 +10949,6 @@ static void exec_batch_bind_execute(StringInfo input_message)
                     Assert(completionTag[0] == 'U' || completionTag[0] == 'D' || completionTag[0] == 'S');
                     tmp_count = pg_atoi(&completionTag[7], sizeof(int32), '\0');
                 }
-
                 process_count += tmp_count;
             }
         }
