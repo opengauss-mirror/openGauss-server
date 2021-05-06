@@ -123,7 +123,7 @@ Datum heap_page_items(PG_FUNCTION_ARGS)
 
         int nRet = 0;
         nRet = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check_ss(nRet, "", "");
+        securec_check_c(nRet, "\0", "\0");
 
         /* Extract information from the line pointer */
 

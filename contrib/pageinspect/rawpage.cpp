@@ -155,7 +155,7 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
     LockBuffer(buf, BUFFER_LOCK_SHARE);
 
     int rc = memcpy_s(raw_page_data, BLCKSZ, BufferGetPage(buf), BLCKSZ);
-    securec_check(rc, "", "");
+    securec_check_c(rc, "\0", "\0");
 
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     ReleaseBuffer(buf);
@@ -307,7 +307,7 @@ Datum page_compress_meta(PG_FUNCTION_ARGS)
     bytea* dumpVal = (bytea*)palloc(VARHDRSZ + output->len);
     SET_VARSIZE(dumpVal, VARHDRSZ + output->len);
     int rc = memcpy_s(VARDATA(dumpVal), output->len, output->data, output->len);
-    securec_check(rc, "", "");
+    securec_check_c(rc, "\0", "\0");
     pfree(output->data);
     pfree(output);
 
@@ -327,7 +327,7 @@ Datum page_compress_meta_usage(PG_FUNCTION_ARGS)
     bytea* dumpVal = (bytea*)palloc(VARHDRSZ + help_size);
     SET_VARSIZE(dumpVal, VARHDRSZ + help_size);
     int rc = memcpy_s(VARDATA(dumpVal), help_size, help, help_size);
-    securec_check(rc, "", "");
+    securec_check_c(rc, "\0", "\0");
 
     PG_RETURN_TEXT_P(dumpVal);
 }
@@ -414,7 +414,7 @@ static char* read_raw_page(Relation rel, ForkNumber forknum, BlockNumber blkno)
     buf = ReadBufferExtended(rel, forknum, blkno, RBM_NORMAL, NULL);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
     int rc = memcpy_s(raw_page, BLCKSZ, BufferGetPage(buf), BLCKSZ);
-    securec_check(rc, "", "");
+    securec_check_c(rc, "\0", "\0");
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     ReleaseBuffer(buf);
 

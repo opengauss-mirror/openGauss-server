@@ -242,8 +242,7 @@ Datum bt_page_stats(PG_FUNCTION_ARGS)
     if (stat.type == 'd'){
         ret = snprintf_s(values[j++], 64, 63, XID_FMT, stat.btpo.xact);
         securec_check_ss(ret, "", "");
-    }
-    else {
+    } else {
         ret = snprintf_s(values[j++], 32, 31, "%d", stat.btpo.level);
         securec_check_ss(ret, "", "");
     }
@@ -333,7 +332,7 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
 
         uargs->page = (char*)palloc(BLCKSZ);
         int rc = memcpy_s(uargs->page, BLCKSZ, BufferGetPage(buffer), BLCKSZ);
-        securec_check(rc, "", "");
+        securec_check_c(rc, "\0", "\0");
 
         UnlockReleaseBuffer(buffer);
         relation_close(rel, AccessShareLock);
@@ -398,13 +397,17 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
         ptr = (char*)itup + IndexInfoFindDataOffset(itup->t_info);
         dlen = IndexTupleSize(itup) - IndexInfoFindDataOffset(itup->t_info);
         dump = (char*)palloc0(dlen * 3 + 1);
+        int length = dlen * 3 + 1;
         values[j] = dump;
         for (off = 0; off < dlen; off++) {
-            if (off > 0)
+            if (off > 0) {
                 *dump++ = ' ';
-            ret = sprintf_s(dump, dlen * 3 + 1, "%02x", *(ptr + off) & 0xff);
+                length--;
+            }
+            ret = sprintf_s(dump, length, "%02x", *(ptr + off) & 0xff);
             securec_check_ss(ret, "", "");
             dump += 2;
+            length -= 2;
         }
 
         tuple = BuildTupleFromCStrings(fctx->attinmeta, values);

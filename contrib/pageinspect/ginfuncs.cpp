@@ -69,7 +69,7 @@ Datum gin_metapage_info(PG_FUNCTION_ARGS)
 
     int nRet = 0;
     nRet = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-    securec_check_ss(nRet, "", "");
+    securec_check_c(nRet, "\0", "\0");
 
     values[0] = Int64GetDatum(metadata->head);
     values[1] = Int64GetDatum(metadata->tail);
@@ -148,7 +148,7 @@ Datum gin_page_opaque_info(PG_FUNCTION_ARGS)
 
     int nRet = 0;
     nRet = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-    securec_check_ss(nRet, "", "");
+    securec_check_c(nRet, "\0", "\0");
 
     values[0] = Int64GetDatum(opaq->rightlink);
     values[1] = Int64GetDatum(opaq->maxoff);
@@ -240,7 +240,7 @@ Datum gin_leafpage_items(PG_FUNCTION_ARGS)
 
         int nRet = 0;
         nRet = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check_ss(nRet, "", "");
+        securec_check_c(nRet, "\0", "\0");
 
         values[0] = ItemPointerGetDatum(&cur->first);
         values[1] = UInt16GetDatum(cur->nbytes);
