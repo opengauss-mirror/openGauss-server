@@ -692,7 +692,7 @@ static int64 get_pagewriter_sleep_time()
     return time_diff;
 }
 
-uint32 get_loc_for_lsn(XLogRecPtr target_lsn)
+uint64 get_loc_for_lsn(XLogRecPtr target_lsn)
 {
     uint64 last_loc = 0;
     XLogRecPtr page_rec_lsn = InvalidXLogRecPtr;
