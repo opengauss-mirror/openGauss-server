@@ -210,31 +210,46 @@ Datum bt_page_stats(PG_FUNCTION_ARGS)
         elog(ERROR, "return type must be a row type");
 
     j = 0;
+    int ret = 0;
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.blkno);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.blkno);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%c", stat.type);
+    ret = snprintf_s(values[j++], 32, 31, "%c", stat.type);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.live_items);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.live_items);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.dead_items);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.dead_items);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.avg_item_size);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.avg_item_size);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.page_size);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.page_size);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.free_size);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.free_size);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.btpo_prev);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.btpo_prev);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.btpo_next);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.btpo_next);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    if (stat.type == 'd')
-        snprintf(values[j++], 64, XID_FMT, stat.btpo.xact);
-    else
-        snprintf(values[j++], 32, "%d", stat.btpo.level);
+    if (stat.type == 'd'){
+        ret = snprintf_s(values[j++], 64, 63, XID_FMT, stat.btpo.xact);
+        securec_check_ss(ret, "", "");
+    }
+    else {
+        ret = snprintf_s(values[j++], 32, 31, "%d", stat.btpo.level);
+        securec_check_ss(ret, "", "");
+    }
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", stat.btpo_flags);
+    ret = snprintf_s(values[j++], 32, 31, "%d", stat.btpo_flags);
+    securec_check_ss(ret, "", "");
 
     tuple = BuildTupleFromCStrings(TupleDescGetAttInMetadata(tupleDesc), values);
 
@@ -317,7 +332,8 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
         uargs = (user_args*)palloc(sizeof(struct user_args));
 
         uargs->page = (char*)palloc(BLCKSZ);
-        memcpy(uargs->page, BufferGetPage(buffer), BLCKSZ);
+        int rc = memcpy_s(uargs->page, BLCKSZ, BufferGetPage(buffer), BLCKSZ);
+        securec_check(rc, "", "");
 
         UnlockReleaseBuffer(buffer);
         relation_close(rel, AccessShareLock);
@@ -363,15 +379,21 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
 
         j = 0;
         values[j] = (char*)palloc(32);
-        snprintf(values[j++], 32, "%d", uargs->offset);
+        int ret = 0;
+        ret = snprintf_s(values[j++], 32, 31, "%d", uargs->offset);
+        securec_check_ss(ret, "", "");
         values[j] = (char*)palloc(32);
-        snprintf(values[j++], 32, "(%u,%u)", BlockIdGetBlockNumber(&(itup->t_tid.ip_blkid)), itup->t_tid.ip_posid);
+        ret = snprintf_s(values[j++], 32, 31, "(%u,%u)", BlockIdGetBlockNumber(&(itup->t_tid.ip_blkid)), itup->t_tid.ip_posid);
+        securec_check_ss(ret, "", "");
         values[j] = (char*)palloc(32);
-        snprintf(values[j++], 32, "%d", (int)IndexTupleSize(itup));
+        ret = snprintf_s(values[j++], 32, 31, "%d", (int)IndexTupleSize(itup));
+        securec_check_ss(ret, "", "");
         values[j] = (char*)palloc(32);
-        snprintf(values[j++], 32, "%c", IndexTupleHasNulls(itup) ? 't' : 'f');
+        ret = snprintf_s(values[j++], 32, 31, "%c", IndexTupleHasNulls(itup) ? 't' : 'f');
+        securec_check_ss(ret, "", "");
         values[j] = (char*)palloc(32);
-        snprintf(values[j++], 32, "%c", IndexTupleHasVarwidths(itup) ? 't' : 'f');
+        ret = snprintf_s(values[j++], 32, 31, "%c", IndexTupleHasVarwidths(itup) ? 't' : 'f');
+        securec_check_ss(ret, "", "");
 
         ptr = (char*)itup + IndexInfoFindDataOffset(itup->t_info);
         dlen = IndexTupleSize(itup) - IndexInfoFindDataOffset(itup->t_info);
@@ -380,7 +402,8 @@ Datum bt_page_items(PG_FUNCTION_ARGS)
         for (off = 0; off < dlen; off++) {
             if (off > 0)
                 *dump++ = ' ';
-            sprintf(dump, "%02x", *(ptr + off) & 0xff);
+            ret = sprintf_s(dump, dlen * 3 + 1, "%02x", *(ptr + off) & 0xff);
+            securec_check_ss(ret, "", "");
             dump += 2;
         }
 
@@ -449,18 +472,26 @@ Datum bt_metap(PG_FUNCTION_ARGS)
         elog(ERROR, "return type must be a row type");
 
     j = 0;
+    int ret = 0;
+
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_magic);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_magic);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_version);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_version);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_root);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_root);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_level);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_level);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_fastroot);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_fastroot);
+    securec_check_ss(ret, "", "");
     values[j] = (char*)palloc(32);
-    snprintf(values[j++], 32, "%d", metad->btm_fastlevel);
+    ret = snprintf_s(values[j++], 32, 31, "%d", metad->btm_fastlevel);
+    securec_check_ss(ret, "", "");
 
     tuple = BuildTupleFromCStrings(TupleDescGetAttInMetadata(tupleDesc), values);
 

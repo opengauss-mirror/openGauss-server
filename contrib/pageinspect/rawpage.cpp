@@ -154,7 +154,8 @@ static bytea* get_raw_page_internal(text* relname, ForkNumber forknum, BlockNumb
     buf = ReadBufferExtended(rel, forknum, blkno, RBM_NORMAL, NULL);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
 
-    memcpy(raw_page_data, BufferGetPage(buf), BLCKSZ);
+    int rc = memcpy_s(raw_page_data, BLCKSZ, BufferGetPage(buf), BLCKSZ);
+    securec_check(rc, "", "");
 
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     ReleaseBuffer(buf);
@@ -305,7 +306,8 @@ Datum page_compress_meta(PG_FUNCTION_ARGS)
 
     bytea* dumpVal = (bytea*)palloc(VARHDRSZ + output->len);
     SET_VARSIZE(dumpVal, VARHDRSZ + output->len);
-    memcpy(VARDATA(dumpVal), output->data, output->len);
+    int rc = memcpy_s(VARDATA(dumpVal), output->len, output->data, output->len);
+    securec_check(rc, "", "");
     pfree(output->data);
     pfree(output);
 
@@ -324,7 +326,8 @@ Datum page_compress_meta_usage(PG_FUNCTION_ARGS)
 
     bytea* dumpVal = (bytea*)palloc(VARHDRSZ + help_size);
     SET_VARSIZE(dumpVal, VARHDRSZ + help_size);
-    memcpy(VARDATA(dumpVal), help, help_size);
+    int rc = memcpy_s(VARDATA(dumpVal), help_size, help, help_size);
+    securec_check(rc, "", "");
 
     PG_RETURN_TEXT_P(dumpVal);
 }
@@ -410,7 +413,8 @@ static char* read_raw_page(Relation rel, ForkNumber forknum, BlockNumber blkno)
     raw_page = (char*)palloc(BLCKSZ);
     buf = ReadBufferExtended(rel, forknum, blkno, RBM_NORMAL, NULL);
     LockBuffer(buf, BUFFER_LOCK_SHARE);
-    memcpy(raw_page, BufferGetPage(buf), BLCKSZ);
+    int rc = memcpy_s(raw_page, BLCKSZ, BufferGetPage(buf), BLCKSZ);
+    securec_check(rc, "", "");
     LockBuffer(buf, BUFFER_LOCK_UNLOCK);
     ReleaseBuffer(buf);
 
