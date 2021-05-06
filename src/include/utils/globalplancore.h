@@ -36,7 +36,7 @@
 #define GPC_HTAB_SIZE (128)
 #define GLOBALPLANCACHEKEY_MAGIC (953717831)
 #define CAS_SLEEP_DURATION (2)
-#define GPC_CLEAN_WAIT_TIME (3600)
+#define GPC_CLEAN_WAIT_TIME (u_sess->attr.attr_common.gpc_clean_timeout)
 
 #define ENABLE_GPC (g_instance.attr.attr_common.enable_global_plancache == true && \
                        g_instance.attr.attr_common.enable_thread_pool == true)
