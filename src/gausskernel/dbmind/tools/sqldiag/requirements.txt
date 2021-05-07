@@ -1,0 +1,7 @@
+tensorflow==2.3.1
+pandas
+matplotlib
+gensim==3.8.3
+sqlparse
+sklearn
+numpy
