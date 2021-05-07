@@ -5361,7 +5361,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_VariableShowStmt: {
             VariableShowStmt* n = (VariableShowStmt*)parse_tree;
 
-            GetPGVariable(n->name, dest);
+            GetPGVariable(n->name, n->likename, dest);
         } break;
         case T_ShutdownStmt: {
             ShutdownStmt* n = (ShutdownStmt*)parse_tree;

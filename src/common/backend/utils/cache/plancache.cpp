@@ -139,6 +139,25 @@ void InitPlanCache(void)
     CacheRegisterSyscacheCallback(AMOPOPID, PlanCacheSysCallback, (Datum)0);
 }
 
+/* ddl no need to global it */
+static bool IsSupportGPCStmt(const Node* node)
+{
+    bool isSupportGPC = false;
+    switch (nodeTag(node)) {
+        case T_InsertStmt:
+        case T_DeleteStmt:
+        case T_UpdateStmt:
+        case T_MergeStmt:
+        case T_SelectStmt:
+            isSupportGPC = false;
+            break;
+        default:
+            isSupportGPC = true;
+            break;
+    }
+    return isSupportGPC;
+}
+
 /*
  * CreateCachedPlan: initially create a plan cache entry.
  *
@@ -174,15 +193,8 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
     MemoryContext oldcxt;
 
     Assert(query_string != NULL); /* required as of 8.4 */
-    bool enable_pbe_gpc = false;
-    if (stmt_name != NULL && stmt_name[0] != '\0') {
-#ifdef ENABLE_MULTIPLE_NODES
-        /* TransactionStmt do not support shared plan */
-        enable_pbe_gpc = (ENABLE_CN_GPC && raw_parse_tree && !IsA(raw_parse_tree, TransactionStmt)) || ENABLE_DN_GPC;
-#else
-        enable_pbe_gpc = ENABLE_GPC && raw_parse_tree && !IsA(raw_parse_tree, TransactionStmt);
-#endif
-    }
+    bool isSupportGPC = raw_parse_tree && IsSupportGPCStmt(raw_parse_tree);
+    bool enable_pbe_gpc = ENABLE_GPC && stmt_name != NULL && stmt_name[0] != '\0' && !isSupportGPC;
 
     if(!enable_pbe_gpc && !(ENABLE_CN_GPC && enable_spi_gpc)) {
        /*
@@ -2660,12 +2672,13 @@ void DropCachedPlanInternal(CachedPlanSource* plansource)
         }
         plansource->lightProxyObj = NULL;
     } else {
-        if (plansource->opFusionObj != NULL) {
+        if (!plansource->gpc.status.InShareTable() && plansource->opFusionObj != NULL) {
             OpFusion *opfusion = (OpFusion *)plansource->opFusionObj;
-            if (opfusion->m_portalName == NULL || OpFusion::locateFusion(opfusion->m_portalName) == NULL) {
+            if (opfusion->m_local.m_portalName == NULL ||
+                OpFusion::locateFusion(opfusion->m_local.m_portalName) == NULL) {
                 OpFusion::tearDown(opfusion);
             } else {
-                opfusion->m_psrc = NULL;
+                opfusion->m_global->m_psrc = NULL;
             }
             plansource->opFusionObj = NULL;
         }

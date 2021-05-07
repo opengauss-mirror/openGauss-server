@@ -3963,8 +3963,8 @@ static bool is_execute_cmd(const char* query_string)
             pfree_ext(format_str);
             return true;
         }
-        encrypt = strstr(format_str, "gs_encrypt_function");
-        decrypt = strstr(format_str, "gs_decrypt_function");
+        encrypt = strstr(format_str, "gs_encrypt");
+        decrypt = strstr(format_str, "gs_decrypt");
         if ((encrypt != NULL) || (decrypt != NULL)) {
             pfree_ext(format_str);
             return true;
@@ -4040,7 +4040,7 @@ static char* mask_Password_internal(const char* query_string)
     int truncateLen = 0; /* accumulate total length for each truncate */
 
     /* the functions need to mask all contents */
-    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128","gs_encrypt_function", "gs_decrypt_function"};
+    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128","gs_encrypt", "gs_decrypt"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
     int length_crypt = 0;

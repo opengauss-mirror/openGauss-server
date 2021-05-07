@@ -45,6 +45,16 @@ typedef struct pnFusionObj {
 
 #define HASH_TBL_LEN 64
 
+/*
+ * The variables in OpFusion is always in two parts: global's variables and local's variables.
+ * Global variable means it can be shared in each session.
+ * Local variable means it will be change in local session, so it cannot be shared.
+ *
+ * Global variables be saved into struct OpFusionGlobalVariable, and we access the global variables
+ * from pointer m_global, and m_global's mem context is under global cachedplansource.
+ * Local variables be saved into struct OpFusionLocaleVariable, and we access the local variables
+ * from object m_local, and m_local's context is under session context.
+ */
 class OpFusion : public BaseObject {
 public:
     OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list);
@@ -59,6 +69,14 @@ public:
     static void setCurrentOpFusionObj(OpFusion* obj);
 
     static bool process(int op, StringInfo msg, char* completionTag, bool isTopLevel, bool* isQueryCompleted);
+
+    static void SaveInGPC(OpFusion* obj);
+
+    static void DropGlobalOpfusion(OpFusion* obj);
+
+    void InitGlobals(MemoryContext context, CachedPlanSource* psrc, List* plantree_list);
+
+    void InitLocals(MemoryContext context);
 
     void CopyFormats(int16* formats, int numRFormats);
 
@@ -80,6 +98,7 @@ public:
         return;
     }
 
+    void copyGlobalOpfusionVar(OpFusion);
     void setPreparedDestReceiver(DestReceiver* preparedDest);
 
     Datum CalFuncNodeVal(Oid functionId, List* args, bool* is_null, Datum* values, bool* isNulls);
@@ -98,7 +117,7 @@ public:
 
     void executeInit();
 
-    void executeEnd(const char* portal_name, bool* completionTag);
+    bool executeEnd(const char* portal_name, bool* completionTag);
 
     void auditRecord();
 
@@ -112,6 +131,8 @@ public:
 
     static void ClearInUnexpectSituation();
 
+    static void ClearInSubUnexpectSituation(ResourceOwner owner);
+
     void storeFusion(const char *portalname);
 
     static OpFusion *locateFusion(const char *portalname);
@@ -120,66 +141,104 @@ public:
 
     static void refreshCurFusion(StringInfo msg);
 
+    inline bool IsGlobal()
+    {
+        pg_memory_barrier();
+        return (m_global && m_global->m_is_global);
+    }
+
 public:
     struct ParamLoc {
         int paramId;
         int scanKeyIndx;
     };
+    struct ConstLoc {
+        Datum constValue;
+        bool constIsNull;
+        int constLoc;
+    };
+    /*
+     * these variables can be shared, mem context on global plancache
+     */
+    struct OpFusionGlobalVariable {
+        CachedPlanSource* m_psrc; /* to get m_cacheplan in PBE */
+        
+        CachedPlan* m_cacheplan;
+        
+        PlannedStmt* m_planstmt; /* m_cacheplan->stmt_list in PBE, plantree in non-PBE */
+        
+        MemoryContext m_context;
+        
+        bool m_is_pbe_query;
+        
+        ParamLoc* m_paramLoc; /* location of m_params, include paramId and the location in indexqual */
+        
+        Oid m_reloid; /* relation oid of range table */
+        
+        int m_paramNum;
 
-    CachedPlanSource* m_psrc; /* to get m_cacheplan in PBE */
+        TableAmType m_table_type;
+        
+        int16* m_attrno; /* target attribute number, length is m_tupDesc->natts */
+        
+        bool m_is_bucket_rel;
 
-    CachedPlan* m_cacheplan;
+        FusionType m_type;
 
-    PlannedStmt* m_planstmt; /* m_cacheplan->stmt_list in PBE, plantree in non-PBE */
+        int m_natts;
 
-    bool m_isFirst; /* be true if is the fisrt execute in PBE */
+        volatile bool m_is_global;
 
-    MemoryContext m_context;
+        TupleDesc m_tupDesc; /* tuple descriptor */
 
-    MemoryContext m_tmpContext; /* use for tmp memory allocation. */
+    };
 
-    ParamListInfo m_params;
+    OpFusionGlobalVariable *m_global;
+    
+    /*
+     * other variables need change each BE, mem context on session cache context
+     */
+    struct OpFusionLocaleVariable {
+        MemoryContext m_localContext; /* use for local variables */
 
-    ParamListInfo m_outParams; /* use outer side parameter. */
+        MemoryContext m_tmpContext; /* use for tmp memory allocation. */
+    
+        bool m_isFirst; /* be true if is the fisrt execute in PBE */
+    
+        ParamListInfo m_outParams; /* use outer side parameter. */
 
-    int m_paramNum;
+        ParamListInfo m_params;
 
-    ParamLoc* m_paramLoc; /* location of m_params, include paramId and the location in indexqual */
+        TupleTableSlot* m_reslot; /* result slot */
+    
+        Datum* m_values;
+    
+        bool* m_isnull;
+    
+        Datum* m_tmpvals; /* for mapping m_values */
+    
+        bool* m_tmpisnull; /* for mapping m_isnull */
+    
+        DestReceiver* m_receiver;
+    
+        bool m_isInsideRec;
+    
+        int16* m_rformats;
+    
+        bool m_isCompleted;
+    
+        long m_position;
+    
+        const char *m_portalName;
+    
+        Snapshot m_snapshot;
 
-    Oid m_reloid; /* relation oid of range table */
+        class ScanFusion* m_scan;
 
-    TupleDesc m_tupDesc; /* tuple descriptor */
+        ResourceOwner m_resOwner;
+    };
 
-    TupleTableSlot* m_reslot; /* result slot */
-
-    int16* m_attrno; /* target attribute number, length is m_tupDesc->natts */
-
-    Datum* m_values;
-
-    bool* m_isnull;
-
-    Datum* m_tmpvals; /* for mapping m_values */
-
-    bool* m_tmpisnull; /* for mapping m_isnull */
-
-    DestReceiver* m_receiver;
-
-    bool m_isInsideRec;
-
-    bool m_is_pbe_query;
-
-    int16* m_rformats;
-
-    bool m_isCompleted;
-
-    long m_position;
-
-    const char *m_portalName;
-
-    Snapshot m_snapshot;
-
-    class ScanFusion* m_scan;
-
+    OpFusionLocaleVariable m_local;
 private:
 #ifdef ENABLE_MOT
     static FusionType GetMotFusionType(PlannedStmt* plannedStmt);
@@ -196,11 +255,17 @@ public:
 
     void close();
 
-private:
-    int64 m_limitCount;
+    void InitLocals(ParamListInfo params);
 
-    int64 m_limitOffset;
+    void InitGlobals();
+private:
+    struct SelectFusionGlobalVariable {
+        int64 m_limitCount;
+        int64 m_limitOffset;
+    };
+    SelectFusionGlobalVariable* m_c_global;
 };
+
 
 class InsertFusion : public OpFusion {
 public:
@@ -210,23 +275,33 @@ public:
 
     bool execute(long max_rows, char* completionTag);
 
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 private:
     void refreshParameterIfNecessary();
 
-    EState* m_estate;
+    struct InsertFusionGlobalVariable {
+        /* for func/op expr calculation */
+        FuncExprInfo* m_targetFuncNodes;
+        
+        int m_targetFuncNum;
+        
+        int m_targetParamNum;
 
-    /* for func/op expr calculation */
-    FuncExprInfo* m_targetFuncNodes;
+        int m_targetConstNum;
 
-    int m_targetFuncNum;
+        ConstLoc* m_targetConstLoc;
+    };
+    InsertFusionGlobalVariable* m_c_global;
 
-    int m_targetParamNum;
+    struct InsertFusionLocaleVariable {
+        EState* m_estate;
+        Datum* m_curVarValue;
+        bool* m_curVarIsnull;
+    };
 
-    Datum* m_curVarValue;
-
-    bool* m_curVarIsnull;
-
-    bool m_is_bucket_rel;
+    InsertFusionLocaleVariable m_c_local;
 };
 
 class UpdateFusion : public OpFusion {
@@ -237,44 +312,47 @@ public:
 
     bool execute(long max_rows, char* completionTag);
 
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 private:
     HeapTuple heapModifyTuple(HeapTuple tuple);
 
     void refreshTargetParameterIfNecessary();
 
-    EState* m_estate;
 
-    /* targetlist */
-    int m_targetNum;
-
-    int m_targetParamNum;
-
-    Datum* m_targetValues;
-
-    bool* m_targetIsnull;
-
-    Datum* m_curVarValue;
     struct VarLoc {
         int varNo;
         int scanKeyIndx;
     };
+    struct UpdateFusionGlobalVariable {
+        /* targetlist */
+        int m_targetConstNum;
+        
+        int m_targetParamNum;
+        
+        VarLoc* m_targetVarLoc;
+        
+        int m_varNum;
+        
+        ConstLoc* m_targetConstLoc;
+        
+        ParamLoc* m_targetParamLoc;
+        
+        /* for func/op expr calculation */
+        FuncExprInfo* m_targetFuncNodes;
+        
+        int m_targetFuncNum;
+    };
+    UpdateFusionGlobalVariable* m_c_global;
 
-    VarLoc* m_targetVarLoc;
+    struct UpdateFusionLocaleVariable {
+        EState* m_estate;
+        Datum* m_curVarValue;
+        bool* m_curVarIsnull;
+    };
 
-    int m_varNum;
-
-    bool* m_curVarIsnull;
-
-    int* m_targetConstLoc;
-
-    ParamLoc* m_targetParamLoc;
-
-    /* for func/op expr calculation */
-    FuncExprInfo* m_targetFuncNodes;
-
-    int m_targetFuncNum;
-
-    bool m_is_bucket_rel;
+    UpdateFusionLocaleVariable m_c_local;
 };
 
 class DeleteFusion : public OpFusion {
@@ -285,10 +363,15 @@ public:
 
     bool execute(long max_rows, char* completionTag);
 
-private:
-    EState* m_estate;
+    void InitLocals(ParamListInfo params);
 
-    bool m_is_bucket_rel;
+    void InitGlobals();
+private:
+    struct DeleteFusionLocaleVariable {
+        EState* m_estate;
+    };
+
+    DeleteFusionLocaleVariable m_c_local;
 };
 
 #ifdef ENABLE_MOT
@@ -299,6 +382,10 @@ public:
     ~MotJitSelectFusion() {};
 
     bool execute(long max_rows, char *completionTag);
+
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 };
 
 class MotJitModifyFusion : public OpFusion {
@@ -309,9 +396,15 @@ public:
 
     bool execute(long max_rows, char *completionTag);
 
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 private:
-    EState* m_estate;
-    CmdType m_cmdType;
+    struct MotJitModifyFusionLocaleVariable {
+        CmdType m_cmdType;
+        EState* m_estate;
+    };
+    MotJitModifyFusionLocaleVariable m_c_local;
 };
 #endif
 
@@ -325,14 +418,20 @@ public:
 
     void close();
 
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 private:
-    int64 m_limitCount;
+    struct SelectForUpdateFusionGlobalVariable {
+        int64 m_limitCount;
+        int64 m_limitOffset;
+    };
+    SelectForUpdateFusionGlobalVariable* m_c_global;
 
-    EState* m_estate;
-
-    int64 m_limitOffset;
-
-    bool m_is_bucket_rel;
+    struct SelectForUpdateFusionLocaleVariable {
+        EState* m_estate;
+    };
+    SelectForUpdateFusionLocaleVariable m_c_local;
 };
 
 class AggFusion : public OpFusion {
@@ -343,6 +442,10 @@ public:
     ~AggFusion(){};
 
     bool execute(long max_rows, char* completionTag);
+
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
 
 protected:
 
@@ -368,7 +471,10 @@ protected:
         dest->buf = NULL;       /* digits array is not palloc'd */
     }
 
-    aggSumFun m_aggSumFunc;
+    struct AggFusionGlobalVariable {
+        aggSumFun m_aggSumFunc;
+    };
+    AggFusionGlobalVariable* m_c_global;
 };
 
 class SortFusion: public OpFusion {
@@ -381,8 +487,16 @@ public:
 
     bool execute(long max_rows, char *completionTag);
 
+    void InitLocals(ParamListInfo params);
+
+    void InitGlobals();
+
 protected:
 
-    TupleDesc  m_scanDesc;
+    struct SortFusionLocaleVariable {
+        TupleDesc  m_scanDesc;
+    };
+
+    SortFusionLocaleVariable m_c_local;
 };
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_H_ */

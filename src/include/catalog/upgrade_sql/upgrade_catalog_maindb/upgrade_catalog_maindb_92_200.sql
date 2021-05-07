@@ -2377,15 +2377,3 @@ out lsn pg_catalog.text,
 out labelfile pg_catalog.text,
 out spcmapfile pg_catalog.text)
 RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_stop_backup_v2';
-
--- ----------------------------------------------------------------
-DROP FUNCTION IF EXISTS pg_catalog.gs_decrypt_function(IN decryptstr text, IN keystr text, IN type text,OUT decrypt_result_str text) CASCADE;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6322;
-CREATE FUNCTION pg_catalog.gs_decrypt_function(IN decryptstr text, IN keystr text, IN type text, OUT decrypt_result_str text) RETURNS text  LANGUAGE INTERNAL  as 'gs_decrypt_function';
-
-
-
--- ----------------------------------------------------------------
-DROP FUNCTION IF EXISTS pg_catalog.gs_encrypt_function(IN encryptstr text, IN keystr text, IN type text,OUT decrypt_result_str text) CASCADE;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6323;
-CREATE FUNCTION pg_catalog.gs_encrypt_function(IN encryptstr text, IN keystr text, IN type text, OUT encrypt_result_str text) RETURNS text  LANGUAGE INTERNAL  as 'gs_encrypt_function';

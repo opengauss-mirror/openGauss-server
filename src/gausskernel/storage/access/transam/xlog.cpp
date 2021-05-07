@@ -10536,8 +10536,10 @@ void ShutdownXLOG(int code, Datum arg)
     /* Shutdown all the page writer threads. */
     ckpt_shutdown_bgwriter();
     ckpt_shutdown_pagewriter();
-    free(g_instance.ckpt_cxt_ctl->dirty_page_queue);
-    g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
+    if (g_instance.ckpt_cxt_ctl->dirty_page_queue != NULL) {
+        pfree(g_instance.ckpt_cxt_ctl->dirty_page_queue);
+        g_instance.ckpt_cxt_ctl->dirty_page_queue = NULL;
+    }
     g_instance.ckpt_cxt_ctl->prune_queue_lock = NULL;
     g_instance.ckpt_cxt_ctl->ckpt_redo_state.recovery_queue_lock = NULL;
 

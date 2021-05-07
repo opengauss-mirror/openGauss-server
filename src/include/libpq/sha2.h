@@ -52,7 +52,7 @@
 #define K_LENGTH 32
 #define ITERATION_COUNT 10000
 #define CLIENT_STRING_LENGTH 11
-#define SEVER_STRING_LENGTH 10
+#define SEVER_STRING_LENGTH 11
 #define HMAC_LENGTH 32
 #define HMAC_BYTES_LENGTH 32
 #define HMAC_STRING_LENGTH (HMAC_LENGTH * 2)
@@ -77,7 +77,7 @@
 #define SM3_PASSWD_LEN (ENCRYPTED_STRING_LENGTH + SM3_LENGTH)
 
 #define isSM3(passwd) \
-		(strncmp(passwd, "sm3", SM3_LENGTH) == 0 && strlen(passwd) == SM3_PASSWD_LEN + ITERATION_STRING_LEN)
+    (strncmp(passwd, "sm3", SM3_LENGTH) == 0 && strlen(passwd) == SM3_PASSWD_LEN + ITERATION_STRING_LEN)
 
 #define isSHA256(passwd) \
     (strncmp(passwd, "sha256", SHA256_LENGTH) == 0 && strlen(passwd) == SHA256_PASSWD_LEN + ITERATION_STRING_LEN)
@@ -117,7 +117,7 @@ extern void sha_hex_to_bytes4(char* s, const char b[8]);
 extern void sha_bytes_to_hex8(uint8 b[4], char* s);
 extern void sha_bytes_to_hex64(uint8 b[32], char* s);
 extern bool pg_sha256_encrypt_for_md5(const char* passwd, const char* salt, size_t salt_len, char* buf);
-extern bool pg_sm3_encrypt(const char* passwd, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf,
+extern bool gs_sm3_encrypt(const char* passwd, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf,
     int iteration_count = ITERATION_COUNT);
 
 #endif /* _SHA2_H */

@@ -2514,7 +2514,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     return true;
 }
 
-Datum gs_encrypt_function(PG_FUNCTION_ARGS)
+Datum gs_encrypt(PG_FUNCTION_ARGS)
 {
     GS_UCHAR* encrypttype;
     text* outtext = NULL;
@@ -2558,7 +2558,7 @@ Datum gs_encrypt_function(PG_FUNCTION_ARGS)
     PG_RETURN_TEXT_P(outtext);
 }
 
-Datum gs_decrypt_function(PG_FUNCTION_ARGS)
+Datum gs_decrypt(PG_FUNCTION_ARGS)
 {
     GS_UCHAR* decrypttype;
     text* outtext = NULL;

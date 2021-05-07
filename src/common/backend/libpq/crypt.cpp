@@ -505,7 +505,7 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                     errorno = memset_s(crypt_client_pass, (SM3_PASSWD_LEN + 1), 0, (SM3_PASSWD_LEN + 1));
                     securec_check(errorno, "\0", "\0");
                 }
-                if (!pg_sm3_encrypt(
+                if (!gs_sm3_encrypt(
                         client_pass, port->user_name, strlen(port->user_name), crypt_client_pass, NULL)) {
                     pfree_ext(crypt_client_pass);
                     pfree_ext(pass_info.shadow_pass);

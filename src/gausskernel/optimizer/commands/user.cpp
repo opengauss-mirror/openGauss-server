@@ -4114,6 +4114,7 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
 {
     char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
     char encrypted_sha256_password[SHA256_PASSWD_LEN + 1] = {0};
+    char encrypted_sm3_password[SHA256_PASSWD_LEN + 1] = {0};
     char encrypted_combined_password[MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1] = {0};
     char salt[SALT_LENGTH * 2 + 1] = {0};
     int iteration_count = 0;
@@ -4160,14 +4161,14 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
         salt[sizeof(salt) - 1] = '\0';
 
         iteration_count = get_stored_iteration(rolename);
-        if (!pg_sm3_encrypt(passwd1, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
-            rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+        if (!gs_sm3_encrypt(passwd1, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
+            rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
             securec_check(rc, "\0", "\0");
             ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sha256-password encryption failed.")));
         }
 
-        if (strncmp(passwd2, encrypted_sha256_password, SM3_PASSWD_LEN) == 0) {
-            rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+        if (strncmp(passwd2, encrypted_sm3_password, SM3_PASSWD_LEN) == 0) {
+            rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
             securec_check(rc, "\0", "\0");
             return true;
         }
@@ -5981,41 +5982,41 @@ Datum calculate_encrypted_sha256_password(const char* password, const char* roln
     return datum_value;
 }
 
-Datum calculate_encrypted_sm3_password(const char* password, const char* rolname, const char* salt_string)
+Datum gs_calculate_encrypted_sm3_password(const char* password, const char* rolname, const char* salt_string)
 {
-    char encrypted_sha256_password[SM3_PASSWD_LEN + 1] = {0};
-    char encrypted_sha256_password_complex[SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1] = {0};
+    char encrypted_sm3_password[SM3_PASSWD_LEN + 1] = {0};
+    char encrypted_sm3_password_complex[SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1] = {0};
     char iteration_string[ITERATION_STRING_LEN + 1] = {0};
     Datum datum_value;
     errno_t rc = EOK;
 
-    if (!pg_sm3_encrypt(password,
+    if (!gs_sm3_encrypt(password,
             salt_string,
             strlen(salt_string),
-            encrypted_sha256_password,
+            encrypted_sm3_password,
             NULL,
             u_sess->attr.attr_security.auth_iteration_count)) {
-        rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+        rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
         securec_check(rc, "\0", "\0");
         ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("password encryption failed")));
     }
 
     encode_iteration(u_sess->attr.attr_security.auth_iteration_count, iteration_string);
-    rc = snprintf_s(encrypted_sha256_password_complex,
+    rc = snprintf_s(encrypted_sm3_password_complex,
         SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1,
         SM3_PASSWD_LEN + ITERATION_STRING_LEN,
         "%s%s",
-        encrypted_sha256_password,
+        encrypted_sm3_password,
         iteration_string);
     securec_check_ss(rc, "\0", "\0");
 
-    datum_value = CStringGetTextDatum(encrypted_sha256_password_complex);
-    rc = memset_s(encrypted_sha256_password_complex,
+    datum_value = CStringGetTextDatum(encrypted_sm3_password_complex);
+    rc = memset_s(encrypted_sm3_password_complex,
         SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1,
         0,
         SM3_PASSWD_LEN + ITERATION_STRING_LEN + 1);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(encrypted_sha256_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+    rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
     securec_check(rc, "\0", "\0");
     rc = memset_s(iteration_string, ITERATION_STRING_LEN + 1, 0, ITERATION_STRING_LEN + 1);
     securec_check(rc, "\0", "\0");
@@ -6062,7 +6063,7 @@ Datum calculate_encrypted_password(bool is_encrypted, const char* password, cons
     } else if (u_sess->attr.attr_security.Password_encryption_type == 1) {
         datum_value = calculate_encrypted_combined_password(password, rolname, salt_string);
     } else if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
-        datum_value = calculate_encrypted_sm3_password(password, rolname, salt_string);
+        datum_value = gs_calculate_encrypted_sm3_password(password, rolname, salt_string);
     } else {
         datum_value = calculate_encrypted_sha256_password(password, rolname, salt_string);
     }

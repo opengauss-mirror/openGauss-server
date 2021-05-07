@@ -774,7 +774,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
     char client_key_bytes[HMAC_LENGTH + 1] = {0};
     char buf[SHA256_PASSWD_LEN + 1] = {0};
     char sever_key_bytes[HMAC_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
     char client_sever_signature_bytes[HMAC_LENGTH + 1] = {0};
     char client_sever_signature_string[HMAC_LENGTH * 2 + 1] = {0};
@@ -856,20 +856,20 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
 
-                rc = strncpy_s(sever_key_string,
-                    sizeof(sever_key_string),
+                rc = strncpy_s(server_key_string,
+                    sizeof(server_key_string),
                     &buf[SHA256_LENGTH + SALT_STRING_LENGTH],
-                    sizeof(sever_key_string) - 1);
+                    sizeof(server_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
                 rc = strncpy_s(stored_key_string,
                     sizeof(stored_key_string),
                     &buf[SHA256_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
                     sizeof(stored_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
-                sever_key_string[sizeof(sever_key_string) - 1] = '\0';
+                server_key_string[sizeof(server_key_string) - 1] = '\0';
                 stored_key_string[sizeof(stored_key_string) - 1] = '\0';
 
-                sha_hex_to_bytes32(sever_key_bytes, sever_key_string);
+                sha_hex_to_bytes32(sever_key_bytes, server_key_string);
                 sha_hex_to_bytes4(token, conn->token);
                 CRYPT_hmac_ret1 = CRYPT_hmac(NID_hmacWithSHA256,
                     (GS_UCHAR*)sever_key_bytes,
@@ -950,24 +950,24 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
         case AUTH_REQ_SM3: {
 
             if (conn->password_stored_method == SM3_PASSWORD) {
-                if (!pg_sm3_encrypt(
+                if (!gs_sm3_encrypt(
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
 
-                rc = strncpy_s(sever_key_string,
-                    sizeof(sever_key_string),
+                rc = strncpy_s(server_key_string,
+                    sizeof(server_key_string),
                     &buf[SM3_LENGTH + SALT_STRING_LENGTH],
-                    sizeof(sever_key_string) - 1);
+                    sizeof(server_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
                 rc = strncpy_s(stored_key_string,
                     sizeof(stored_key_string),
                     &buf[SM3_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
                     sizeof(stored_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
-                sever_key_string[sizeof(sever_key_string) - 1] = '\0';
+                server_key_string[sizeof(server_key_string) - 1] = '\0';
                 stored_key_string[sizeof(stored_key_string) - 1] = '\0';
 
-                sha_hex_to_bytes32(sever_key_bytes, sever_key_string);
+                sha_hex_to_bytes32(sever_key_bytes, server_key_string);
                 sha_hex_to_bytes4(token, conn->token);
                 CRYPT_hmac_ret1 = CRYPT_hmac(NID_hmacWithSHA256,
                     (GS_UCHAR*)sever_key_bytes,
@@ -1046,7 +1046,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
     erase_arr(client_key_bytes);
     erase_arr(buf);
     erase_arr(sever_key_bytes);
-    erase_arr(sever_key_string);
+    erase_arr(server_key_string);
     erase_arr(token);
     erase_arr(client_sever_signature_bytes);
     erase_arr(client_sever_signature_string);

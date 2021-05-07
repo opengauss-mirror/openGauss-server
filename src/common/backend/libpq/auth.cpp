@@ -799,7 +799,7 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 /*
  * Send an authentication request packet to the frontend.
  */
-static bool GenerateFakeEncryptString(char* encrypt_string, Port* port)
+static bool gs_generateFakeEncryptString(char* encrypt_string, Port* port)
 {
     int retval = 0;
     errno_t rc = EOK;
@@ -844,7 +844,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     StringInfoData buf;
     char encrypt_string[ENCRYPTED_STRING_LENGTH + 1] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char sever_key[HMAC_LENGTH + 1] = {0};
     char sever_signature[HMAC_LENGTH + 1] = {0};
     char sever_signature_string[HMAC_LENGTH * 2 + 1] = {0};
@@ -878,7 +878,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
              * username. We construct a fake encrypted password here and send it the client.
              */
 
-            if (!GenerateFakeEncryptString(encrypt_string , port)) {
+            if (!gs_generateFakeEncryptString(encrypt_string , port)) {
 
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
@@ -986,7 +986,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
         pq_sendbytes(&buf, salt, SALT_LENGTH * 2);
     } else if ((AUTH_REQ_SM3 != areq && SM3_PASSWORD == stored_method && AUTH_REQ_OK != areq) ||  
                (AUTH_REQ_SM3 == areq && SM3_PASSWORD !=stored_method )) {
-       if (!GenerateFakeEncryptString(encrypt_string , port)) {
+       if (!gs_generateFakeEncryptString(encrypt_string , port)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
                     errmsg("Failed to Generate Encrypt String")));
@@ -1031,10 +1031,10 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     if (areq == AUTH_REQ_SHA256 && (stored_method == SHA256_PASSWORD || stored_method == COMBINED_PASSWORD)) {
         /*calculate SeverSignature */
         rc = strncpy_s(
-            sever_key_string, sizeof(sever_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(sever_key_string) - 1);
+            server_key_string, sizeof(server_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(server_key_string) - 1);
         securec_check(rc, "\0", "\0");
-        sever_key_string[sizeof(sever_key_string) - 1] = '\0';
-        sha_hex_to_bytes32(sever_key, sever_key_string);
+        server_key_string[sizeof(server_key_string) - 1] = '\0';
+        sha_hex_to_bytes32(sever_key, server_key_string);
         sha_hex_to_bytes4(token, port->token);
 #ifdef USE_ASSERT_CHECKING
         CRYPT_hmac_result =
@@ -1087,10 +1087,10 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     if (areq == AUTH_REQ_SM3 && stored_method == SM3_PASSWORD) {
         /*calculate SeverSignature */
         rc = strncpy_s(
-            sever_key_string, sizeof(sever_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(sever_key_string) - 1);
+            server_key_string, sizeof(server_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(server_key_string) - 1);
         securec_check(rc, "\0", "\0");
-        sever_key_string[sizeof(sever_key_string) - 1] = '\0';
-        sha_hex_to_bytes32(sever_key, sever_key_string);
+        server_key_string[sizeof(server_key_string) - 1] = '\0';
+        sha_hex_to_bytes32(sever_key, server_key_string);
         sha_hex_to_bytes4(token, port->token);
 #ifdef USE_ASSERT_CHECKING
         CRYPT_hmac_result =

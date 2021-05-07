@@ -640,6 +640,7 @@ typedef struct AlterDefaultPrivilegesStmt {
 typedef struct VariableShowStmt {
     NodeTag type;
     char* name;
+    char* likename;
 } VariableShowStmt;
 
 /* ----------------------

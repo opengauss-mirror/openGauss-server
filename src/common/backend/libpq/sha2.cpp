@@ -555,7 +555,7 @@ bool pg_sha256_encrypt(
     char sever_key[HMAC_LENGTH + 1] = {0};
     char stored_key[STORED_KEY_LENGTH + 1] = {0};
     char salt[SALT_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char stored_key_string[STORED_KEY_LENGTH * 2 + 1] = {0};
     int pkcs_ret;
     int sever_ret;
@@ -564,7 +564,7 @@ bool pg_sha256_encrypt(
     int hmac_length = HMAC_LENGTH;
     int stored_key_length = STORED_KEY_LENGTH;
     int total_encrypt_length;
-    char sever_string[SEVER_STRING_LENGTH] = "Sever Key";
+    char server_string[SEVER_STRING_LENGTH] = "Server Key";
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
@@ -593,11 +593,11 @@ bool pg_sha256_encrypt(
     /* We have already get k ,then we calculate client key and sever key,
      * then calculate stored key by using client key */
 
-    /* calculate sever key */
+    /* calculate server key */
     sever_ret = CRYPT_hmac(NID_hmacWithSHA256,
         (GS_UCHAR*)k,
         K_LENGTH,
-        (GS_UCHAR*)sever_string,
+        (GS_UCHAR*)server_string,
         SEVER_STRING_LENGTH - 1,
         (GS_UCHAR*)sever_key,
         (GS_UINT32*)&hmac_length);
@@ -667,7 +667,7 @@ bool pg_sha256_encrypt(
 
     total_encrypt_length = SALT_LENGTH * 2 + HMAC_LENGTH * 2 + STORED_KEY_LENGTH * 2;
 
-    sha_bytes_to_hex64((uint8*)sever_key, sever_key_string);
+    sha_bytes_to_hex64((uint8*)sever_key, server_key_string);
     sha_bytes_to_hex64((uint8*)stored_key, stored_key_string);
 
     rc = snprintf_s(buf + SHA256_LENGTH,
@@ -675,7 +675,7 @@ bool pg_sha256_encrypt(
         total_encrypt_length,
         "%s%s%s",
         salt_s,
-        sever_key_string,
+        server_key_string,
         stored_key_string);
     SECUREC_CHECK_SS(rc);
 
@@ -764,7 +764,7 @@ bool pg_sha256_encrypt_for_md5(const char* password, const char* salt, size_t sa
     return true;
 }
 
-bool pg_sm3_encrypt(
+bool gs_sm3_encrypt(
     const char* password, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf, int iteration_count)
 {
     size_t password_len = 0;
@@ -773,7 +773,7 @@ bool pg_sm3_encrypt(
     char sever_key[HMAC_LENGTH + 1] = {0};
     char stored_key[STORED_KEY_LENGTH + 1] = {0};
     char salt[SALT_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char stored_key_string[STORED_KEY_LENGTH * 2 + 1] = {0};
     int pkcs_ret;
     int sever_ret;
@@ -782,7 +782,7 @@ bool pg_sm3_encrypt(
     int hmac_length = HMAC_LENGTH;
     int stored_key_length = STORED_KEY_LENGTH;
     int total_encrypt_length;
-    char sever_string[SEVER_STRING_LENGTH] = "Sever Key";
+    char server_string[SEVER_STRING_LENGTH] = "Server Key";
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
@@ -807,14 +807,14 @@ bool pg_sm3_encrypt(
         return false;
     }
 
-    /* We have already get k ,then we calculate client key and sever key,
+    /* We have already get k ,then we calculate client key and server key,
      * then calculate stored key by using client key */
 
-    /* calculate sever key */
+    /* calculate server rkey */
     sever_ret = CRYPT_hmac(NID_hmacWithSHA256,
         (GS_UCHAR*)k,
         K_LENGTH,
-        (GS_UCHAR*)sever_string,
+        (GS_UCHAR*)server_string,
         SEVER_STRING_LENGTH - 1,
         (GS_UCHAR*)sever_key,
         (GS_UINT32*)&hmac_length);
@@ -871,7 +871,7 @@ bool pg_sm3_encrypt(
         return false;
     }
 
-    // Mark the type in the stored string
+    /* Mark the type in the stored string */
     rc = strncpy_s(buf, SM3_LENGTH + 1, "sm3", SM3_LENGTH);
     SECUREC_CHECK(rc);
 
@@ -879,7 +879,7 @@ bool pg_sm3_encrypt(
 
     total_encrypt_length = SALT_LENGTH * 2 + HMAC_LENGTH * 2 + STORED_KEY_LENGTH * 2;
 
-    sha_bytes_to_hex64((uint8*)sever_key, sever_key_string);
+    sha_bytes_to_hex64((uint8*)sever_key, server_key_string);
     sha_bytes_to_hex64((uint8*)stored_key, stored_key_string);
 
     rc = snprintf_s(buf + SM3_LENGTH,
@@ -887,13 +887,13 @@ bool pg_sm3_encrypt(
         total_encrypt_length,
         "%s%s%s",
         salt_s,
-        sever_key_string,
+        server_key_string,
         stored_key_string);
     SECUREC_CHECK_SS(rc);
 
     buf[(unsigned int)(SM3_LENGTH + total_encrypt_length)] = '\0';
 
-    // We must clear the mem before we free it for the safe
+    /* We must clear the mem before we free it for the safe */
     rc = memset_s(k, K_LENGTH + 1, 0, K_LENGTH + 1);
     SECUREC_CHECK(rc);
 

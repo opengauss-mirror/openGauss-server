@@ -6893,6 +6893,21 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 #endif
+		/* The I/O upper limit of batch flush dirty page every second */
+        {{"gpc_clean_timeout",
+            PGC_SIGHUP,
+            CLIENT_CONN,
+            gettext_noop("Set the maximum allowed duration of any unused global plancache."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_common.gpc_clean_timeout,
+            30 * 60,    /* 30min */
+            5 * 60,    /* 5min */
+            24 * 60 * 60,    /* 24h */
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
 
@@ -9204,7 +9219,7 @@ static void ReportGUCOption(struct config_generic* record);
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* pHolder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
-static void ShowAllGUCConfig(DestReceiver* dest);
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
 static char* _ShowOption(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -14163,12 +14178,13 @@ void EmitWarningsOnPlaceholders(const char* className)
 /*
  * SHOW command
  */
-void GetPGVariable(const char* name, DestReceiver* dest)
+void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
 {
-    if (guc_name_compare(name, "all") == 0)
-        ShowAllGUCConfig(dest);
-    else
+    if (guc_name_compare(name, "all") == 0) {
+        ShowAllGUCConfig(likename, dest);
+    } else {
         ShowGUCConfigOption(name, dest);
+    }
 }
 
 TupleDesc GetPGVariableResultDesc(const char* name)
@@ -14224,7 +14240,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
 /*
  * SHOW ALL command
  */
-static void ShowAllGUCConfig(DestReceiver* dest)
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
 {
     bool am_superuser = superuser();
     int i;
@@ -14248,6 +14264,10 @@ static void ShowAllGUCConfig(DestReceiver* dest)
 
         if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
             continue;
+
+        if(NULL != likename && NULL == strstr((char*)conf->name, likename)) {
+            continue;
+        }
 
         /* assign to the values array */
         values[0] = PointerGetDatum(cstring_to_text(conf->name));
@@ -17161,6 +17181,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
     bool isPwdEqual = true;
     char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
     char encrypted_sha256_password[SHA256_LENGTH + ENCRYPTED_STRING_LENGTH + 1] = {0};
+    char encrypted_sm3_password[SHA256_LENGTH + ENCRYPTED_STRING_LENGTH + 1] = {0};
     char encrypted_combined_password[MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1] = {0};
     char salt[SALT_LENGTH * 2 + 1] = {0};
     TimestampTz lastTryLoginTime;
@@ -17249,13 +17270,13 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
             salt[sizeof(salt) - 1] = '\0';
 
             iteration_count = decode_iteration(&rolepasswd[SM3_PASSWD_LEN]);
-            if (!pg_sm3_encrypt(passwd, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
+            if (!gs_sm3_encrypt(passwd, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
                 str_reset(passwd);
                 str_reset(rolepasswd);
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed")));
             }
 
-            if (strncmp(rolepasswd, encrypted_sha256_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
+            if (strncmp(rolepasswd, encrypted_sm3_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
                 isPwdEqual = false;
             }
         } else if (isCOMBINED(rolepasswd)) {

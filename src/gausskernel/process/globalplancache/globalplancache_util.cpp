@@ -307,9 +307,8 @@ List* CopyLocalStmt(const List* stmt_list, const MemoryContext parent_cxt, Memor
     *plan_context = AllocSetContextCreate(parent_cxt,
                                           "CopyedStmt",
                                           ALLOCSET_DEFAULT_MINSIZE,
-                                          16 * 1024,
-                                          ALLOCSET_DEFAULT_MAXSIZE,
-                                          STACK_CONTEXT);
+                                          ALLOCSET_DEFAULT_INITSIZE,
+                                          ALLOCSET_DEFAULT_MAXSIZE);
     /*
      * Copy plan into the new context.
      */

@@ -38,6 +38,7 @@ const int FUSION_DESCRIB = 1;
 extern int namestrcmp(Name name, const char* str);
 extern void report_qps_type(CmdType commandType);
 void InitOpfusionFunctionId();
+Node* JudgePlanIsPartIterator(Plan* plan);
 
 enum FusionType {
     NONE_FUSION,

@@ -29,6 +29,7 @@
 #include "access/xact.h"
 #include "catalog/pgxc_node.h"
 #include "commands/prepare.h"
+#include "opfusion/opfusion.h"
 #include "optimizer/nodegroups.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxcnode.h"
@@ -211,6 +212,9 @@ Datum GlobalPlanCache::PlanClean()
                 hash_search(m_array[bucket_id].hash_tbl, (void *) &(entry->key), HASH_REMOVE, &found);
                 MemoryContextUnSeal(cur->context);
                 MemoryContextUnSeal(cur->query_context);
+                if (cur->opFusionObj) {
+                    OpFusion::DropGlobalOpfusion((OpFusion*)(cur->opFusionObj));
+                }
                 MemoryContextDelete(cur->context);
                 m_array[bucket_id].count--;
             }

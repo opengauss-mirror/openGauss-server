@@ -1450,8 +1450,8 @@ extern Datum substrb_without_lenth(PG_FUNCTION_ARGS);
 /*aes encrypt/decrypt function*/
 extern Datum gs_encrypt_aes128(PG_FUNCTION_ARGS);
 extern Datum gs_decrypt_aes128(PG_FUNCTION_ARGS);
-extern Datum gs_encrypt_function(PG_FUNCTION_ARGS);
-extern Datum gs_decrypt_tunction(PG_FUNCTION_ARGS);
+extern Datum gs_encrypt(PG_FUNCTION_ARGS);
+extern Datum gs_decrypt(PG_FUNCTION_ARGS);
 
 extern ScalarVector* vtimestamp_part(PG_FUNCTION_ARGS);
 extern ScalarVector* vint4mul(PG_FUNCTION_ARGS);
