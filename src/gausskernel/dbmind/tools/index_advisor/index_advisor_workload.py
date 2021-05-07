@@ -34,11 +34,11 @@ FULL_ARRANGEMENT_THRESHOLD = 20
 BASE_CMD = ''
 SHARP = '#'
 SCHEMA = None
+BLANK = ' '
 SQL_TYPE = ['select', 'delete', 'insert', 'update']
 SQL_PATTERN = [r'([^\\])\'((\')|(.*?([^\\])\'))',
                r'([^\\])"((")|(.*?([^\\])"))',
-               r'([^a-zA-Z])-?\d+(\.\d+)?',
-               r'([^a-zA-Z])-?\d+(\.\d+)?',
+               r'(\s*[<>]\s*=*\s*\d+)',
                r'(\'\d+\\.*?\')']
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -86,7 +86,6 @@ class IndexItem:
         self.storage = 0
 
 
-
 def run_shell_cmd(target_sql_list):
     cmd = BASE_CMD + ' -c \"'
     if SCHEMA:
@@ -94,7 +93,7 @@ def run_shell_cmd(target_sql_list):
     for target_sql in target_sql_list:
         cmd += target_sql + ';'
     cmd += '\"'
-    proc = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     (stdout, stderr) = proc.communicate()
     stdout, stderr = stdout.decode(), stderr.decode()
     if 'gsql' in stderr or 'failed to connect' in stderr:
@@ -132,12 +131,15 @@ def print_header_boundary(header):
 def load_workload(file_path):
     wd_dict = {}
     workload = []
-
+    global BLANK
     with open(file_path, 'r') as file:
         raw_text = ''.join(file.readlines())
         sqls = raw_text.split(';')
         for sql in sqls:
             if any(tp in sql.lower() for tp in SQL_TYPE):
+                TWO_BLANKS = BLANK * 2
+                while TWO_BLANKS in sql:
+                    sql = sql.replace(TWO_BLANKS, BLANK)
                 if sql not in wd_dict.keys():
                     wd_dict[sql] = 1
                 else:
@@ -228,7 +230,7 @@ def estimate_workload_cost_file(workload, index_config=None):
         if ENABLE_MULTI_NODE:
             file.write('set enable_fast_query_shipping = off;\n')
         for query in workload:
-            file.write('EXPLAIN ' + query.statement + ';\n')
+            file.write('set explain_perf_mode = 'normal'; EXPLAIN ' + query.statement + ';\n')
 
     result = run_shell_sql_cmd(sql_file).split('\n')
     if os.path.exists(sql_file):
@@ -269,6 +271,7 @@ def estimate_workload_cost_file(workload, index_config=None):
 
 def make_single_advisor_sql(ori_sql):
     sql = 'select gs_index_advise(\''
+    ori_sql = ori_sql.replace('"', '\'')
     for elem in ori_sql:
         if elem == '\'':
             sql += '\''
