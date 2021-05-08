@@ -4270,7 +4270,7 @@ static void SIGBUS_handler(SIGNAL_ARGS)
     uint64 buffer_size;
     int buf_id;
     int si_code = g_instance.sigbus_cxt.sigbus_code;
-    unsigned long sigbus_addr = (unsigned long)g_instance.sigbus_cxt.sigbus_addr;
+    unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     if (si_code != BUS_MCEERR_AR && si_code != BUS_MCEERR_AO) {
         ereport(PANIC, (errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
@@ -4280,8 +4280,8 @@ static void SIGBUS_handler(SIGNAL_ARGS)
 #else
     buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
 #endif
-    unsigned long startaddr = (unsigned long)t_thrd.storage_cxt.BufferBlocks;  // using long code判断
-    unsigned long endaddr = startaddr + buffer_size;
+    unsigned long long startaddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
+    unsigned long long endaddr = startaddr + buffer_size;
     /* Determine the range of address carried by sigbus, And print the log according to the page state. */
     if (sigbus_addr >= startaddr && sigbus_addr <= endaddr) {
         buf_id = floor((sigbus_addr - startaddr) / (Size)BLCKSZ);
@@ -4289,12 +4289,12 @@ static void SIGBUS_handler(SIGNAL_ARGS)
         if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
             buf_desc->state & BM_IO_IN_PROGRESS) {
             ereport(PANIC,
-                (errmsg("UCE occure at dirty page, The error address is: %x, Gaussdb will shut down immediately.",
+                (errmsg("UCE occure at dirty page, The error address is: 0x%llx, Gaussdb will shut down immediately.",
                     sigbus_addr)));
         } else {
             ereport(WARNING,
                 (errmsg(
-                    "UCE occure at clean/free page, The error address is: %x. GaussDB will shutdown.", sigbus_addr)));
+                    "UCE occure at clean/free page, The error address is: 0x%llx. GaussDB will shutdown.", sigbus_addr)));
             pmdie(SIGBUS);
         }
     } else if (sigbus_addr == 0) {
@@ -4302,7 +4302,7 @@ static void SIGBUS_handler(SIGNAL_ARGS)
     } else {
         ereport(PANIC,
             (errmsg(
-                "SIGBUS signal received. The error address is: %x, Gaussdb will shut down immediately", sigbus_addr)));
+                "SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", sigbus_addr)));
     }
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
