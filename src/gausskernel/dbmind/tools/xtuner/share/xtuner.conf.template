@@ -15,7 +15,7 @@
 logfile = log/opengauss_tuner.log
 output_tuning_result = tuned_knobs.json
 verbose = on
-recorder_file = log/recorder.log
+recorder_file = log/recorder.csv
 tune_strategy = auto  # rl, gop or auto
 drop_cache = on  # You must modify the permission of the login user in the /etc/sudoers file and grant the NOPASSWD permission to the user.
 used_mem_penalty_term = 1e-9  # Prevent taking up more memory.
@@ -45,12 +45,26 @@ particle_nums = 3  # A larger value indicates higher accuracy but slower speed.
 [Benchmark]
 # Some examples of benchmark script implementation are provided in the benchmark directory.
 # Implement the benchmark script based on the specified interface.
-benchmark_script = tpch
-# These parameters are used to replace the path and cmd in the benchmark script.
+benchmark_script = period  # Build-in benchmarks: period, tpcc, tpch, tpcds, sysbench (not tested)
+
+# The following parameters are used to replace the path and cmd in the benchmark script.
 # The path and cmd variables in the benchmark script are examples. You can set the parameters
 # by referring to the benchmark script file in the benchmark directory.
-benchmark_path =  # If this parameter is blank, the default path in the benchmark script is used.
-benchmark_cmd =   # If this parameter is blank, the default cmd in the benchmark script is used.
+
+# If this parameter is blank, the default path in the benchmark script is used. 
+# For build-in benchmarks, only 'period' does not need it.
+benchmark_path =  
+# If this parameter is blank, the default cmd in the benchmark script is used. 
+# For build-in benchmarks, only 'tpcc' needs it.
+benchmark_cmd = 
+
+# Optional parameter. Only for 'period'.
+# By appointment this parameter, use can measure the performance of period task.
+# The unit of this parameter is second.
+# The default parameter is 60 seconds, which means that the cycle of the workload is 60 seconds.
+# This value needs to be greater than or equal to the cycle of the workload itself,
+# try not to be less than, otherwise it will easily lead to judgment distortion.
+benchmark_period = 60 
 
 #------------------------------------------------------------------------------
 # Tuning Knobs Configurations

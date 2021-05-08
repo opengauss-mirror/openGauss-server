@@ -14,18 +14,34 @@ See the Mulan PSL v2 for more details.
 """
 
 import os
+import sys
+import platform
 
 from setuptools import setup, find_packages
 
 
 def read_requirements():
     """Parse requirements.txt."""
-    filepath = os.path.join('.', 'requirements.txt')
+    if 'aarch64' in platform.uname().machine:
+        filepath = os.path.join('.', 'requirements-aarch64.txt')
+    else:
+        filepath = os.path.join('.', 'requirements-x86.txt')
     with open(filepath, 'r') as f:
         requirements = [_line.rstrip() for _line in f]
     requirements.reverse()
     return requirements
 
+def check_version():
+    version_info = sys.version_info
+    major, minor = version_info.major, version_info.minor
+    # At least, the Python version is (3, 6)
+    if major < 3 or minor <= 5:
+        return False
+    return True
+
+if not check_version():
+    print("Requires Python >= 3.6")
+    exit(-1)
 
 # Read the package information from the main.py.
 pkginfo = dict()

@@ -1,0 +1,6 @@
+cryptography==2.5
+paramiko==2.7.2
+numpy==1.16.5
+scipy==1.6.0
+bayesian-optimization
+ptable
