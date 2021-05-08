@@ -263,7 +263,8 @@ static bool isNeedGetLCName = true;
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
 #define CHECK_TIMES 10
-
+#define SIGBUS_MCEERR_AR 4
+#define SIGBUS_MCEERR_AO 5
 static char gaussdb_state_file[MAXPGPATH] = {0};
 
 uint32 noProcLogicTid = 0;
@@ -4272,7 +4273,7 @@ static void SIGBUS_handler(SIGNAL_ARGS)
     int si_code = g_instance.sigbus_cxt.sigbus_code;
     unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-    if (si_code != BUS_MCEERR_AR && si_code != BUS_MCEERR_AO) {
+    if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
         ereport(PANIC, (errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
     }
 #ifdef __aarch64__
