@@ -14,14 +14,14 @@ See the Mulan PSL v2 for more details.
 """
 
 import logging
-import re
 
 from tuner.character import OpenGaussMetric
 from tuner.exceptions import DBStatusError, SecurityError, ExecutionError, OptionError
 from tuner.executor import ExecutorFactory
-from tuner.knob import RecommendedKnobs
+from tuner.knob import RecommendedKnobs, Knob
 from tuner.utils import clip
 from tuner.utils import construct_dividing_line
+from tuner.utils import to_tuples
 
 
 def check_special_character(phrase):
@@ -128,9 +128,9 @@ class DB_Agent:
                                     "Check whether the database is started. ")
 
             # Get database instance pid and data_path.
-            _, self.data_path = self.exec_statement(
+            self.data_path = self.exec_statement(
                 "SELECT datapath FROM pg_node_env;"
-            )
+            )[0][0]
         except ExecutionError as e:
             logging.exception("An exception occurred while checking connection parameters: %s", e)
             raise DBStatusError("Failed to login to the database. "
@@ -159,19 +159,24 @@ class DB_Agent:
             check_special_character(knob)
             wherein_list.append("'%s'" % knob)
 
-        sql = "SELECT name, boot_val, min_val, max_val FROM pg_settings WHERE name IN ({})".format(
+        sql = "SELECT name, setting, min_val, max_val FROM pg_settings WHERE name IN ({})".format(
             ','.join(wherein_list)
         )
 
-        stdout = self.exec_statement(sql)[4:]
-        tuples = [[stdout[4 * i], stdout[4 * i + 1], stdout[4 * i + 2], stdout[4 * i + 3]] for i in
-                  range(len(stdout) // 4)]
-
-        for name, boot_val, min_val, max_val in tuples:
+        # If the value is missing, use the default value obtained in the system table to fill it.
+        tuples = self.exec_statement(sql)
+        for name, setting, min_val, max_val in tuples:
             knob = self.knobs[name]
-            knob.min = min_val if not knob.min else max(knob.min, min_val, key=lambda x: float(x))
-            knob.max = max_val if not knob.max else min(knob.max, max_val, key=lambda x: float(x))
-            knob.default = boot_val if not knob.default else clip(knob.default, knob.min, knob.max)
+            if knob.type != Knob.TYPE.BOOL:
+                min_val = float(min_val)
+                max_val = float(max_val)
+                knob.min = min_val if knob.min is None else max(knob.min, min_val)
+                knob.max = max_val if knob.max is None else min(knob.max, max_val)
+            knob.original = setting
+            # If user did not set default field, then make the original value as the default value. 
+            # The default value (knob.current) is the starting point while tuning. 
+            if knob.current is None:
+                knob.current = knob.to_numeric(setting)
 
     def exec_statement(self, sql, timeout=None):
         """
@@ -198,14 +203,7 @@ class DB_Agent:
             logging.error("Cannot execute SQL statement: %s. Error message: %s.", sql, stderr)
             raise ExecutionError("Cannot execute SQL statement: %s." % sql)
 
-        # Parse the result.
-        result = re.sub(r'[-+]{2,}', r'', stdout)  # remove '----+----'
-        result = re.sub(r'\|', r'', result)  # remove '|'
-        result = re.sub(r'\(\d*[\s,]*row[s]*?\)', r'', result)  # remove '(n rows)'
-        result = re.sub(r'\n', r' ', result)
-        result = result.strip()
-        result = re.split(r'\s+', result)
-        return result
+        return to_tuples(stdout)
 
     def is_alive(self):
         """
@@ -260,6 +258,17 @@ class DB_Agent:
             nv.append(self.knobs[name].to_numeric(val))
         return nv
 
+    def get_default_normalized_vector(self):
+        """
+        In order to get the initial performance and rollback the settings while tuning is finished.
+        :return: the vector that normalized from original/initial knobs.
+        """
+        nv = list()
+        for name in self.ordered_knob_list:
+            val = self.knobs[name].original
+            nv.append(self.knobs[name].to_numeric(val))
+        return nv
+
     def set_knob_normalized_vector(self, nv):
         restart = False
         for i, val in enumerate(nv):
@@ -274,7 +283,7 @@ class DB_Agent:
     def get_knob_value(self, name):
         check_special_character(name)
         sql = "SELECT setting FROM pg_settings WHERE name = '{}';".format(name)
-        _, value = self.exec_statement(sql)
+        value = self.exec_statement(sql)[0][0]
         return value
 
     def set_knob_value(self, name, value):
@@ -288,18 +297,12 @@ class DB_Agent:
     def reset_state(self):
         self.metric.reset()
 
-    def set_default_knob(self):
-        restart = False
-
-        for knob in self.knobs:
-            self.set_knob_value(knob.name, knob.default)
-            restart = True if knob.restart else restart
-
-        self.restart()
-
     def restart(self):
         logging.info(construct_dividing_line("Restarting database.", padding="*"))
-        self.exec_statement("checkpoint;")  # Prevent the database from being shut down for a long time.
+        try:
+            self.exec_statement("checkpoint;")  # Prevent the database from being shut down for a long time.
+        except ExecutionError:
+            logging.warning("Cannot checkpoint perhaps due to bad GUC settings.")
         self.exec_command_on_host("gs_ctl stop -D {data_path}".format(data_path=self.data_path),
                                   ignore_status_code=True)
         self.exec_command_on_host("gs_ctl start -D {data_path}".format(data_path=self.data_path),

@@ -16,6 +16,8 @@ See the Mulan PSL v2 for more details.
 import numpy as np
 
 
+PATTERN = '|\t%s\t|\t%s\t|\t%s\t|'
+
 class Particle:
     def __init__(self, position, velocity, best_position, fitness):
         self.position = position
@@ -94,13 +96,16 @@ class Pso:
             self.best_position = particle.position
 
     def update_one_step(self):
-        for particle in self.particles:
+        for i, particle in enumerate(self.particles):
             self._update_velocity(particle)  # update velocity
             self._update_position(particle)  # update position
+            print(PATTERN % ('%s-%s' % (self.iteration_count, i), self.best_fitness, self.best_position), flush=True)
         self.iteration_count += 1
         self.fitness_val_list.append(self.best_fitness)
 
     def minimize(self):
+        # Print a header
+        print(PATTERN % ('iter', 'best_fitness', 'best_position'), flush=True)
         for i in range(self.max_iteration):
             self.update_one_step()
         return self.best_fitness, self.best_position

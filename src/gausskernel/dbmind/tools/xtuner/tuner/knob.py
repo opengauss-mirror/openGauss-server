@@ -48,10 +48,8 @@ class RecommendedKnobs:
         knob_list.extend(self._need_tune_knobs)
         knob_list.extend(self._only_report_knobs)
         for knob in knob_list:
-            if knob.type in ('int', 'float'):
-                knob_table.add_row([knob.name, knob.default, knob.min, knob.max, knob.restart])
-            else:
-                knob_table.add_row([knob.name, knob.to_string(knob.default), knob.min, knob.max, knob.restart])
+            row = (knob.name, knob.to_string(knob.current), knob.min, knob.max, knob.restart)
+            knob_table.add_row(row)
         print(knob_table)
 
     def dump(self, fp, dump_report_knobs=True):
@@ -71,14 +69,16 @@ class RecommendedKnobs:
 
     def append_need_tune_knobs(self, *args):
         for knob in args:
-            if knob:
-                self._need_tune_knobs.append(knob)
-                self._tbl[knob.name] = knob
+            if knob is None:
+                continue
+            self._need_tune_knobs.append(knob)
+            self._tbl[knob.name] = knob
 
     def append_only_report_knobs(self, *args):
         for knob in args:
-            if knob:
-                self._only_report_knobs.append(knob)
+            if knob is None:
+                continue
+            self._only_report_knobs.append(knob)
 
     def names(self):
         return sorted(self._tbl.keys())
@@ -100,41 +100,46 @@ class RecommendedKnobs:
 
 
 class Knob:
-    def __init__(self, name, knob):
+    def __init__(self, name, **kwargs):
         """
         Wrap a tuning knob and abstract it as a class.
         The second argument knob is dict type. Its fields include:
-            default: Int, float or bool type.
+            recommend: The knob value recommended by knob recommendation.
+            current: Normalized current value.
+            original: Str type. A setting value from `pg_settings` or user's configuration.
             min: Optional. Int, float type.
             max: Optional. Int, float type.
             type: String type. Constrained by Knob.TYPE.
             restart: Boolean type.
 
-        :param name: The name of a knob.
-        :param knob: The dict data-structure of a knob.
+        :param name: The name of the knob.
+        :param kwargs: A dict structure contains the knob's all fields.
         """
-        if not isinstance(knob, dict):
-            raise TypeError
-
         self.name = name
-        self.type = knob.get('type')
-        self.min = knob.get('min')
-        self.max = knob.get('max')
-        self.default = knob.get('default')
-        self.restart = knob.get('restart', False)
+        self.recommend = kwargs.get('recommend')
+        self.original = self.current = None
+        self.user_set = kwargs.get('default')
+        self._min = kwargs.get('min')
+        self._max = kwargs.get('max')
+        self.type = kwargs.get('type')
+        self.restart = kwargs.get('restart', False)
+
+        if '' in (self.name, self.type):
+            raise ValueError("'name', and 'type' fields of knob are essential.")
 
         if self.type == 'bool':
-            self.min = 0
-            self.max = 1
+            self._min = 0
+            self._max = 1
 
-        self._scale = self.max - self.min
+        if str in (type(self._min), type(self._max)):
+            raise ValueError("'min', and 'max' fields of knob should not be str type.")
 
-        if self._scale < 0:
-            raise ValueError('Knob %s is incorrectly configured. '
-                             'The max value must be greater than or equal to the min value.' % self.name)
+        # Refresh scale.
+        self._scale = None
+        self.fresh_scale()
 
     def to_string(self, val):
-        rv = val * self._scale + float(self.min) if self.type in ('int', 'float') else val
+        rv = self.denormalize(val) if self.type in ('int', 'float') else val
         if self.type == 'int':
             rv = str(int(round(rv)))
         elif self.type == 'bool':
@@ -148,7 +153,7 @@ class Knob:
 
     def to_numeric(self, val):
         if self.type in ('float', 'int'):
-            rv = (float(val) - float(self.min)) / self._scale
+            rv = self.normalize(val)
         elif self.type == 'bool':
             rv = 0. if val == 'off' else 1.
         else:
@@ -156,38 +161,63 @@ class Knob:
 
         return rv
 
-    @staticmethod
-    def new_instance(name, value_default, knob_type, value_min=0, value_max=1, restart=False):
-        if knob_type not in Knob.TYPE.ITEMS:
-            raise TypeError("The type of parameter 'knob_type' is incorrect.")
+    def fresh_scale(self):
+        if None in (self._min, self._max):
+            return
 
-        if knob_type == Knob.TYPE.INT:
-            value_default = int(value_default)
-            value_max = int(value_max)
-            value_min = int(value_min)
-        elif knob_type == Knob.TYPE.FLOAT:
-            value_default = float(value_default)
-            value_max = float(value_max)
-            value_min = float(value_min)
-        else:
-            if type(value_default) is not bool:
-                raise ValueError
+        self._scale = self._max - self._min
+        if self._scale < 0:
+            raise ValueError('Knob %s is incorrectly configured. '
+                             'The max value must be greater than '
+                             'or equal to the min value.' % self.name)
+        if type(self.user_set) is str:
+            self.current = self.to_numeric(self.user_set)
+        elif type(self.user_set) in (int, float):
+            self.user_set = str(self.user_set)
+            self.current = self.normalize(self.user_set)
+        elif self.recommend is not None:
+            self.current = self.normalize(self.recommend)
 
-            value_default = 1 if value_default else 0
-            value_max = 1
-            value_min = 0
+    @property
+    def min(self):
+        return self._min
 
-        return Knob(name,
-                    {'type': knob_type, 'restart': restart,
-                     'default': value_default, 'min': value_min, 'max': value_max})
+    @min.setter
+    def min(self, val):
+        if val is None:
+            return
+        self._min = val
+        self.fresh_scale()
+
+    @property
+    def max(self):
+        return self._max
+
+    @max.setter
+    def max(self, val):
+        if val is None:
+            return
+        self._max = val
+        self.fresh_scale()
+
+    def normalize(self, val):
+        return (float(val) - float(self._min)) / self._scale
+
+    def denormalize(self, val):
+        return val * self._scale + float(self._min)
 
     def to_dict(self):
         return \
-            {self.name: {
-                'type': self.type, 'restart': self.restart,
-                'default': self.default,
-                'min': self.min, 'max': self.max
-            }}
+            {self.name:
+                {
+                    'type': self.type,
+                    'restart': self.restart,
+                    'default': self.user_set if self.user_set is not None else self.original,
+                    'recommend': self.to_string(self.current),
+                    'min': self._min,
+                    'max': self._max
+                }
+            }
 
     def __str__(self):
         return str(self.to_dict())
@@ -202,9 +232,10 @@ class Knob:
 
 def load_knobs_from_json_file(filename):
     knobs = RecommendedKnobs()
-    with open(filename) as fp:
-        for name, val in json.load(fp).items():
-            val['name'] = name
-            knobs.append_need_tune_knobs(Knob(name=name, knob=val))
+    with open(filename) as f:
+        for name, _dict in json.load(f).items():
+            knobs.append_need_tune_knobs(
+                Knob(name=name, **_dict)
+            )
 
     return knobs
