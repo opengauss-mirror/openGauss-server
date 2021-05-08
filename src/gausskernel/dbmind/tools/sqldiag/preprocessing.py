@@ -18,8 +18,6 @@ import sqlparse
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import Keyword, DML
 
-from .similarity import list_distance
-
 # split flag in SQL
 split_flag = ('!=', '<=', '>=', '==', '<', '>', '=', ',', '(', ')', '*', ';', '%', '+', ',', ';')
 
@@ -81,7 +79,7 @@ EQUALS_FILTER = r'(= .*? |= .*$)'
 LIMIT_DIGIT = r'LIMIT \d+'
 
 
-def unify_sql(sql):
+def _unify_sql(sql):
     """
     function: unify sql format
     """
@@ -106,11 +104,11 @@ def unify_sql(sql):
     return sql.strip()
 
 
-def sql_filter(sql):
+def templatize_sql(sql):
     """
     function: replace the message which is not important in sql
     """
-    sql = unify_sql(sql)
+    sql = _unify_sql(sql)
 
     sql = re.sub(r';', r'', sql)
 
@@ -148,7 +146,7 @@ def sql_filter(sql):
     return sql
 
 
-def check_select(parsed_sql):
+def _is_select_clause(parsed_sql):
     if not parsed_sql.is_group:
         return False
     for token in parsed_sql.tokens:
@@ -157,26 +155,27 @@ def check_select(parsed_sql):
     return False
 
 
-def get_table_token_list(parsed_sql, token_list):
+# todo: what is token list? from list?
+def _get_table_token_list(parsed_sql, token_list):
     flag = False
     for token in parsed_sql.tokens:
         if not flag:
             if token.ttype is Keyword and token.value.upper() == 'FROM':
                 flag = True
         else:
-            if check_select(token):
-                get_table_token_list(token, token_list)
+            if _is_select_clause(token):
+                _get_table_token_list(token, token_list)
             elif token.ttype is Keyword:
                 return
             else:
                 token_list.append(token)
 
 
-def extract_table(sql):
+def _extract_table(sql):
     tables = []
     table_token_list = []
     sql_parsed = sqlparse.parse(sql)[0]
-    get_table_token_list(sql_parsed, table_token_list)
+    _get_table_token_list(sql_parsed, table_token_list)
     for table_token in table_token_list:
         if isinstance(table_token, Identifier):
             tables.append(table_token.get_name())
@@ -190,13 +189,13 @@ def extract_table(sql):
     return tables
 
 
-def get_sql_table_name(sql):
+def _get_sql_table_name(sql):
     """
     function: get table name in sql
     has many problems in code, especially in 'delete', 'update', 'insert into' sql
     """
     if sql.startswith('SELECT'):
-        tables = extract_table(sql)
+        tables = _extract_table(sql)
     elif sql.startswith('DELETE'):
         if 'WHERE' not in sql:
             tables = re.findall(r'FROM\s+([^\s]*)[;\s ]?', sql)
@@ -212,9 +211,9 @@ def get_sql_table_name(sql):
     return tables
 
 
-def get_table_column_name(sql):
+def _get_table_column_name(sql):
     remove_sign = (r'=', r'<', r'>')
-    tables = get_sql_table_name(sql)
+    tables = _get_sql_table_name(sql)
     sql = re.sub(r'[?]', r'', sql)
     sql = re.sub(r'[()]', r'', sql)
     sql = re.sub(r'`', r'', sql)
@@ -245,28 +244,50 @@ def get_sql_template(sql):
     """
     function: derive skeleton of sql
     """
-    filtered_sql = sql_filter(sql)
-    sql_template = filtered_sql
-    tables, columns = get_table_column_name(sql_template)
-    if filtered_sql.startswith('INSERT INTO'):
+    fine_template = templatize_sql(sql)
+    rough_template = fine_template
+    tables, columns = _get_table_column_name(fine_template)
+    if rough_template.startswith('INSERT INTO'):
         table = tables[0]
-        sql_template = re.sub(r'INTO ' + table + r' \(.*?\)', r'INTO tab ()', sql_template)
+        rough_template = re.sub(r'INTO ' + table + r' \(.*?\)', r'INTO tab ()', rough_template)
 
     for table in tables:
-        sql_template = re.sub(r'(\s+{table}\.|\s+{table}\s+|\s+{table})'.format(table=table), r' tab ', sql_template)
+        rough_template = re.sub(r'(\s+{table}\.|\s+{table}\s+|\s+{table})'.format(table=table), r' tab ',
+                                rough_template)
 
     for column in columns:
         if column in ['*', '.', '+', '?']:
             continue
-        sql_template = re.sub(r'\s+' + column + r'\s+', r' col ', sql_template)
-    return filtered_sql, sql_template
+        rough_template = re.sub(r'\s+' + column + r'\s+', r' col ', rough_template)
+    return fine_template, rough_template
 
 
-def sql_similarity(sql1, sql2):
-    """
-    calculate similarity of sql
-    """
-    if sql1.split()[0] != sql2.split()[0]:
-        return 0.0
-    similarity_of_sql = list_distance(sql1.split(), sql2.split())
-    return similarity_of_sql
+class LoadData:
+    def __init__(self, csv_file):
+        self.csv_file = csv_file
+
+    def load_predict_file(self):
+        for line in self.csv_file:
+            line = line.strip()
+            if line:
+                yield line
+
+    def load_train_file(self):
+        for line in self.csv_file:
+            line = line.strip()
+            if not line or ',' not in line:
+                continue
+            last_delimater_pos = line.rindex(',')
+            if re.search(r'\d+(\.\d+)?$', line[last_delimater_pos + 1:]) is None:
+                continue
+            sql = line[:last_delimater_pos]
+            duration_time = float(line[last_delimater_pos + 1:])
+            yield sql, duration_time
+
+    def __getattr__(self, name):
+        if name not in ('train_data', 'predict_data'):
+            raise AttributeError('{} has no attribute {}.'.format(LoadData.__name__, name))
+        if name == 'train_data':
+            return self.load_train_file()
+        else:
+            return self.load_predict_file()
