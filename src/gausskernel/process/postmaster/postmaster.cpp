@@ -337,6 +337,7 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
+static void SIGBUS_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
 static void startup_alarm(SIGNAL_ARGS);
 static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState others);
@@ -1929,6 +1930,7 @@ int PostmasterMain(int argc, char* argv[])
     (void)gspqsignal(SIGINT, pmdie);          /* send SIGTERM and shut down */
     (void)gspqsignal(SIGQUIT, pmdie);         /* send SIGQUIT and die */
     (void)gspqsignal(SIGTERM, pmdie);         /* wait for children and shut down */
+    (void)gspqsignal(SIGBUS, SIGBUS_handler);   /* send SIGBUS and die or panic */
 
     pqsignal(SIGALRM, SIG_IGN); /* ignored */
     pqsignal(SIGPIPE, SIG_IGN); /* ignored */
@@ -4254,6 +4256,56 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
     errno = save_errno;
 }
+/*
+ * SIGBUS -- When uce failure occurs in system memory, sigbus_handler will exit according to the region
+   of its logical address.
+   1. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
+   2. For addresses outside the buffer pool range, print the NIC log and exit
+   3. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
+   4. If the page is not dirty, execute pmdie to exit normally and print warning message. If the page is dirty,
+      print the PANIC log and exit
+ */
+static void SIGBUS_handler(SIGNAL_ARGS)
+{
+    uint64 buffer_size;
+    int buf_id;
+    int si_code = g_instance.sigbus_cxt.sigbus_code;
+    unsigned long sigbus_addr = (unsigned long)g_instance.sigbus_cxt.sigbus_addr;
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
+    if (si_code != BUS_MCEERR_AR && si_code != BUS_MCEERR_AO) {
+        ereport(PANIC, (errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
+    }
+#ifdef __aarch64__
+    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
+#else
+    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
+#endif
+    unsigned long startaddr = (unsigned long)t_thrd.storage_cxt.BufferBlocks;  // using long code判断
+    unsigned long endaddr = startaddr + buffer_size;
+    /* Determine the range of address carried by sigbus, And print the log according to the page state. */
+    if (sigbus_addr >= startaddr && sigbus_addr <= endaddr) {
+        buf_id = floor((sigbus_addr - startaddr) / (Size)BLCKSZ);
+        BufferDesc* buf_desc = GetBufferDescriptor(buf_id);
+        if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
+            buf_desc->state & BM_IO_IN_PROGRESS) {
+            ereport(PANIC,
+                (errmsg("UCE occure at dirty page, The error address is: %x, Gaussdb will shut down immediately.",
+                    sigbus_addr)));
+        } else {
+            ereport(WARNING,
+                (errmsg(
+                    "UCE occure at clean/free page, The error address is: %x. GaussDB will shutdown.", sigbus_addr)));
+            pmdie(SIGBUS);
+        }
+    } else if (sigbus_addr == 0) {
+        ereport(PANIC, (errmsg("SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately")));
+    } else {
+        ereport(PANIC,
+            (errmsg(
+                "SIGBUS signal received. The error address is: %x, Gaussdb will shut down immediately", sigbus_addr)));
+    }
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+}
 
 void KillGraceThreads(void)
 {
@@ -4294,6 +4346,7 @@ static void pmdie(SIGNAL_ARGS)
     switch (postgres_signal_arg) {
         case SIGTERM:
         case SIGINT:
+        case SIGBUS:
 
             if (STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode && !dummyStandbyMode &&
                 SIGTERM == postgres_signal_arg) {
