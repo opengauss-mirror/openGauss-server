@@ -489,6 +489,25 @@ static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ReplicationSlot));
 }
 
+static void knl_g_archive_standby_init(knl_g_archive_standby_context* archive_standby_cxt)
+{
+    errno_t rc = memset_s(archive_standby_cxt, sizeof(knl_g_archive_standby_context), 0, sizeof(knl_g_archive_standby_context));
+    securec_check(rc, "\0", "\0");
+    Assert(archive_standby_cxt != NULL);
+    archive_standby_cxt->arch_task_status = 0;
+    archive_standby_cxt->arch_finish_result = false;
+    archive_standby_cxt->need_to_send_archive_status = false;
+
+    /* we don't need to use this parameter, but we should init it. */
+    archive_standby_cxt->archive_task.sub_term = -1;
+    archive_standby_cxt->archive_task.term = 0;
+    archive_standby_cxt->archive_task.targetLsn = 0;
+
+    archive_standby_cxt->archive_enabled = false;
+    archive_standby_cxt->standby_archive_start_point = false;
+    archive_standby_cxt->arch_latch = NULL;
+}
+
 #ifdef ENABLE_MOT
 static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
 {
@@ -573,6 +592,7 @@ void knl_instance_init()
     knl_g_wal_init(&g_instance.wal_cxt);
     knl_g_oid_nodename_cache_init(&g_instance.oid_nodename_cache);
     knl_g_archive_obs_init(&g_instance.archive_obs_cxt);
+    knl_g_archive_standby_init(&g_instance.archive_standby_cxt);
     knl_g_hypo_init(&g_instance.hypo_cxt);
 }
 
