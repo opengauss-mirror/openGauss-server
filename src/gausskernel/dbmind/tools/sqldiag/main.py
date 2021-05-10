@@ -13,71 +13,63 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 import argparse
-import os
-import stat
+import logging
+import sys
+from configparser import ConfigParser
 
-from src.file_processor import get_train_dataset, get_test_dataset
-from src.sql_template import SqlTemplate
-from src.w2vector import Word2Vector
+from algorithm.diag import SQLDiag
+from utils import ResultSaver
 
-__version__ = '1.0.0'
-w2v_model_name = 'w2v.model'
-w2v_model_parameter = {'max_len': 300,
-                       'sg': 1,
-                       'hs': 1,
-                       'min_count': 0,
-                       'window': 1,
-                       'size': 5,
-                       'iter': 50,
-                       'workers': 4
-                       }
-
-
-def train(template_dir, data):
-    w2v_model_path = os.path.join(template_dir, w2v_model_name)
-    w2v = Word2Vector(**w2v_model_parameter)
-    if not os.path.exists(w2v_model_path):
-        w2v.train(sentence=data)
-    else:
-        w2v.load_model(w2v_model_path)
-        w2v.update(sentence=data)
-    w2v.save_model(w2v_model_path)
-    sql_template = SqlTemplate(template_dir, word2vec_model=w2v)
-    sql_template.template = data
-
-
-def predict(template_dir, data):
-    w2v_model_path = os.path.join(template_dir, w2v_model_name)
-    w2v = Word2Vector(**w2v_model_parameter)
-    w2v.load_model(w2v_model_path)
-    sql_template = SqlTemplate(template_dir, word2vec_model=w2v)
-    result = sql_template.predict_batch_exec_time(data)
-    return result
+__version__ = '2.0.0'
+__description__ = 'SQLdiag integrated by openGauss.'
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='sqldiag')
-    parser.add_argument('-m', '--mode', required=True, choices=['train', 'predict'])
-    parser.add_argument('-f', '--file', required=True)
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('mode', choices=['train', 'predict', 'finetune'],
+                        help='The training mode is to perform feature extraction and '
+                             'model training based on historical SQL statements. '
+                             'The prediction mode is to predict the execution time of '
+                             'a new SQL statement through the trained model.')
+    parser.add_argument('-f', '--csv-file', type=argparse.FileType('r'),
+                        help='The data set for training or prediction. '
+                             'The file format is CSV. '
+                             'If it is two columns, the format is (SQL statement, duration time). '
+                             'If it is three columns, '
+                             'the format is (timestamp of SQL statement execution time, SQL statement, duration time).')
+    parser.add_argument('--predicted-file', help='The file path to save the predicted result.')
+    parser.add_argument('--model', default='template', choices=['template', 'dnn'],
+                        help='Choose the model model to use.')
+    parser.add_argument('--model-path', required=True,
+                        help='The storage path of the model file, used to read or save the model file.')
+    parser.add_argument('--config-file', default='sqldiag.conf')
     parser.version = __version__
     return parser.parse_args()
 
 
+def get_config(filepath):
+    cp = ConfigParser()
+    cp.read(filepath, encoding='UTF-8')
+    return cp
+
+
 def main(args):
-    mode = args.mode
-    filepath = args.file
-    template_dir = os.path.realpath('./template')
-    if not os.path.exists(template_dir):
-        os.makedirs(template_dir, mode=0o700)
-    if oct(os.stat(template_dir).st_mode)[-3:] != '700':
-        os.chmod(template_dir, stat.S_IRWXU)
-    if mode == 'train':
-        train_data = get_train_dataset(filepath)
-        train(template_dir, train_data)
-    if mode == 'predict':
-        predict_data = get_test_dataset(filepath)
-        result = predict(template_dir, predict_data)
-        print(result)
+    logging.basicConfig(level=logging.INFO)
+    model = SQLDiag(args.model, args.csv_file, get_config(args.config_file))
+    if args.mode == 'train':
+        model.fit()
+        model.save(args.model_path)
+    elif args.mode == 'predict':
+        if not args.predicted_file:
+            logging.error("The [--predicted-file] parameter is required for predict mode")
+            sys.exit(1)
+        model.load(args.model_path)
+        pred_result = model.transform()
+        ResultSaver().save(pred_result, args.predicted_file)
+        logging.info('predicted result in saved in {}'.format(args.predicted_file))
+    elif args.mode == 'finetune':
+        model.fine_tune(args.model_path)
+        model.save(args.model_path)
 
 
 if __name__ == '__main__':
