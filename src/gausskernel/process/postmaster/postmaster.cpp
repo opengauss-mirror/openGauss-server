@@ -4290,12 +4290,12 @@ static void SIGBUS_handler(SIGNAL_ARGS)
         if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
             buf_desc->state & BM_IO_IN_PROGRESS) {
             ereport(PANIC,
-                (errmsg("UCE occure at dirty page, The error address is: 0x%llx, Gaussdb will shut down immediately.",
+                (errmsg("Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut down immediately.",
                     sigbus_addr)));
         } else {
             ereport(WARNING,
                 (errmsg(
-                    "UCE occure at clean/free page, The error address is: 0x%llx. GaussDB will shutdown.", sigbus_addr)));
+                    "Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will shutdown.", sigbus_addr)));
             pmdie(SIGBUS);
         }
     } else if (sigbus_addr == 0) {
