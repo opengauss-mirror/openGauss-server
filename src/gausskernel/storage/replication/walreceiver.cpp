@@ -87,6 +87,8 @@ bool wal_catchup = false;
 
 #define TEMP_CONF_FILE "postgresql.conf.bak"
 
+#define MAX_PATH 256
+
 const char *g_reserve_param[RESERVE_SIZE] = {
     "application_name",
     "archive_command",
@@ -123,8 +125,10 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "archive_dest",
 #ifndef ENABLE_MULTIPLE_NODES
     "recovery_min_apply_delay",
+    "archive_mode",
     "sync_config_strategy"
 #else
+    NULL,
     NULL,
     NULL
 #endif
@@ -167,6 +171,7 @@ static void WalRcvSigHupHandler(SIGNAL_ARGS);
 static void WalRcvShutdownHandler(SIGNAL_ARGS);
 static void WalRcvQuickDieHandler(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
+static void sigusr2_handler(SIGNAL_ARGS);
 static void ConfigFileTimer(void);
 static bool ProcessConfigFileMessage(char *buf, Size len);
 static void firstSynchStandbyFile(void);
@@ -175,8 +180,14 @@ static TimestampTz GetHeartbeatLastReplyTimestamp();
 static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timestamp, bool ping_sent);
 static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
 static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
+static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
 static void WalRecvSendArchiveXlogResponse();
-
+static void WalRecvSendArchiveXlogResult2Standby();
+static void SendArchiveStatus(bool status);
+static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response);
+static void InitArchiveStartPoint();
+static bool CheckXlogNameValid(char* xlog);
+int XlogNameCmp(const void* a, const void* b);
 void ProcessWalRcvInterrupts(void)
 {
     /*
@@ -299,6 +310,15 @@ void setObsArchLatch(const Latch* latch)
     SpinLockRelease(&walrcv->mutex);
 }
 
+void SetStandbyArchLatch(const Latch* latch)
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->arch_latch = (Latch *)latch;
+    SpinLockRelease(&walrcv->mutex);
+}
+
 static void wakeupObsArchLatch()
 {
     /* use volatile pointer to prevent code rearrangement */
@@ -306,6 +326,17 @@ static void wakeupObsArchLatch()
     SpinLockAcquire(&walrcv->mutex);
     if (walrcv->obsArchLatch != NULL) {
         SetLatch(walrcv->obsArchLatch);
+    }
+    SpinLockRelease(&walrcv->mutex);
+}
+
+static void wakeupArchLatch()
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    SpinLockAcquire(&walrcv->mutex);
+    if (walrcv->obsArchLatch != NULL) {
+        SetLatch(walrcv->arch_latch);
     }
     SpinLockRelease(&walrcv->mutex);
 }
@@ -375,6 +406,20 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         WalRecvSendArchiveXlogResponse();
         pg_memory_barrier();
         pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
+    }
+
+    /* send archive status to primary */
+    if (g_instance.archive_standby_cxt.need_to_send_archive_status) {
+        g_instance.archive_standby_cxt.need_to_send_archive_status = false;
+        SendArchiveStatus(g_instance.archive_standby_cxt.archive_enabled);
+    }
+
+    /* response the result of archive to primary */
+    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
+    if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_DONE)) {
+        WalRecvSendArchiveXlogResult2Standby();
+        pg_memory_barrier();
+        pg_atomic_write_u32(arch_task_status, ARCH_TASK_NONE);
     }
 
     if (!WalRcvWriterInProgress())
@@ -552,7 +597,7 @@ void WalReceiverMain(void)
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigusr1_handler);
-    (void)gspqsignal(SIGUSR2, SIG_IGN);
+    (void)gspqsignal(SIGUSR2, sigusr2_handler);
 
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
@@ -877,6 +922,18 @@ static void sigusr1_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+static void sigusr2_handler(SIGNAL_ARGS) {
+    /* get sigusr2 */
+    int save_errno = errno;
+    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
+    /*
+     * sending archive status to the primary in this step
+     */
+    g_instance.archive_standby_cxt.need_to_send_archive_status = true;
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    errno = save_errno;
+}
+
 /* Wal receiver is shut down? */
 bool WalRcvIsShutdown(void)
 {
@@ -1030,6 +1087,25 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
             errorno = memcpy_s(&archiveXLogMessage, sizeof(ArchiveXlogMessage), buf, sizeof(ArchiveXlogMessage));
             securec_check(errorno, "\0", "\0");
             ProcessArchiveXlogMessage(&archiveXLogMessage);
+            break;
+        }
+        case 'n' : /* process the archive task message sent by primary */
+        {
+            ArchiveXlogMessage archiveXLogMessage;
+            CHECK_MSG_SIZE(len, ArchiveXlogMessage, "invalid ArchiveXlogMessage message received from primary");
+            /* memcpy is required here for alignment reasons */
+            errorno = memcpy_s(&archiveXLogMessage, sizeof(ArchiveXlogMessage), buf, sizeof(ArchiveXlogMessage));
+            securec_check(errorno, "\0", "\0");
+            ProcessStandbyArchiveXlogMessage(&archiveXLogMessage);
+            break;
+        }
+        case 'S': /* send the status of the archive thread on standby */
+        {
+            ArchiveStatusResponseMessage response;
+            CHECK_MSG_SIZE(len, ArchiveStatusResponseMessage, "invalid ArchiveStatusResponseMessage message received from primary");
+            errorno = memcpy_s(&response, sizeof(ArchiveStatusResponseMessage), buf, sizeof(ArchiveStatusResponseMessage));
+            securec_check(errorno, "\0", "\0");
+            ProcessArchiveStatusResponse(&response);
             break;
         }
         default:
@@ -1879,6 +1955,36 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
 }
 
 /*
+ * Process ProcessStandbyArchiveXlogMessage received from primary sender, message type is 'n'.
+ */
+static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message)
+{
+    ereport(LOG, (errmsg("ProcessStandbyArchiveXlogMessage: get archive xlog message :%X/%X",
+                        (uint32)(archive_xlog_message->targetLsn >> 32), (uint32)(archive_xlog_message->targetLsn))));
+    errno_t errorno = EOK;
+    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
+    unsigned int expected = ARCH_TASK_NONE;
+    int failed_times = 0;
+    while (pg_atomic_compare_exchange_u32(arch_task_status, &expected, ARCH_TASK_GET) == false) {
+        /* some task arrived before last task done if expected not equal to NONE */
+        expected = ARCH_TASK_NONE;
+        pg_usleep(ARCHIVE_XLOG_DELAY);  // sleep 0.01s
+        if (failed_times++ >= GET_ARCHIVE_XLOG_RETRY_MAX) {
+            ereport(WARNING, (errmsg("get archive xlog message :%X/%X, but not finished",
+                                     (uint32)(archive_xlog_message->targetLsn >> 32),
+                                     (uint32)(archive_xlog_message->targetLsn))));
+            return;
+        }
+    }
+    errorno = memcpy_s(&g_instance.archive_standby_cxt.archive_task,
+        sizeof(ArchiveXlogMessage) + 1,
+        archive_xlog_message,
+        sizeof(ArchiveXlogMessage));
+    securec_check(errorno, "\0", "\0");
+    wakeupArchLatch();
+}
+
+/*
  * Send switchover request message to primary, indicating the current time.
  */
 static void XLogWalRcvSendSwitchRequest(void)
@@ -1929,6 +2035,30 @@ static void WalRecvSendArchiveXlogResponse()
 
     ereport(LOG,
         (errmsg("WalRecvSendArchiveXlogResponse %d %X/%X", reply.pitr_result, 
+            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+
+}
+
+/*
+ * Send archive xlog result message to primary.
+ */
+static void WalRecvSendArchiveXlogResult2Standby()
+{
+    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
+    ArchiveXlogResponseMeeeage reply;
+    errno_t errorno = EOK;
+    reply.pitr_result = g_instance.archive_standby_cxt.arch_finish_result;
+    reply.targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
+    buf[0] = 'n';
+    errorno = memcpy_s(&buf[1],
+        sizeof(ArchiveXlogResponseMeeeage),
+        &reply,
+        sizeof(ArchiveXlogResponseMeeeage));
+    securec_check(errorno, "\0", "\0");
+    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
+    const char* archive_result_string = ((reply.pitr_result) ? "success" : "fail");
+    ereport(LOG,
+        (errmsg("WalRecvSendArchiveXlogResult2Standby archive_result:%s archive_lsn:%X/%X", archive_result_string, 
             (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
 
 }
@@ -2739,4 +2869,179 @@ static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
     } else {
         WalRcvSetPercentCountStartLsn(currentDoneLsn);
     }
+}
+
+/* 
+ * SendArchiveStatus
+ * This function is used to notify the primary of
+ * whether archiving is enabled for standby.
+ * 
+ * If the value of status is true, archiving is enabled for the standby node.
+ * Otherwise, archiving is disabled.
+ * 
+ * The targetLsn is the minimum lsn which is not archived.
+ */
+static void SendArchiveStatus(bool status)
+{
+    char buf[sizeof(ArchiveStatusMessage) + 1];
+    ArchiveStatusMessage message;
+    errno_t errorno = EOK;
+    message.is_archive_activied = status;
+    InitArchiveStartPoint();
+    const char* status_string = status ? "on" : "off";
+    ereport(LOG, (errmsg("the archive thread status is %s, and the start point of lsn is %ld",
+                        status_string, g_instance.archive_standby_cxt.standby_archive_start_point)));
+    message.startLsn = g_instance.archive_standby_cxt.standby_archive_start_point;
+    buf[0] = 'S';
+    errorno = memcpy_s(&buf[1],
+        sizeof(ArchiveStatusMessage),
+        &message,
+        sizeof(ArchiveStatusMessage));
+    securec_check(errorno, "\0", "\0");
+    libpqrcv_send(buf, sizeof(ArchiveStatusMessage) + 1);
+}
+
+static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response)
+{
+    ereport(LOG, (errmsg("get updating archive status response")));
+    bool is_success = response->is_set_status_success;
+    if (is_success) {
+        SetLatch(g_instance.archive_standby_cxt.arch_latch);
+    } else {
+        ereport(WARNING,
+                (errcode(ERRCODE_WARNING),
+                    errmsg("it is failed to notify the primary that updating the archive status of standby")));
+    }
+}
+
+/*
+ * InitArchiveStartPoint is used to find a start point which is the standby should check
+ */
+static void InitArchiveStartPoint()
+{
+    ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
+    if (!IsServerModeStandby() || obs_archive_slot != NULL) {
+        return;
+    }
+    struct stat stat_buf;
+    XLogRecPtr targetLsn = 0;
+    XLogRecPtr flushPtr = t_thrd.walreceiverfuncs_cxt.WalRcv->walRcvCtlBlock->flushPtr;
+    XLogRecPtr* standby_archive_start_point = &g_instance.archive_standby_cxt.standby_archive_start_point;
+    XLogRecPtr backup = g_instance.archive_standby_cxt.standby_archive_start_point;
+    DIR *xldir = NULL;
+    struct dirent *xlde = NULL;
+
+    errno_t errorno = EOK;
+    xldir = AllocateDir(XLOGDIR);
+
+    if (xldir == NULL) {
+        ereport(ERROR,
+                (errcode_for_file_access(),
+                errmsg("InitArchiveStartPoint: could not open transaction log directory \"%s\": %m", XLOGDIR)));
+    }
+
+    /* find all xlog in the XLOGDIR and push it into a list */
+    List* xlog_names = NIL;
+    ListCell* xlog = NULL;
+    while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL){
+        if (!CheckXlogNameValid(xlde->d_name)) {
+            continue;
+        }
+        char* xlog_name = (char*)palloc(sizeof(char) * MAX_PATH);
+        errorno = snprintf_s(xlog_name, MAX_PATH, MAX_PATH - 1, xlde->d_name);
+        xlog_names = lappend(xlog_names, xlog_name);
+    }
+    if (xlog_names->length == 0) {
+        *standby_archive_start_point = flushPtr;
+        return;
+    }
+
+    /* cast the type List to array of string, and sort the array */
+    char** xlog_array = (char**)palloc((sizeof(char*) * xlog_names->length));
+    int count = 0;
+    foreach(xlog, xlog_names) {
+        xlog_array[count++] = (char*)lfirst(xlog);
+    }
+    qsort(xlog_array, xlog_names->length, sizeof(char*), XlogNameCmp);
+
+    /* check the lsn which is the existsed xlog but not archived */
+    for (;;) {
+        targetLsn += XLogSegSize;
+        char lastoff[MAXFNAMELEN];
+        XLogSegNo segno = 0;
+        XLByteToSeg(targetLsn, segno);
+        errorno = snprintf_s(lastoff, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
+                            (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
+        
+        if (!CheckXlogNameValid(lastoff)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE), errmsg("InitArchiveStartPoint:the lsn is error")));
+            break;
+        }
+
+        bool is_xlog = false;
+        for (int i = 0; i < xlog_names->length; i++) {
+            char* xlog_name = xlog_array[i];
+            int cmp_result = strcmp(lastoff, xlog_name);
+            if (cmp_result < 0) {
+                is_xlog = true;
+                break;
+            } else if (cmp_result > 0) {
+                continue;
+            } else {
+                is_xlog = true;
+                char statusPath[MAXPGPATH];
+                errorno = snprintf_s(statusPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/archive_status/%s%s", lastoff,
+                                    ".done");
+                securec_check_ss(errorno, "", "");
+                bool is_done = (stat(statusPath, &stat_buf) == 0);
+        
+                if (!is_done) {
+                    *standby_archive_start_point = targetLsn;
+                    ereport(LOG,
+                            (errmsg("the start point is %X/%X",
+                                    (uint32)(*standby_archive_start_point >> 32), (uint32)(*standby_archive_start_point))));
+                    return;
+                }
+                break;
+            }
+        }
+        if (!is_xlog) {
+            ereport(LOG, (errmsg("can not found this xlog in the XLOGDIR")));
+            break;
+        }
+    }
+
+    /* we use the smaller lsn as the archive start point */
+    if (backup <= *standby_archive_start_point) {
+        *standby_archive_start_point = backup;
+    }
+
+    /* we use the flushPtr as the archive start point if we can't find a start point according to the xlog */
+    if (*standby_archive_start_point == 0) {
+        *standby_archive_start_point = flushPtr;
+    }
+
+    /* release all memory which is used to store the xlog name */
+    foreach(xlog, xlog_names) {
+        char* name = (char*)lfirst(xlog);
+        pfree(name);
+        name = NULL;
+    }
+    if (xlog_array != NULL) {
+        pfree(xlog_array);
+        xlog_array = NULL;
+    }
+}
+
+static bool CheckXlogNameValid(char* xlog)
+{
+    if (strlen(xlog) != 24 || strspn(xlog, "0123456789ABCDEF") != 24) {
+        return false;
+    }
+    return true;
+}
+
+int XlogNameCmp(const void* a, const void* b)
+{
+    return strcmp(*(char* const*)a, *(char* const*)b);
 }
