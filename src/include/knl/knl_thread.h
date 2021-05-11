@@ -51,6 +51,7 @@
 #include "knl/knl_guc.h"
 #include "knl/knl_session.h"
 #include "nodes/pg_list.h"
+#include "replication/walprotocol.h"
 #include "storage/lock/s_lock.h"
 #include "utils/palloc.h"
 #include "storage/latch.h"
@@ -66,7 +67,7 @@
 #include "pgxc/barrier.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 35
+#define RESERVE_SIZE 36
 
 typedef struct ResourceOwnerData* ResourceOwner;
 

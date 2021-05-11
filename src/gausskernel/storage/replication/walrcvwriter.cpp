@@ -157,7 +157,9 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
                  * being archived again later.
                  */
                 XLogFileName(xlogfname, recvFileTLI, recvSegNo);
-                XLogArchiveForceDone(xlogfname);
+                if (!u_sess->attr.attr_common.XLogArchiveMode) {
+                    XLogArchiveForceDone(xlogfname);
+                }
             }
             recvFile = -1;
 
