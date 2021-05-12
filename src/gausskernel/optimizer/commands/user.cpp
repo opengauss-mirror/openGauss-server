@@ -4114,7 +4114,7 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
 {
     char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
     char encrypted_sha256_password[SHA256_PASSWD_LEN + 1] = {0};
-    char encrypted_sm3_password[SHA256_PASSWD_LEN + 1] = {0};
+    char encrypted_sm3_password[SM3_PASSWD_LEN + 1] = {0};
     char encrypted_combined_password[MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1] = {0};
     char salt[SALT_LENGTH * 2 + 1] = {0};
     int iteration_count = 0;
@@ -4164,7 +4164,7 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
         if (!gs_sm3_encrypt(passwd1, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
             rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
             securec_check(rc, "\0", "\0");
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sha256-password encryption failed.")));
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed.")));
         }
 
         if (strncmp(passwd2, encrypted_sm3_password, SM3_PASSWD_LEN) == 0) {
@@ -4232,6 +4232,8 @@ static bool IsPasswdEqual(const char* rolename, char* passwd1, char* passwd2)
     securec_check(rc, "\0", "\0");
     rc = memset_s(
         encrypted_combined_password, MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1, 0, MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(encrypted_sm3_password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
     securec_check(rc, "\0", "\0");
 
     return false;

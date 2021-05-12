@@ -2377,3 +2377,4 @@ out lsn pg_catalog.text,
 out labelfile pg_catalog.text,
 out spcmapfile pg_catalog.text)
 RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_stop_backup_v2';
+

@@ -597,6 +597,7 @@ void ClientAuthentication(Port* port)
             break;
         /* Database Security:  Support SHA256.*/
         case uaSHA256:
+        case uaSM3:
             /*Forbid remote connection with initial user.*/
             if (isRemoteInitialUser(port)) {
                 ereport(FATAL,
@@ -616,33 +617,13 @@ void ClientAuthentication(Port* port)
             }
             sha_bytes_to_hex8((uint8*)token, port->token);
             port->token[TOKEN_LENGTH * 2] = '\0';
-            sendAuthRequest(port, AUTH_REQ_SHA256);
-            status = recv_and_check_password_packet(port);
-            break;
-        case uaSM3:
-            /*Forbid remote connection with initial user.*/
-            if (isRemoteInitialUser(port)) {
-                ereport(FATAL,
-                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Forbid remote connection with initial user.")));
+            if (port->hba->auth_method == uaSHA256) {
+                sendAuthRequest(port, AUTH_REQ_SHA256);
+            } else {
+                sendAuthRequest(port, AUTH_REQ_SM3);
             }
-             
-            rc = memset_s(port->token, TOKEN_LENGTH * 2 + 1, 0, TOKEN_LENGTH * 2 + 1);
-            securec_check(rc, "\0", "\0");
-            /* Functions which alloc memory need hold interrupts for safe. */
-            HOLD_INTERRUPTS();
-            retval = RAND_bytes((GS_UCHAR*)token, (GS_UINT32)TOKEN_LENGTH);
-            RESUME_INTERRUPTS();
-            CHECK_FOR_INTERRUPTS();
-            if (retval != 1) {
-                ereport(ERROR, (errmsg("Failed to Generate the random number,errcode:%u", retval)));
-            }
-            sha_bytes_to_hex8((uint8*)token, port->token);
-            port->token[TOKEN_LENGTH * 2] = '\0';
-            sendAuthRequest(port, AUTH_REQ_SM3);
             status = recv_and_check_password_packet(port);
-            break;
-            
+            break;           
         case uaPAM:
 #ifdef USE_PAM
             status = CheckPAMAuth(port, port->user_name, "");
@@ -972,7 +953,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     pq_beginmessage(&buf, 'R');
 
     /*
-     * The following block will determine the actual authentication method, sha256 or md5.
+     * The following block will determine the actual authentication method, sha256 or md5 or sm3.
      * AUTH_REQ_MD5_SHA256 is only for stored sha256 and req md5 condition.
      */
     if (AUTH_REQ_MD5 == areq && SHA256_PASSWORD == stored_method) {
@@ -985,7 +966,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
         /* Here send the sha256 salt for authenication. */
         pq_sendbytes(&buf, salt, SALT_LENGTH * 2);
     } else if ((AUTH_REQ_SM3 != areq && SM3_PASSWORD == stored_method && AUTH_REQ_OK != areq) ||  
-               (AUTH_REQ_SM3 == areq && SM3_PASSWORD !=stored_method )) {
+               (AUTH_REQ_SM3 == areq && SM3_PASSWORD != stored_method )) {
        if (!gs_generateFakeEncryptString(encrypt_string , port)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),

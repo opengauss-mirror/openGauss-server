@@ -193,6 +193,12 @@ typedef struct WalRcvData {
     char lastRecoveredBarrierId[MAX_BARRIER_ID_LENGTH];
     XLogRecPtr lastRecoveredBarrierLSN;
     Latch* obsArchLatch;
+    bool archive_enabled;
+    XLogRecPtr standby_archive_start_point;
+    Latch* arch_latch;
+    bool arch_finish_result;
+    volatile unsigned int arch_task_status;
+    ArchiveXlogMessage archive_task;
 } WalRcvData;
 
 typedef struct WalReceiverFunc {
@@ -267,6 +273,7 @@ extern void set_failover_host_conninfo_for_dummy(const char *remote_host, int re
 extern void get_failover_host_conninfo_for_dummy(int *repl);
 extern void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr);
 extern void setObsArchLatch(const Latch* latch);
+extern void SetStandbyArchLatch(const Latch* latch);
 
 
 static inline void WalRcvCtlAcquireExitLock(void)
