@@ -2485,12 +2485,11 @@ static bool HasBeenArchivedOnStandby(const char* xlog)
         if (walsnd == NULL) {
             continue;
         }
-        SpinLockAcquire(&walsnd->mutex);
 
+        SpinLockAcquire(&walsnd->mutex);
         if (IsValidArchiverStandby((WalSnd*)walsnd) &&
             walsnd->arch_task_last_lsn != 0 && walsnd->arch_task_last_lsn < minium_lsn) {
             minium_lsn = walsnd->arch_task_last_lsn;
-            continue;
         }
         SpinLockRelease(&walsnd->mutex);
     }
