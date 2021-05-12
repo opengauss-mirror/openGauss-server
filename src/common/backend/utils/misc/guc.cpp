@@ -6922,7 +6922,24 @@ static void InitConfigureNamesReal()
 {
     struct config_real localConfigureNamesReal[] =
 
-        {{{"seq_page_cost",
+        {
+#ifndef ENABLE_MULTIPLE_NODES
+            {{"unique_sql_clean_ratio",
+            PGC_POSTMASTER,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("The percentage of the UniquesQl hash table that will be "
+                         "automatically eliminated when the UniquesQl hash table "
+                         "is full. 0 means that auto-eliminate is not enabled."),
+            NULL},
+            &g_instance.attr.attr_common.unique_sql_clean_ratio,
+            0,
+            0,
+            0.2,
+            NULL,
+            NULL,
+            NULL},
+#endif
+            {{"seq_page_cost",
               PGC_USERSET,
               QUERY_TUNING_COST,
               gettext_noop("Sets the planner's estimate of the cost of a "

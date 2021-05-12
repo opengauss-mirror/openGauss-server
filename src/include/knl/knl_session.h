@@ -1835,6 +1835,9 @@ typedef struct knl_u_unique_sql_context {
 
     /* handle nested portal calling */
     uint32 portal_nesting_level;
+#ifndef ENABLE_MULTIPLE_NODES
+    char* unique_sql_text;
+#endif
 } knl_u_unique_sql_context;
 
 typedef struct unique_sql_sorthash_instr {
