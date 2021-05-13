@@ -535,6 +535,7 @@ static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage, XLogRecPtr CurrPo
 static void XLogArchiveNotify(const char *xlog);
 static void XLogArchiveNotifySeg(XLogSegNo segno);
 static bool XLogArchiveCheckDone(const char *xlog);
+static bool HasBeenArchivedOnHaMode(const char* xlog);
 static bool XLogArchiveIsBusy(const char *xlog);
 static bool XLogArchiveIsReady(const char *xlog);
 static void XLogArchiveCleanup(const char *xlog);
@@ -2436,6 +2437,14 @@ static bool XLogArchiveCheckDone(const char *xlog)
     struct stat stat_buf;
     errno_t errorno = EOK;
 
+    /* Only the primary need this step to check this xlog has been archived on standby.
+     * If this xlog has been archived by all standby which start up the archive thread,
+     * we should check weather the primary (if primary start up the archive s)
+     */
+    if (!HasBeenArchivedOnHaMode(xlog)) {
+        return false;
+    }
+
     /* Always deletable if archiving is off or in recovery process. Archiving is always disabled on standbys. */
     if (!XLogArchivingActive() || RecoveryInProgress()) {
         return true;
@@ -2465,6 +2474,59 @@ static bool XLogArchiveCheckDone(const char *xlog)
     /* Retry creation of the .ready file */
     XLogArchiveNotify(xlog);
     return false;
+}
+
+static bool HasBeenArchivedOnHaMode(const char* xlog)
+{
+    load_server_mode();
+    if (!t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && !t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+        return true;
+    }
+    int mode = t_thrd.xlog_cxt.server_mode;
+    XLogRecPtr minium_lsn = PG_UINT64_MAX;
+    for (int i = 0; mode == PRIMARY_MODE && i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        if (walsnd == NULL) {
+            continue;
+        }
+
+        SpinLockAcquire(&walsnd->mutex);
+        if (IsValidArchiverStandby((WalSnd*)walsnd) &&
+            walsnd->arch_task_last_lsn != 0 && walsnd->arch_task_last_lsn < minium_lsn) {
+            minium_lsn = walsnd->arch_task_last_lsn;
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+
+    if (mode == STANDBY_MODE) {
+        XLogRecPtr target_lsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
+        XLogRecPtr start_point = g_instance.archive_standby_cxt.standby_archive_start_point;
+        minium_lsn = (target_lsn == 0) ? start_point : target_lsn;
+    }
+
+    if (minium_lsn == PG_UINT64_MAX) {
+        return true;
+    }
+    char minium_archived_xlog_name[MAXFNAMELEN];
+    XLogSegNo xlogSegno = 0;
+    XLByteToSeg(minium_lsn, xlogSegno);
+    XLogFileName(minium_archived_xlog_name, DEFAULT_TIMELINE_ID, xlogSegno);
+
+    if (mode == STANDBY_MODE) {
+        /* 
+         * targetLsn or start_point may be the xlog to be archived. Therefore,
+         * the value of targetLsn or start_point must be smaller than minium_archived_xlog_name
+         * to ensure that the xlog has been archived.
+         */
+        return strcmp(xlog, minium_archived_xlog_name) < 0;
+    }
+
+    /*
+     * if the input xlog name is smaller than or equal to the minium_archived_xlog_name,
+     * we can confirm that the xlog has been archived by all standby nodes.
+     */
+    return strcmp(xlog, minium_archived_xlog_name) <= 0;
 }
 
 /*

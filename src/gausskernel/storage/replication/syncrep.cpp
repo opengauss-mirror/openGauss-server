@@ -626,7 +626,8 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
         (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
-        list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
+            list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync) ||
+        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && list_length(sync_standbys) == 0)) {
         list_free(sync_standbys);
         return false;
     }

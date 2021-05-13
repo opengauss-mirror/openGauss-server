@@ -3130,6 +3130,36 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         /* Check for input from the client */
         ProcessRepliesIfAny();
 
+        /* Only the primary can send the archive lsn to standby */
+        load_server_mode();
+        if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && IsValidArchiverStandby(t_thrd.walsender_cxt.MyWalSnd)) {
+            XLogRecPtr receivePtr;
+            XLogRecPtr writePtr;
+            XLogRecPtr flushPtr;
+            XLogRecPtr replayPtr;
+            bool amSync = false;
+            bool got_recptr = false;
+            got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
+            if (got_recptr) {
+                ArchiveXlogOnStandby(flushPtr);
+            } else {
+                if (t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
+                    (t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
+                        list_length(SyncRepGetSyncStandbys(&amSync)) == 0)) {
+                    ArchiveXlogOnStandby(t_thrd.walsender_cxt.MyWalSnd->flush);
+                } else {
+                    ereport(WARNING, (errcode(ERRCODE_WARNING),
+                                        errmsg("ArchiveXlogOnStandby failed when call SyncRepGetSyncRecPtr")));
+                }
+            }
+        }
+
+        volatile unsigned int *standby_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->standby_archive_flag;
+        if (unlikely(pg_atomic_read_u32(standby_archive_flag) == 1)) {
+            WalSndSendArchiveLsn2Standby(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn);
+            pg_atomic_write_u32(standby_archive_flag, 0);
+        } 
+
         /* Walsender first startup, send a keepalive to standby, no need reply. */
         if (first_startup) {
             WalSndKeepalive(false);
