@@ -474,6 +474,9 @@ bool CheckForForceFinishRedoTrigger(TermFileData *term_file);
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
+void XLogArchiveNotify(const char *xlog);
+extern bool IsValidArchiverStandby(WalSnd* walsnd);
+
 /* File path names (all relative to $PGDATA) */
 #define BACKUP_LABEL_FILE "backup_label"
 #define DISABLE_CONN_FILE "disable_conn_file"

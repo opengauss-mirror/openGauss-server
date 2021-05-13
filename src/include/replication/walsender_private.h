@@ -120,6 +120,18 @@ typedef struct WalSnd {
     LogCtrlData log_ctrl;
     unsigned int archive_flag;
     Latch* arch_latch;
+    bool is_start_archive;
+    unsigned int standby_archive_flag;
+    XLogRecPtr archive_target_lsn;
+    XLogRecPtr arch_task_last_lsn;
+    bool arch_finish_result;
+
+    /* 
+     * has_sent_arch_lsn indicates whether the walsnd has sent the archive location,
+     * and last_send_time is used to record the time when the archive location is sent last time.
+     */
+    bool has_sent_arch_lsn;
+    long last_send_lsn_time;
 
     /* 
      * lastCalTime is last time calculating catchupRate, and lastCalWrite

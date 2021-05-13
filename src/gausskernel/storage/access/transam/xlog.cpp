@@ -532,7 +532,6 @@ static void XLogFlushCore(XLogRecPtr WriteRqstPtr);
 static void XLogSelfFlush(void);
 static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage, XLogRecPtr CurrPos, int currLRC);
 
-static void XLogArchiveNotify(const char *xlog);
 static void XLogArchiveNotifySeg(XLogSegNo segno);
 static bool XLogArchiveCheckDone(const char *xlog);
 static bool HasBeenArchivedOnHaMode(const char* xlog);
@@ -2326,7 +2325,7 @@ static uint64 XLogRecPtrToBytePos(XLogRecPtr ptr)
  * and the archiver then knows to archive XLOGDIR/0000000100000001000000C6,
  * then when complete, rename it to 0000000100000001000000C6.done
  */
-static void XLogArchiveNotify(const char *xlog)
+void XLogArchiveNotify(const char *xlog)
 {
     char archiveStatusPath[MAXPGPATH];
     FILE *fd = NULL;
@@ -17667,5 +17666,19 @@ void ExtremRtoUpdateMinCheckpoint()
 {
     if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone && t_thrd.xlog_cxt.minRecoveryPoint == InvalidXLogRecPtr) {
         t_thrd.xlog_cxt.minRecoveryPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
+    }
+}
+
+/* IsArchiverOnStandby */
+extern bool IsValidArchiverStandby(WalSnd* walsnd)
+{
+    if (walsnd == NULL) {
+        return false;
+    }
+    if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
+        walsnd->is_start_archive) {
+        return true;
+    } else {
+        return false;
     }
 }
