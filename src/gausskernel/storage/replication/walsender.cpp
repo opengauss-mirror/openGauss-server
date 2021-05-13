@@ -3207,8 +3207,14 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             if (got_recptr) {
                 ArchiveXlogOnStandby(flushPtr);
             } else {
-                ereport(WARNING, (errcode(ERRCODE_WARNING),
-                                errmsg("ArchiveXlogOnStandby failed when call SyncRepGetSyncRecPtr")));
+                if (t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
+                    (t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
+                        list_length(SyncRepGetSyncStandbys(&amSync)) == 0)) {
+                    ArchiveXlogOnStandby(t_thrd.walsender_cxt.MyWalSnd->flush);
+                } else {
+                    ereport(WARNING, (errcode(ERRCODE_WARNING),
+                                        errmsg("ArchiveXlogOnStandby failed when call SyncRepGetSyncRecPtr")));
+                }
             }
         }
 
