@@ -40,13 +40,32 @@ python3 main.py --help
 
 
 ## Dependencies
+If you use a Python runtime that OS comes with, you should install Python SDK, such as:
+
+    sudo yum install python3-devel
+
+You should install the following mathematical libraries to your OS, so that some Python libraries can import them.
+
+For CentOS-based OS (e.g., Redhat, CentOS, EulerOS):
+    
+    sudo yum install lapack lapack-devel blas blas-devel
+     
+For Debian-based OS (e.g., Ubuntu, KaliLinux):
+    
+    sudo apt-get install gfortran libopenblas-dev liblapack-dev
+
+You should install the following dependencies by python-pip.
+    
+    paramiko
+    bayesian-optimization
+    ptable
+
+If you want to use deep learning, you should also install the following libraries:
 
     tensorflow>=2.2.0
     keras-rl2
     keras>=2.4.0
-    paramiko
-    bayesian-optimization
-    ptable
+    
 
 Note: Firstly, please upgrade your pip: ```python -m pip install --upgrade pip```
 

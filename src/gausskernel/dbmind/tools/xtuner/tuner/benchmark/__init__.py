@@ -38,7 +38,7 @@ def get_benchmark_instance(script, path, cmd, db_info):
     bm = importlib.import_module('tuner.benchmark.{}'.format(name))
     # Verify the validity of the benchmark script.
     # An exception will be thrown if benchmark instance does not have specified attributes.
-    if (not getattr(bm, 'path', False)) or (not getattr(bm, 'cmd', False)) or (not getattr(bm, 'run', False)):
+    if not getattr(bm, 'run', False):
         raise ConfigureError('The benchmark script %s is invalid. '
                              'For details, see the example template and description document.' % script)
     # Check whether function run exists and whether its type matches.
@@ -64,6 +64,10 @@ def get_benchmark_instance(script, path, cmd, db_info):
 
     # Wrap remote server shell as an API and pass it to benchmark instance.
     def wrapper(server_ssh):
-        return bm.run(server_ssh, local_ssh)
+        try:
+            return bm.run(server_ssh, local_ssh)
+        except Exception as e:
+            logging.warning("An error occured while running the benchmark, hence the benchmark score is 0. The error is %s.", e, exc_info=True)
+            return .0
 
     return wrapper

@@ -1,0 +1,5 @@
+tensorflow >= 2.1.0 # optional
+keras-rl2~=1.0.4    # optional
+paramiko==2.7.2
+bayesian-optimization
+ptable

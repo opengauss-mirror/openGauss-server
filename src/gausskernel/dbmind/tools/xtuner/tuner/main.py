@@ -12,9 +12,13 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
+from __future__ import print_function
 
 import argparse
-import configparser
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 import json
 import os
 import sys
@@ -23,8 +27,9 @@ from getpass import getpass
 
 from tuner.exceptions import OptionError
 from tuner.xtuner import procedure_main
+from tuner import utils
 
-__version__ = '2.0.0'
+__version__ = '2.1.0'
 __description__ = 'X-Tuner: a self-tuning tool integrated by openGauss.'
 
 
@@ -44,6 +49,15 @@ def check_path_valid(path):
         if path.find(char) >= 0:
             return False
 
+    return True
+
+
+def check_version():
+    version_info = sys.version_info
+    major, minor = version_info.major, version_info.minor
+    # At least, the Python version is (3, 6)
+    if major < 3 or minor <= 5:
+        return False
     return True
 
 
@@ -179,6 +193,10 @@ def get_config(filepath):
         raise OptionError(invalid_opt_msg % ('benchmark_script', benchmarks))
     config['benchmark_path'] = cp['Benchmark'].get('benchmark_path', '')
     config['benchmark_cmd'] = cp['Benchmark'].get('benchmark_cmd', '')
+    benchmark_period = cp['Benchmark'].get('benchmark_period', '0')
+    if not benchmark_period:
+        benchmark_period = '0'
+    config['benchmark_period'] = int(benchmark_period)
 
     # Section Knobs
     scenario_opts = ['auto', 'ap', 'tp', 'htap']
@@ -220,6 +238,10 @@ def get_config(filepath):
 
 
 def main():
+    if not check_version():
+        print("FATAL: You should use at least Python 3.6 or above version.")
+        return -1
+
     parser = get_argv_parser()
     args = parser.parse_args()
     mode = args.mode
@@ -228,7 +250,7 @@ def main():
         parser.print_usage()
         return -1
 
-    config = get_config(args.tuner_config_file)
+    utils.config = config = get_config(args.tuner_config_file)
     if not config:
         return -1
 

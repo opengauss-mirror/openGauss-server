@@ -12,6 +12,7 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
+import inspect
 
 from prettytable import PrettyTable
 
@@ -28,58 +29,75 @@ SIZE_UNIT_MAP = {"kB": 1,
                  "MB": 1024,
                  "GB": 1024 * 1024}
 
+
 def round4(v):
-    return v + (4 - v % 4)
+    return int(v + (4 - v % 4))
+
+
+def instantiate_knob(name, recommend, knob_type, value_min=0, value_max=1, restart=False):
+    if knob_type not in Knob.TYPE.ITEMS:
+        raise TypeError("The type of parameter 'knob_type' is incorrect.")
+
+    if knob_type == Knob.TYPE.INT:
+        recommend = int(recommend)
+        value_max = int(value_max)
+        value_min = int(value_min)
+    elif knob_type == Knob.TYPE.FLOAT:
+        recommend = float(recommend)
+        value_max = float(value_max)
+        value_min = float(value_min)
+    elif knob_type == Knob.TYPE.BOOL:
+        value_type = type(recommend)
+        if value_type is bool:
+            recommend = 1 if recommend else 0
+        elif value_type is str and value_type in ('on', 'off'):
+            recommend = 1 if recommend == 'on' else 0
+        elif value_type is int:
+            pass
+        else:
+            raise ValueError
+
+        value_max = 1
+        value_min = 0
+
+    return Knob(name,
+                recommend=recommend,
+                min=value_min,
+                max=value_max,
+                type=knob_type,
+                restart=restart)
+
 
 def recommend_knobs(mode, metric):
     advisor = OpenGaussKnobAdvisor(metric)
+    reporter = advisor.report
 
     knobs = RecommendedKnobs()
     if mode == "recommend":
         if metric.uptime < 1:
-            advisor.report.print_bad(
+            reporter.print_bad(
                 "The database runs for a short period of time, and the database description may not be accumulated. "
                 "The recommendation result may be inaccurate."
             )
         elif metric.uptime < 12:
-            advisor.report.print_warn(
+            reporter.print_warn(
                 "The database runs for a short period of time, and the database description may not be accumulated. "
                 "The recommendation result may be inaccurate."
             )
-        knobs.append_need_tune_knobs(advisor.shared_buffers,
-                                     advisor.max_connections,
-                                     advisor.max_prepared_transactions,
-                                     advisor.work_mem,
-                                     advisor.maintenance_work_mem,
-                                     advisor.effective_cache_size,
-                                     advisor.effective_io_concurrency,
-                                     advisor.wal_buffers,
-                                     advisor.random_page_cost,
-                                     advisor.default_statistics_target)
+        _, recommend_list = advisor.all_properties()
+        knobs.append_need_tune_knobs(*recommend_list)
     elif mode == "tune":
-        knobs.append_need_tune_knobs(advisor.random_page_cost,
-                                     advisor.effective_io_concurrency,
-                                     advisor.work_mem)
-        knobs.append_only_report_knobs(advisor.shared_buffers,
-                                       advisor.max_connections,
-                                       advisor.max_prepared_transactions,
-                                       advisor.maintenance_work_mem,
-                                       advisor.effective_cache_size,
-                                       advisor.wal_buffers,
-                                       advisor.default_statistics_target)
+        tune_knobs = ["random_page_cost", "effective_io_concurrency", "work_mem"]
+        tune_list, recommend_list = advisor.all_properties(tune_knobs)
+        knobs.append_need_tune_knobs(*tune_list)
+        knobs.append_only_report_knobs(*recommend_list)
     elif mode == "train":
-        knobs.append_need_tune_knobs(advisor.work_mem,
-                                     advisor.shared_buffers)
-        knobs.append_only_report_knobs(advisor.max_connections,
-                                       advisor.max_prepared_transactions,
-                                       advisor.maintenance_work_mem,
-                                       advisor.effective_cache_size,
-                                       advisor.effective_io_concurrency,
-                                       advisor.wal_buffers,
-                                       advisor.random_page_cost,
-                                       advisor.default_statistics_target)
+        tune_knobs = ["shared_buffers", "work_mem"]
+        tune_list, recommend_list = advisor.all_properties(tune_knobs)
+        knobs.append_need_tune_knobs(*tune_list)
+        knobs.append_only_report_knobs(*recommend_list)
 
-    knobs.report = advisor.report.generate
+    knobs.report = reporter.generate
     return knobs
 
 
@@ -132,7 +150,57 @@ class OpenGaussKnobAdvisor:
         # Append metric and workload info to ReportMsg.
         self.report.print_info(self.metric.to_dict())
 
+    def all_properties(self, tune_knobs=None):
+        members = inspect.getmembers(
+            self, lambda x: isinstance(x, Knob))
+        if tune_knobs is None:
+            tune_knobs = []
+
+        tune_list = []
+        recommend_list = []
+        for name, value in members:
+            if name in tune_knobs:
+                tune_list.append(value)
+            else:
+                recommend_list.append(value)
+        return tune_list, recommend_list
+
     # Allocation of memory or storage I/O resources.
+    @cached_property
+    def max_process_memory(self):
+        # max_process_memory unit is kB.
+        omega = 0.9  # retention corr
+        omega_min = 0.7
+        total_mem = self.metric.os_mem_total
+        min_free_mem = self.metric.min_free_mem
+        nb_gaussdb = self.metric.nb_gaussdb
+        # This is a simplified formula that developer gave.
+        suitable_mem = round4((total_mem - min_free_mem) * omega / nb_gaussdb)
+        min_mem = round4((total_mem - min_free_mem) * omega_min / nb_gaussdb)
+
+        if min_mem <= self.metric["max_process_memory"] <= suitable_mem:
+            self.report.print_info("We only found %s gaussdb process(es). "
+                                   "In this case, your 'max_process_memory' setting may be just fitting."
+                                   % self.metric.nb_gaussdb)
+
+        if self.metric["max_process_memory"] > suitable_mem:
+            self.report.print_warn("We only found %s gaussdb process(es). "
+                                   "In this case, your 'max_process_memory' setting may be a bit large."
+                                   % self.metric.nb_gaussdb)
+
+        if self.metric["max_process_memory"] < min_mem:
+            self.report.print_bad("We only found %s gaussdb process(es). "
+                                  "In this case, your 'max_process_memory' setting is heavily small."
+                                  % self.metric.nb_gaussdb)
+
+        # Should always return the recommendation because other recommendations depend on it.
+        return instantiate_knob(name="max_process_memory",
+                                recommend=suitable_mem,
+                                knob_type=Knob.TYPE.INT,
+                                value_max=suitable_mem,
+                                value_min=min_mem,
+                                restart=True)
+
     @cached_property
     def max_connections(self):
         max_conn = self.metric["max_connections"]
@@ -180,34 +248,34 @@ class OpenGaussKnobAdvisor:
             lower = max(20, cores * 3)
             recommend = clip(recommend, max(20, cores * 5), max(100, cores * 7))
 
-            return Knob.new_instance(name="max_connections",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=True)
+            return instantiate_knob(name="max_connections",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=True)
 
         # Should be based on work_mem.
-        if self.metric.os_mem_total > 16 * SIZE_UNIT_MAP["GB"]:
-            remain_mem = self.metric.os_mem_total * 0.85 - self.shared_buffers.default
-        elif self.metric.os_mem_total > 8 * SIZE_UNIT_MAP["GB"]:
-            remain_mem = self.metric.os_mem_total * 0.75 - self.shared_buffers.default
-        elif self.metric.os_mem_total < 4 * SIZE_UNIT_MAP["GB"]:
-            remain_mem = self.metric.os_mem_total * 0.6 - self.shared_buffers.default
+        if self.max_process_memory.recommend > 16 * SIZE_UNIT_MAP["GB"]:
+            remain_mem = self.max_process_memory.recommend * 0.85 - self.shared_buffers.recommend
+        elif self.max_process_memory.recommend > 8 * SIZE_UNIT_MAP["GB"]:
+            remain_mem = self.max_process_memory.recommend * 0.75 - self.shared_buffers.recommend
+        elif self.max_process_memory.recommend < 4 * SIZE_UNIT_MAP["GB"]:
+            remain_mem = self.max_process_memory.recommend * 0.6 - self.shared_buffers.recommend
         else:
-            remain_mem = self.metric.os_mem_total * 0.7 - self.shared_buffers.default
+            remain_mem = self.max_process_memory.recommend * 0.7 - self.shared_buffers.recommend
 
         # AP and HTAP
         # The value of work_mem is adapted based on the value of max_connections.
         work_mem = max(self.metric["work_mem"], self.metric.temp_file_size * 4)
         lower = max(15, cores * 3)
         recommend = max(remain_mem / (work_mem + 0.01), lower)
-        return Knob.new_instance(name="max_connections",
-                                 value_default=recommend,
-                                 knob_type=Knob.TYPE.INT,
-                                 value_max=recommend * 2,
-                                 value_min=lower,
-                                 restart=True)
+        return instantiate_knob(name="max_connections",
+                                recommend=recommend,
+                                knob_type=Knob.TYPE.INT,
+                                value_max=recommend * 2,
+                                value_min=lower,
+                                restart=True)
 
     @property
     def max_prepared_transactions(self):
@@ -222,18 +290,18 @@ class OpenGaussKnobAdvisor:
                                    "indicating that the two-phase commit function is not used.")
             return
 
-        if max_pt < max_conn.default:
+        if max_pt < max_conn.recommend:
             self.report.print_bad("Most applications do not use XA prepared transactions, "
                                   "so should set the max_prepared_transactions to 0. "
                                   "If you do require prepared transactions, "
                                   "you should set this equal to max_connections to avoid blocking. "
                                   "May require increasing kernel memory parameters.")
-            return Knob.new_instance(name="max_prepared_transactions",
-                                     value_default=max_conn.default,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=max_conn.max,
-                                     value_min=max_conn.min,
-                                     restart=True)
+            return instantiate_knob(name="max_prepared_transactions",
+                                    recommend=max_conn.recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=max_conn.max,
+                                    value_min=max_conn.min,
+                                    restart=True)
 
     @cached_property
     def shared_buffers(self):
@@ -243,7 +311,7 @@ class OpenGaussKnobAdvisor:
         but because database also relies on the operating system cache,
         it is unlikely that an allocation of more than 40% of RAM to shared_buffers will
          work better than a smaller amount. """
-        mem_total = self.metric.os_mem_total  # unit: kB
+        mem_total = self.max_process_memory.recommend  # unit: kB
         if mem_total < 1 * SIZE_UNIT_MAP['GB']:
             default = 0.15 * mem_total
         elif mem_total > 8 * SIZE_UNIT_MAP['GB']:
@@ -263,26 +331,27 @@ class OpenGaussKnobAdvisor:
             upper = round4(recommend * 1.15)
             lower = round4(min(0.15 * mem_total / self.metric.block_size, recommend))
 
-            return Knob.new_instance(name="shared_buffers",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=True)
+            return instantiate_knob(name="shared_buffers",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=True)
         else:
-            upper = round4(min(recommend, 2 * SIZE_UNIT_MAP["GB"] / self.metric.block_size))  # 32-bit OS only can use 2 GB mem.
+            upper = round4(
+                min(recommend, 2 * SIZE_UNIT_MAP["GB"] / self.metric.block_size))  # 32-bit OS only can use 2 GB mem.
             lower = round4(min(0.15 * mem_total / self.metric.block_size, recommend))
-            return Knob.new_instance(name="shared_buffers",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=True)
+            return instantiate_knob(name="shared_buffers",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=True)
 
     @property
     def work_mem(self):
         temp_file_size = self.metric.temp_file_size
-        max_conn = self.max_connections.default
+        max_conn = self.max_connections.recommend
 
         # This knob does not need to be modified.
         if temp_file_size < 16 * SIZE_UNIT_MAP["MB"]:
@@ -298,25 +367,25 @@ class OpenGaussKnobAdvisor:
                 return
 
             #  conservative operations
-            recommend = (self.metric.os_mem_total - self.shared_buffers.default) / (max_conn * 2)
+            recommend = (self.max_process_memory.recommend - self.shared_buffers.recommend) / (max_conn * 2)
             upper = max(recommend, 256 * SIZE_UNIT_MAP["MB"])
             lower = min(recommend, 64 * SIZE_UNIT_MAP["MB"])
-            return Knob.new_instance(name="work_mem",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=False)
+            return instantiate_knob(name="work_mem",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=False)
         else:
-            recommend = (self.metric.os_mem_total - self.shared_buffers.default) / max_conn
+            recommend = (self.max_process_memory.recommend - self.shared_buffers.recommend) / max_conn
             upper = max(recommend, 1 * SIZE_UNIT_MAP["GB"])
             lower = min(recommend, 64 * SIZE_UNIT_MAP["MB"])
-            return Knob.new_instance(name="work_mem",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=False)
+            return instantiate_knob(name="work_mem",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=False)
 
     @property
     def maintenance_work_mem(self):
@@ -324,23 +393,23 @@ class OpenGaussKnobAdvisor:
 
     @property
     def effective_cache_size(self):
-        upper = self.metric.os_mem_total * 0.75
-        lower = self.shared_buffers.default
+        upper = self.max_process_memory.recommend * 0.75
+        lower = self.shared_buffers.recommend
 
         if self.metric.workload_type == WORKLOAD_TYPE.TP:
-            return Knob.new_instance(name="effective_cache_size",
-                                     value_default=lower,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=False)
+            return instantiate_knob(name="effective_cache_size",
+                                    recommend=lower,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=False)
         else:
-            return Knob.new_instance(name="effective_cache_size",
-                                     value_default=upper,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=upper,
-                                     value_min=lower,
-                                     restart=False)
+            return instantiate_knob(name="effective_cache_size",
+                                    recommend=upper,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=upper,
+                                    value_min=lower,
+                                    restart=False)
 
     @property
     def effective_io_concurrency(self):
@@ -348,19 +417,19 @@ class OpenGaussKnobAdvisor:
             if 0 <= self.metric["effective_io_concurrency"] <= 2:  # No need for recommendation.
                 return
 
-            return Knob.new_instance(name="effective_io_concurrency",
-                                     value_default=2,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=4,
-                                     value_min=0,
-                                     restart=False)
+            return instantiate_knob(name="effective_io_concurrency",
+                                    recommend=2,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=4,
+                                    value_min=0,
+                                    restart=False)
         else:
-            return Knob.new_instance(name="effective_io_concurrency",
-                                     value_default=200,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=250,
-                                     value_min=150,
-                                     restart=False)
+            return instantiate_knob(name="effective_io_concurrency",
+                                    recommend=200,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=250,
+                                    value_min=150,
+                                    restart=False)
 
     # Background writer.
     @property
@@ -372,53 +441,55 @@ class OpenGaussKnobAdvisor:
         blocks_16m = 16 * SIZE_UNIT_MAP["MB"] / self.metric.block_size
         # Generally, this value is sufficient. A large value does not bring better performance.
         if wal_buffers >= blocks_16m:
-            if wal_buffers > self.shared_buffers.default * 1 / 32:
+            if wal_buffers > self.shared_buffers.recommend * 1 / 32:
                 self.report.print_bad(
-                    "The value of wal_buffers is too high. Generally, a large value does not bring better performance.")
-                return Knob.new_instance(name="wal_buffers",
-                                         value_default=self.shared_buffers.default * 1 / 32,
-                                         knob_type=Knob.TYPE.INT,
-                                         value_max=max(self.shared_buffers.default * 1 / 32, blocks_16m),
-                                         value_min=min(self.shared_buffers.default * 1 / 64, blocks_16m),
-                                         restart=True)
+                    "The value of wal_buffers is too high. Generally, "
+                    "a large value does not bring better performance.")
+                return instantiate_knob(name="wal_buffers",
+                                        recommend=self.shared_buffers.recommend * 1 / 32,
+                                        knob_type=Knob.TYPE.INT,
+                                        value_max=max(self.shared_buffers.recommend * 1 / 32, blocks_16m),
+                                        value_min=min(self.shared_buffers.recommend * 1 / 64, blocks_16m),
+                                        restart=True)
             else:
                 self.report.print_warn(
-                    "The value of wal_buffers is a bit high. Generally, an excessively large value does not bring "
+                    "The value of wal_buffers is a bit high. Generally, "
+                    "an excessively large value does not bring "
                     "better performance. You can also set this parameter to -1. "
                     "The database automatically performs adaptation. "
                 )
-                return Knob.new_instance(name="wal_buffers",
-                                         value_default=self.shared_buffers.default * 1 / 32,
-                                         knob_type=Knob.TYPE.INT,
-                                         value_max=self.shared_buffers.default * 1 / 32,
-                                         value_min=blocks_16m,
-                                         restart=True)
-        elif wal_buffers < self.shared_buffers.default * 1 / 64:
-            return Knob.new_instance(name="wal_buffers",
-                                     value_default=-1,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=-1,
-                                     value_min=-1,
-                                     restart=True)
+                return instantiate_knob(name="wal_buffers",
+                                        recommend=self.shared_buffers.recommend * 1 / 32,
+                                        knob_type=Knob.TYPE.INT,
+                                        value_max=self.shared_buffers.recommend * 1 / 32,
+                                        value_min=blocks_16m,
+                                        restart=True)
+        elif wal_buffers < self.shared_buffers.recommend * 1 / 64:
+            return instantiate_knob(name="wal_buffers",
+                                    recommend=-1,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=-1,
+                                    value_min=-1,
+                                    restart=True)
 
     # Optimizer
     @property
     def random_page_cost(self):
         if self.metric.is_hdd:
             # Currently, with the rise of storage technology, the default value of 4 is too large.
-            return Knob.new_instance(name="random_page_cost",
-                                     value_default=3,
-                                     knob_type=Knob.TYPE.FLOAT,
-                                     value_max=3,
-                                     value_min=2,
-                                     restart=False)
+            return instantiate_knob(name="random_page_cost",
+                                    recommend=3,
+                                    knob_type=Knob.TYPE.FLOAT,
+                                    value_max=3,
+                                    value_min=2,
+                                    restart=False)
         else:
-            return Knob.new_instance(name="random_page_cost",
-                                     value_default=1,
-                                     knob_type=Knob.TYPE.FLOAT,
-                                     value_max=2,
-                                     value_min=1,
-                                     restart=False)
+            return instantiate_knob(name="random_page_cost",
+                                    recommend=1,
+                                    knob_type=Knob.TYPE.FLOAT,
+                                    value_max=2,
+                                    value_min=1,
+                                    restart=False)
 
     @property
     def default_statistics_target(self):
@@ -445,12 +516,12 @@ class OpenGaussKnobAdvisor:
                     recommend = 600
                 else:
                     recommend = 800
-            return Knob.new_instance(name="default_statistics_target",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=1000,
-                                     value_min=100,
-                                     restart=False)
+            return instantiate_knob(name="default_statistics_target",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=1000,
+                                    value_min=100,
+                                    restart=False)
         elif workload_type == WORKLOAD_TYPE.TP:
             if read_write_ratio < 0.5:
                 recommend = 10
@@ -461,16 +532,52 @@ class OpenGaussKnobAdvisor:
             else:
                 recommend = 100
 
-            return Knob.new_instance(name="default_statistics_target",
-                                     value_default=recommend,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=150,
-                                     value_min=10,
-                                     restart=False)
+            return instantiate_knob(name="default_statistics_target",
+                                    recommend=recommend,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=150,
+                                    value_min=10,
+                                    restart=False)
         else:
-            return Knob.new_instance(name="default_statistics_target",
-                                     value_default=100,
-                                     knob_type=Knob.TYPE.INT,
-                                     value_max=300,
-                                     value_min=80,
-                                     restart=False)
+            return instantiate_knob(name="default_statistics_target",
+                                    recommend=100,
+                                    knob_type=Knob.TYPE.INT,
+                                    value_max=300,
+                                    value_min=80,
+                                    restart=False)
+
+    @property
+    def enable_nestloop(self):
+        if self.metric.workload_type != WORKLOAD_TYPE.TP and self.metric['enable_nestloop'] == 'on':
+            self.report.print_warn("Detect that your appointed workload does not seem to a TP workload, "
+                                   "hence disable enable_nestloop is better.")
+            return instantiate_knob(name="enable_nestloop",
+                                    recommend=0,
+                                    knob_type=Knob.TYPE.BOOL,
+                                    value_max=1,
+                                    value_min=0,
+                                    restart=False)
+
+    @property
+    def enable_mergejoin(self):
+        if self.metric.workload_type != WORKLOAD_TYPE.TP and self.metric['enable_mergejoin'] == 'on':
+            self.report.print_warn("Detect that your appointed workload does not seem to a TP workload, "
+                                   "hence disable enable_mergejoin is better.")
+            return instantiate_knob(name="enable_mergejoin",
+                                    recommend=0,
+                                    knob_type=Knob.TYPE.BOOL,
+                                    value_max=1,
+                                    value_min=0,
+                                    restart=False)
+
+    @property
+    def enable_hashjoin(self):
+        if self.metric['enable_hashjoin'] == 'off':
+            self.report.print_warn("Detect that you disabled enable_hashjoin. "
+                                   "We suggest that if there is no special reason, please enable enable_hashjoin.")
+            return instantiate_knob(name="enable_hashjoin",
+                                    recommend=1,
+                                    knob_type=Knob.TYPE.BOOL,
+                                    value_max=1,
+                                    value_min=0,
+                                    restart=False)

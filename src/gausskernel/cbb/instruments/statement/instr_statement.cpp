@@ -1453,6 +1453,20 @@ void instr_stmt_report_debug_query_id(uint64 debug_query_id)
     CURRENT_STMT_METRIC_HANDLE->debug_query_id = debug_query_id;
 }
 
+void instr_stmt_track_param_query(const char *query)
+{
+    if (CURRENT_STMT_METRIC_HANDLE->params == NULL) {
+        CURRENT_STMT_METRIC_HANDLE->query = pstrdup(query);
+    } else {
+        Size len = strlen(query) + strlen(CURRENT_STMT_METRIC_HANDLE->params) + 2;
+        CURRENT_STMT_METRIC_HANDLE->query = (char *)palloc(len * sizeof(char));
+        errno_t rc = sprintf_s(CURRENT_STMT_METRIC_HANDLE->query, len, "%s;%s",
+                               query, CURRENT_STMT_METRIC_HANDLE->params);
+        securec_check_ss_c(rc, "\0", "\0");
+        pfree_ext(CURRENT_STMT_METRIC_HANDLE->params);
+   }
+}
+
 /* using unique query */
 void instr_stmt_report_query(uint64 unique_query_id)
 {
@@ -1460,13 +1474,23 @@ void instr_stmt_report_query(uint64 unique_query_id)
     CURRENT_STMT_METRIC_HANDLE->unique_query_id = unique_query_id;
     CURRENT_STMT_METRIC_HANDLE->unique_sql_cn_id = u_sess->unique_sql_cxt.unique_sql_cn_id;
 
-    if (is_local_unique_sql()) {
-        MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
-        if (CURRENT_STMT_METRIC_HANDLE->query == NULL) {
-            CURRENT_STMT_METRIC_HANDLE->query = FindCurrentUniqueSQL();
-        }
-        (void)MemoryContextSwitchTo(old_ctx);
+    if (!is_local_unique_sql() || CURRENT_STMT_METRIC_HANDLE->query) {
+        return;
     }
+
+    MemoryContext old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+
+    if (!u_sess->attr.attr_common.track_stmt_parameter) {
+        CURRENT_STMT_METRIC_HANDLE->query = FindCurrentUniqueSQL();
+    } else {
+        if (u_sess->unique_sql_cxt.curr_single_unique_sql != NULL) {
+            instr_stmt_track_param_query(u_sess->unique_sql_cxt.curr_single_unique_sql);
+        } else {
+            instr_stmt_track_param_query(t_thrd.postgres_cxt.debug_query_string);
+         }
+    }
+
+    (void)MemoryContextSwitchTo(old_ctx);
 }
 
 void instr_stmt_report_txid(uint64 txid)
@@ -1592,8 +1616,7 @@ void instr_stmt_report_unique_sql_info(const PgStat_TableCounts *agg_table_stat,
 
 bool instr_stmt_need_track_plan()
 {
-    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->level <= STMT_TRACK_L0 ||
-        CURRENT_STMT_METRIC_HANDLE->level > STMT_TRACK_L2)
+    if (CURRENT_STMT_METRIC_HANDLE == NULL || CURRENT_STMT_METRIC_HANDLE->level > STMT_TRACK_L2)
         return false;
 
     return true;
@@ -1602,8 +1625,7 @@ bool instr_stmt_need_track_plan()
 void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
-    if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
-        || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0) {
+    if (queryDesc == NULL || ssctx == NULL || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0) {
         return;
     }
 
