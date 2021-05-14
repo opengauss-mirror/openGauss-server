@@ -1319,39 +1319,6 @@ int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const ch
     return 0;
 }
 
-bool contain_nodename(const char* namelist, const char* name)
-{
-    char* ptr = NULL;
-    char* outer_ptr = NULL;
-    char delims[] = ",";
-    size_t len = 0;
-    char* buffer = NULL;
-    int nRet = 0;
-
-    len = strlen(namelist) + 1;
-    buffer = (char*)calloc(len, sizeof(char));
-    if (buffer == NULL) {
-        fprintf(stderr, "Cannot alloc memory\n");
-        return false;
-    }
-    nRet = snprintf_s(buffer, len, len - 1, "%s", namelist);
-    securec_check_ss_c(nRet, buffer, "\0");
-
-    ptr = strtok_r(buffer, delims, &outer_ptr);
-    while (NULL != ptr) {
-        if (strcmp(ptr, name) == 0) {
-            free(buffer);
-            buffer = NULL;
-            return true;
-        }
-        ptr = strtok_r(NULL, delims, &outer_ptr);
-    }
-
-    free(buffer);
-    buffer = NULL;
-    return false;
-}
-
 int get_dynamic_dn_role(void)
 {
     char path[MAXPGPATH];
@@ -1608,5 +1575,73 @@ bool has_static_config()
         return true;
     }
 
+    return false;
+}
+
+/*
+ ******************************************************************************
+ ******************************************************************************
+ Function    : check_datanodename_value
+ Description : check the input datanode Name.
+  Input       :nodeName            data node name
+  return      :true                input datanode name is correct
+               false               input datanode name is incorrect
+ ******************************************************************************
+ */
+bool CheckDataNameValue(const char *datanodeName, const char *dataDir)
+{
+    int nRet;
+    uint32 nodeIdx = 0;
+    uint32 datanodeIdx = 0;
+    int dnIdMaxLen = 64;
+    char dnId[dnIdMaxLen];
+
+    if ((datanodeName == NULL) || (*datanodeName == '\0')) {
+        return false;
+    }
+
+    dataNodeInfo *dnI = NULL;
+
+    for (datanodeIdx = 0; datanodeIdx < g_currentNode->datanodeCount; datanodeIdx++) {
+        dataNodeInfo *dniTmp = &(g_currentNode->datanode[datanodeIdx]);
+        if (strcmp(dniTmp->datanodeLocalDataPath, dataDir) == 0) {
+            dnI = dniTmp;
+            break;
+        }
+    }
+
+    if (dnI == NULL) {
+        fprintf(stderr, "Failed: cannot find the expected data dir\n");
+        return false;
+    }
+
+    for (nodeIdx = 0; nodeIdx < g_node_num; ++nodeIdx) {
+        staticNodeConfig *dest = &(g_node[nodeIdx]);
+        for (datanodeIdx = 0; datanodeIdx < dest->datanodeCount; ++datanodeIdx) {
+            dataNodeInfo *dn = &(dest->datanode[datanodeIdx]);
+            if (dn->datanodeId == 0 || dn->datanodeId == dnI->datanodeId) {
+                continue;
+            }
+            nRet = memset_s(dnId, sizeof(dnId), '\0', sizeof(dnId));
+            securec_check_c(nRet, "\0", "\0");
+            nRet = snprintf_s(
+                dnId, sizeof(dnId) / sizeof(char), sizeof(dnId) / sizeof(char) - 1, "dn_%4d", dn->datanodeId);
+            securec_check_ss_c(nRet, "\0", "\0");
+            if (strncmp(dnId, datanodeName,
+                ((strlen(dnId) > strlen(datanodeName)) ? strlen(dnId) : strlen(datanodeName))) != 0) {
+                continue;
+            }
+            for (int peerIndex = 0; peerIndex < CM_MAX_DATANODE_STANDBY_NUM; ++peerIndex) {
+                peerDatanodeInfo *peerDatanode = &(dnI->peerDatanodes[peerIndex]);
+                if (strlen(peerDatanode->datanodePeerHAIP[0]) == 0) {
+                    continue;
+                }
+                if (strcmp(peerDatanode->datanodePeerHAIP[0], dn->datanodeLocalHAIP[0]) == 0 &&
+                    peerDatanode->datanodePeerHAPort == dn->datanodeLocalHAPort) {
+                    return true;
+                }
+            }
+        }
+    }
     return false;
 }
