@@ -3209,6 +3209,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
                         (t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
                             list_length(SyncRepGetSyncStandbys(&amSync)) == 0)) {
+                /*
+                 * This step is used to deal with the situation that synchronous standbys are not set.
+                 */
                 ArchiveXlogOnStandby(t_thrd.walsender_cxt.MyWalSnd->flush);
             } else {
                 ereport(WARNING, (errcode(ERRCODE_WARNING),

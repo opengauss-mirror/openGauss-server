@@ -623,6 +623,9 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * or there are not enough synchronous standbys.
      * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
      * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
+     * 
+     * All synchronous standbys are allowed to disconnect from the host
+     * only when the maximum available mode is on
      */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
         (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
