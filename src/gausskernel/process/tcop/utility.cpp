@@ -2739,14 +2739,14 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateForeignTableStmt:
-#ifdef ENABLE_MULTIPLE_NODES		
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && IS_SINGLE_NODE) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                         errmsg("Current mode does not support FOREIGN table yet"),
                         errdetail("The feature is not currently supported")));
             }
-#endif			
+#endif
             /* fall through */
         case T_CreateStmt: {
 #ifdef PGXC
@@ -2783,12 +2783,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #else
             PreventTransactionChain(is_top_level, "CREATE TABLESPACE");
             CreateTableSpace((CreateTableSpaceStmt*)parse_tree);
-
 #endif
             break;
 
         case T_DropTableSpaceStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord())
                 PreventTransactionChain(is_top_level, "DROP TABLESPACE");
             /* Allow this to be run inside transaction block on remote nodes */
