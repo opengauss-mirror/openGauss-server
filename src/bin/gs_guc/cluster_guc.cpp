@@ -1698,74 +1698,6 @@ int get_nodename_number_from_nodelist(const char* namelist)
 
 /*
  ******************************************************************************
- ******************************************************************************
- Function    : check_datanodename_value
- Description : check the input datanode Name.
-  Input       :nodeName            data node name
-  return      :true                input datanode name is correct
-               false               input datanode name is incorrect
- ******************************************************************************
- */
-bool CheckDataNameValue(const char *datanodeName, const char *dataDir)
-{
-    int nRet;
-    uint32 nodeIdx = 0;
-    uint32 datanodeIdx = 0;
-    int dnIdMaxLen = 64;
-    char dnId[dnIdMaxLen];
-
-    if ((datanodeName == NULL) || (*datanodeName == '\0')) {
-        return false;
-    }
-
-    dataNodeInfo *dnI = NULL;
-
-    for (datanodeIdx = 0; datanodeIdx < g_currentNode->datanodeCount; datanodeIdx++) {
-        dataNodeInfo *dniTmp = &(g_currentNode->datanode[datanodeIdx]);
-        if (strcmp(dniTmp->datanodeLocalDataPath, dataDir) == 0) {
-            dnI = dniTmp;
-            break;
-        }
-    }
-
-    if (dnI == NULL) {
-        write_stderr("Failed: cannot find the expected data dir\n");
-        return false;
-    }
-
-    for (nodeIdx = 0; nodeIdx < g_node_num; ++nodeIdx) {
-        staticNodeConfig *dest = &(g_node[nodeIdx]);
-        for (datanodeIdx = 0; datanodeIdx < dest->datanodeCount; ++datanodeIdx) {
-            dataNodeInfo *dn = &(dest->datanode[datanodeIdx]);
-            if (dn->datanodeId == 0 || dn->datanodeId == dnI->datanodeId) {
-                continue;
-            }
-            nRet = memset_s(dnId, sizeof(dnId), '\0', sizeof(dnId));
-            securec_check_c(nRet, "\0", "\0");
-            nRet = snprintf_s(
-                dnId, sizeof(dnId) / sizeof(char), sizeof(dnId) / sizeof(char) - 1, "dn_%4d", dn->datanodeId);
-            securec_check_ss_c(nRet, "\0", "\0");
-            if (strncmp(dnId, datanodeName,
-                ((strlen(dnId) > strlen(datanodeName)) ? strlen(dnId) : strlen(datanodeName))) != 0) {
-                continue;
-            }
-            for (int peerIndex = 0; peerIndex < CM_MAX_DATANODE_STANDBY_NUM; ++peerIndex) {
-                peerDatanodeInfo *peerDatanode = &(dnI->peerDatanodes[peerIndex]);
-                if (strlen(peerDatanode->datanodePeerHAIP[0]) == 0) {
-                    continue;
-                }
-                if (strcmp(peerDatanode->datanodePeerHAIP[0], dn->datanodeLocalHAIP[0]) == 0 &&
-                    peerDatanode->datanodePeerHAPort == dn->datanodeLocalHAPort) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-/*
- ******************************************************************************
  Function    : parse_datanodename_result
  Description : check data node name.
   Input       :datanodenamelist    data node name
@@ -1946,11 +1878,6 @@ char* get_AZ_value(const char* value, const char* data_dir)
 
     if (NULL == nodenameList) {
         // try dn
-        resultStatus = get_nodename_list_by_AZ(az1, data_dir, &nodenameList);
-        PROCESS_STATUS(resultStatus);
-        if (nodenameList == NULL) {
-            goto failed;
-        }
 
         len = strlen(q) + 1;
         s = (char *)pg_malloc_zero(len * sizeof(char));
@@ -1961,15 +1888,15 @@ char* get_AZ_value(const char* value, const char* data_dir)
         while (vptr != NULL) {
             p = vptr;
 
-            if (!contain_nodename(nodenameList, p)) {
+            if (CheckDataNameValue(p, data_dir) == false) {
                 goto failed;
             }
             vptr = strtok_r(NULL, delims, &vouter_ptr);
         }
 
         GS_FREE(s);
-        len = strlen(nodenameList);
-        nRet = snprintf_s(nodenameList, len + 1, len, "%s", q);
+        nodenameList = (char *)pg_malloc_zero(len * sizeof(char));
+        nRet = snprintf_s(nodenameList, len, len - 1, "%s", q);
         securec_check_ss_c(nRet, nodenameList, "\0");
     } else if ('\0' == nodenameList[0]) {
         (void)write_stderr("ERROR: There is no standby node name. Please make sure the value of "
