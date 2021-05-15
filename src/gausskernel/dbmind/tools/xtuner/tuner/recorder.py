@@ -13,60 +13,71 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 import logging
+import csv
+
+DELIMITER = ","
 
 
 class Recorder:
-    def __init__(self, filepath, verbose=True):
+    def __init__(self, filepath):
         """
         Record each tuning process and write it to a file.
         """
-        logger = logging.getLogger('recorder')
-        fmt = logging.Formatter("%(asctime)s: %(message)s")
+        self._fd = open(filepath, 'w', newline='')
+        self.writer = csv.writer(self._fd, delimiter=DELIMITER,
+                                 quotechar='\\', quoting=csv.QUOTE_MINIMAL)
 
-        file_handler = logging.FileHandler(filepath, mode='w')  # no appending
-        file_handler.setFormatter(fmt)
-        logger.addHandler(file_handler)
-
-        if verbose:
-            stream_handler = logging.StreamHandler()
-            stream_handler.setFormatter(fmt)
-            logger.addHandler(stream_handler)
-
-        logger.setLevel(logging.INFO)
-
-        self.logger = logger
-        self.logger.info('Recorder is starting.')
+        # Record the information of best knobs.
+        self.best_id = None
+        self.names = None
+        self.best_values = None
         self.best_reward = None
-        self.count = 0
+
+        self.current_id = 0
 
     def prompt_message(self, msg, *args, **kwargs):
-        self.logger.info('[%d] ' % self.count + msg, *args, **kwargs)
-        logging.info('[Recorder %d]: ' + msg, self.count, *args, **kwargs)
+        logging.info("[Recorder %d]: " + msg, self.current_id, *args, **kwargs)
 
-    def record(self, reward, knobs):
+    def record(self, score, used_mem, reward, names, values):
         """
         Record the reward value and knobs of the step,
         and update the maximum reward value and the corresponding knobs.
+
+        :values: A list contains each knob value. The knob value is str type, not denormalized numeric.
         """
-        record = (reward, knobs)
-        if self.best_reward is None:
-            self.best_reward = record
-        else:
-            self.best_reward = max(record, self.best_reward, key=lambda r: r[0])
+        _names = tuple(names)
+        _values = tuple(values)
+        if self.current_id == 0:
+            header = ("id",) + _names + ("score", "used_mem", "reward", "best_reward", "best_id")
+            self.writer.writerow(header)
+            self.best_id = 0
+            self.names = names
+            self.best_values = values
+            self.best_reward = reward
 
-        self.logger.info('[%d] Current reward is %f, knobs: %s.', self.count, reward, knobs)
-        self.logger.info('[%d] Best reward is %f, knobs: %s.', self.count, self.best_reward[0], self.best_reward[1])
+        if reward >= self.best_reward:
+            self.best_id = self.current_id
+            self.best_values = values
+            self.best_reward = reward
 
-        self.count += 1
+        record = (self.current_id,) + _values + (score, used_mem, reward, self.best_reward, self.best_id)
+        self.writer.writerow(record)
+        self._fd.flush()
+
+        self.current_id += 1
 
     def give_best(self, rk):
         """
         Give the knobs with the maximum reward value to the parameter RecommendKnobs (RK) object.
         So that RK can update itself with the passed knobs.
         """
-        reward, best_knobs = self.best_reward
-        self.logger.info('The tuning process is complete. The best reward is %f, best knobs are:\n%s.',
-                         reward, best_knobs)
+        logging.info("The tuning process is finished. The best reward is %f, and best knobs (%s) are %s.",
+                     self.best_reward, self.names, self.best_values)
 
-        for name, setting in best_knobs.items():
-            rk[name].default = setting
+        for name, value in zip(self.names, self.best_values):
+            knob = rk[name]
+            knob.current = knob.to_numeric(value)  # self.current is always a normalized numeric.
+
+    def __del__(self):
+        self._fd.flush()
+        self._fd.close()

@@ -129,5 +129,10 @@ drop tablespace relativeTbs2;
 
 DROP SCHEMA testschema CASCADE;
 
+-- Fail, cannot run inside a transaction block
+begin;
+drop tablespace testspace;
+end;
+
 -- Should succeed
 DROP TABLESPACE testspace;

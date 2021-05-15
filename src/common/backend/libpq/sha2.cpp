@@ -555,7 +555,7 @@ bool pg_sha256_encrypt(
     char sever_key[HMAC_LENGTH + 1] = {0};
     char stored_key[STORED_KEY_LENGTH + 1] = {0};
     char salt[SALT_LENGTH + 1] = {0};
-    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char stored_key_string[STORED_KEY_LENGTH * 2 + 1] = {0};
     int pkcs_ret;
     int sever_ret;
@@ -564,7 +564,7 @@ bool pg_sha256_encrypt(
     int hmac_length = HMAC_LENGTH;
     int stored_key_length = STORED_KEY_LENGTH;
     int total_encrypt_length;
-    char server_string[SEVER_STRING_LENGTH] = "Server Key";
+    char sever_string[SEVER_STRING_LENGTH] = "Sever Key";
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
@@ -593,11 +593,11 @@ bool pg_sha256_encrypt(
     /* We have already get k ,then we calculate client key and sever key,
      * then calculate stored key by using client key */
 
-    /* calculate server key */
+    /* calculate sever key */
     sever_ret = CRYPT_hmac(NID_hmacWithSHA256,
         (GS_UCHAR*)k,
         K_LENGTH,
-        (GS_UCHAR*)server_string,
+        (GS_UCHAR*)sever_string,
         SEVER_STRING_LENGTH - 1,
         (GS_UCHAR*)sever_key,
         (GS_UINT32*)&hmac_length);
@@ -667,7 +667,7 @@ bool pg_sha256_encrypt(
 
     total_encrypt_length = SALT_LENGTH * 2 + HMAC_LENGTH * 2 + STORED_KEY_LENGTH * 2;
 
-    sha_bytes_to_hex64((uint8*)sever_key, server_key_string);
+    sha_bytes_to_hex64((uint8*)sever_key, sever_key_string);
     sha_bytes_to_hex64((uint8*)stored_key, stored_key_string);
 
     rc = snprintf_s(buf + SHA256_LENGTH,
@@ -675,7 +675,7 @@ bool pg_sha256_encrypt(
         total_encrypt_length,
         "%s%s%s",
         salt_s,
-        server_key_string,
+        sever_key_string,
         stored_key_string);
     SECUREC_CHECK_SS(rc);
 
@@ -782,7 +782,7 @@ bool gs_sm3_encrypt(
     int hmac_length = HMAC_LENGTH;
     int stored_key_length = STORED_KEY_LENGTH;
     int total_encrypt_length;
-    char server_string[SEVER_STRING_LENGTH] = "Server Key";
+    char server_string[SEVER_STRING_LENGTH_SM3] = "Server Key";
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
@@ -815,7 +815,7 @@ bool gs_sm3_encrypt(
         (GS_UCHAR*)k,
         K_LENGTH,
         (GS_UCHAR*)server_string,
-        SEVER_STRING_LENGTH - 1,
+        SEVER_STRING_LENGTH_SM3 - 1,
         (GS_UCHAR*)sever_key,
         (GS_UINT32*)&hmac_length);
     if (sever_ret) {

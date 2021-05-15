@@ -13,9 +13,12 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
+import logging
+
 import numpy as np
 
 from tuner.env import Env, Box
+from tuner.exceptions import ExecutionError
 
 
 class DB_Env(Env):
@@ -72,22 +75,33 @@ class DB_Env(Env):
         if self.drop_cache:
             self.db.drop_cache()
 
-        obs = self._get_obs()
-        score = self.perf(self.bm)
-        used_mem = self.db.metric.used_mem
-        reward = score - self.mem_penalty * used_mem  # Use the memory usage as a regular term.
+        try:
+            obs = self._get_obs()
+            score = self.perf(self.bm)
+            used_mem = self.db.metric.used_mem
+            reward = score - self.mem_penalty * used_mem  # Use the memory usage as a regular term.
+        except ExecutionError as e:
+            logging.error('An error errored after changed the settings, '
+                          'hence rollback to the default settings. The error is %s.', e)
+            self.reset()  # Rollback to default setting
+            obs = [.0 for _ in self._get_obs()]  # Pad 0 to the observation vector.
+            score = .0
+            used_mem = self.db.metric.os_mem_total
+            # This value is minimal theoretically, so that regard it as a penalty term.
+            reward = score - self.mem_penalty * used_mem
 
         # Record each tuning process.
-        knob_dict = {k: self.db.get_knob_value(k) for k in self.db.ordered_knob_list}
-        self.recorder.record(reward, knob_dict)
+        knob_values = [self.db.knobs[name].to_string(value) for name, value in zip(self.db.ordered_knob_list, action)]
+        self.recorder.record(score, used_mem, reward, names=self.db.ordered_knob_list, values=knob_values)
+
         self.recorder.prompt_message('Database metrics: %s.', obs)
         self.recorder.prompt_message('Benchmark score: %f, used mem: %d kB, reward: %f.', score, used_mem, reward)
 
         return obs, reward, False, {}
 
     def reset(self):
+        self.db.set_knob_normalized_vector(self.db.get_default_normalized_vector())
         self.db.reset_state()
-        self.db.set_knob_normalized_vector(np.random.random(self.nb_actions))  # Maybe we can have more samples.
         return self._get_obs()
 
     def _get_obs(self):

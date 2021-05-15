@@ -44,9 +44,8 @@ class OpenGaussMetric:
     def _get_numeric_metric(self, sql):
         result = self._db.exec_statement(sql)
 
-        if len(result) > 1:
-            _, value = result
-            return float(value)
+        if len(result) > 0:
+            return float(result[0][0])
         else:
             return 0
 
@@ -66,9 +65,8 @@ class OpenGaussMetric:
               "where name in ('max_connections', 'work_mem', 'temp_buffers', 'shared_buffers', 'wal_buffers') " \
               "order by name;"
         res = self._db.exec_statement(sql)
-        res.pop(0)
-        res = map(int, res)
-        max_conn, s_buff, t_buff, w_buff, work_mem = res
+        values = map(lambda x: int(x[0]), res)
+        max_conn, s_buff, t_buff, w_buff, work_mem = values
         total_mem = max_conn * (work_mem / 64 + t_buff / 128) + s_buff / 64 + w_buff / 4096  # unit: MB
         return total_mem * 1024  # unit: kB
 
@@ -206,9 +204,18 @@ class OpenGaussMetric:
         )
 
     @cached_property
+    def nb_gaussdb(self):
+        return int(self._db.exec_command_on_host("ps -ux | grep gaussd[b] | wc -l"))
+
+    @cached_property
     def os_mem_total(self):
         mem = self._db.exec_command_on_host("free -k | awk 'NR==2{print $2}'")  # unit kB
         return int(mem)
+
+    @cached_property
+    def min_free_mem(self):
+        kbytes = self._db.exec_command_on_host("cat /proc/sys/vm/min_free_kbytes")
+        return int(kbytes)  # unit: kB
 
     @cached_property
     def os_cpu_count(self):
@@ -342,9 +349,9 @@ class OpenGaussMetric:
 
     @cached_property
     def enable_autovacuum(self):
-        _, setting = self._db.exec_statement(
+        setting = self._db.exec_statement(
             "select setting from pg_settings where name = 'autovacuum';"
-        )
+        )[0][0]
         return setting == 'on'
 
     def get_internal_state(self):

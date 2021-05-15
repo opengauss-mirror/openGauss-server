@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details.
 
 import logging
 import os
+import signal
 from logging import handlers
 
 from tuner import benchmark
@@ -47,6 +48,7 @@ def prompt_restart_risks():
 
 def set_logger(filename):
     logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
 
     dirname = os.path.dirname(filename)
     if not os.path.exists(dirname):
@@ -100,6 +102,7 @@ def procedure_main(mode, db_info, config):
 
     logging.info("Configurations: %s.", config)
     if config['tuning_list'].strip() != '' and mode != 'recommend':
+        print("You have configured the tuning list, so use this list to tune.")
         knobs = load_knobs_from_json_file(config['tuning_list'])
     else:
         print("Start to recommend knobs. Just a moment, please.")
@@ -123,16 +126,32 @@ def procedure_main(mode, db_info, config):
                      mem_penalty=config['used_mem_penalty_term'])
         env.set_tuning_knobs(knobs)
 
+        print('The benchmark will start to run iteratively. '
+              'This process may take a long time. Please wait a moment.')
         if mode == 'train':
             rl_model('train', env, config)
         elif mode == 'tune':
-            if config['tune_strategy'] == 'rl':
-                rl_model('tune', env, config)
-            elif config['tune_strategy'] == 'gop':
-                global_search(env, config)
-            else:
-                raise ValueError('Incorrect tune strategy: %s.' % config['tune_strategy'])
+            # Run once the performance under the default knob configuration.
+            # Its id is 0, aka the first one.
+            original_knobs = db_agent.get_default_normalized_vector()
+            env.step(original_knobs)
 
+            try:
+                if config['tune_strategy'] == 'rl':
+                    rl_model('tune', env, config)
+                elif config['tune_strategy'] == 'gop':
+                    global_search(env, config)
+                else:
+                    raise ValueError('Incorrect tune strategy: %s.' % config['tune_strategy'])
+    
+            except KeyboardInterrupt:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                print("Trigger an interrupt via the keyboard. "
+                      "Continue to generate current tuning results.")
+
+            # Rollback/reset to the original/initial knobs while the tuning process is finished.
+            db_agent.set_knob_normalized_vector(original_knobs)
+            # Modify the variable `knobs` with tuned result.
             recorder.give_best(knobs)
         else:
             raise ValueError('Incorrect mode value: %s.' % mode)
@@ -208,7 +227,7 @@ def global_search(env, config):
         from tuner.algorithms.pso import Pso
 
         def performance_function(v):
-            s, r, d, _ = env.step(v, False)
+            s, r, d, _ = env.step(v)
             return -r  # Use -reward because PSO wishes to minimize.
 
         pso = Pso(

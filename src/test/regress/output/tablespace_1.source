@@ -259,5 +259,10 @@ NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table testschema.foo
 drop cascades to table testschema.asselect
 drop cascades to table testschema.atable
+-- Fail, cannot run inside a transaction block
+begin;
+drop tablespace testspace;
+ERROR:  DROP TABLESPACE cannot run inside a transaction block
+end;
 -- Should succeed
 DROP TABLESPACE testspace;
