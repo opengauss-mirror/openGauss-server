@@ -38,6 +38,7 @@
 #define SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE
 
 #include "knl/knl_guc/knl_guc_common.h"
+#include "datatype/timestamp.h"
 
 typedef struct knl_session_attr_storage {
     bool raise_errors_if_no_files;
@@ -186,7 +187,10 @@ typedef struct knl_session_attr_storage {
     int defer_csn_cleanup_time;
 
     bool enable_hashbucket;
-
+#ifndef ENABLE_MULTIPLE_NODES
+    int recovery_min_apply_delay;
+    TimestampTz recoveryDelayUntilTime;
+#endif
     /* for GTT */
     int max_active_gtt;
     int vacuum_gtt_defer_check_age;
