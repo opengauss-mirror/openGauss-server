@@ -446,10 +446,6 @@ typedef struct knl_t_xlog_context {
     char* recoveryTargetBarrierId;
     char* recoveryTargetName;
     XLogRecPtr recoveryTargetLSN;
-#ifndef ENABLE_MULTIPLE_NODES
-    int recovery_min_apply_delay;
-    TimestampTz recoveryDelayUntilTime;
-#endif
     /* options taken from recovery.conf for XLOG streaming */
     bool StandbyModeRequested;
     char* PrimaryConnInfo;
