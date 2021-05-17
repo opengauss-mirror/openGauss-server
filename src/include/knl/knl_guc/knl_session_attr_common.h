@@ -179,7 +179,6 @@ typedef struct knl_session_attr_common {
 
     int instr_rt_percentile_interval;
     bool enable_instr_rt_percentile;
-    bool track_stmt_parameter;
     char* percentile_values;
 
     /* instr - full sql/slow sql */

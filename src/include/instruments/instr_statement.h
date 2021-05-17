@@ -180,7 +180,6 @@ typedef struct StatementStatContext {
     TransactionId txn_id;
     UniqueSQLParse parse;
     char* query_plan;        /* query plan */
-    char* params;            /* params for pbe statements */
     uint64 plan_size;
     LockSummaryStat lock_summary;
     StatementDetail details;
