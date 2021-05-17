@@ -7817,7 +7817,7 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
     long waitTime = 0;
 
     /* nothing to do if no delay configured */
-    if (t_thrd.xlog_cxt.recovery_min_apply_delay <= 0) {
+    if (u_sess->attr.attr_storage.recovery_min_apply_delay <= 0) {
         return false;
     }
 
@@ -7858,11 +7858,11 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
         return false;
     }
     
-    t_thrd.xlog_cxt.recoveryDelayUntilTime =
-        TimestampTzPlusMilliseconds(xtime, t_thrd.xlog_cxt.recovery_min_apply_delay);
+    u_sess->attr.attr_storage.recoveryDelayUntilTime =
+        TimestampTzPlusMilliseconds(xtime, u_sess->attr.attr_storage.recovery_min_apply_delay);
     
     /* Exit without arming the latch if it's already past time to apply this record */
-    TimestampDifference(GetCurrentTimestamp(), t_thrd.xlog_cxt.recoveryDelayUntilTime, &secs, &microsecs);
+    TimestampDifference(GetCurrentTimestamp(), u_sess->attr.attr_storage.recoveryDelayUntilTime, &secs, &microsecs);
     if (secs <= 0 && microsecs <= 0) {
         return false;
     }
@@ -7878,7 +7878,7 @@ static bool RecoveryApplyDelay(const XLogReaderState *record)
         }
 
         /* Wait for difference between GetCurrentTimestamp() and recoveryDelayUntilTime */
-        TimestampDifference(GetCurrentTimestamp(), t_thrd.xlog_cxt.recoveryDelayUntilTime,
+        TimestampDifference(GetCurrentTimestamp(), u_sess->attr.attr_storage.recoveryDelayUntilTime,
                             &secs, &microsecs);
 
         /* To clear LSNMarker item that has not been processed  in  pageworker */
