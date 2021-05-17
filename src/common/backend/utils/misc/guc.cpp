@@ -3761,7 +3761,7 @@ static void InitConfigureNamesInt()
         	gettext_noop("Sets the minimum delay for applying changes during recovery."),
         	NULL,
         	GUC_UNIT_MS},
-            &t_thrd.xlog_cxt.recovery_min_apply_delay,
+            &u_sess->attr.attr_storage.recovery_min_apply_delay,
             0,
             0,
             INT_MAX,
