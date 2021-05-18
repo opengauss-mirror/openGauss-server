@@ -127,6 +127,7 @@ static void initLastTaskLsn();
 static bool SendArchiveThreadStatusInternal(bool is_archive_activited);
 static void SendArchiveThreadStatus(bool status);
 static bool NotifyPrimaryArchiverActived(ThreadId* last_walrcv_pid, bool* sent_archive_status);
+static void NotifyPrimaryArchiverShutdown(bool sent_archive_status);
 static void ChangeArchiveTaskStatus2Done();
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
@@ -368,6 +369,7 @@ static void pgarch_MainLoop(void)
             t_thrd.arch.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
             if (!XLogArchivingActive()) {
+                NotifyPrimaryArchiverShutdown(sent_archive_status);
                 ereport(LOG, (errmsg("PgArchiver exit")));
                 return;
             }
@@ -511,9 +513,7 @@ static void pgarch_MainLoop(void)
      * in the loop, the sent_archive_status will be set to true. We don't need to send the archive status when
      * the sent_archive_status is false, so we don't need to check the version number in this step.
      */
-    if (sent_archive_status) {
-        SendArchiveThreadStatus(ARCHIVE_OFF);
-    }
+    NotifyPrimaryArchiverShutdown(sent_archive_status);
 }
 
 /*
@@ -1222,6 +1222,13 @@ static bool NotifyPrimaryArchiverActived(ThreadId* last_walrcv_pid, bool* sent_a
     }
     *sent_archive_status = false;
     return false;
+}
+
+static void NotifyPrimaryArchiverShutdown(bool sent_archive_status)
+{
+    if (sent_archive_status) {
+        SendArchiveThreadStatus(ARCHIVE_OFF);
+    }
 }
 
 static void ChangeArchiveTaskStatus2Done()
