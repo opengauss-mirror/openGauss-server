@@ -1473,6 +1473,8 @@ static HbaLine* parse_hba_line(const char* line, int line_num, HbaLine* parsedli
     /* Database Security:  Support SHA256.*/
     else if (strncmp(token->string, "sha256", sizeof("sha256")) == 0) {
         parsedline->auth_method = uaSHA256;
+    } else if (strncmp(token->string, "sm3", sizeof("sm3")) == 0) {
+        parsedline->auth_method = uaSM3;
     } else if (strncmp(token->string, "pam", sizeof("pam")) == 0)
 #ifdef USE_PAM
         parsedline->auth_method = uaPAM;

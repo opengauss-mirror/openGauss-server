@@ -259,9 +259,17 @@ void format_debug_print_plan(char *force_line, int index, int length)
             if (encrypt != NULL) {
                 mask_position(force_line, index, length, "gs_encrypt_aes128\\");
             }
+            encrypt = strstr(format_str, "gs_encrypt");
+            if (encrypt != NULL) {
+                mask_position(force_line, index, length, "gs_encrypt\\");
+            }
             decrypt = strstr(format_str, "gs_decrypt_aes128");
             if (decrypt != NULL) {
                 mask_position(force_line, index, length, "gs_decrypt_aes128\\");
+            }
+            decrypt = strstr(format_str, "gs_decrypt");
+            if (decrypt != NULL) {
+                mask_position(force_line, index, length, "gs_decrypt\\");
             }
             pfree_ext(format_str);
         }

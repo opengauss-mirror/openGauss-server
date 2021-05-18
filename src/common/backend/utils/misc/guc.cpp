@@ -5637,7 +5637,7 @@ static void InitConfigureNamesInt()
             &u_sess->attr.attr_security.Password_encryption_type,
             2,
             0,
-            2,
+            3,
             check_int_parameter,
             NULL,
             NULL},
@@ -17198,6 +17198,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
     bool isPwdEqual = true;
     char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
     char encrypted_sha256_password[SHA256_LENGTH + ENCRYPTED_STRING_LENGTH + 1] = {0};
+    char encrypted_sm3_password[SM3_LENGTH + ENCRYPTED_STRING_LENGTH + 1] = {0};
     char encrypted_combined_password[MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1] = {0};
     char salt[SALT_LENGTH * 2 + 1] = {0};
     TimestampTz lastTryLoginTime;
@@ -17277,6 +17278,22 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
             }
 
             if (strncmp(rolepasswd, encrypted_sha256_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
+                isPwdEqual = false;
+            }
+        } else if (isSM3(rolepasswd)) {
+
+            ss_rc = strncpy_s(salt, sizeof(salt), &rolepasswd[SM3_LENGTH], sizeof(salt) - 1);
+            securec_check(ss_rc, "", "");
+            salt[sizeof(salt) - 1] = '\0';
+
+            iteration_count = decode_iteration(&rolepasswd[SM3_PASSWD_LEN]);
+            if (!gs_sm3_encrypt(passwd, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
+                str_reset(passwd);
+                str_reset(rolepasswd);
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed")));
+            }
+
+            if (strncmp(rolepasswd, encrypted_sm3_password, ENCRYPTED_STRING_LENGTH + 1) != 0) {
                 isPwdEqual = false;
             }
         } else if (isCOMBINED(rolepasswd)) {

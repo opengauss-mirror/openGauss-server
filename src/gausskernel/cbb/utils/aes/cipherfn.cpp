@@ -77,6 +77,9 @@ char* g_vector = NULL;
 
 #define EC_ENCRYPT_PREFIX "encryptOpt"
 
+#define ENCRYPT_TYPE_SM4 "sm4"
+#define ENCRYPT_TYPE_AES128 "aes128"
+
 // free the malloc memory
 #define GS_FREE(ptr)        \
     if (NULL != (ptr)) {    \
@@ -155,7 +158,7 @@ bool gs_decrypt_aes(GS_UCHAR* ciphertext, GS_UINT32 cipherlen, GS_UCHAR* key, GS
  * Revision	:Using random initial vector and one fixed salt in one thread
  * 			  in order to avoid generating deriveKey everytime.
  */
-Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
+bool gs_encrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
 {
     char* key = NULL;
     GS_UINT32 keylen = 0;
@@ -166,21 +169,9 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
     GS_UINT32 retval = 0;
     char* encodetext = NULL;
     GS_UINT32 encodetextlen = 0;
-    GS_UINT32 ciphertextlen_max = 0;
-    text* outtext = NULL;
+    GS_UINT32 ciphertextlen_max = 0;	
     errno_t errorno = EOK;
 
-    /* check input paramaters */
-    if (PG_ARGISNULL(0)) {
-        fcinfo->isnull = true;
-        outtext = NULL;
-        PG_RETURN_TEXT_P(outtext);
-    }
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
-    }
-    
     plaintext = text_to_cstring(PG_GETARG_TEXT_P(0));
     plaintextlen = strlen(plaintext);
     key = text_to_cstring(PG_GETARG_TEXT_P(1));
@@ -236,13 +227,13 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
     }
     encodetextlen = strlen(encodetext);
 
-    outtext = cstring_to_text(encodetext);
+    *outtext = cstring_to_text(encodetext);
     errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
     securec_check(errorno, "\0", "\0");
     OPENSSL_free(encodetext);
     encodetext = NULL;
 
-    PG_RETURN_TEXT_P(outtext);
+    return true;
 }
 
 /*
@@ -254,7 +245,7 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
  * Revision	:Save several derivekeys and salts in one thread
  * 			  in order to avoid generating deriveKey everytime.
  */
-Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
+bool gs_decrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
 {
     GS_UCHAR* key = NULL;
     GS_UINT32 keylen = 0;
@@ -263,20 +254,8 @@ Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 retval = 0;
     GS_UCHAR* decodetext = NULL;
-    GS_UINT32 decodetextlen = 0;
-    text* outtext = NULL;
+    GS_UINT32 decodetextlen = 0;	
     errno_t errorno = EOK;
-
-    if (PG_ARGISNULL(0)) {
-        fcinfo->isnull = true;
-        outtext = NULL;
-        PG_RETURN_TEXT_P(outtext);
-    }
-
-    if (PG_ARGISNULL(1)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
-    }
 
     decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
     key = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(1)));
@@ -345,12 +324,12 @@ Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
     OPENSSL_free(ciphertext);
     ciphertext = NULL;
 
-    outtext = cstring_to_text((char*)plaintext);
+    *outtext = cstring_to_text((char*)plaintext);
     errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
     securec_check(errorno, "\0", "\0");
     pfree_ext(plaintext);
 
-    PG_RETURN_TEXT_P(outtext);
+    return true;
 }
 
 /*
@@ -2352,3 +2331,321 @@ bool isEncryptedCluster()
     }
     return true;
 }
+
+bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
+{
+    char* key = NULL;
+    GS_UINT32 keylen = 0;
+    char* plaintext = NULL;
+    GS_UINT32 plaintextlen = 0;
+
+    char* ciphertext = NULL;
+    char* encodestring = NULL;
+    GS_UINT32 encodetextlen = 0;
+    GS_UINT32 ciphertextlenmax = 0;
+    GS_UCHAR user_key[SM4_KEY_LENGTH];
+    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+	
+    errno_t errorno = EOK;
+    GS_UINT32 ret = 0;
+    size_t cipherLength = 0;
+
+    plaintext = (char*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
+    plaintextlen = strlen((const char*)plaintext);
+
+    key = (text_to_cstring(PG_GETARG_TEXT_P(1)));
+    keylen = strlen((const char*)key);
+
+    if (!check_input_password(key)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("The encryption key must be %d~%d bytes and contain at least three kinds of characters!",
+                MIN_KEY_LEN, SM4_KEY_LENGTH)));
+    }
+    errorno = memcpy_s(user_key, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
+    securec_check_c(errorno, "\0", "\0");
+
+
+    if (keylen < SM4_KEY_LENGTH) {
+        errorno = memset_s(user_key + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    errorno = memset_s(key, keylen, '\0', keylen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(key);
+
+    /*
+     * Calculate the max length of ciphertext:
+     */
+
+    ciphertextlenmax = plaintextlen + SM4_BLOCK_SIZE - 1;
+    ciphertext = (char*)palloc(ciphertextlenmax);
+    errorno = memset_s(ciphertext, ciphertextlenmax, '\0', ciphertextlenmax);
+    securec_check(errorno, "\0", "\0");
+
+    ret = sm4_ctr_enc_partial_mode(
+        plaintext, plaintextlen, ciphertext, &cipherLength, user_key, useriv);
+    if (ret !=  0) {
+        ereport(ERROR,
+            (errmsg("sm4 encrypt fail"),
+                errdetail("sm4_ctr_enc_partial_mode fail")));
+    }
+
+    errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(plaintext);
+
+    /* encode the ciphertext for nice show and decrypt operation */
+    encodestring = SEC_encodeBase64((const char*)ciphertext, cipherLength);
+    errorno = memset_s(ciphertext, cipherLength, '\0', cipherLength);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(ciphertext);
+
+    if (encodestring == NULL) {
+        ciphertextlenmax = 0;
+        ereport(
+            ERROR, (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("encode the plain text failed!")));
+    }
+    encodetextlen = strlen((const char*)encodestring);
+
+    *outtext = cstring_to_text((const char*)encodestring);
+    errorno = memset_s(encodestring, encodetextlen, '\0', encodetextlen);
+    securec_check(errorno, "\0", "\0");
+    OPENSSL_free(encodestring);
+    encodestring = NULL;
+
+    return true;
+}
+
+bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
+{
+    char* key = NULL;
+    GS_UINT32 keylen = 0;
+    char* ciphertext = NULL;
+    GS_UINT32 ciphertextlen = 0;
+    char* encodetext = NULL;
+    GS_UCHAR* decodetext;
+    GS_UINT32 ret = 0;
+
+    GS_UINT32 decodetextlen = 0;
+    GS_UINT32 ciphertextlenmax = 0;
+    GS_UCHAR userkey[SM4_KEY_LENGTH];
+    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+
+    errno_t errorno = EOK;
+    size_t encodetextlen = 0;
+
+    decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
+
+    decodetextlen = strlen((const char*)decodetext);
+
+    key = (char*)(text_to_cstring(PG_GETARG_TEXT_P(1)));
+    keylen = strlen((const char*)key);
+
+    if (!check_input_password(key)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("The decryption key must be %d~%d bytes and contain at least three kinds of characters!",
+                MIN_KEY_LEN, SM4_KEY_LENGTH)));
+    }
+
+    ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext , &ciphertextlen));
+    if ((ciphertext == NULL)) {
+        if (ciphertext != NULL) {
+            OPENSSL_free(ciphertext);
+            ciphertext = NULL;
+        }
+        errorno = memset_s(decodetext, decodetextlen, '\0', decodetextlen);
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(decodetext);
+        errorno = memset_s(key, keylen, '\0', keylen);
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(key);
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Decode the cipher text failed or the ciphertext is wrong!")));
+    }
+
+    errorno = memset_s(decodetext, decodetextlen, '\0', decodetextlen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(decodetext);
+
+
+    errorno = memcpy_s(userkey, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
+    securec_check_c(errorno, "\0", "\0");
+
+
+    if (keylen < SM4_KEY_LENGTH) {
+        errorno = memset_s(userkey + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
+        securec_check_c(errorno, "\0", "\0");
+    }
+
+    errorno = memset_s(key, keylen, '\0', keylen);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(key);
+
+    ciphertextlenmax = ciphertextlen + SM4_BLOCK_SIZE - 1;
+    encodetext = (char*)palloc(ciphertextlenmax);
+    errorno = memset_s(encodetext, ciphertextlenmax, '\0', ciphertextlenmax);
+    securec_check(errorno, "\0", "\0");
+
+    ret = sm4_ctr_dec_partial_mode(
+                ciphertext, ciphertextlen, encodetext, &encodetextlen, userkey, useriv);   
+    if (ret !=  0) {
+        ereport(ERROR,
+            (errmsg("sm4 decrypt fail"),
+                errdetail("sm4_ctr_dec_partial_mode fail")));
+    }
+
+    errorno = memset_s(ciphertext, ciphertextlen, '\0', ciphertextlen);
+    securec_check(errorno, "\0", "\0");
+    OPENSSL_free(ciphertext);
+    ciphertext = NULL;	
+
+    encodetextlen = strlen((const char*)encodetext);
+
+    *outtext = cstring_to_text((char*)encodetext);
+    errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
+    securec_check(errorno, "\0", "\0");
+   	pfree_ext(encodetext);
+    encodetext = NULL;
+
+    return true;
+}
+
+Datum gs_encrypt(PG_FUNCTION_ARGS)
+{
+    GS_UCHAR* encrypttype;
+    text* outtext = NULL;
+    bool status = false;
+
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
+    }
+
+    if (PG_ARGISNULL(2)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption type can not be empty!")));
+    }
+
+    encrypttype = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(2)));
+
+    if (strcmp((const char*)encrypttype, ENCRYPT_TYPE_SM4) == 0) {
+        status = gs_encrypt_sm4_function(fcinfo, &outtext);
+    } else if (strcmp((const char*)encrypttype, ENCRYPT_TYPE_AES128) == 0) {
+        status = gs_encrypt_aes128_function(fcinfo, &outtext);
+    } else {
+        pfree_ext(encrypttype);
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Encryption type is wrong!")));
+
+    }
+    pfree_ext(encrypttype);
+
+    if (!status) {
+        outtext = NULL;
+    }
+    PG_RETURN_TEXT_P(outtext);
+}
+
+Datum gs_decrypt(PG_FUNCTION_ARGS)
+{
+    GS_UCHAR* decrypttype;
+    text* outtext = NULL;
+    bool status = false;
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+    
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
+    }
+
+    if (PG_ARGISNULL(2)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption type can not be empty!")));
+    }
+
+    decrypttype = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(2)));
+
+    if (strcmp((const char*)decrypttype, ENCRYPT_TYPE_SM4) == 0) {
+        status = gs_decrypt_sm4_function(fcinfo, &outtext);
+    } else if (strcmp((const char*)decrypttype, ENCRYPT_TYPE_AES128) == 0) {
+        status = gs_decrypt_aes128_function(fcinfo, &outtext);
+    } else {
+        pfree_ext(decrypttype);
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Decryption type  is wrong!")));
+
+    }
+    pfree_ext(decrypttype);
+
+    if (!status) {
+        outtext = NULL;
+    }
+    PG_RETURN_TEXT_P(outtext);
+}
+
+Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
+{
+    text* outtext = NULL;
+    bool status = false;
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+    
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
+    }
+
+   status = gs_encrypt_aes128_function(fcinfo, &outtext);
+   if (!status) {
+        outtext = NULL;
+    }
+    PG_RETURN_TEXT_P(outtext);
+
+}
+
+Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
+{
+    text* outtext = NULL;
+    bool status = false;
+    /* check input paramaters */
+    if (PG_ARGISNULL(0)) {
+        fcinfo->isnull = true;
+        outtext = NULL;
+        PG_RETURN_TEXT_P(outtext);
+    }
+    
+    if (PG_ARGISNULL(1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
+    }
+
+    status = gs_decrypt_aes128_function(fcinfo, &outtext);
+    if (!status) {
+        outtext = NULL;
+    }
+    PG_RETURN_TEXT_P(outtext);
+}
+
+

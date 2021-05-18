@@ -53,6 +53,7 @@
 #define ITERATION_COUNT 10000
 #define CLIENT_STRING_LENGTH 11
 #define SEVER_STRING_LENGTH 10
+#define SEVER_STRING_LENGTH_SM3 11
 #define HMAC_LENGTH 32
 #define HMAC_BYTES_LENGTH 32
 #define HMAC_STRING_LENGTH (HMAC_LENGTH * 2)
@@ -73,6 +74,12 @@
 #define ITERATION_STRING_LEN 11 /* The length of INT_MAX(2147483647) */
 #define SHA256_MD5_COMBINED_LEN (SHA256_PASSWD_LEN + MD5_PASSWD_LEN + ITERATION_STRING_LEN)
 
+#define SM3_LENGTH 3
+#define SM3_PASSWD_LEN (ENCRYPTED_STRING_LENGTH + SM3_LENGTH)
+
+#define isSM3(passwd) \
+    (strncmp(passwd, "sm3", SM3_LENGTH) == 0 && strlen(passwd) == SM3_PASSWD_LEN + ITERATION_STRING_LEN)
+
 #define isSHA256(passwd) \
     (strncmp(passwd, "sha256", SHA256_LENGTH) == 0 && strlen(passwd) == SHA256_PASSWD_LEN + ITERATION_STRING_LEN)
 
@@ -81,7 +88,7 @@
     (strncmp(passwd, "sha256", SHA256_LENGTH) == 0 && strncmp(passwd + SHA256_PASSWD_LEN, "md5", 3) == 0)
 
 /* Check whether it is encrypted password. */
-#define isPWDENCRYPTED(passwd) (isMD5(passwd) || isSHA256(passwd) || isCOMBINED(passwd))
+#define isPWDENCRYPTED(passwd) (isMD5(passwd) || isSHA256(passwd) || isSM3(passwd) || isCOMBINED(passwd))
 
 /* The current password stored method are sha256, md5 and combined. */
 #define PLAIN_PASSWORD 0
@@ -90,6 +97,7 @@
 #define ERROR_PASSWORD 3
 #define BAD_MEM_ADDR 4
 #define COMBINED_PASSWORD 5
+#define SM3_PASSWORD 6
 
 typedef struct _SHA256_CTX2 {
     uint32 state[8];
@@ -110,6 +118,8 @@ extern void sha_hex_to_bytes4(char* s, const char b[8]);
 extern void sha_bytes_to_hex8(uint8 b[4], char* s);
 extern void sha_bytes_to_hex64(uint8 b[32], char* s);
 extern bool pg_sha256_encrypt_for_md5(const char* passwd, const char* salt, size_t salt_len, char* buf);
+extern bool gs_sm3_encrypt(const char* passwd, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf,
+    int iteration_count = ITERATION_COUNT);
 
 #endif /* _SHA2_H */
 

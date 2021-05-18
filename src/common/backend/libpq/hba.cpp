@@ -18,6 +18,8 @@
 #include "knl/knl_variable.h"
 
 #include <ctype.h>
+
+
 #include <pwd.h>
 #include <fcntl.h>
 #include <sys/param.h>
@@ -40,6 +42,8 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "commands/user.h"
+#include "libpq/crypt.h"
+
 
 #define atooid(x) ((Oid)strtoul((x), NULL, 10))
 #define atoxid(x) ((TransactionId)strtoul((x), NULL, 10))
@@ -1057,6 +1061,11 @@ static HbaLine* parse_hba_line(List* line, int line_num)
             parsedline->auth_method = uaTrust;
         else
             parsedline->auth_method = uaSHA256;
+    } else if (strcmp(token->string, "sm3") == 0) {
+        if (parsedline->conntype == ctLocal && u_sess->proc_cxt.IsInnerMaintenanceTools)
+            parsedline->auth_method = uaTrust;
+        else
+            parsedline->auth_method = uaSM3;
     } else if (strcmp(token->string, "pam") == 0)
 #ifdef USE_PAM
         parsedline->auth_method = uaPAM;
@@ -1480,6 +1489,12 @@ static void check_hba(hbaPort* port)
             } else if (hba->auth_method == uaTrust) {
                 /* For non-initdb user, password is always needed */
                 hba->auth_method = uaSHA256;
+                password_info pass_info;
+                if (get_stored_password(port->user_name, &pass_info)) {
+                    if (isSM3(pass_info.shadow_pass)) {
+                        hba->auth_method = uaSM3;
+                    }			        
+                }
             }
 
             if (!IS_AF_UNIX(port->raddr.addr.ss_family))

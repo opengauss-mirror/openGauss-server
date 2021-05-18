@@ -2777,6 +2777,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
+ 6322 | gs_decrypt
+ 6323 | gs_encrypt
  7777 | sysdate
  7998 | set_working_grand_version_num_manually
  8050 | datalength

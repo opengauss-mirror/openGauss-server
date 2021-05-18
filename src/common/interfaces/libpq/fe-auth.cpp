@@ -774,7 +774,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
     char client_key_bytes[HMAC_LENGTH + 1] = {0};
     char buf[SHA256_PASSWD_LEN + 1] = {0};
     char sever_key_bytes[HMAC_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
     char client_sever_signature_bytes[HMAC_LENGTH + 1] = {0};
     char client_sever_signature_string[HMAC_LENGTH * 2 + 1] = {0};
@@ -856,20 +856,20 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
 
-                rc = strncpy_s(sever_key_string,
-                    sizeof(sever_key_string),
+                rc = strncpy_s(server_key_string,
+                    sizeof(server_key_string),
                     &buf[SHA256_LENGTH + SALT_STRING_LENGTH],
-                    sizeof(sever_key_string) - 1);
+                    sizeof(server_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
                 rc = strncpy_s(stored_key_string,
                     sizeof(stored_key_string),
                     &buf[SHA256_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
                     sizeof(stored_key_string) - 1);
                 securec_check_c(rc, "\0", "\0");
-                sever_key_string[sizeof(sever_key_string) - 1] = '\0';
+                server_key_string[sizeof(server_key_string) - 1] = '\0';
                 stored_key_string[sizeof(stored_key_string) - 1] = '\0';
 
-                sha_hex_to_bytes32(sever_key_bytes, sever_key_string);
+                sha_hex_to_bytes32(sever_key_bytes, server_key_string);
                 sha_hex_to_bytes4(token, conn->token);
                 CRYPT_hmac_ret1 = CRYPT_hmac(NID_hmacWithSHA256,
                     (GS_UCHAR*)sever_key_bytes,
@@ -946,6 +946,78 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
             }
 
             break;
+        }   
+        case AUTH_REQ_SM3: {
+
+            if (conn->password_stored_method == SM3_PASSWORD) {
+                if (!gs_sm3_encrypt(
+                        password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
+                    return STATUS_ERROR;
+
+                rc = strncpy_s(server_key_string,
+                    sizeof(server_key_string),
+                    &buf[SM3_LENGTH + SALT_STRING_LENGTH],
+                    sizeof(server_key_string) - 1);
+                securec_check_c(rc, "\0", "\0");
+                rc = strncpy_s(stored_key_string,
+                    sizeof(stored_key_string),
+                    &buf[SM3_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
+                    sizeof(stored_key_string) - 1);
+                securec_check_c(rc, "\0", "\0");
+                server_key_string[sizeof(server_key_string) - 1] = '\0';
+                stored_key_string[sizeof(stored_key_string) - 1] = '\0';
+
+                sha_hex_to_bytes32(sever_key_bytes, server_key_string);
+                sha_hex_to_bytes4(token, conn->token);
+                CRYPT_hmac_ret1 = CRYPT_hmac(NID_hmacWithSHA256,
+                    (GS_UCHAR*)sever_key_bytes,
+                    HMAC_LENGTH,
+                    (GS_UCHAR*)token,
+                    TOKEN_LENGTH,
+                    (GS_UCHAR*)client_sever_signature_bytes,
+                    (GS_UINT32*)&hmac_length);
+                if (CRYPT_hmac_ret1) {
+                    return STATUS_ERROR;
+                }
+
+                sha_bytes_to_hex64((uint8*)client_sever_signature_bytes, client_sever_signature_string);
+
+                /*
+                 * Check the sever_signature before client_signature be checked is not safe.
+                 * future : The rfc5802 authentication protocol need be enhanced.
+                 */
+                if (PG_PROTOCOL_MINOR(conn->pversion) < PG_PROTOCOL_GAUSS_BASE &&
+                    0 != strncmp(conn->sever_signature, client_sever_signature_string, HMAC_STRING_LENGTH)) {
+                    pwd_to_send = fail_info;
+                } else {
+                    /* calculate H, H = hmac(storedkey, token) XOR ClientKey */
+                    sha_hex_to_bytes32(stored_key_bytes, stored_key_string);
+                    CRYPT_hmac_ret2 = CRYPT_hmac(NID_hmacWithSHA256,
+                        (GS_UCHAR*)stored_key_bytes,
+                        STORED_KEY_LENGTH,
+                        (GS_UCHAR*)token,
+                        TOKEN_LENGTH,
+                        (GS_UCHAR*)hmac_result,
+                        (GS_UINT32*)&hmac_length);
+                    if (CRYPT_hmac_ret2) {
+                        return STATUS_ERROR;
+                    }
+
+                    sha_hex_to_bytes32(client_key_bytes, client_key_buf);
+                    if (XOR_between_password(hmac_result, client_key_bytes, h, HMAC_LENGTH)) {
+                        return STATUS_ERROR;
+                    }
+
+                    sha_bytes_to_hex64((uint8*)h, h_string);
+
+                    /* Send H to sever */
+                    pwd_to_send = h_string;
+                }
+            }  else {
+                pwd_to_send = password;
+            }
+
+            break;
         }
         case AUTH_REQ_PASSWORD:
             pwd_to_send = password;
@@ -974,7 +1046,7 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
     erase_arr(client_key_bytes);
     erase_arr(buf);
     erase_arr(sever_key_bytes);
-    erase_arr(sever_key_string);
+    erase_arr(server_key_string);
     erase_arr(token);
     erase_arr(client_sever_signature_bytes);
     erase_arr(client_sever_signature_string);
@@ -1119,6 +1191,7 @@ int pg_fe_sendauth(AuthRequest areq, PGconn* conn)
         case AUTH_REQ_MD5:
         case AUTH_REQ_MD5_SHA256:
         case AUTH_REQ_SHA256:
+        case AUTH_REQ_SM3:
         case AUTH_REQ_PASSWORD:
             int status;
             conn->password_needed = true;

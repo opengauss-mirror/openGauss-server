@@ -741,7 +741,9 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
-
+test: hw_cipher_sm4
+test: hw_cipher_aes128
+test: hw_pwd_encryption_sm3
 test: rule_test
 
 #delete limit

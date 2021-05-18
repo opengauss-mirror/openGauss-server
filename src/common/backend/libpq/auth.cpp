@@ -261,6 +261,7 @@ static void auth_failed(Port* port, int status)
                 break;
             case uaMD5:
             case uaSHA256:
+            case uaSM3:
             case uaIAM:
                 errstr = gettext_noop("Invalid username/password,login denied.");
                 /* We use it to indicate if a .pgpass password failed. */
@@ -596,6 +597,7 @@ void ClientAuthentication(Port* port)
             break;
         /* Database Security:  Support SHA256.*/
         case uaSHA256:
+        case uaSM3:
             /*Forbid remote connection with initial user.*/
             if (isRemoteInitialUser(port)) {
                 ereport(FATAL,
@@ -615,9 +617,13 @@ void ClientAuthentication(Port* port)
             }
             sha_bytes_to_hex8((uint8*)token, port->token);
             port->token[TOKEN_LENGTH * 2] = '\0';
-            sendAuthRequest(port, AUTH_REQ_SHA256);
+            if (port->hba->auth_method == uaSHA256) {
+                sendAuthRequest(port, AUTH_REQ_SHA256);
+            } else {
+                sendAuthRequest(port, AUTH_REQ_SM3);
+            }
             status = recv_and_check_password_packet(port);
-            break;
+            break;           
         case uaPAM:
 #ifdef USE_PAM
             status = CheckPAMAuth(port, port->user_name, "");
@@ -774,6 +780,44 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 /*
  * Send an authentication request packet to the frontend.
  */
+static bool gs_generateFakeEncryptString(char* encrypt_string, Port* port)
+{
+    int retval = 0;
+    errno_t rc = EOK;
+    char fake_salt_bytes[SALT_LENGTH + 1] = {0};
+    char fake_salt[SALT_LENGTH * 2 + 1] = {0};
+    char fake_serverkey_bytes[HMAC_LENGTH + 1] = {0};
+    char fake_serverkey[HMAC_LENGTH * 2 + 1] = {0};
+    char fake_storedkey_bytes[STORED_KEY_LENGTH + 1] = {0};
+    char fake_storedkey[STORED_KEY_LENGTH * 2 + 1] = {0};
+    
+    GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
+    retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
+    if (retval != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
+    }	
+
+    retval = RAND_priv_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
+    if (retval != 1) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
+    }
+    sha_bytes_to_hex64((uint8*)fake_salt_bytes, fake_salt);
+    sha_bytes_to_hex64((uint8*)fake_serverkey_bytes, fake_serverkey);
+    sha_bytes_to_hex64((uint8*)fake_storedkey_bytes, fake_storedkey);
+    rc = snprintf_s(encrypt_string,
+        ENCRYPTED_STRING_LENGTH + 1,
+        ENCRYPTED_STRING_LENGTH,
+        "%s%s%s",
+        fake_salt,
+        fake_serverkey,
+        fake_storedkey);
+    securec_check_ss(rc, "\0", "\0");
+    return true;
+}
 static void sendAuthRequest(Port* port, AuthRequest areq)
 {
     /* Database Security:  Support SHA256.*/
@@ -781,7 +825,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     StringInfoData buf;
     char encrypt_string[ENCRYPTED_STRING_LENGTH + 1] = {0};
     char token[TOKEN_LENGTH + 1] = {0};
-    char sever_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
     char sever_key[HMAC_LENGTH + 1] = {0};
     char sever_signature[HMAC_LENGTH + 1] = {0};
     char sever_signature_string[HMAC_LENGTH * 2 + 1] = {0};
@@ -790,12 +834,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     GS_UINT32 CRYPT_hmac_result;
 #endif
     char salt[SALT_LENGTH * 2 + 1] = {0};
-    char fake_salt_bytes[SALT_LENGTH + 1] = {0};
-    char fake_salt[SALT_LENGTH * 2 + 1] = {0};
-    char fake_serverkey_bytes[HMAC_LENGTH + 1] = {0};
-    char fake_serverkey[HMAC_LENGTH * 2 + 1] = {0};
-    char fake_storedkey_bytes[STORED_KEY_LENGTH + 1] = {0};
-    char fake_storedkey[STORED_KEY_LENGTH * 2 + 1] = {0};
+
     int auth_iteration_count = 0;
     errno_t rc = EOK;
     bool save_ImmediateInterruptOK = t_thrd.int_cxt.ImmediateInterruptOK;
@@ -814,43 +853,27 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
 #endif        
         stored_method = SHA256_PASSWORD;
     } else {
-        if (!IsRoleExist(port->user_name)) {
-            int retval = 0;
-
+        if (!IsRoleExist(port->user_name)) {			
             /*
              * When login failed, let the server quit at the same place regardless of right or wrong
              * username. We construct a fake encrypted password here and send it the client.
              */
-            GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
-            retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
-            if (retval != 1) {
+
+            if (!gs_generateFakeEncryptString(encrypt_string , port)) {
+
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random serverkey,errcode:%d", retval)));
+                        errmsg("Failed to Generate Encrypt String")));
             }
-            retval = RAND_priv_bytes((GS_UCHAR*)fake_storedkey_bytes, (GS_UINT32)(STORED_KEY_LENGTH));
-            if (retval != 1) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
-                        errmsg("Failed to Generate the random storedkey,errcode:%d", retval)));
-            }
-            sha_bytes_to_hex64((uint8*)fake_salt_bytes, fake_salt);
-            sha_bytes_to_hex64((uint8*)fake_serverkey_bytes, fake_serverkey);
-            sha_bytes_to_hex64((uint8*)fake_storedkey_bytes, fake_storedkey);
-            rc = snprintf_s(encrypt_string,
-                ENCRYPTED_STRING_LENGTH + 1,
-                ENCRYPTED_STRING_LENGTH,
-                "%s%s%s",
-                fake_salt,
-                fake_serverkey,
-                fake_storedkey);
-            securec_check_ss(rc, "\0", "\0");
 
             /* Construct the stored method. */
             if (PG_PROTOCOL_MINOR(FrontendProtocol) < PG_PROTOCOL_GAUSS_BASE) {
                 stored_method = MD5_PASSWORD;
             } else {
                 stored_method = SHA256_PASSWORD;
+                if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {			
+                    stored_method = SM3_PASSWORD;		        
+                }
             }
         } else {
             /* Only need to send the necessary information here when use the iamauth role for authenication. */
@@ -918,7 +941,8 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
 
     /* Check password stored method and there is no need to check for send only AUTH_REQ_OK. */
     if (areq != AUTH_REQ_OK && MD5_PASSWORD != stored_method && SHA256_PASSWORD != stored_method &&
-        stored_method != COMBINED_PASSWORD && port->hba->auth_method != uaGSS) {
+        stored_method != COMBINED_PASSWORD && port->hba->auth_method != uaGSS && 
+        stored_method != SM3_PASSWORD) {
         t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
         rc = memset_s(encrypt_string, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH + 1);
         securec_check(rc, "\0", "\0");
@@ -929,7 +953,7 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     pq_beginmessage(&buf, 'R');
 
     /*
-     * The following block will determine the actual authentication method, sha256 or md5.
+     * The following block will determine the actual authentication method, sha256 or md5 or sm3.
      * AUTH_REQ_MD5_SHA256 is only for stored sha256 and req md5 condition.
      */
     if (AUTH_REQ_MD5 == areq && SHA256_PASSWORD == stored_method) {
@@ -941,6 +965,18 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
 
         /* Here send the sha256 salt for authenication. */
         pq_sendbytes(&buf, salt, SALT_LENGTH * 2);
+    } else if ((AUTH_REQ_SM3 != areq && SM3_PASSWORD == stored_method && AUTH_REQ_OK != areq) ||  
+               (AUTH_REQ_SM3 == areq && SM3_PASSWORD != stored_method )) {
+       if (!gs_generateFakeEncryptString(encrypt_string , port)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
+                    errmsg("Failed to Generate Encrypt String")));
+
+        }
+        stored_method = SM3_PASSWORD;
+        areq = AUTH_REQ_SM3;
+        port->hba->auth_method = uaSM3;
+        pq_sendint32(&buf, (int32)areq);
     } else {
         /* Be careful about areq == AUTH_REQ_OK condition. */
         if (AUTH_REQ_SHA256 == areq && stored_method != SHA256_PASSWORD) {
@@ -976,10 +1012,10 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
     if (areq == AUTH_REQ_SHA256 && (stored_method == SHA256_PASSWORD || stored_method == COMBINED_PASSWORD)) {
         /*calculate SeverSignature */
         rc = strncpy_s(
-            sever_key_string, sizeof(sever_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(sever_key_string) - 1);
+            server_key_string, sizeof(server_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(server_key_string) - 1);
         securec_check(rc, "\0", "\0");
-        sever_key_string[sizeof(sever_key_string) - 1] = '\0';
-        sha_hex_to_bytes32(sever_key, sever_key_string);
+        server_key_string[sizeof(server_key_string) - 1] = '\0';
+        sha_hex_to_bytes32(sever_key, server_key_string);
         sha_hex_to_bytes4(token, port->token);
 #ifdef USE_ASSERT_CHECKING
         CRYPT_hmac_result =
@@ -1022,6 +1058,56 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
              * we should confirm the authenication between client and server even
              * the role,iteration or some other thing is wrong to prevent guessing.
              */
+            if (auth_iteration_count == -1)
+                auth_iteration_count = ITERATION_COUNT;
+            pq_sendint32(&buf, (int32)auth_iteration_count);
+        }
+
+    }
+        
+    if (areq == AUTH_REQ_SM3 && stored_method == SM3_PASSWORD) {
+        /*calculate SeverSignature */
+        rc = strncpy_s(
+            server_key_string, sizeof(server_key_string), &encrypt_string[SALT_LENGTH * 2], sizeof(server_key_string) - 1);
+        securec_check(rc, "\0", "\0");
+        server_key_string[sizeof(server_key_string) - 1] = '\0';
+        sha_hex_to_bytes32(sever_key, server_key_string);
+        sha_hex_to_bytes4(token, port->token);
+#ifdef USE_ASSERT_CHECKING
+        CRYPT_hmac_result =
+#else
+        (void)
+#endif
+            CRYPT_hmac(NID_hmacWithSHA256,
+                (GS_UCHAR*)sever_key,
+                HMAC_LENGTH,
+                (GS_UCHAR*)token,
+                TOKEN_LENGTH,
+                (GS_UCHAR*)sever_signature,
+                (GS_UINT32*)&sever_signature_length);
+#ifdef USE_ASSERT_CHECKING
+        Assert(!CRYPT_hmac_result);
+#endif
+        rc = strncpy_s(salt, sizeof(salt), encrypt_string, sizeof(salt) - 1);
+        securec_check(rc, "\0", "\0");
+        salt[sizeof(salt) - 1] = '\0';
+        sha_bytes_to_hex64((uint8*)sever_signature, sever_signature_string);
+        pq_sendint32(&buf, (int32)SM3_PASSWORD);
+        pq_sendbytes(&buf, salt, SALT_LENGTH * 2);
+        pq_sendbytes(&buf, port->token, TOKEN_LENGTH * 2);
+
+        /*
+         * Send the sever_signature before client_signature is not safe.
+         * The rfc5802 authentication protocol need be enhanced.
+         */
+        /* For M.N, N < 50	means older version of Gauss200 or Postgres versions */
+        if (PG_PROTOCOL_MINOR(FrontendProtocol) < PG_PROTOCOL_GAUSS_BASE)
+            pq_sendbytes(&buf, sever_signature_string, HMAC_LENGTH * 2);
+
+        /* Get iteration and send it to client. */
+        if (PG_PROTOCOL_MINOR(FrontendProtocol) > PG_PROTOCOL_GAUSS_BASE) {
+            auth_iteration_count = get_stored_iteration(port->user_name);
+
             if (auth_iteration_count == -1)
                 auth_iteration_count = ITERATION_COUNT;
             pq_sendint32(&buf, (int32)auth_iteration_count);
