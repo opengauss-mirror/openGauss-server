@@ -152,14 +152,14 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
                                     errmsg("could not close log file %s: %m",
                                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
 
+#ifdef ENABLE_MULTIPLE_NODES
                 /*
                  * Create .done file forcibly to prevent the restored segment from
                  * being archived again later.
                  */
                 XLogFileName(xlogfname, recvFileTLI, recvSegNo);
-                if (!u_sess->attr.attr_common.XLogArchiveMode) {
-                    XLogArchiveForceDone(xlogfname);
-                }
+                XLogArchiveForceDone(xlogfname);
+#endif
             }
             recvFile = -1;
 
