@@ -316,5 +316,10 @@ DATA(insert ( 4239    smalldatetime_ops  PGNSP  PGUID  4264  9003    t    0));
 DATA(insert ( 403     byteawithoutorderwithequalcol_ops PGNSP PGUID  436  4402 t 0 ));
 DATA(insert ( 405     byteawithoutorderwithequalcol_ops PGNSP PGUID 4470 4402 t 0 ));
 
+DATA(insert ( 403     jsonb_ops        PGNSP    PGUID  4033  3802 t 0 ));
+DATA(insert ( 405     jsonb_ops        PGNSP    PGUID  4034  3802 t 0 ));
+DATA(insert ( 2742    jsonb_ops        PGNSP    PGUID  4036  3802 t 25 ));
+DATA(insert ( 2742    jsonb_hash_ops   PGNSP    PGUID  4037  3802 f 23 ));
+
 #endif   /* PG_OPCLASS_H */
 

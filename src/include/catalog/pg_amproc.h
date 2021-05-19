@@ -144,6 +144,7 @@ DATA(insert (	3522   3500 3500 1 3514 ));
 
 DATA(insert (	3806   86 86 1 3475 ));
 DATA(insert (	3807   86 86 1 456 ));
+DATA(insert (	4033   3802 3802 1 3417 ));
 DATA(insert (	5535   5545 5545 1 5519 ));
 DATA(insert (	5536   5545 5545 1 5520 ));
 /* hash */
@@ -182,7 +183,7 @@ DATA(insert (	2232   31 31 1 450 ));
 DATA(insert (	2235   1033 1033 1 329 ));
 DATA(insert (	2969   2950 2950 1 2963 ));
 DATA(insert (	3523   3500 3500 1 3515 ));
-
+DATA(insert (	4034   3802 3802 1 3430 ));
 
 /* gist */
 DATA(insert (	2593   603 603 1 2578 ));
@@ -398,7 +399,16 @@ DATA(insert (	3919   3831 3831 4 3878 ));
 DATA(insert (	3919   3831 3831 5 3879 ));
 DATA(insert (	3919   3831 3831 6 3880 ));
 DATA(insert (	3919   3831 3831 7 3881 ));
-
+DATA(insert (	4036   3802 3802 1 3498 ));
+DATA(insert (	4036   3802 3802 2 3482 ));
+DATA(insert (	4036   3802 3802 3 3493 ));
+DATA(insert (	4036   3802 3802 4 3497 ));
+DATA(insert (	4036   3802 3802 6 3494 ));
+DATA(insert (	4037   3802 3802 1 351 ));
+DATA(insert (	4037   3802 3802 2 3492 ));
+DATA(insert (	4037   3802 3802 3 3486 ));
+DATA(insert (	4037   3802 3802 4 3487 ));
+DATA(insert (	4037   3802 3802 6 3495 ));
 /* cgin */
 DATA(insert (	4446   3614 3614 1 3724 ));
 DATA(insert (	4446   3614 3614 2 3656 ));

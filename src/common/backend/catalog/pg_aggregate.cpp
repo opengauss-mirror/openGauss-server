@@ -105,7 +105,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
 #ifdef PGXC
 
     if (aggTransType == INTERNALOID && pg_strcasecmp(aggName, "listagg") != 0 && pg_strcasecmp(aggName, "median") != 0
-        && pg_strcasecmp(aggName, "mode") != 0)
+        && pg_strcasecmp(aggName, "mode") != 0 && pg_strcasecmp(aggName, "json_agg") != 0
+        && pg_strcasecmp(aggName, "json_object_agg") != 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("unsafe use of pseudo-type \"internal\""),

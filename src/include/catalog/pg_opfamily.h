@@ -150,6 +150,11 @@ DATA(insert OID = 3919 (783        range_ops        PGNSP PGUID));
 DATA(insert OID = 4015 (4000    quad_point_ops    PGNSP PGUID));
 DATA(insert OID = 4016 (4000    kd_point_ops    PGNSP PGUID));
 DATA(insert OID = 4017 (4000    text_ops        PGNSP PGUID));
+DATA(insert OID = 4033 (403     jsonb_ops       PGNSP PGUID ));
+DATA(insert OID = 4034 (405     jsonb_ops       PGNSP PGUID ));
+DATA(insert OID = 4035 (783     jsonb_ops       PGNSP PGUID ));
+DATA(insert OID = 4036 (2742    jsonb_ops       PGNSP PGUID ));
+DATA(insert OID = 4037 (2742    jsonb_hash_ops  PGNSP PGUID ));
 #define TEXT_SPGIST_FAM_OID 4017
 
 DATA(insert OID = 3806 (403        raw_ops         PGNSP PGUID));
