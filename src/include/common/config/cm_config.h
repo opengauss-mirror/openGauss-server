@@ -433,10 +433,10 @@ extern int node_index_Comparator(const void* arg1, const void* arg2);
 extern void set_cm_read_flag(bool falg);
 extern char* getAZNamebyPriority(uint32 azPriority);
 extern int cmconfig_getenv(const char* env_var, char* output_env_value, uint32 env_value_len);
-extern bool contain_nodename(const char* namelist, const char* name);
 extern int get_dynamic_dn_role(void);
 extern int get_nodename_list_by_AZ(const char* AZName, const char* data_dir, char** nodeNameList);
 extern int checkPath(const char* fileName);
 extern bool has_static_config();
+extern bool CheckDataNameValue(const char *datanodeName, const char *dataDir);
 
 #endif
