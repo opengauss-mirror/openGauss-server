@@ -2498,7 +2498,7 @@ static bool HasBeenArchivedOnHaMode(const char* xlog)
         SpinLockRelease(&walsnd->mutex);
     }
 
-    if (mode == STANDBY_MODE) {
+    if (mode == STANDBY_MODE && XLogArchivingActive()) {
         XLogRecPtr target_lsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
         XLogRecPtr start_point = g_instance.archive_standby_cxt.standby_archive_start_point;
         minium_lsn = (target_lsn == 0) ? start_point : target_lsn;
