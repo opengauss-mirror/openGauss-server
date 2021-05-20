@@ -332,6 +332,10 @@ DATA(insert ( 4600	checksumtext_agg_transfn		  numeric_add		  -				0	1700	_null_
 DATA(insert ( 3545	bytea_string_agg_transfn	-	bytea_string_agg_finalfn		0	2281	_null_ _null_ 	n	0));
 #endif
 
+/* json */
+DATA(insert ( 3124	json_agg_transfn	-	json_agg_finalfn	0	2281	_null_ _null_ 	n	0));
+DATA(insert ( 3403 	json_object_agg_transfn	-	json_object_agg_finalfn 0	2281	_null_ _null_ 	n	0));
+
 /* hll distribute agg */
 DATA(insert ( 4366		hll_add_trans0 hll_union_collect hll_pack 0 4370 _null_ _null_ 	n	0));
 #define HLL_ADD_TRANS0_OID 4366

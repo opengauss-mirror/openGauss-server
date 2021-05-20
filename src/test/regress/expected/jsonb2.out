@@ -1,0 +1,678 @@
+--This file is a supplement to jsonb.sql.
+CREATE SCHEMA jsonb_test;
+SET CURRENT_SCHEMA TO jsonb_test;
+-- data format
+select ''::jsonb;
+ jsonb 
+-------
+ 
+(1 row)
+
+select null::jsonb;
+ jsonb 
+-------
+ 
+(1 row)
+
+select 'null'::jsonb;
+ jsonb 
+-------
+ null
+(1 row)
+
+select 'NULL'::jsonb;
+ERROR:  invalid input syntax for type json
+LINE 1: select 'NULL'::jsonb;
+               ^
+DETAIL:  Token "NULL" is invalid.
+CONTEXT:  JSON data, line 1: NULL
+referenced column: jsonb
+select '-1.5'::jsonb;
+ jsonb 
+-------
+ -1.5
+(1 row)
+
+select '+1.5'::jsonb;
+ERROR:  invalid input syntax for type json
+LINE 1: select '+1.5'::jsonb;
+               ^
+DETAIL:  Token "+" is invalid.
+CONTEXT:  JSON data, line 1: +...
+referenced column: jsonb
+select '-1.5e5'::jsonb;
+  jsonb  
+---------
+ -150000
+(1 row)
+
+select '-1.5e5.6'::jsonb;
+ERROR:  invalid input syntax for type json
+LINE 1: select '-1.5e5.6'::jsonb;
+               ^
+DETAIL:  Token "." is invalid.
+CONTEXT:  JSON data, line 1: -1.5e5....
+referenced column: jsonb
+select '-1.5e-5'::jsonb;
+  jsonb   
+----------
+ -.000015
+(1 row)
+
+select '-1.5e+5'::jsonb;
+  jsonb  
+---------
+ -150000
+(1 row)
+
+select '25.000000'::jsonb;
+   jsonb   
+-----------
+ 25.000000
+(1 row)
+
+select 'true'::jsonb, 'false'::jsonb;
+ jsonb | jsonb 
+-------+-------
+ true  | false
+(1 row)
+
+select 'True'::jsonb, 'False'::jsonb;
+ERROR:  invalid input syntax for type json
+LINE 1: select 'True'::jsonb, 'False'::jsonb;
+               ^
+DETAIL:  Token "True" is invalid.
+CONTEXT:  JSON data, line 1: True
+referenced column: jsonb
+select 'TRUE'::jsonb, 'FALSE'::jsonb;
+ERROR:  invalid input syntax for type json
+LINE 1: select 'TRUE'::jsonb, 'FALSE'::jsonb;
+               ^
+DETAIL:  Token "TRUE" is invalid.
+CONTEXT:  JSON data, line 1: TRUE
+referenced column: jsonb
+-- jsonb Advanced Features
+select '{   }'::jsonb;
+ jsonb 
+-------
+ {}
+(1 row)
+
+select '{"aa" :     1, "d":4, "aa"   :2, "b":3}'::jsonb;
+           jsonb           
+---------------------------
+ {"b": 3, "d": 4, "aa": 2}
+(1 row)
+
+select '[   ]'::jsonb;
+ jsonb 
+-------
+ []
+(1 row)
+
+select '[1,   5, 8, {"aa" :     1, "d":4, "aa"   :2, "b":3}]'::jsonb;
+                jsonb                 
+--------------------------------------
+ [1, 5, 8, {"b": 3, "d": 4, "aa": 2}]
+(1 row)
+
+-- jsonb normal functions and operator
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array[]::text[];
+ ?column? 
+----------
+ 
+(1 row)
+
+-- jsonb hash funcs
+select jsonb_hash('');
+ jsonb_hash 
+------------
+           
+(1 row)
+
+select jsonb_hash('1');
+ jsonb_hash 
+------------
+ -822615224
+(1 row)
+
+select jsonb_hash('null');
+ jsonb_hash  
+-------------
+ -2147483647
+(1 row)
+
+select jsonb_hash('true');
+ jsonb_hash  
+-------------
+ -2147483646
+(1 row)
+
+select jsonb_hash('"xxx"');
+ jsonb_hash 
+------------
+  155246999
+(1 row)
+
+select jsonb_hash('[1,2,3]');
+ jsonb_hash 
+------------
+ -559968547
+(1 row)
+
+select jsonb_hash('{"xxx":123, "das":[789,{}]}');
+ jsonb_hash 
+------------
+   -2916660
+(1 row)
+
+-- gin/contain/exist
+-- there is only one func we can call directly，and operators have been well tested in jsonb.sql
+-- The size of the returned value of the character string depends on the operating system.
+select btint4cmp(gin_compare_jsonb('',''),0);
+ btint4cmp 
+-----------
+          
+(1 row)
+
+select btint4cmp(gin_compare_jsonb('1','1'),0);
+ btint4cmp 
+-----------
+         0
+(1 row)
+
+select btint4cmp(gin_compare_jsonb('[1]','[2]'),0);
+ btint4cmp 
+-----------
+        -1
+(1 row)
+
+select btint4cmp(gin_compare_jsonb('1','2'),0);
+ btint4cmp 
+-----------
+        -1
+(1 row)
+
+-- jsonb compare
+-- cmp eq ne gt ge lt le （also = <> > >= < <=）
+-- The size of the returned value of the character string depends on the operating system.
+create table cmpjsonb (a jsonb, b jsonb);
+insert into cmpjsonb values
+('null',  'null'), ('null', '"oooo"'), ('null', '-3.5e8'), ('null', 'false'), ('null', '[]'), ('null', '[1,2]'), ('null', '{}'), ('null', '{"":""}'),
+('""','""'), ('"aa"', '"aa"'), ('"a"', '"b"'), ('"a"', '"cc"'), ('"a"', '-58.6e-2'), ('""', 'false'), ('"true"', 'true'), ('""', '[]'), ('"s"', '["s"]'), ('"x"', '{}'), ('"x"', '{"x":1}'), 
+('0',  '-0'),('100', '1e2'), ('-3.5e8', '8e3'), ('9','-9'), ('1', 'false'), ('-1', 'true'), ('0', '[]'), ('1', '[1]'), ('0', '{}'), ('1', '{"1":1}'), 
+('false', 'false'), ('false', 'true'), ('false', '[]'), ('false', '[true]'), ('true', '{}'), ('true', '{"false":true}'),
+('[]','[]'),('[1,2]','[1]'), ('[1,2,3]','[true, false, true]'), ('[1,2]', '[1,3]'), ('[]','{}'),('[[]]', '[{}]'),('[[false]]', '[1]'), ('[[{"":""}]]','[{}]'),
+('{}','{}'),('{"a":4}','{"a":5}'),('{"aa":4}','{"a":5}'),('{"aa":4}','{"a":5, "aa":4}'),('{"f":[1,5,8], "r":{"":30, "o":"ooo"}}', '{"f":[1,5], "r":{"":30, "o":"ooo"}}'),
+(null,null),(null,'888');
+select a, b,
+  btint4cmp(jsonb_cmp(a, b),0) as cmp,
+  jsonb_eq(a, b) as eq,
+  jsonb_ne(a, b) as ne,
+  jsonb_lt(a, b) as lt,
+  jsonb_le(a, b) as le,
+  jsonb_gt(a, b) as gt,
+  jsonb_ge(a, b) as ge
+from cmpjsonb order by 1,2,3,4,5,6,7,8,9;
+                      a                      |                    b                     | cmp | eq | ne | lt | le | gt | ge 
+---------------------------------------------+------------------------------------------+-----+----+----+----+----+----+----
+ []                                          | []                                       |   0 | t  | f  | f  | t  | f  | t
+ []                                          | {}                                       |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | []                                       |   1 | f  | t  | f  | f  | t  | t
+ null                                        | null                                     |   0 | t  | f  | f  | t  | f  | t
+ null                                        | "oooo"                                   |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | -350000000                               |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | false                                    |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | [1, 2]                                   |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | {}                                       |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | {"": ""}                                 |  -1 | f  | t  | t  | t  | f  | f
+ ""                                          | []                                       |   1 | f  | t  | f  | f  | t  | t
+ ""                                          | ""                                       |   0 | t  | f  | f  | t  | f  | t
+ ""                                          | false                                    |  -1 | f  | t  | t  | t  | f  | f
+ "a"                                         | "b"                                      |  -1 | f  | t  | t  | t  | f  | f
+ "a"                                         | "cc"                                     |  -1 | f  | t  | t  | t  | f  | f
+ "a"                                         | -.586                                    |  -1 | f  | t  | t  | t  | f  | f
+ "aa"                                        | "aa"                                     |   0 | t  | f  | f  | t  | f  | t
+ "s"                                         | ["s"]                                    |  -1 | f  | t  | t  | t  | f  | f
+ "true"                                      | true                                     |  -1 | f  | t  | t  | t  | f  | f
+ "x"                                         | {}                                       |  -1 | f  | t  | t  | t  | f  | f
+ "x"                                         | {"x": 1}                                 |  -1 | f  | t  | t  | t  | f  | f
+ -350000000                                  | 8000                                     |  -1 | f  | t  | t  | t  | f  | f
+ -1                                          | true                                     |  -1 | f  | t  | t  | t  | f  | f
+ 0                                           | []                                       |   1 | f  | t  | f  | f  | t  | t
+ 0                                           | 0                                        |   0 | t  | f  | f  | t  | f  | t
+ 0                                           | {}                                       |  -1 | f  | t  | t  | t  | f  | f
+ 1                                           | false                                    |  -1 | f  | t  | t  | t  | f  | f
+ 1                                           | [1]                                      |  -1 | f  | t  | t  | t  | f  | f
+ 1                                           | {"1": 1}                                 |  -1 | f  | t  | t  | t  | f  | f
+ 9                                           | -9                                       |   1 | f  | t  | f  | f  | t  | t
+ 100                                         | 100                                      |   0 | t  | f  | f  | t  | f  | t
+ false                                       | []                                       |   1 | f  | t  | f  | f  | t  | t
+ false                                       | false                                    |   0 | t  | f  | f  | t  | f  | t
+ false                                       | true                                     |  -1 | f  | t  | t  | t  | f  | f
+ false                                       | [true]                                   |  -1 | f  | t  | t  | t  | f  | f
+ true                                        | {}                                       |  -1 | f  | t  | t  | t  | f  | f
+ true                                        | {"false": true}                          |  -1 | f  | t  | t  | t  | f  | f
+ [[]]                                        | [{}]                                     |  -1 | f  | t  | t  | t  | f  | f
+ [[false]]                                   | [1]                                      |   1 | f  | t  | f  | f  | t  | t
+ [[{"": ""}]]                                | [{}]                                     |  -1 | f  | t  | t  | t  | f  | f
+ [1, 2]                                      | [1]                                      |   1 | f  | t  | f  | f  | t  | t
+ [1, 2]                                      | [1, 3]                                   |  -1 | f  | t  | t  | t  | f  | f
+ [1, 2, 3]                                   | [true, false, true]                      |  -1 | f  | t  | t  | t  | f  | f
+ {}                                          | {}                                       |   0 | t  | f  | f  | t  | f  | t
+ {"a": 4}                                    | {"a": 5}                                 |  -1 | f  | t  | t  | t  | f  | f
+ {"aa": 4}                                   | {"a": 5}                                 |   1 | f  | t  | f  | f  | t  | t
+ {"aa": 4}                                   | {"a": 5, "aa": 4}                        |  -1 | f  | t  | t  | t  | f  | f
+ {"f": [1, 5, 8], "r": {"": 30, "o": "ooo"}} | {"f": [1, 5], "r": {"": 30, "o": "ooo"}} |   1 | f  | t  | f  | f  | t  | t
+                                             | 888                                      |     |    |    |    |    |    | 
+                                             |                                          |     |    |    |    |    |    | 
+(50 rows)
+
+select a, b,
+  a =  b as eq,
+  a <> b as ne,
+  a <  b as lt,
+  a <= b as le,
+  a >  b as gt,
+  a >= b as ge
+from cmpjsonb order by 1,2,3,4,5,6,7,8;
+                      a                      |                    b                     | eq | ne | lt | le | gt | ge 
+---------------------------------------------+------------------------------------------+----+----+----+----+----+----
+ []                                          | []                                       | t  | f  | f  | t  | f  | t
+ []                                          | {}                                       | f  | t  | t  | t  | f  | f
+ null                                        | []                                       | f  | t  | f  | f  | t  | t
+ null                                        | null                                     | t  | f  | f  | t  | f  | t
+ null                                        | "oooo"                                   | f  | t  | t  | t  | f  | f
+ null                                        | -350000000                               | f  | t  | t  | t  | f  | f
+ null                                        | false                                    | f  | t  | t  | t  | f  | f
+ null                                        | [1, 2]                                   | f  | t  | t  | t  | f  | f
+ null                                        | {}                                       | f  | t  | t  | t  | f  | f
+ null                                        | {"": ""}                                 | f  | t  | t  | t  | f  | f
+ ""                                          | []                                       | f  | t  | f  | f  | t  | t
+ ""                                          | ""                                       | t  | f  | f  | t  | f  | t
+ ""                                          | false                                    | f  | t  | t  | t  | f  | f
+ "a"                                         | "b"                                      | f  | t  | t  | t  | f  | f
+ "a"                                         | "cc"                                     | f  | t  | t  | t  | f  | f
+ "a"                                         | -.586                                    | f  | t  | t  | t  | f  | f
+ "aa"                                        | "aa"                                     | t  | f  | f  | t  | f  | t
+ "s"                                         | ["s"]                                    | f  | t  | t  | t  | f  | f
+ "true"                                      | true                                     | f  | t  | t  | t  | f  | f
+ "x"                                         | {}                                       | f  | t  | t  | t  | f  | f
+ "x"                                         | {"x": 1}                                 | f  | t  | t  | t  | f  | f
+ -350000000                                  | 8000                                     | f  | t  | t  | t  | f  | f
+ -1                                          | true                                     | f  | t  | t  | t  | f  | f
+ 0                                           | []                                       | f  | t  | f  | f  | t  | t
+ 0                                           | 0                                        | t  | f  | f  | t  | f  | t
+ 0                                           | {}                                       | f  | t  | t  | t  | f  | f
+ 1                                           | false                                    | f  | t  | t  | t  | f  | f
+ 1                                           | [1]                                      | f  | t  | t  | t  | f  | f
+ 1                                           | {"1": 1}                                 | f  | t  | t  | t  | f  | f
+ 9                                           | -9                                       | f  | t  | f  | f  | t  | t
+ 100                                         | 100                                      | t  | f  | f  | t  | f  | t
+ false                                       | []                                       | f  | t  | f  | f  | t  | t
+ false                                       | false                                    | t  | f  | f  | t  | f  | t
+ false                                       | true                                     | f  | t  | t  | t  | f  | f
+ false                                       | [true]                                   | f  | t  | t  | t  | f  | f
+ true                                        | {}                                       | f  | t  | t  | t  | f  | f
+ true                                        | {"false": true}                          | f  | t  | t  | t  | f  | f
+ [[]]                                        | [{}]                                     | f  | t  | t  | t  | f  | f
+ [[false]]                                   | [1]                                      | f  | t  | f  | f  | t  | t
+ [[{"": ""}]]                                | [{}]                                     | f  | t  | t  | t  | f  | f
+ [1, 2]                                      | [1]                                      | f  | t  | f  | f  | t  | t
+ [1, 2]                                      | [1, 3]                                   | f  | t  | t  | t  | f  | f
+ [1, 2, 3]                                   | [true, false, true]                      | f  | t  | t  | t  | f  | f
+ {}                                          | {}                                       | t  | f  | f  | t  | f  | t
+ {"a": 4}                                    | {"a": 5}                                 | f  | t  | t  | t  | f  | f
+ {"aa": 4}                                   | {"a": 5}                                 | f  | t  | f  | f  | t  | t
+ {"aa": 4}                                   | {"a": 5, "aa": 4}                        | f  | t  | t  | t  | f  | f
+ {"f": [1, 5, 8], "r": {"": 30, "o": "ooo"}} | {"f": [1, 5], "r": {"": 30, "o": "ooo"}} | f  | t  | f  | f  | t  | t
+                                             | 888                                      |    |    |    |    |    | 
+                                             |                                          |    |    |    |    |    | 
+(50 rows)
+
+-- partition/temp/unlog row/column table
+-- index  uindex
+create table jsonbt (a jsonb, b int);
+create temp table tmpjsonbt (a jsonb);
+create unlogged table ulgjsonbt (a jsonb);
+create table partjsonbt1 (a jsonb) partition by range(a) (partition p1 values less than('1'),partition p2 values less than('{}'));
+ERROR:  column a cannot serve as a range partitioning column because of its datatype
+create table partjsonbt2 (a jsonb) partition by hash(a) (partition p1,partition p2);
+ERROR:  column a cannot serve as a hash partitioning column because of its datatype
+create table csjsonbt(a jsonb) with (orientation=column);
+ERROR:  type "jsonb" is not supported in column store
+create unique index uijsonbt on jsonbt(a);
+create index ijsonbt on jsonbt(a);
+insert into jsonbt values('null',1), ('""',1), ('0',1), ('false',1), ('[]',1), ('{}',1);
+insert into tmpjsonbt values('null'), ('""'), ('0');
+insert into ulgjsonbt values('false'), ('[]'), ('{}');
+update tmpjsonbt set a = '"a"' where jsonb_typeof(a) = 'string';
+delete from ulgjsonbt where jsonb_typeof(a) = 'boolean';
+insert into jsonbt values('false',0) on duplicate key update b = 5;
+select * from jsonbt;
+   a   | b 
+-------+---
+ null  | 1
+ ""    | 1
+ 0     | 1
+ []    | 1
+ {}    | 1
+ false | 5
+(6 rows)
+
+select * from tmpjsonbt;
+  a   
+------
+ null
+ 0
+ "a"
+(3 rows)
+
+select * from ulgjsonbt;
+ a  
+----
+ []
+ {}
+(2 rows)
+
+-- pk fk join
+create table jsonbpk (pk jsonb primary key);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "jsonbpk_pkey" for table "jsonbpk"
+create table jsonbfk (a int, fk jsonb references jsonbpk);
+insert into jsonbpk values(null);
+ERROR:  null value in column "pk" violates not-null constraint
+DETAIL:  Failing row contains (null).
+insert into jsonbpk values('null'), ('""'), ('0'), ('false'), ('[]'), ('{}');
+insert into jsonbpk values('"aaa"'), ('-2.5e2'), ('true'), ('[1,5,"ff",{}]'), ('{"":""}'), ('{"xx":55, "dd":[1,2]}');
+insert into jsonbpk values('null');
+ERROR:  duplicate key value violates unique constraint "jsonbpk_pkey"
+DETAIL:  Key (pk)=(null) already exists.
+insert into jsonbpk values('[1,5,"ff",{}]');
+ERROR:  duplicate key value violates unique constraint "jsonbpk_pkey"
+DETAIL:  Key (pk)=([1, 5, "ff", {}]) already exists.
+insert into jsonbfk values(1,'null'), (2,'""'), (3,'0'), (4,'false'), (5,'[]'), (6,'{}');
+insert into jsonbfk values(7,'"aaa"'), (8,'-2.5e2'), (9,'true'), (1,'[1,5,"ff",{}]'), (2,'{"":""}'), (3,'{"xx":55, "dd":[1,2]}');
+insert into jsonbfk values(10,'"aaa"'), (11,'-2.5e2'), (12,'true'), (13,'[1,5,"ff",{}]'), (14,'{"":""}'), (15,'{"xx":55, "dd":[1,2]}');
+insert into jsonbfk values(1,'[100]'), (2,'"err"'), (3,'100'), (4,'[1,3,2]'), (5,'{"err":"err"}');
+ERROR:  insert or update on table "jsonbfk" violates foreign key constraint "jsonbfk_fk_fkey"
+DETAIL:  Key (fk)=([100]) is not present in table "jsonbpk".
+select a, pk, fk from jsonbfk join jsonbpk on fk = pk order by 1,2;
+ a  |            pk            |            fk            
+----+--------------------------+--------------------------
+  1 | null                     | null
+  1 | [1, 5, "ff", {}]         | [1, 5, "ff", {}]
+  2 | ""                       | ""
+  2 | {"": ""}                 | {"": ""}
+  3 | 0                        | 0
+  3 | {"dd": [1, 2], "xx": 55} | {"dd": [1, 2], "xx": 55}
+  4 | false                    | false
+  5 | []                       | []
+  6 | {}                       | {}
+  7 | "aaa"                    | "aaa"
+  8 | -250                     | -250
+  9 | true                     | true
+ 10 | "aaa"                    | "aaa"
+ 11 | -250                     | -250
+ 12 | true                     | true
+ 13 | [1, 5, "ff", {}]         | [1, 5, "ff", {}]
+ 14 | {"": ""}                 | {"": ""}
+ 15 | {"dd": [1, 2], "xx": 55} | {"dd": [1, 2], "xx": 55}
+(18 rows)
+
+explain select a, pk, fk from jsonbfk join jsonbpk on fk = pk order by 1,2;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Sort  (cost=142.63..145.72 rows=1238 width=68)
+   Sort Key: jsonbfk.a, jsonbpk.pk
+   ->  Hash Join  (cost=39.63..79.04 rows=1238 width=68)
+         Hash Cond: (jsonbfk.fk = jsonbpk.pk)
+         ->  Seq Scan on jsonbfk  (cost=0.00..22.38 rows=1238 width=36)
+         ->  Hash  (cost=23.17..23.17 rows=1317 width=32)
+               ->  Seq Scan on jsonbpk  (cost=0.00..23.17 rows=1317 width=32)
+(7 rows)
+
+-- scan indexscan bypass
+set opfusion_debug_mode = log;
+analyze jsonbpk;
+explain select * from jsonbpk;
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
+ Seq Scan on jsonbpk  (cost=0.00..1.12 rows=12 width=17)
+(2 rows)
+
+select * from jsonbpk where pk >= '[]';
+            pk            
+--------------------------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+ "aaa"
+ -250
+ true
+ [1, 5, "ff", {}]
+ {"": ""}
+ {"dd": [1, 2], "xx": 55}
+(12 rows)
+
+select * from jsonbpk where pk >= 'false';
+            pk            
+--------------------------
+ false
+ {}
+ true
+ [1, 5, "ff", {}]
+ {"": ""}
+ {"dd": [1, 2], "xx": 55}
+(6 rows)
+
+explain select * from jsonbpk where pk >= 'false';
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
+ Seq Scan on jsonbpk  (cost=0.00..1.15 rows=6 width=17)
+   Filter: (pk >= 'false'::jsonb)
+(3 rows)
+
+insert into jsonbpk select generate_series(1,10000)::text::jsonb;
+analyze jsonbpk;
+explain select * from jsonbpk where pk < '0';
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query's relation is not support.
+ Index Only Scan using jsonbpk_pkey on jsonbpk  (cost=0.00..10.16 rows=50 width=17)
+   Index Cond: (pk < '0'::jsonb)
+(3 rows)
+
+set opfusion_debug_mode = off;
+-- normal agg function
+create table jsonbaggtest (a int, b jsonb);
+insert into jsonbaggtest select * from jsonbfk;
+select count(*) from jsonbaggtest where b > '{}';
+ count 
+-------
+     4
+(1 row)
+
+select count(a), max(a), b from jsonbaggtest group by b having max(a) > 5 order by 1,2,3;
+ count | max |            b             
+-------+-----+--------------------------
+     1 |   6 | {}
+     2 |  10 | "aaa"
+     2 |  11 | -250
+     2 |  12 | true
+     2 |  13 | [1, 5, "ff", {}]
+     2 |  14 | {"": ""}
+     2 |  15 | {"dd": [1, 2], "xx": 55}
+(7 rows)
+
+select max(b), a from jsonbaggtest group by a having max(b) > '{}' order by 1,2;
+ERROR:  function max(jsonb) does not exist
+LINE 1: select max(b), a from jsonbaggtest group by a having max(b) ...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: max
+select min(b) from jsonbaggtest;
+ERROR:  function min(jsonb) does not exist
+LINE 1: select min(b) from jsonbaggtest;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: min
+select sum(b) from jsonbaggtest;
+ERROR:  function sum(jsonb) does not exist
+LINE 1: select sum(b) from jsonbaggtest;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sum
+select median(b) from jsonbaggtest;
+ERROR:  function median(jsonb) does not exist
+LINE 1: select median(b) from jsonbaggtest;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: median
+select avg(b) from jsonbaggtest;
+ERROR:  function avg(jsonb) does not exist
+LINE 1: select avg(b) from jsonbaggtest;
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: avg
+-- view/matview/incmatview
+create table jsonbvt(a jsonb);
+insert into jsonbvt values ('null'), ('""'), ('0'), ('false'), ('[]'), ('{}');
+create view jsonbpkv as select * from jsonbvt;
+create materialized view jsonbpkmv as select * from jsonbvt;
+create incremental materialized view jsonbpkimv as select * from jsonbvt;
+insert into jsonbvt values('[null, "", 0, false, [], {}]');
+select * from jsonbpkv;
+              a               
+------------------------------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+ [null, "", 0, false, [], {}]
+(7 rows)
+
+select * from jsonbpkmv;
+   a   
+-------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+(6 rows)
+
+select * from jsonbpkimv;
+   a   
+-------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+(6 rows)
+
+refresh materialized view jsonbpkmv;
+refresh incremental materialized view jsonbpkimv;
+select * from jsonbpkmv;
+              a               
+------------------------------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+ [null, "", 0, false, [], {}]
+(7 rows)
+
+select * from jsonbpkimv;
+              a               
+------------------------------
+ null
+ ""
+ 0
+ false
+ []
+ {}
+ [null, "", 0, false, [], {}]
+(7 rows)
+
+-- transaction and rollback and err
+create table jsonbtr (a jsonb);
+begin;
+select * from jsonbtr;
+ a 
+---
+(0 rows)
+
+insert into jsonbtr values('{}'), ('[]');
+select * from jsonbtr;
+ a  
+----
+ {}
+ []
+(2 rows)
+
+end;
+begin;
+insert into jsonbtr values('{"":""}'), ('[1,2,3]');
+select * from jsonbtr;
+     a     
+-----------
+ {}
+ []
+ {"": ""}
+ [1, 2, 3]
+(4 rows)
+
+rollback;
+select * from jsonbtr;
+ a  
+----
+ {}
+ []
+(2 rows)
+
+begin;
+insert into jsonbtr values('{:}'), ('[,]');
+ERROR:  invalid input syntax for type json
+LINE 1: insert into jsonbtr values('{:}'), ('[,]');
+                                   ^
+DETAIL:  Expected string or "}", but found ":".
+CONTEXT:  JSON data, line 1: {:...
+referenced column: a
+select * from jsonbtr;
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+end;
+select * from jsonbtr;
+ a  
+----
+ {}
+ []
+(2 rows)
+
+-- clean up
+DROP SCHEMA jsonb_test CASCADE;
+NOTICE:  drop cascades to 13 other objects
+DETAIL:  drop cascades to table cmpjsonb
+drop cascades to table jsonbt
+drop cascades to table ulgjsonbt
+drop cascades to table jsonbpk
+drop cascades to table jsonbfk
+drop cascades to table jsonbaggtest
+drop cascades to table jsonbvt
+drop cascades to view jsonbpkv
+drop cascades to materialized view jsonbpkmv
+drop cascades to materialized view jsonbpkimv
+--?drop cascades to table matviewmap_.*
+--?drop cascades to table mlog_.*
+drop cascades to table jsonbtr

@@ -530,6 +530,8 @@ DATA(insert (20   4303 0 e b ));
 DATA(insert (23   4303 4317 e f ));
 DATA(insert (4402 4301 0 e b ));
 
-
+/* json to/from jsonb */
+DATA(insert ( 114 3802 0 e i ));
+DATA(insert ( 3802 114 0 e i ));
 
 #endif   /* PG_CAST_H */

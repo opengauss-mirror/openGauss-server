@@ -301,6 +301,6 @@ extern Numeric make_result(NumericVar *var);
 extern void free_var(NumericVar *var);
 extern void int64_to_numericvar(int64 val, NumericVar *var);
 extern void add_var(NumericVar *var1, NumericVar *var2, NumericVar *result);
-
+extern char *numeric_normalize(Numeric num);
 
 #endif /* _PG_NUMERIC_H_ */

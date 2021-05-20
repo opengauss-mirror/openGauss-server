@@ -396,6 +396,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PERCENTILECONTAGGFUNCOID 4452
 #define MODEAGGFUNCOID 4461
 #define PGCHECKAUTHIDFUNCOID 3228
+#define JSONAGGFUNCOID 5206
+#define JSONOBJECTAGGFUNCOID 5209
 
 /*
  * Symbolic values for prokind column

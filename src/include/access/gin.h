@@ -75,4 +75,9 @@ extern void gin_xlog_startup(void);
 extern void gin_xlog_cleanup(void);
 extern bool IsGinVacuumPages(XLogReaderState *record);
 
+typedef char GinLogicValue;
+#define DatumGetGinLogicValue(X) ((GinLogicValue)(X))
+#define GinLogicValueGetDatum(X) ((Datum)(X))
+#define PG_RETURN_GIN_LOGIC_VALUE(x) return GinLogicValueGetDatum(x)
+
 #endif /* GIN_H */
