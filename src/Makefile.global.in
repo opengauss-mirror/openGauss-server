@@ -173,6 +173,7 @@ enable_jemalloc_debug	= @enable_jemalloc_debug@
 enable_privategauss             = @enable_privategauss@
 enable_multiple_nodes		= @enable_multiple_nodes@
 enable_mot			= @enable_mot@
+enable_llvm			= @enable_llvm@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
 enable_pldebugger		= @enable_pldebugger@
@@ -506,7 +507,9 @@ LIBLLVM_BIN = $(LIBLLVM_HOME)/bin
 LIBLLVM_INCLUDE_PATH = $(LIBLLVM_HOME)/include
 LIBLLVM_LIB_PATH = $(LIBLLVM_HOME)/lib
 LLVM_CONFIG = $(LIBLLVM_BIN)/llvm-config
-LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
+ifeq ($(enable_llvm), yes)
+  LLVM_LIBS = $(shell $(LLVM_CONFIG)    --libs)
+endif
 
 #############################################################################
 # event component
@@ -751,6 +754,10 @@ endif
 
 ifeq ($(enable_mot), yes)
   override CPPFLAGS := $(CPPFLAGS) -I$(MASSTREE_INCLUDE_PATH)
+endif
+
+ifeq ($(enable_llvm), yes)
+  override CPPFLAGS := $(CPPFLAGS) -DENABLE_LLVM_COMPILE
 endif
 
 CC = @CC@

@@ -1049,10 +1049,12 @@ int PostmasterMain(int argc, char* argv[])
     cJSON_Hooks hooks = {cJSON_internal_malloc, cJSON_internal_free};
     cJSON_InitHooks(&hooks);
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Prepare codegen enviroment.
      */
     CodeGenProcessInitialize();
+#endif
 
     /* Initialize paths to installation files */
     getInstallationPaths(argv[0]);
@@ -7070,7 +7072,9 @@ void ExitPostmaster(int status)
     TermMOT();   /* shutdown memory engine before codegen is destroyed */
 #endif
 
+#ifdef ENABLE_LLVM_COMPILE
     CodeGenProcessTearDown();
+#endif
 
     /* Save llt data to disk before postmaster exit */
 #ifdef ENABLE_LLT

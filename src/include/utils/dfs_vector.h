@@ -30,6 +30,8 @@
 #include "securec.h"
 #include "securec_check.h"
 
+#include <algorithm>
+
 /* stands for non-int type */
 struct __type_true {};
 
