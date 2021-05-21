@@ -743,6 +743,7 @@
 ./lib/postgresql/pgxs/src/Makefile.port
 ./lib/postgresql/pgxs/src/nls-global.mk
 ./lib/postgresql/pgxs/src/Makefile.global
+./lib/postgresql/pgxs/src/get_PlatForm_str.sh
 ./lib/postgresql/pgxs/config/install-sh
 ./lib/postgresql/euc_cn_and_mic.so
 ./lib/postgresql/latin_and_mic.so
