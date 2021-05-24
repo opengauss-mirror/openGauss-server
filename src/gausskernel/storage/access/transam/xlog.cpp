@@ -2478,9 +2478,6 @@ static bool XLogArchiveCheckDone(const char *xlog)
 static bool HasBeenArchivedOnHaMode(const char* xlog)
 {
     load_server_mode();
-    if (!t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && !t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
-        return true;
-    }
     int mode = t_thrd.xlog_cxt.server_mode;
     XLogRecPtr minium_lsn = PG_UINT64_MAX;
     for (int i = 0; mode == PRIMARY_MODE && i < g_instance.attr.attr_storage.max_wal_senders; i++) {
