@@ -6294,6 +6294,25 @@ static LOCKMODE set_lockmode(LOCKMODE mode, LOCKMODE cmd_mode)
     return mode;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static LOCKMODE GetPartitionLockLevel(AlterTableType subType)
+{
+    LOCKMODE cmdLockMode;
+    switch (cmd->subtype) {
+        case AT_AddPartition:
+        case AT_DropPartition:
+        case AT_ExchangePartition:
+        case AT_MergePartition:
+            cmdLockMode = RowExclusiveLock;
+            break;
+        default:
+            cmdLockMode = AccessExclusiveLock;
+            break;
+    }
+    return cmdLockMode;
+}
+#endif
+
 /*
  * AlterTableGetLockLevel
  *
@@ -6542,6 +6561,10 @@ LOCKMODE AlterTableGetLockLevel(List* cmds)
         foreach (lcmd, cmds) {
             LOCKMODE cmd_lockmode = AccessExclusiveLock;
 
+#ifndef ENABLE_MULTIPLE_NODES
+            AlterTableCmd* cmd = (AlterTableCmd *)lfirst(lcmd);
+            cmd_lockmode = GetPartitionLockLevel(cmd->subtype);
+#endif
             /* update with the higher lock mode */
             lockmode = set_lockmode(lockmode, cmd_lockmode);
         }
