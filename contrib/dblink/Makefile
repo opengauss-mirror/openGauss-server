@@ -9,6 +9,9 @@ SHLIB_PREREQS = submake-libpq
 EXTENSION = dblink
 DATA = dblink--1.0.sql dblink--unpackaged--1.0.sql
 
+exclude_option = -fPIE
+override CPPFLAGS := $(filter-out $(exclude_option),$(CPPFLAGS))
+
 REGRESS = dblink
 
 # the db name is hard-coded in the tests
