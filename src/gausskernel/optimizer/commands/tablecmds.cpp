@@ -6302,7 +6302,7 @@ static LOCKMODE GetPartitionLockLevel(AlterTableType subType)
         case AT_AddPartition:
         case AT_DropPartition:
         case AT_ExchangePartition:
-        case AT_MergePartition:
+        case AT_TruncatePartition:
             cmdLockMode = RowExclusiveLock;
             break;
         default:
