@@ -6298,7 +6298,7 @@ static LOCKMODE set_lockmode(LOCKMODE mode, LOCKMODE cmd_mode)
 static LOCKMODE GetPartitionLockLevel(AlterTableType subType)
 {
     LOCKMODE cmdLockMode;
-    switch (cmd->subtype) {
+    switch (subtype) {
         case AT_AddPartition:
         case AT_DropPartition:
         case AT_ExchangePartition:
