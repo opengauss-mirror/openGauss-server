@@ -2477,9 +2477,20 @@ static bool XLogArchiveCheckDone(const char *xlog)
 
 static bool HasBeenArchivedOnHaMode(const char* xlog)
 {
+    /*
+     * Generally, the validity of the xlog transferred from the upper layer has been verified.
+     * Therefore, if the length of the xlog name transferred is greater than the standard length
+     * of the xlog name (24 characters), the transferred file is a .backup file.
+     * Therefore, if the xlog name contains more than 24 characters, return true.
+     */
+    if (strlen(xlog) > 24) {
+        return true;
+    }
+
     load_server_mode();
     int mode = t_thrd.xlog_cxt.server_mode;
     XLogRecPtr minium_lsn = PG_UINT64_MAX;
+
     for (int i = 0; mode == PRIMARY_MODE && i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
