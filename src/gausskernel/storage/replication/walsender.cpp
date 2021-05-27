@@ -3203,12 +3203,13 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             XLogRecPtr replayPtr;
             bool amSync = false;
             bool got_recptr = false;
+            int standby_nums = list_length(SyncRepGetSyncStandbys(&amSync));
             got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
             if (got_recptr) {
                 ArchiveXlogOnStandby(flushPtr);
-            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
-                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
-                            list_length(SyncRepGetSyncStandbys(&amSync)) == 0)) {
+            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL || 
+                        u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH ||
+                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && standby_nums == 0)) {
                 /*
                  * This step is used to deal with the situation that synchronous standbys are not set.
                  */
