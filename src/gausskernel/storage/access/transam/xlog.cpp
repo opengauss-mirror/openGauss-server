@@ -2481,9 +2481,9 @@ static bool HasBeenArchivedOnHaMode(const char* xlog)
      * Generally, the validity of the xlog transferred from the upper layer has been verified.
      * Therefore, if the length of the xlog name transferred is greater than the standard length
      * of the xlog name (24 characters), the transferred file is a .backup file.
-     * Therefore, if the xlog name contains more than 24 characters, return true .
+     * Therefore, if the xlog name contains more than 24 characters, return true directly.
      */
-    if (strlen(xlog) > 24) {
+    if (strlen(xlog) > XLOG_NAME_LENGTH) {
         return true;
     }
 
