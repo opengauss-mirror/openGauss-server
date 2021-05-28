@@ -36,7 +36,7 @@ class KerasRegression:
         shape = features.shape[1]
         if self.model is None:
             self.model = self.build_model(shape=shape, encoding_dim=self.encoding_dim)
-        self.model.fit(features, labels, epochs=epochs, batch_size=batch_size, shuffle=True, verbose=2)
+        self.model.fit(features, labels, epochs=epochs, batch_size=batch_size, shuffle=True, verbose=0)
 
     def predict(self, features):
         predict_result = self.model.predict(features)
@@ -129,10 +129,6 @@ class DnnModel(AbstractModel, ABC):
             self.w2v.load(word2vector_path)
             with open(scaler_path, 'rb') as f:
                 self.scaler = pickle.load(f)
-            logging.info("dnn model is loaded: '{}'; w2v model is loaded: '{}'; scaler model is loaded: '{}'."
-                         .format(dnn_path,
-                                 word2vector_path,
-                                 scaler_path))
         else:
             logging.error("{} not exist.".format(realpath))
 
@@ -149,7 +145,5 @@ class DnnModel(AbstractModel, ABC):
         self.w2v.save(word2vector_path)
         with open(scaler_path, 'wb') as f:
             pickle.dump(self.scaler, f)
-        logging.info("dnn model is saved: '{}'; w2v model is saved: '{}'; scaler model is saved: '{}'."
-                     .format(dnn_path,
-                             word2vector_path,
-                             scaler_path))
+        print("DNN model is stored in '{}'".format(realpath))
+

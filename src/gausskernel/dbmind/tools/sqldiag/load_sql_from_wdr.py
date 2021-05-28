@@ -12,10 +12,10 @@ __description__ = "Get sql information based on wdr."
 def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
                                      description=__description__)
-    parser.add_argument('--port', help="User of remote server.", type=int, required=True)
-    parser.add_argument('--start_time', help="Start time of query", required=True)
-    parser.add_argument('--finish_time', help="Finish time of query", required=True)
-    parser.add_argument('--save_path', default='sample_data/data.csv', help="Path to save result")
+    parser.add_argument('--port', help="Port of database service.", type=int, required=True)
+    parser.add_argument('--start-time', help="Start time of query", required=True)
+    parser.add_argument('--finish-time', help="Finish time of query", required=True)
+    parser.add_argument('--save-path', default='sample_data/data.csv', help="Path to save result")
     return parser.parse_args()
 
 

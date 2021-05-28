@@ -18,8 +18,6 @@ import sqlparse
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import Keyword, DML
 
-# split flag in SQL
-split_flag = ('!=', '<=', '>=', '==', '<', '>', '=', ',', '(', ')', '*', ';', '%', '+', ',', ';')
 
 DDL_WORDS = ('CREATE', 'ALTER', 'DROP', 'TRUNCATE', 'COMMIT', 'RENAME')
 DML_WORDS = ('SELECT', 'INSERT INTO', 'UPDATE', 'DELETE', 'MERGE', 'CALL',
@@ -31,53 +29,6 @@ KEYWORDS = ('GRANT', 'REVOKE', 'DENY', 'ABORT', 'ADD', 'AGGREGATE', 'ANALYSE', '
 FUNC = ('FLOOR', 'SUM', 'NOW', 'UUID', 'COUNT')
 SQL_SIG = ('&', '&&')
 
-# filter like (insert into aa (c1, c2) values (v1, v2) => insert into aa * values *)
-BRACKET_FILTER = r'\(.*?\)'
-
-# filter (123, 123.123)
-PURE_DIGIT_FILTER = r'[\s]+\d+(\.\d+)?'
-
-# filter ('123', '123.123')
-SINGLE_QUOTE_DIGIT_FILTER = r'\'\d+(\.\d+)?\''
-
-# filter ("123", "123.123")
-DOUBLE_QUOTE_DIGIT_FILTER = r'"\d+(\.\d+)?"'
-
-# filter ('123', 123, '123,123', 123.123) not filter(table1, column1, table_2, column_2)
-DIGIT_FILTER = r'([^a-zA-Z])_?\d+(\.\d+)?'
-
-# filter date in sql ('1999-09-09', '1999/09/09', "1999-09-09 20:10:10", '1999/09/09 20:10:10.12345')
-PURE_TIME_FILTER = r'[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}\s*([0-9]{1,2}[:][0-9]{1,2}[:][0-9]{1,2})?(\.\d+)?'
-SINGLE_QUOTE_TIME_FILTER = r'\'[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}\s*([0-9]{1,2}[:][0-9]{1,2}[:][0-9]{1,' \
-                           r'2})?(\.\d+)?\' '
-DOUBLE_QUOTE_TIME_FILTER = r'"[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}\s*([0-9]{1,2}[:][0-9]{1,2}[:][0-9]{1,2})?(\.\d+)?"'
-
-# filter like "where id='abcd" => "where id=#"
-SINGLE_QUOTE_FILTER = r'\'.*?\''
-
-# filter like 'where id="abcd" => 'where id=#'
-DOUBLE_QUOTE_FILTER = r'".*?"'
-
-# filter annotation like "/* XXX */"
-ANNOTATION_FILTER_1 = r'/\s*\*[\w\W]*?\*\s*/\s*'
-ANNOTATION_FILTER_2 = r'^--.*\s?'
-
-# filter NULL character  '\n \t' in sql
-NULL_CHARACTER_FILTER = r'\s+'
-
-# remove data in insert sql
-VALUE_BRACKET_FILETER = r'VALUES (\(.*\))'
-
-# remove equal data in sql
-WHERE_EQUAL_FILTER = r'= .*?\s'
-
-LESS_EQUAL_FILTER = r'(<= .*? |<= .*$)'
-GREATER_EQUAL_FILTER = r'(>= .*? |<= .*$)'
-LESS_FILTER = r'(< .*? |< .*$)'
-GREATER_FILTER = r'(> .*? |> .*$)'
-EQUALS_FILTER = r'(= .*? |= .*$)'
-LIMIT_DIGIT = r'LIMIT \d+'
-
 
 def _unify_sql(sql):
     """
@@ -85,65 +36,49 @@ def _unify_sql(sql):
     """
     index = 0
     sql = re.sub(r'\n', r' ', sql)
-    sql = re.sub(ANNOTATION_FILTER_1, r'', sql)
-    sql = re.sub(ANNOTATION_FILTER_2, r'', sql)
-    while index < len(sql):
-        if sql[index] in split_flag:
-            if sql[index:index + 2] in split_flag:
-                sql = sql[:index].strip() + ' ' + sql[index:index + 2] + ' ' + sql[index + 2:].strip()
-                index = index + 3
-            else:
-                sql = sql[:index].strip() + ' ' + sql[index] + ' ' + sql[index + 1:].strip()
-                index = index + 2
-        else:
-            index = index + 1
-    new_sql = list()
-    for word in sql.split():
-        new_sql.append(word.upper())
-    sql = ' '.join(new_sql)
+    sql = re.sub(r'/\s*\*[\w\W]*?\*\s*/\s*', r'', sql)
+    sql = re.sub(r'^--.*\s?', r'', sql)
+   
+    sql = re.sub(r'([!><=]=)', r' \1 ', sql)
+    sql = re.sub(r'([^!><=])([=<>])', r'\1 \2 ', sql)
+    sql = re.sub(r'([,()*%/+])', r' \1 ', sql)
+    sql = re.sub(r'\s+', r' ', sql)
+    sql = sql.upper()
     return sql.strip()
+
+
+def split_sql(sqls):
+    if not sqls:
+        return []
+    sqls = sqls.split(';')
+    result = list(map(lambda item: _unify_sql(item), sqls))
+    return result
 
 
 def templatize_sql(sql):
     """
-    function: replace the message which is not important in sql
+    SQL desensitization
     """
-    sql = _unify_sql(sql)
+    if not sql:
+        return ''
+    standard_sql = _unify_sql(sql)
 
-    sql = re.sub(r';', r'', sql)
+    if standard_sql.startswith('INSERT'):
+        standard_sql = re.sub(r'VALUES (\(.*\))', r'VALUES', standard_sql)
+    # remove digital like 12, 12.565
+    standard_sql = re.sub(r'[\s]+\d+(\.\d+)?', r' ?', standard_sql)
+    # remove '$n' in sql
+    standard_sql = re.sub(r'\$\d+', r'?', standard_sql)
+    # remove single quotes content
+    standard_sql = re.sub(r'\'.*?\'', r'?', standard_sql)
+    # remove double quotes content
+    standard_sql = re.sub(r'".*?"', r'?', standard_sql)
+    # remove '`' in sql
+    standard_sql = re.sub(r'`', r'', standard_sql)
+    # remove ; in sql
+    standard_sql = re.sub(r';', r'', standard_sql)
 
-    # ? represent date or time
-    sql = re.sub(PURE_TIME_FILTER, r'?', sql)
-    sql = re.sub(SINGLE_QUOTE_TIME_FILTER, r'?', sql)
-    sql = re.sub(DOUBLE_QUOTE_TIME_FILTER, r'?', sql)
-
-    # $ represent insert value
-    if sql.startswith('INSERT'):
-        sql = re.sub(VALUE_BRACKET_FILETER, r'VALUES ()', sql)
-
-    # $$ represent select value
-    if sql.startswith('SELECT') and ' = ' in sql:
-        sql = re.sub(WHERE_EQUAL_FILTER, r'= $$ ', sql)
-
-    # $$$ represent delete value
-    if sql.startswith('DELETE') and ' = ' in sql:
-        sql = re.sub(WHERE_EQUAL_FILTER, r'= $$$ ', sql)
-
-    # & represent logical signal
-    sql = re.sub(LESS_EQUAL_FILTER, r'<= & ', sql)
-    sql = re.sub(LESS_FILTER, r'< & ', sql)
-    sql = re.sub(GREATER_EQUAL_FILTER, r'>= & ', sql)
-    sql = re.sub(GREATER_FILTER, r'> & ', sql)
-    sql = re.sub(LIMIT_DIGIT, r'LIMIT &', sql)
-    sql = re.sub(EQUALS_FILTER, r'= & ', sql)
-    sql = re.sub(PURE_DIGIT_FILTER, r' &', sql)
-    sql = re.sub(r'`', r'', sql)
-
-    # && represent quote str
-    sql = re.sub(SINGLE_QUOTE_FILTER, r'?', sql)
-    sql = re.sub(DOUBLE_QUOTE_FILTER, r'?', sql)
-
-    return sql
+    return standard_sql.strip()
 
 
 def _is_select_clause(parsed_sql):
@@ -155,7 +90,6 @@ def _is_select_clause(parsed_sql):
     return False
 
 
-# todo: what is token list? from list?
 def _get_table_token_list(parsed_sql, token_list):
     flag = False
     for token in parsed_sql.tokens:
