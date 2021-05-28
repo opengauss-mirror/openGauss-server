@@ -906,6 +906,11 @@ void parse_join_expr(JoinExpr *join_tree)
         return;
     }
 
+    if (nodeTag(join_tree->larg) != T_RangeVar ||
+        nodeTag(join_tree->rarg) != T_RangeVar) {
+        return;
+    }
+
     List *join_fields = join_tree->usingClause;
     char *l_table_name = ((RangeVar *)(join_tree->larg))->relname;
     char *r_table_name = ((RangeVar *)(join_tree->rarg))->relname;
@@ -1548,7 +1553,7 @@ void add_index_from_group_order(TableCell *table, List *clause, List *target_lis
             ListCell *prev = NULL;
             foreach (cur, table->index) {
                 IndexCell *table_index = (IndexCell *)lfirst(cur);
-                if (strcasecmp(table_index->index_name, index->index_name) == 0) {
+                if (index->index_name == NULL || strcasecmp(table_index->index_name, index->index_name) == 0) {
                     break;
                 }
                 if (table_index->op && strcasecmp(table_index->op, "=") != 0) {
