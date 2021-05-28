@@ -5421,6 +5421,9 @@ static void drop_unnamed_stmt(void)
  */
 void quickdie(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     sigaddset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT); /* prevent nested calls */
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
@@ -5474,6 +5477,9 @@ void quickdie(SIGNAL_ARGS)
  */
 void die(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     int save_errno = errno;
 
     /* Don't joggle the elbow of proc_exit */
@@ -5523,6 +5529,9 @@ void die(SIGNAL_ARGS)
  */
 void StatementCancelHandler(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     int save_errno = errno;
 
     /*
@@ -7269,6 +7278,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+	t_thrd.int_cxt.ignoreBackendSignal = false;
         gstrace_tryblock_exit(true, oldTryCounter);
         Assert(t_thrd.proc->dw_pos == -1);
 
