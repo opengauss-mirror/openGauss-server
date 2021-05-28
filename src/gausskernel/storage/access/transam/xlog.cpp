@@ -2483,7 +2483,7 @@ static bool HasBeenArchivedOnHaMode(const char* xlog)
      * of the xlog name (24 characters), the transferred file is a .backup file.
      * Therefore, if the xlog name contains more than 24 characters, return true.
      */
-    if (strlen(xlog) > 24) {
+    if (strlen(xlog) > XLOG_NAME_LENGTH) {
         return true;
     }
 
