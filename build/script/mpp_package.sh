@@ -881,6 +881,9 @@ function install_gaussdb()
         fi
     fi
 
+    # copy gs_plan_simulator.sh to /bin dir. it's used in gs_collector tool.
+    cp ${ROOT_DIR}/src/bin/gs_plan_simulator/gs_plan_simulator.sh ${BUILD_DIR}/bin/
+
     chmod 444 ${BUILD_DIR}/bin/cluster_guc.conf
     dos2unix ${BUILD_DIR}/bin/cluster_guc.conf > /dev/null 2>&1
 
