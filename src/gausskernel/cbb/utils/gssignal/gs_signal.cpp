@@ -882,7 +882,6 @@ void* gs_signal_receiver_thread(void* args)
     sigaddset(&waitMask, SIGQUIT);
     sigaddset(&waitMask, SIGHUP);
     sigaddset(&waitMask, SIGUSR1);
-    sigaddset(&waitMask, SIGBUS);
 
     gs_signal_block_sigusr2();
 
@@ -928,12 +927,6 @@ static void gs_res_signal_handler(int signo, siginfo_t* siginfo, void* context)
 
         CurrentMemoryContext = oldContext;
         return;
-    }
-    /* SIGILL, SIGFPE, SIGSEGV, SIGBUS has si_addr, we only receive SIGBUS. Here si_addr is used to determine whether it
-     * is a SIGBUS signal */
-    if (siginfo->si_addr) {
-        g_instance.sigbus_cxt.sigbus_addr = siginfo->si_addr;
-        g_instance.sigbus_cxt.sigbus_code = siginfo->si_code;
     }
 
     /* Hornour the signal */
@@ -1095,6 +1088,7 @@ sigset_t gs_signal_unblock_sigusr2(void)
     (void)sigdelset(&intMask, SIGUSR2);
     (void)sigdelset(&intMask, SIGPROF);
     (void)sigdelset(&intMask, SIGSEGV);
+    (void)sigdelset(&intMask, SIGBUS);
     (void)sigdelset(&intMask, SIGFPE);
     (void)sigdelset(&intMask, SIGILL);
     (void)sigdelset(&intMask, SIGSYS);
@@ -1117,6 +1111,7 @@ sigset_t gs_signal_block_sigusr2(void)
     (void)sigdelset(&intMask, SIGFPE);
     (void)sigdelset(&intMask, SIGILL);
     (void)sigdelset(&intMask, SIGSYS);
+    (void)sigdelset(&intMask, SIGBUS);
 
     pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
 

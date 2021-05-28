@@ -334,7 +334,7 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
-static void SIGBUS_handler(SIGNAL_ARGS);
+void SIGBUS_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
 static void startup_alarm(SIGNAL_ARGS);
 static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState others);
@@ -1927,7 +1927,6 @@ int PostmasterMain(int argc, char* argv[])
     (void)gspqsignal(SIGINT, pmdie);          /* send SIGTERM and shut down */
     (void)gspqsignal(SIGQUIT, pmdie);         /* send SIGQUIT and die */
     (void)gspqsignal(SIGTERM, pmdie);         /* wait for children and shut down */
-    (void)gspqsignal(SIGBUS, SIGBUS_handler);   /* send SIGBUS and die or panic */
 
     pqsignal(SIGALRM, SIG_IGN); /* ignored */
     pqsignal(SIGPIPE, SIG_IGN); /* ignored */
@@ -4257,7 +4256,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
    4. If the page is not dirty, execute pmdie to exit normally and print warning message. If the page is dirty,
       print the PANIC log and exit
  */
-static void SIGBUS_handler(SIGNAL_ARGS)
+void SIGBUS_handler(SIGNAL_ARGS)
 {
     uint64 buffer_size;
     int buf_id;

@@ -61,6 +61,11 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
 {
     static volatile int64 first_tid = INVALID_TID;
     int64 cur_tid = (int64)pthread_self();
+    if (sig == SIGBUS) {
+        g_instance.sigbus_cxt.sigbus_addr = si->si_addr;
+        g_instance.sigbus_cxt.sigbus_code = si->si_code;
+        SIGBUS_handler(sig);
+    }
 
     if (first_tid == INVALID_TID &&
             __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
@@ -90,6 +95,11 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
 {
     static volatile int64 first_tid = INVALID_TID;
     int64 cur_tid = (int64)pthread_self();
+    if (sig == SIGBUS) {
+        g_instance.sigbus_cxt.sigbus_addr = si->si_addr;
+        g_instance.sigbus_cxt.sigbus_code = si->si_code;
+        SIGBUS_handler(sig);
+    }
 
     if (first_tid == INVALID_TID &&
             __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
