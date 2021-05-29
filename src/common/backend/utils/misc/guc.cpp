@@ -174,6 +174,8 @@
 #define CONFIG_EXEC_PARAMS_NEW "global/config_exec_params.new"
 #endif
 
+#define DEFAULT_CLEAN_RATIO 0.1
+
 /* upper limit for GUC variables measured in kilobytes of memory */
 /* note that various places assume the byte size fits in a "long" variable */
 #if SIZEOF_SIZE_T > 4 && SIZEOF_LONG > 4
@@ -547,6 +549,10 @@ static const char* logging_module_guc_show(void);
 static bool logging_module_check(char** newval, void** extra, GucSource source);
 static void logging_module_guc_assign(const char* newval, void* extra);
 static void plog_merge_age_assign(int newval, void* extra);
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source);
+#endif
 
 /* Inplace Upgrade GUC hooks */
 static bool check_is_upgrade(bool* newval, void** extra, GucSource source);
@@ -3263,6 +3269,17 @@ static void InitConfigureNamesBool()
              gettext_noop("Enables beta opfusion features."),
              NULL},
             &u_sess->attr.attr_sql.enable_beta_opfusion,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"enable_auto_clean_unique_sql",
+             PGC_POSTMASTER,
+             INSTRUMENTS_OPTIONS,
+             gettext_noop("Enable auto clean unique sql entry when the UniquesQl hash table is full."),
+             NULL},
+            &g_instance.attr.attr_common.enable_auto_clean_unique_sql,
             false,
             NULL,
             NULL,
@@ -6925,17 +6942,17 @@ static void InitConfigureNamesReal()
         {
 #ifndef ENABLE_MULTIPLE_NODES
             {{"unique_sql_clean_ratio",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             INSTRUMENTS_OPTIONS,
             gettext_noop("The percentage of the UniquesQl hash table that will be "
                          "automatically eliminated when the UniquesQl hash table "
-                         "is full. 0 means that auto-eliminate is not enabled."),
+                         "is full."),
             NULL},
-            &g_instance.attr.attr_common.unique_sql_clean_ratio,
-            0,
+            &u_sess->attr.attr_common.unique_sql_clean_ratio,
+            DEFAULT_CLEAN_RATIO,
             0,
             0.2,
-            NULL,
+            CheckUniqueSqlCleanRatio,
             NULL,
             NULL},
 #endif
@@ -19164,6 +19181,21 @@ static void plog_merge_age_assign(int newval, void* extra)
     t_thrd.log_cxt.plog_msg_switch_tm.tv_sec = newval / MS_PER_S;
     t_thrd.log_cxt.plog_msg_switch_tm.tv_usec = (newval - MS_PER_S * t_thrd.log_cxt.plog_msg_switch_tm.tv_sec) * 1000;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source)
+{
+    if (g_instance.attr.attr_common.enable_auto_clean_unique_sql && *newval == 0) {
+            ereport(WARNING,
+                (errmsg("Can't set unique_sql_clean_ratio to 0 when enable_auto_clean_unique_sql is true. "
+                        "Reset it's value to default(%lf). If you want to disable auto clean unique sql, "
+                        "please set enable_auto_clean_unique_sql to false.",
+                    DEFAULT_CLEAN_RATIO)));
+        *newval = DEFAULT_CLEAN_RATIO;
+    }
+    return true;
+}
+#endif
 
 /* ------------------------------------------------------------ */
 /* GUC hooks for inplace/grey upgrade                                                         */

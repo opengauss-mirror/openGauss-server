@@ -679,7 +679,7 @@ void UpdateUniqueSQLStat(Query* query, const char* sql, int64 elapse_start_time,
         /* control unique sql number by instr_unique_sql_count. */
         long totalCount = hash_get_num_entries(g_instance.stat_cxt.UniqueSQLHashtbl);
         if (totalCount >= u_sess->attr.attr_common.instr_unique_sql_count) {
-            if (g_instance.attr.attr_common.unique_sql_clean_ratio != 0) {
+            if (g_instance.attr.attr_common.enable_auto_clean_unique_sql) {
                 if (!AutoRecycleUniqueSQLEntry()) {
                     return;
                 }
@@ -1807,7 +1807,7 @@ static void SetLocalUniqueSQLId(List* query_list)
                 /* store the normalized uniquesq text into u_sess->Unique_sql_cxt in stage B
                  * or E of PBE, only if auto-cleanup is enabled
                  */
-                if (g_instance.attr.attr_common.unique_sql_clean_ratio != 0) {
+                if (g_instance.attr.attr_common.enable_auto_clean_unique_sql) {
                     u_sess->unique_sql_cxt.unique_sql_text = query->unique_sql_text;
                 }
 #endif
@@ -2423,7 +2423,7 @@ static bool AutoRecycleUniqueSQLEntry()
             (errmodule(MOD_INSTR), errcode(ERRCODE_LOG), errmsg("[UniqueSQL] instr_unique_sql_count is too large, uniquesql auto-clean will not happen.")));
         return false;
     }
-    double ratio = g_instance.attr.attr_common.unique_sql_clean_ratio;
+    double ratio = u_sess->attr.attr_common.unique_sql_clean_ratio;
     int cleanCount = Max(int(ratio * instr_unique_sql_count + totalCount - instr_unique_sql_count), 1);
     /* get remove entry list */
     KeyUpdatedtime* removeList = GetSortedEntryList();
