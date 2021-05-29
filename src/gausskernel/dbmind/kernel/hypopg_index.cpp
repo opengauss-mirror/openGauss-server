@@ -91,7 +91,8 @@ static void hypo_set_indexname(hypoIndex *entry, const char *indexname);
 static void hypo_index_reset(void);
 static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel,
     Relation relation, hypoIndex *entry);
-
+static List *get_table_indexes(Oid oid);
+static List *get_index_attrnum(Oid oid);
 
 void InitHypopg()
 {
@@ -217,6 +218,31 @@ static void hypo_executorEnd_hook(QueryDesc *queryDesc)
         standard_ExecutorEnd(queryDesc);
     }
 }
+List *get_table_indexes(Oid oid)
+{
+    Relation rel = heap_open(oid, NoLock);
+    List *indexes = RelationGetIndexList(rel);
+    heap_close(rel, NoLock);
+    return indexes;
+}
+
+/* Return the names of all the columns involved in the index. */
+List *get_index_attrnum(Oid index_oid)
+{
+    HeapTuple index_tup = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(index_oid));
+    if (!HeapTupleIsValid(index_tup))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for index %u", index_oid)));
+    Form_pg_index index_form = (Form_pg_index)GETSTRUCT(index_tup);
+    int2vector *attnums = &(index_form->indkey);
+    // get attrnum from table oid.
+    List *attrnum = NIL;
+    int i;
+    for (i = 0; i < attnums->dim1; i++) {
+        attrnum = lappend_int(attrnum, attnums->values[i]);
+    }
+    ReleaseSysCache(index_tup);
+    return attrnum;
+}
 
 /*
  * This function will execute the "hypo_injectHypotheticalIndex" for every
@@ -243,7 +269,32 @@ static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId,
                      * hypothetical index found, add it to the relation's
                      * indextlist
                      */
-                    hypo_injectHypotheticalIndex(root, relationObjectId, inhparent, rel, relation, entry);
+                    List *indexes = get_table_indexes(entry->relid);
+                    ListCell *index = NULL;
+                    bool match_flag = false;
+                    foreach (index, indexes) {
+                        List *attrnums = get_index_attrnum(lfirst_oid(index));
+                        if (attrnums == NIL) {
+                            break;
+                        }
+                        if (entry->ncolumns > attrnums->length) {
+                            continue;
+                        }
+                        match_flag = true;
+                        for (int i = 0; i < entry->ncolumns; i++) {
+                            if (entry->indexkeys[i] != list_nth_int(attrnums, i)) {
+                                match_flag = false;
+                                break;
+                            }
+                        }
+                        // the suggested index has existed
+                        if (match_flag) {
+                            break;
+                        }
+                    }
+                    if (!match_flag) {
+                        hypo_injectHypotheticalIndex(root, relationObjectId, inhparent, rel, relation, entry);
+                    }
                 }
             }
 
