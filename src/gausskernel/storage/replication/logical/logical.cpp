@@ -825,6 +825,14 @@ void LogicalIncreaseRestartDecodingForSlot(XLogRecPtr current_lsn, XLogRecPtr re
  */
 void LogicalConfirmReceivedLocation(XLogRecPtr lsn)
 {
+    /*
+     * Check if the slot is not moving backwards. Logical slots have confirmed
+     * consumption up to confirmed_lsn, meaning that data older than that is
+     * not available anymore.
+     */
+    if (XLByteLE(lsn, t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush))
+        return;
+
     Assert(!XLByteEQ(lsn, InvalidXLogRecPtr));
     (void)LWLockAcquire(LogicalReplicationSlotPersistentDataLock, LW_EXCLUSIVE);
     /* Do an unlocked check for candidate_lsn first. */
