@@ -1419,7 +1419,6 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
 {
     StringInfoData buf;
     XLogRecPtr flushRecPtr;
-    XLogRecPtr minLsn;
     char xpos[MAXFNAMELEN];
     int rc = 0;
 
@@ -1449,19 +1448,6 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
     ReplicationSlotAcquire(cmd->slotname, false);
 
     Assert(OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database));
-
-    /*
-     * Check if the slot is not moving backwards. Logical slots have confirmed
-     * consumption up to confirmed_lsn, meaning that data older than that is
-     * not available anymore.
-     */
-    minLsn = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
-    if (XLByteLT(cmd->confirmed_flush, minLsn)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot move slot to %X/%X, minimum is %X/%X",
-                               (uint32)(cmd->confirmed_flush >> 32), (uint32)cmd->confirmed_flush,
-                               (uint32)(minLsn >> 32), (uint32)(minLsn))));
-    }
 
     LogicalConfirmReceivedLocation(cmd->confirmed_flush);
 
