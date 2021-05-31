@@ -101,6 +101,14 @@ static int cmp_lsn(const void *a, const void *b);
 #define CATCHUP_XLOG_DIFF(ptr1, ptr2, amount) \
     XLogRecPtrIsInvalid(ptr1) ? false : (XLByteDifference(ptr2, ptr1) < amount)
 
+#define GS_FREE(ptr)            \
+    do {                        \
+        if (NULL != (ptr)) {    \
+            free((char*)(ptr)); \
+            ptr = NULL;         \
+        }                       \
+    } while (0)
+
 /*
  * Determine whether to wait for standby catching up, if requested by user.
  * 
@@ -1435,7 +1443,7 @@ int init_gauss_cluster_config(void)
     }
 
     if (g_nodeHeader.node <= 0) {
-        free(g_node);
+        GS_FREE(g_node);
         return 1;
     }
 
@@ -1447,13 +1455,13 @@ int init_gauss_cluster_config(void)
     }
 
     if (NULL == g_currentNode) {
-        free(g_node);
+        GS_FREE(g_node);
         return 1;
     }
 
     if (get_dynamic_dn_role() != 0) {
         // failed to get dynamic dn role
-        free(g_node);
+        GS_FREE(g_node);
         return 1;
     }
 
@@ -1509,20 +1517,14 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
             // The sync number must less or equals to the number of standby node names.
             return false;
         }
-
         /* get current cluster information from cluster_staic_config */
-        if (strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 && has_static_config()
-            && 0 == init_gauss_cluster_config()) {
-            for (idx = 0; idx < g_node_num; idx++) {
-                if (g_currentNode->node == g_node[idx].node) {
-                    g_local_node_idx = idx;
-                    break;
-                }
+        if (strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 && has_static_config()) {
+            if (0 != init_gauss_cluster_config()) {
+                goto pass;
             }
         } else {
             goto pass;
         }
-        g_local_node_name = g_node[g_local_node_idx].nodeName;
 
         p = pconf->member_names;
         for (int i = 1; i <= pconf->nmembers; i++) {
