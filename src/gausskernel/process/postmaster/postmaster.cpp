@@ -4262,9 +4262,9 @@ void SIGBUS_handler(SIGNAL_ARGS)
     int buf_id;
     int si_code = g_instance.sigbus_cxt.sigbus_code;
     unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
-        ereport(PANIC, (errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
+        ereport(PANIC, 
+            (errcode(ERRCODE_UE_COMMON_ERROR), errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
     }
 #ifdef __aarch64__
     buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
@@ -4280,22 +4280,28 @@ void SIGBUS_handler(SIGNAL_ARGS)
         if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
             buf_desc->state & BM_IO_IN_PROGRESS) {
             ereport(PANIC,
-                (errmsg("Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut down immediately.",
+                (errcode(ERRCODE_UE_DIRTY_PAGE), 
+                    errmsg("Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut "
+                           "down immediately.",
                     sigbus_addr)));
         } else {
             ereport(WARNING,
-                (errmsg(
-                    "Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will shutdown.", sigbus_addr)));
+                (errcode(ERRCODE_UE_CLEAN_PAGE),
+                    errmsg("Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will "
+                           "shutdown.", 
+                        sigbus_addr)));
             pmdie(SIGBUS);
         }
     } else if (sigbus_addr == 0) {
-        ereport(PANIC, (errmsg("SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately")));
+        ereport(PANIC, 
+            (errcode(ERRCODE_UE_COMMON_ERROR), 
+                errmsg("SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately")));
     } else {
         ereport(PANIC,
-            (errmsg(
-                "SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", sigbus_addr)));
+            (errcode(ERRCODE_UE_COMMON_ERROR), 
+                errmsg("SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", 
+                    sigbus_addr)));
     }
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
 
 void KillGraceThreads(void)
