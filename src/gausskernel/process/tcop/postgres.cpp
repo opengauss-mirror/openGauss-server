@@ -5421,6 +5421,9 @@ static void drop_unnamed_stmt(void)
  */
 void quickdie(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     sigaddset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT); /* prevent nested calls */
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
@@ -5474,6 +5477,9 @@ void quickdie(SIGNAL_ARGS)
  */
 void die(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     int save_errno = errno;
 
     /* Don't joggle the elbow of proc_exit */
@@ -5523,6 +5529,9 @@ void die(SIGNAL_ARGS)
  */
 void StatementCancelHandler(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     int save_errno = errno;
 
     /*
@@ -6764,8 +6773,6 @@ void RemoveTempNamespace()
         {
             StringInfoData str;
             initStringInfo(&str);
-            StringInfoData str_temp_table;
-            initStringInfo(&str_temp_table);
 
             if (u_sess->catalog_cxt.myTempNamespace) {
                 ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -6785,13 +6792,11 @@ void RemoveTempNamespace()
                 if (nspname != NULL) {
                     ereport(LOG, (errmsg("Session quiting, drop temp schema %s", nspname)));
                     appendStringInfo(&str, "DROP SCHEMA %s, pg_toast_temp_%s CASCADE", nspname, &nspname[8]);
-                    appendStringInfo(&str_temp_table, "DELETE FROM gs_encrypted_columns WHERE rel_id in ( select pg_class.oid from pg_class join pg_namespace ON (pg_class.relnamespace = pg_namespace.oid ) where pg_namespace.nspname = \'%s\')", nspname);
 
                     pgstatCountSQL4SessionLevel();
 
                     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
                     exec_simple_query(str.data, QUERY_MESSAGE);
-                    exec_simple_query(str_temp_table.data, QUERY_MESSAGE);
                     u_sess->catalog_cxt.myTempNamespace = InvalidOid;
                     u_sess->catalog_cxt.myTempToastNamespace = InvalidOid;
                 }
@@ -7273,6 +7278,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+	t_thrd.int_cxt.ignoreBackendSignal = false;
         gstrace_tryblock_exit(true, oldTryCounter);
         Assert(t_thrd.proc->dw_pos == -1);
 

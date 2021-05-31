@@ -9,9 +9,9 @@ W2V_SUFFIX = 'word2vector'
 
 
 def check_template_algorithm(param):
-    if param and param not in ["list", "levenshtein", "parse_tree"]:
+    if param and param not in ["list", "levenshtein", "parse_tree", "cosine_distance"]:
         raise ValueError("The similarity algorithm '%s' is invaild, "
-                         "please choose from ['list', 'levenshtein', 'parse_tree']" % param)
+                         "please choose from ['list', 'levenshtein', 'parse_tree', 'cosine_distance']" % param)
 
 
 class ModelConfig(object):
@@ -62,7 +62,7 @@ SUPPORTED_ALGORITHM = {'dnn': lambda config: DnnModel(DnnConfig.init_from_config
 
 
 class SQLDiag:
-    def __init__(self, model_algorithm, csv_file, params):
+    def __init__(self, model_algorithm, params):
         if model_algorithm not in SUPPORTED_ALGORITHM:
             raise NotImplementedError("do not support {}".format(model_algorithm))
         try:
@@ -70,20 +70,16 @@ class SQLDiag:
         except ValueError as e:
             logging.error(e, exc_info=True)
             sys.exit(1)
-        self.load_data = LoadData(csv_file)
 
-    def __getattr__(self, item):
-        return getattr(self.load_data, item)
+    def fit(self, data):
+        self._model.fit(data)
 
-    def fit(self):
-        self._model.fit(self.train_data)
+    def transform(self, data):
+        return self._model.transform(data)
 
-    def transform(self):
-        return self._model.transform(self.predict_data)
-
-    def fine_tune(self, filepath):
+    def fine_tune(self, filepath, data):
         self._model.load(filepath)
-        self._model.fit(self.train_data)
+        self._model.fit(data)
 
     def load(self, filepath):
         self._model.load(filepath)

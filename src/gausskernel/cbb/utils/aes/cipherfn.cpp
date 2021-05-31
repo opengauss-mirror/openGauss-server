@@ -2344,7 +2344,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UINT32 encodetextlen = 0;
     GS_UINT32 ciphertextlenmax = 0;
     GS_UCHAR user_key[SM4_KEY_LENGTH];
-    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+    GS_UCHAR user_iv[SM4_IV_LENGTH] = {0};
 	
     errno_t errorno = EOK;
     GS_UINT32 ret = 0;
@@ -2375,17 +2375,27 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     pfree_ext(key);
 
+    ret = RAND_priv_bytes(user_iv, SM4_IV_LENGTH);
+    if (ret != 1) {
+        errorno = memset_s(user_iv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
+        securec_check_c(errorno, "", "");
+        (void)fprintf(stderr, _("generate random sm4 vector failed,errcode:%d\n"), ret);
+        return false;
+    }
+
     /*
      * Calculate the max length of ciphertext:
      */
 
-    ciphertextlenmax = plaintextlen + SM4_BLOCK_SIZE - 1;
+    ciphertextlenmax = plaintextlen + SM4_IV_LENGTH + SM4_BLOCK_SIZE - 1;
     ciphertext = (char*)palloc(ciphertextlenmax);
     errorno = memset_s(ciphertext, ciphertextlenmax, '\0', ciphertextlenmax);
     securec_check(errorno, "\0", "\0");
+    errorno = memcpy_s(ciphertext , SM4_IV_LENGTH, user_iv, SM4_IV_LENGTH);
+    securec_check_c(errorno, "\0", "\0");
 
     ret = sm4_ctr_enc_partial_mode(
-        plaintext, plaintextlen, ciphertext, &cipherLength, user_key, useriv);
+        plaintext, plaintextlen, ciphertext + SM4_IV_LENGTH, &cipherLength, user_key, user_iv);
     if (ret !=  0) {
         ereport(ERROR,
             (errmsg("sm4 encrypt fail"),
@@ -2395,7 +2405,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
     securec_check(errorno, "\0", "\0");
     pfree_ext(plaintext);
-
+    cipherLength = cipherLength + SM4_IV_LENGTH;
     /* encode the ciphertext for nice show and decrypt operation */
     encodestring = SEC_encodeBase64((const char*)ciphertext, cipherLength);
     errorno = memset_s(ciphertext, cipherLength, '\0', cipherLength);
@@ -2424,14 +2434,16 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UINT32 keylen = 0;
     char* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
+    GS_UINT32 cipherpartlen;
     char* encodetext = NULL;
+    char* cipherpart = NULL;
     GS_UCHAR* decodetext;
     GS_UINT32 ret = 0;
 
     GS_UINT32 decodetextlen = 0;
     GS_UINT32 ciphertextlenmax = 0;
     GS_UCHAR userkey[SM4_KEY_LENGTH];
-    GS_UCHAR useriv[SM4_KEY_LENGTH] = {0};
+    GS_UCHAR user_iv[SM4_IV_LENGTH] = {0};
 
     errno_t errorno = EOK;
     size_t encodetextlen = 0;
@@ -2451,7 +2463,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     }
 
     ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext , &ciphertextlen));
-    if ((ciphertext == NULL)) {
+    if ((ciphertext == NULL) || (ciphertextlen < (SM4_IV_LENGTH + 1))) {
         if (ciphertext != NULL) {
             OPENSSL_free(ciphertext);
             ciphertext = NULL;
@@ -2475,7 +2487,6 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     errorno = memcpy_s(userkey, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
     securec_check_c(errorno, "\0", "\0");
 
-
     if (keylen < SM4_KEY_LENGTH) {
         errorno = memset_s(userkey + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
         securec_check_c(errorno, "\0", "\0");
@@ -2485,13 +2496,21 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     pfree_ext(key);
 
+    errorno = memcpy_s(user_iv, SM4_IV_LENGTH,ciphertext, SM4_IV_LENGTH);
+    securec_check_c(errorno, "\0", "\0");
+
     ciphertextlenmax = ciphertextlen + SM4_BLOCK_SIZE - 1;
     encodetext = (char*)palloc(ciphertextlenmax);
     errorno = memset_s(encodetext, ciphertextlenmax, '\0', ciphertextlenmax);
     securec_check(errorno, "\0", "\0");
 
+    cipherpartlen = ciphertextlen - SM4_IV_LENGTH;
+    cipherpart = (char*)palloc(cipherpartlen + 1);
+    errorno = memcpy_s(cipherpart, cipherpartlen  + 1, ciphertext + SM4_IV_LENGTH, cipherpartlen);
+    securec_check(errorno, "\0", "\0");
+
     ret = sm4_ctr_dec_partial_mode(
-                ciphertext, ciphertextlen, encodetext, &encodetextlen, userkey, useriv);   
+                cipherpart, cipherpartlen, encodetext, &encodetextlen, userkey, user_iv);
     if (ret !=  0) {
         ereport(ERROR,
             (errmsg("sm4 decrypt fail"),
@@ -2502,6 +2521,10 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     OPENSSL_free(ciphertext);
     ciphertext = NULL;	
+
+    errorno = memset_s(cipherpart, cipherpartlen + 1, '\0', cipherpartlen + 1);
+    securec_check(errorno, "\0", "\0");
+    pfree_ext(cipherpart);
 
     encodetextlen = strlen((const char*)encodetext);
 

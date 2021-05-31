@@ -448,8 +448,6 @@ static void pgarch_MainLoop(void)
                 }
             } else {
                 pgarch_ArchiverCopyLoop();
-                /* archive xlog on standby success, we need to change the status of archive task. */
-                ChangeArchiveTaskStatus2Done();
                 gettimeofday(&last_copy_time, NULL);
             }
         }
@@ -567,6 +565,9 @@ static void pgarch_ArchiverCopyLoop(void)
             if (pgarch_archiveXlog(xlog)) {
                 /* successful */
                 pgarch_archiveDone(xlog);
+
+                /* archive xlog on standby success, we need to change the status of archive task. */
+                ChangeArchiveTaskStatus2Done();
                 break; /* out of inner retry loop */
             } else {
                 if (++failures >= NUM_ARCHIVE_RETRIES) {

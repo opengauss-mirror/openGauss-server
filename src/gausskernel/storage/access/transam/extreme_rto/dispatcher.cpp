@@ -325,20 +325,39 @@ void AllocRecordReadBuffer(XLogReaderState *xlogreader, uint32 privateLen)
 #endif
 }
 
+void SendSingalToPageWorker(int signal)
+{
+    for (uint32 i = 0; i < g_instance.comm_cxt.predo_cxt.totalNum; ++i) {
+        uint32 state = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState));
+        if (state == PAGE_REDO_WORKER_READY) {
+            int err = gs_signal_send(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal);
+            if (0 != err) {
+                ereport(WARNING, (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
+                                         g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal,
+                                         gs_strerror(err))));
+            }
+        }
+    }
+}
+
 void HandleStartupInterruptsForExtremeRto()
 {
     Assert(AmStartupProcess());
-    uint32 triggeredstate = pg_atomic_read_u32(&(g_startupTriggerState));
+
     uint32 newtriggered = (uint32)CheckForSatartupStatus();
-    if (newtriggered != extreme_rto::TRIGGER_NORMAL && triggeredstate != newtriggered) {
-        ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                      errmsg("HandleStartupInterruptsForExtremeRto:g_startupTriggerState set from %u to %u",
-                             triggeredstate, newtriggered)));
-        pg_atomic_write_u32(&(g_startupTriggerState), newtriggered);
+    if (newtriggered != extreme_rto::TRIGGER_NORMAL) {
+        uint32 triggeredstate = pg_atomic_read_u32(&(g_startupTriggerState));
+        if (triggeredstate != newtriggered) {
+            ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("HandleStartupInterruptsForExtremeRto:g_startupTriggerState set from %u to %u",
+                                 triggeredstate, newtriggered)));
+            pg_atomic_write_u32(&(g_startupTriggerState), newtriggered);
+        }
     }
 
     if (t_thrd.startup_cxt.got_SIGHUP) {
         t_thrd.startup_cxt.got_SIGHUP = false;
+        SendSingalToPageWorker(SIGHUP);
         ProcessConfigFile(PGC_SIGHUP);
     }
 
@@ -526,21 +545,6 @@ void SetPageWorkStateByThreadId(uint32 threadState)
         if (g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId == curThread.thid) {
             pg_atomic_write_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState), threadState);
             break;
-        }
-    }
-}
-
-void SendSingalToPageWorker(int signal)
-{
-    for (uint32 i = 0; i < g_instance.comm_cxt.predo_cxt.totalNum; ++i) {
-        uint32 state = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadState));
-        if (state == PAGE_REDO_WORKER_READY) {
-            int err = gs_signal_send(g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal);
-            if (0 != err) {
-                ereport(WARNING, (errmsg("Dispatch kill(pid %lu, signal %d) failed: \"%s\",",
-                                         g_instance.comm_cxt.predo_cxt.pageRedoThreadStatusList[i].threadId, signal,
-                                         gs_strerror(err))));
-            }
         }
     }
 }

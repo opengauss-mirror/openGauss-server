@@ -71,11 +71,15 @@ predict dataset sample: [sample_data/predict.csv](data/predict.csv)
 
 ## example for template method using sample dataset 
 
-    # training
+    # train
     python main.py train -f ./sample_data/train.csv --model template --model-path ./template
     
     # predict
     python main.py predict -f ./sample_data/predict.csv --model template --model-path ./template 
+    --predicted-file ./result/t_result
+
+    # predict with threshold
+    python main.py predict -f ./sample_data/predict.csv --threshold 0.02 --model template --model-path ./template 
     --predicted-file ./result/t_result
     
     # update model

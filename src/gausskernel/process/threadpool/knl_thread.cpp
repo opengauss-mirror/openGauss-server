@@ -534,6 +534,7 @@ static void knl_t_interrupt_init(knl_t_interrupt_context* int_cxt)
     int_cxt->CritSectionCount = 0;
     int_cxt->InterruptByCN = false;
     int_cxt->InterruptCountResetFlag = false;
+    int_cxt->ignoreBackendSignal = false;
 }
 
 static void knl_t_proc_init(knl_t_proc_context* proc_cxt)
