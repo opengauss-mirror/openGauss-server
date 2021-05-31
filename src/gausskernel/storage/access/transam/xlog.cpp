@@ -16631,17 +16631,20 @@ bool CheckFinishRedoSignal(void)
 
 extreme_rto::Enum_TriggeredState CheckForSatartupStatus(void)
 {
-    if (CheckForPrimaryTrigger()) {
-        /* update flag */
+    if (t_thrd.startup_cxt.primary_triggered) {
+        ereport(LOG, (errmsg("received primary request")));
+        ResetPrimaryTriggered();
         return extreme_rto::TRIGGER_PRIMARY;
     }
-    if (CheckForStandbyTrigger()) {
+    if (t_thrd.startup_cxt.standby_triggered) {
+        ereport(LOG, (errmsg("received standby request")));
+        ResetStandbyTriggered();
         return extreme_rto::TRIGGER_STADNBY;
     }
-    if (IsFailoverTriggered()) {
+    if (t_thrd.startup_cxt.failover_triggered) {
         return extreme_rto::TRIGGER_FAILOVER;
     }
-    if (IsSwitchoverTriggered()) {
+    if (t_thrd.startup_cxt.switchover_triggered) {
         return extreme_rto::TRIGGER_FAILOVER;
     }
     return extreme_rto::TRIGGER_NORMAL;
