@@ -66,6 +66,7 @@ typedef struct knl_instance_attr_storage {
     int wal_writer_cpu;
     int wal_file_init_num;
     int XLOGbuffers;
+    int wal_insert_status_entries;
     int max_wal_senders;
     int max_replication_slots;
     int replication_type;
