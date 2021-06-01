@@ -82,7 +82,8 @@ typedef enum {
     CLIENT_MODE,
     OBS_MODE,
     SOURCE_MODE,
-    GDS_MODE
+    GDS_MODE,
+    USER_MAPPING_MODE
 } KeyMode;
 
 typedef struct {

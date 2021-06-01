@@ -824,6 +824,11 @@ void decode_cipher_files(
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/datasource%s", datadir, RAN_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
+    } else if (mode == USER_MAPPING_MODE) {
+        ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/usermapping%s", datadir, CIPHER_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/usermapping%s", datadir, RAN_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
     }
     /*
      * in client_mode,check with the user name is appointed.if so, read the files begin

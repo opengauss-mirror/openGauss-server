@@ -53,6 +53,10 @@
 #include "catalog/toasting.h"
 #include "bulkload/dist_fdw.h"
 
+/* Sensitive options for user mapping, will be encrypted when saved to catalog. */
+const char* sensitiveOptionsArray[] = {"password"};
+const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
+
 /*
  * Convert a DefElem list to the text array format that is used in
  * pg_foreign_data_wrapper, pg_foreign_server, and pg_user_mapping.
@@ -1153,6 +1157,8 @@ void CreateUserMapping(CreateUserMappingStmt* stmt)
     values[Anum_pg_user_mapping_umuser - 1] = ObjectIdGetDatum(useId);
     values[Anum_pg_user_mapping_umserver - 1] = ObjectIdGetDatum(srv->serverid);
 
+    EncryptGenericOptions(stmt->options, sensitiveOptionsArray, sensitiveArrayLength, false);
+
     /* Add user options */
     useoptions =
         transformGenericOptions(UserMappingRelationId, PointerGetDatum(NULL), stmt->options, fdw->fdwvalidator);
@@ -1247,6 +1253,8 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
         datum = SysCacheGetAttr(USERMAPPINGUSERSERVER, tp, Anum_pg_user_mapping_umoptions, &isnull);
         if (isnull)
             datum = PointerGetDatum(NULL);
+
+        EncryptGenericOptions(stmt->options, sensitiveOptionsArray, sensitiveArrayLength, false);
 
         /* Prepare the options array */
         datum = transformGenericOptions(UserMappingRelationId, datum, stmt->options, fdw->fdwvalidator);

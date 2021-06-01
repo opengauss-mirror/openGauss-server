@@ -344,6 +344,48 @@ bool isSpecifiedSrvTypeFromSrvName(const char* srvName, const char* SepcifiedTyp
     return isSpecifiedSrvType;
 }
 
+static void DecryptOptions(List *options)
+{
+    if (options == NULL) {
+        return;
+    }
+
+    ListCell *cell = NULL;
+    foreach(cell, options) {
+        DefElem* def = (DefElem*)lfirst(cell);
+        if (def->defname == NULL || def->arg == NULL || !IsA(def->arg, String)) {
+            continue;
+        }
+
+        char *str = strVal(def->arg);
+        if (str == NULL || strlen(str) == 0) {
+            continue;
+        }
+
+        for (int i = 0; i < sensitiveArrayLength; i++) {
+            if (pg_strcasecmp(def->defname, sensitiveOptionsArray[i]) == 0) {
+                char plainText[EC_CIPHER_TEXT_LENGTH] = {0};
+
+                /*
+                 * If decryptECString return false, it means the stored values is not encrypted.
+                 * This happened when user mapping was created in old gaussdb version.
+                 */
+                if (decryptECString(str, plainText, EC_CIPHER_TEXT_LENGTH, false)) {
+                    pfree_ext(str);
+                    pfree_ext(def->arg);
+                    def->arg = (Node*)makeString(pstrdup(plainText));
+                    
+                    /* Clear buffer */
+                    errno_t errCode = memset_s(plainText, EC_CIPHER_TEXT_LENGTH, 0, EC_CIPHER_TEXT_LENGTH);
+                    securec_check(errCode, "\0", "\0");
+                }
+
+                break;
+            }
+        }
+    }
+}
+
 /*
  * GetUserMapping - look up the user mapping.
  *
@@ -380,6 +422,8 @@ UserMapping* GetUserMapping(Oid userid, Oid serverid)
     } else {
         um->options = untransformRelOptions(datum);
     }
+
+    DecryptOptions(um->options);
 
     ReleaseSysCache(tp);
 
