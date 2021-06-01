@@ -29,6 +29,7 @@
 ./bin/transfer.py
 ./bin/bind_net_irq.sh
 ./bin/setArmOptimization.sh
+./bin/gs_plan_simulator.sh
 ./bin/krb5kdc
 ./bin/klist
 ./bin/kinit
