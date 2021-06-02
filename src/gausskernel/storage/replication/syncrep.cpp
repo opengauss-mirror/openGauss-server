@@ -1518,7 +1518,8 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
             return false;
         }
         /* get current cluster information from cluster_staic_config */
-        if (strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 && has_static_config()) {
+        if (t_thrd.role == WORKER && strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 
+            && has_static_config()) {
             if (0 != init_gauss_cluster_config()) {
                 goto pass;
             }
