@@ -139,7 +139,7 @@ MemoryContext StackMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
         func = &SessionFunctions;
 
     /* only track the memory context after t_thrd.mem_cxt.mem_track_mem_cxt is created */
-    if (func == &GenericFunctions && parent && u_sess->attr.attr_memory.memory_tracking_mode &&
+    if (func == &GenericFunctions && parent && u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_PEAKMEMORY &&
         t_thrd.mem_cxt.mem_track_mem_cxt &&
         (t_thrd.utils_cxt.ExecutorMemoryTrack == NULL || ((AllocSet)parent)->track)) {
         isTracked = true;
