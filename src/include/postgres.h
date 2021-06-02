@@ -246,7 +246,8 @@ typedef enum {
 } CodegenStrategy;
 
 typedef enum {
-    MEMORY_TRACKING_NONE,     /* not to track the memory usage */
+    MEMORY_TRACKING_NONE = 0,     /* not to track the memory usage */
+    MEMORY_TRACKING_PEAKMEMORY,
     MEMORY_TRACKING_NORMAL,   /* just update the peak information internal */
     MEMORY_TRACKING_EXECUTOR, /* to logging the memory information in executor */
     MEMORY_TRACKING_FULLEXEC  /* to logging the all memory context information in executor */

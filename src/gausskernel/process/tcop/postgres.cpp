@@ -4892,6 +4892,9 @@ static void exec_execute_message(const char* portal_name, long max_rows)
             break;
     }
 
+    if(MEMORY_TRACKING_QUERY_PEAK)
+        ereport(LOG, (errmsg("execute portal %s, peak memory %ld(kb)", sourceText,  (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
+
     if (save_log_statement_stats)
         ShowUsage("EXECUTE MESSAGE STATISTICS");
 
@@ -7764,7 +7767,15 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 #ifdef ENABLE_MULTIPLE_NODES
         // reset some flag related to stream
         ResetStreamEnv();
+#else
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
+        t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;
+        t_thrd.utils_cxt.peakedBytesInQueryLifeCycle = 0;
+        t_thrd.utils_cxt.basedBytesInQueryLifeCycle = 0;
 #endif
+
+
         t_thrd.codegen_cxt.codegen_IRload_thr_count = 0;
         IsExplainPlanStmt = false;
         t_thrd.codegen_cxt.g_runningInFmgr = false;
@@ -7901,6 +7912,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                 }
 #endif
                 exec_simple_query(query_string, QUERY_MESSAGE, &input_message); /* @hdfs Add the second parameter */
+
+                if(MEMORY_TRACKING_QUERY_PEAK)
+                    ereport(LOG, (errmsg("query_string %s, peak memory %ld(kb)", query_string,  (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
                 u_sess->debug_query_id = 0;
                 send_ready_for_query = true;
             } break;
@@ -8272,6 +8286,8 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             pq_putemptymessage('s');
                     }
                     pfree_ext(completionTag);
+                    if(MEMORY_TRACKING_QUERY_PEAK)
+                        ereport(LOG, (errmsg("execute opfusion,  peak memory %ld(kb)",  (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
                     break;
                 }
                 pfree_ext(completionTag);
@@ -11013,6 +11029,10 @@ static void exec_batch_bind_execute(StringInfo input_message)
         default:
             break;
     }
+
+
+    if(MEMORY_TRACKING_QUERY_PEAK)
+        ereport(LOG, (errmsg("execute batch execute %s, peak memory %ld(kb)", psrc->query_string,  (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024))));
 
     if (save_log_statement_stats) {
         ShowUsage("BATCH BIND MESSAGE STATISTICS");

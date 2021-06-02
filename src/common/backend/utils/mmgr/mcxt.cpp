@@ -143,6 +143,9 @@ void MemoryContextInit(void)
     /* init the thread memory track object */
     t_thrd.utils_cxt.trackedMemChunks = 0;
     t_thrd.utils_cxt.trackedBytes = 0;
+    t_thrd.utils_cxt.peakedBytesInQueryLifeCycle = 0;
+    t_thrd.utils_cxt.basedBytesInQueryLifeCycle = 0;
+
 
     /*
      * Initialize t_thrd.top_mem_cxt as an AllocSetContext with slow growth rate

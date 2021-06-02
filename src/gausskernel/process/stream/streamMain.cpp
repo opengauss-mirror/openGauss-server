@@ -607,6 +607,8 @@ void ResetStreamEnv()
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->queryMemInChunks = t_thrd.utils_cxt.trackedMemChunks;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->peakChunksQuery = t_thrd.utils_cxt.trackedMemChunks;
+    t_thrd.utils_cxt.peakedBytesInQueryLifeCycle = 0;
+    t_thrd.utils_cxt.basedBytesInQueryLifeCycle = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillCount = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->spillSize = 0;
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->broadcastSize = 0;

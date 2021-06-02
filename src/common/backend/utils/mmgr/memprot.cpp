@@ -689,6 +689,10 @@ bool memTracker_ReserveMem(int64 requestedBytes, bool needProtect)
             else
                 u_sess->stat_cxt.trackedMemChunks = newszChunk;
             gs_atomic_add_32(&dynmicTrackedMemChunks, needChunk);
+
+            t_thrd.utils_cxt.basedBytesInQueryLifeCycle += requestedBytes;
+            if(t_thrd.utils_cxt.basedBytesInQueryLifeCycle > t_thrd.utils_cxt.peakedBytesInQueryLifeCycle)
+                t_thrd.utils_cxt.peakedBytesInQueryLifeCycle = t_thrd.utils_cxt.basedBytesInQueryLifeCycle;
         }
     }
 
@@ -752,11 +756,13 @@ void memTracker_ReleaseMem(int64 toBeFreedRequested)
     } else if (type == MEM_THRD) {
         tc = t_thrd.utils_cxt.trackedMemChunks;
         t_thrd.utils_cxt.trackedBytes -= toBeFreed;
+        t_thrd.utils_cxt.basedBytesInQueryLifeCycle -= toBeFreed;
         tb = t_thrd.utils_cxt.trackedBytes;
     } else {
         tc = u_sess->stat_cxt.trackedMemChunks;
         u_sess->stat_cxt.trackedBytes -= toBeFreed;
         tb = u_sess->stat_cxt.trackedBytes;
+        t_thrd.utils_cxt.basedBytesInQueryLifeCycle -= toBeFreed;
     }
 
     int newszChunk = (uint64)tb >> chunkSizeInBits;

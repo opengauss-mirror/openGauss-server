@@ -188,6 +188,7 @@ private:
 #define IS_USESS_AVAILABLE (likely(u_sess != NULL))
 #define GS_MP_INITED (t_thrd.utils_cxt.gs_mp_inited)
 #define MEMORY_TRACKING_MODE (IS_USESS_AVAILABLE ? u_sess->attr.attr_memory.memory_tracking_mode : 0)
+#define MEMORY_TRACKING_QUERY_PEAK (IS_USESS_AVAILABLE ? (u_sess->attr.attr_memory.memory_tracking_mode == MEMORY_TRACKING_PEAKMEMORY ) : 0)
 #define ENABLE_MEMORY_CONTEXT_CONTROL \
     (IS_USESS_AVAILABLE ? u_sess->attr.attr_memory.enable_memory_context_control : false)
 #define MEMORY_FAULT_PERCENT (IS_USESS_AVAILABLE ? u_sess->attr.attr_resource.memory_fault_percent : 0)
