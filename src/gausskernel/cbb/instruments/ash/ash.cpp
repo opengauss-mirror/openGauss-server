@@ -64,6 +64,7 @@
 #define NUM_UNIQUE_SQL_PARTITIONS 64
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define UNIQUE_SQL_MAX_LEN (g_instance.attr.attr_common.pgstat_track_activity_query_size + 1)
+const int ATTR_NUM = 27;
 /* unique SQL max hash table size */
 const int UNIQUE_SQL_MAX_HASH_SIZE = 1000;
 extern Datum hash_uint32(uint32 k);
@@ -1144,34 +1145,37 @@ static void InitTupleAttr(FuncCallContext** funcctx)
 {
     MemoryContext oldcontext;
     TupleDesc tupdesc = NULL;
+    int i = 0;
     oldcontext = MemoryContextSwitchTo((*funcctx)->multi_call_memory_ctx);
-    tupdesc = CreateTemplateTupleDesc(26, false);
-    TupleDescInitEntry(tupdesc, (AttrNumber)1, "sampleid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)2, "sample_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "need_flush_sample", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "databaseid", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)5, "thread_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)6, "sessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)7, "start_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)8, "event", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "lwtid", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)10, "psessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)11, "tlevel", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)12, "smpid", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)13, "userid", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)14, "application_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)15, "client_addr", INETOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)16, "client_hostname", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)17, "client_port", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)18, "query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)19, "unique_query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)20, "user_id", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)21, "cn_id", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)22, "unique_query", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)23, "locktag", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)24, "lockmode", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)25, "block_sessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)26, "wait_status", TEXTOID, -1, 0);
+    tupdesc = CreateTemplateTupleDesc(ATTR_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sampleid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sample_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "need_flush_sample", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "databaseid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "thread_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "event", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "lwtid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "psessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "tlevel", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "smpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "userid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "application_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_addr", INETOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_hostname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_port", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "unique_query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "user_id", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cn_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "unique_query", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "locktag", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "lockmode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "wait_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "global_sessionid", TEXTOID, -1, 0);
+    Assert(i == ATTR_NUM);
     (*funcctx)->tuple_desc = BlessTupleDesc(tupdesc);
     (*funcctx)->user_fctx = palloc0(sizeof(int));
     (*funcctx)->max_calls = g_instance.stat_cxt.active_sess_hist_arrary->curr_index;
@@ -1194,8 +1198,8 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
 
     if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
-        Datum values[26];
-        bool nulls[26] = {false};
+        Datum values[ATTR_NUM];
+        bool nulls[ATTR_NUM] = {false};
         HeapTuple tuple = NULL;
         SessionHistEntry *beentry = NULL;
         errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -1210,7 +1214,7 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
                 GetTuple(values, Natts_gs_asp, nulls, Natts_gs_asp, beentry);
             } else {
                 /* No permissions to view data about this session */
-                for (uint32 i = 0; i < 26; i++) {
+                for (uint32 i = 0; i < ATTR_NUM; i++) {
                     nulls[i] = true;
                 }
             }
