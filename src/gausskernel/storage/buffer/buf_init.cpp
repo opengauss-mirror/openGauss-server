@@ -109,7 +109,7 @@ void InitBufferPool(void)
     if (BBOX_BLACKLIST_SHARE_BUFFER) {
         bbox_blacklist_add(SHARED_BUFFER, t_thrd.storage_cxt.BufferBlocks, buffer_size);
     }
-
+    
     /*
      * The array used to sort to-be-checkpointed buffer ids is located in
      * shared memory, to avoid having to allocate significant amounts of
