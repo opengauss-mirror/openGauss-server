@@ -1171,8 +1171,10 @@ void ExplainOnePlan(
 
     if (es->analyze) {
         if (es->format == EXPLAIN_FORMAT_TEXT) {
-            if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL)
-                appendStringInfo(es->str, "Total runtime: %.3f ms\n", 1000.0 * totaltime);
+            if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL) {
+                appendStringInfo(es->str, "Total runtime: %.3f ms, Peak Memory :%ld (KB)\n", 1000.0 * totaltime, (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024));
+
+            }
             else if (es->planinfo != NULL && es->planinfo->m_query_summary) {
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
                     "Coordinator executor start time: %.3f ms\n",

@@ -123,7 +123,7 @@ MemoryContext AlignMemoryAllocator::AllocSetContextCreate(MemoryContext parent, 
         func = &SessionFunctions;
 
     /* only track the unshared context after t_thrd.mem_cxt.mem_track_mem_cxt is created */
-    if (func == &GenericFunctions && parent && MEMORY_TRACKING_MODE && t_thrd.mem_cxt.mem_track_mem_cxt &&
+    if (func == &GenericFunctions && parent && (MEMORY_TRACKING_MODE > MEMORY_TRACKING_PEAKMEMORY) && t_thrd.mem_cxt.mem_track_mem_cxt &&
         (t_thrd.utils_cxt.ExecutorMemoryTrack == NULL || ((AllocSet)parent)->track)) {
         isTracked = true;
         value |= IS_TRACKED;

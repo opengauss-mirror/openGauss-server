@@ -847,6 +847,7 @@ static const struct config_enum_entry codegen_strategy_option[] = {
     {"partial", CODEGEN_PARTIAL, false}, {"pure", CODEGEN_PURE, false}, {NULL, 0, false}};
 /*change the char * memory_tracking_mode to enum*/
 static const struct config_enum_entry memory_tracking_option[] = {{"none", MEMORY_TRACKING_NONE, false},
+    {"peak", MEMORY_TRACKING_PEAKMEMORY, false},
     {"normal", MEMORY_TRACKING_NORMAL, false},
     {"executor", MEMORY_TRACKING_EXECUTOR, false},
     {"fullexec", MEMORY_TRACKING_FULLEXEC, false},

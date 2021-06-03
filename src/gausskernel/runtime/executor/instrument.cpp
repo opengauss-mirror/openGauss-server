@@ -438,7 +438,7 @@ void CalculateContextSize(MemoryContext ctx, int64* memory_size)
         return;
 
     /* to return the accurate value when memory tracking is enable */
-    if (u_sess->attr.attr_memory.memory_tracking_mode && aset->track)
+    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_PEAKMEMORY && aset->track)
         *memory_size = aset->track->allBytesPeak;
     else {
         /* calculate MemoryContext Stats */
