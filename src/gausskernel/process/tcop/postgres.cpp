@@ -3373,7 +3373,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
 
 #ifndef ENABLE_MULTIPLE_NODES
         /* store normalized uniquesQl text into Query in P phase of PBE, only if auto-cleanup is enabled */
-        if (is_unique_sql_enabled() && g_instance.attr.attr_common.unique_sql_clean_ratio != 0) {
+        if (is_unique_sql_enabled() && g_instance.attr.attr_common.enable_auto_clean_unique_sql) {
             query->unique_sql_text = FindCurrentUniqueSQL();
         }
 #endif

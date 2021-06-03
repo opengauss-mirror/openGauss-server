@@ -1778,7 +1778,6 @@ char* get_AZ_value(const char* value, const char* data_dir)
     char delims[] = ",";
     char* vptr = NULL;
     char emptyvalue[] = "''";
-    int resultStatus = 0;
     bool isNodeName = false;
 
     if (az1 != NULL) {
