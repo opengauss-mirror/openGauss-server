@@ -868,34 +868,46 @@ void parse_join_expr(Node *item_join)
         return;
     }
 
-    List *l_join_fields = ((ColumnRef *)(join_cond->lexpr))->fields;
-    List *r_join_fields = ((ColumnRef *)(join_cond->rexpr))->fields;
-    char *l_table_name = find_table_name(l_join_fields);
-    char *r_table_name = find_table_name(r_join_fields);
-    char *l_field_name = find_field_name(l_join_fields);
-    char *r_field_name = find_field_name(r_join_fields);
+    List *field_value = NIL;
+    if (IsA(join_cond->lexpr, ColumnRef) && IsA(join_cond->rexpr, A_Const)){
+        // on t1.c1...
+        field_value = lappend(field_value, (A_Const *)join_cond->rexpr);
+        parse_field_expr(((ColumnRef *)join_cond->lexpr)->fields, join_cond->name, field_value);
+    } else if (IsA(join_cond->rexpr, ColumnRef) && IsA(join_cond->lexpr, A_Const)){
+        // on ...t1.c1
+        field_value = lappend(field_value, (A_Const *)join_cond->lexpr);
+        parse_field_expr(((ColumnRef *)join_cond->rexpr)->fields, join_cond->name, field_value);
+    } else if (IsA(join_cond->lexpr, ColumnRef) && IsA(join_cond->rexpr, ColumnRef)){
+        // on t1.c1 = t2.c2
+        List *l_join_fields = ((ColumnRef *)(join_cond->lexpr))->fields;
+        List *r_join_fields = ((ColumnRef *)(join_cond->rexpr))->fields;
+        char *l_table_name = find_table_name(l_join_fields);
+        char *r_table_name = find_table_name(r_join_fields);
+        char *l_field_name = find_field_name(l_join_fields);
+        char *r_field_name = find_field_name(r_join_fields);
 
-    if (!l_table_name || !r_table_name || !l_field_name || !r_field_name) {
-        return;
-    }
+        if (!l_table_name || !r_table_name || !l_field_name || !r_field_name) {
+            return;
+        }
 
-    TableCell *ltable = find_or_create_tblcell(l_table_name, NULL);
-    TableCell *rtable = find_or_create_tblcell(r_table_name, NULL);
+        TableCell *ltable = find_or_create_tblcell(l_table_name, NULL);
+        TableCell *rtable = find_or_create_tblcell(r_table_name, NULL);
 
-    if (!ltable || !rtable) {
-        return;
-    }
+        if (!ltable || !rtable) {
+            return;
+        }
 
-    // add join conditons
-    add_join_cond(ltable, l_field_name, rtable, r_field_name);
-    add_join_cond(rtable, r_field_name, ltable, l_field_name);
+        // add join conditons
+        add_join_cond(ltable, l_field_name, rtable, r_field_name);
+        add_join_cond(rtable, r_field_name, ltable, l_field_name);
 
-    // add possible drived tables
-    if (!list_member(g_drived_tables, ltable)) {
-        g_drived_tables = lappend(g_drived_tables, ltable);
-    }
-    if (!list_member(g_drived_tables, rtable)) {
-        g_drived_tables = lappend(g_drived_tables, rtable);
+        // add possible drived tables
+        if (!list_member(g_drived_tables, ltable)) {
+            g_drived_tables = lappend(g_drived_tables, ltable);
+        }
+        if (!list_member(g_drived_tables, rtable)) {
+            g_drived_tables = lappend(g_drived_tables, rtable);
+        }
     }
 }
 
