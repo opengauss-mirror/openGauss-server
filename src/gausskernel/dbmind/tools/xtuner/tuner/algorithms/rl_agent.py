@@ -13,10 +13,10 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
-from keras import Model
-from keras import Sequential
-from keras.layers import Flatten, Dense, Activation, Input, Concatenate
-from keras.optimizers import Adam
+from tensorflow.keras import Model
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Flatten, Dense, Activation, Input, Concatenate
+from tensorflow.keras.optimizers import Adam
 from rl.agents import DDPGAgent
 from rl.agents import DQNAgent
 from rl.memory import SequentialMemory
@@ -47,8 +47,6 @@ class RLAgent:
         model.add(Activation('relu'))
         model.add(Dense(16))
         model.add(Activation('relu'))
-        model.add(Dense(16))
-        model.add(Activation('relu'))
         model.add(Dense(nb_actions, activation='linear'))
 
         # build alg
@@ -70,8 +68,6 @@ class RLAgent:
         actor.add(Activation('relu'))
         actor.add(Dense(16))
         actor.add(Activation('relu'))
-        actor.add(Dense(16))
-        actor.add(Activation('relu'))
         actor.add(Dense(nb_actions))
         actor.add(Activation('sigmoid'))
 
@@ -80,8 +76,6 @@ class RLAgent:
         observation_input = Input(shape=(1, nb_states), name='observation_input')
         flattened_observation = Flatten()(observation_input)
         x = Concatenate()([action_input, flattened_observation])
-        x = Dense(32)(x)
-        x = Activation('relu')(x)
         x = Dense(32)(x)
         x = Activation('relu')(x)
         x = Dense(32)(x)
