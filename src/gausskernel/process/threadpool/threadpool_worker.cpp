@@ -616,6 +616,8 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     if (!t_thrd.proc_cxt.proc_exit_inprogress) {
         if (ENABLE_DN_GPC)
             CleanSessGPCPtr(m_currentSession);
+        if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable())
+            u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.SubRefCount();
         CNGPCCleanUpSession();
     }
 
