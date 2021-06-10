@@ -436,5 +436,6 @@ extern void set_qunit_case_number_hook(int newval, void* extra);
 #endif
 
 extern GucContext get_guc_context();
+extern void InitializeNumLwLockPartitions(void);
 
 #endif /* GUC_H */

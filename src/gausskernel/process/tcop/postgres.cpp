@@ -6965,6 +6965,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             gstrace_exit(GS_TRC_ID_PostgresMain);
             proc_exit(1);
         }
+        InitializeNumLwLockPartitions();
     }
 
     /* initialize guc variables which need to be sended to stream threads */
