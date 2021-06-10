@@ -4040,6 +4040,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         (void)SignalChildren(SIGHUP);
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->GetSessionCtrl()->SigHupHandler();
+            g_threadPoolControler->GetScheduler()->SigHupHandler();
         }
 
         if (g_instance.pid_cxt.StartupPID != 0)

@@ -103,8 +103,6 @@ static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundPa
 static bool IsForceCustomplan(CachedPlanSource *plansource);
 static bool IsDeleteLimit(CachedPlanSource* plansource, ParamListInfo boundParams);
 static double cached_plan_cost(CachedPlan* plan);
-static void AcquireExecutorLocks(List* stmt_list, bool acquire);
-static void AcquirePlannerLocks(List* stmt_list, bool acquire);
 static void ScanQueryForLocks(Query* parsetree, bool acquire);
 static bool ScanQueryWalker(Node* node, bool* acquire);
 static TupleDesc PlanCacheComputeResultDesc(List* stmt_list);
@@ -722,10 +720,9 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
         Assert(plansource->is_valid);
         return NIL;
     }
-    /* if is shared plan, we should acquire plan lock for this transaction */
+    /* if is shared plan, we should acquire plan lock before check recreate plan */
     if (plansource->gpc.status.InShareTable()) {
         Assert(plansource->is_valid);
-        AcquirePlannerLocks(plansource->query_list, true);
         return NIL;
     }
     /*
@@ -1959,18 +1956,20 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot copy a one-shot cached plan")));
 
     if (ENABLE_GPC && is_share == true) {
-    	source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
-    										   "GPCCachedPlanSource",
-    										   ALLOCSET_SMALL_MINSIZE,
-    										   ALLOCSET_SMALL_INITSIZE,
-    										   ALLOCSET_DEFAULT_MAXSIZE,
-    										   SHARED_CONTEXT);
+        source_context = AllocSetContextCreate(GLOBAL_PLANCACHE_MEMCONTEXT,
+                                               "GPCCachedPlanSource",
+                                               ALLOCSET_SMALL_MINSIZE,
+                                               ALLOCSET_SMALL_INITSIZE,
+                                               ALLOCSET_DEFAULT_MAXSIZE,
+                                               SHARED_CONTEXT);
+        ResourceOwnerEnlargeGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner);
+        ResourceOwnerRememberGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, source_context);
     } else {
-    	source_context = AllocSetContextCreate(u_sess->cache_mem_cxt,
-    										   "CachedPlanSource",
-    										   ALLOCSET_SMALL_MINSIZE,
-    										   ALLOCSET_SMALL_INITSIZE,
-    										   ALLOCSET_DEFAULT_MAXSIZE);
+        source_context = AllocSetContextCreate(u_sess->cache_mem_cxt,
+                                               "CachedPlanSource",
+                                               ALLOCSET_SMALL_MINSIZE,
+                                               ALLOCSET_SMALL_INITSIZE,
+                                               ALLOCSET_DEFAULT_MAXSIZE);
     }
 
 
@@ -2004,19 +2003,19 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     newsource->context = source_context;
 
     if (ENABLE_GPC && is_share == true) {
-    	querytree_context = AllocSetContextCreate(source_context,
-    											  "GPCCachedPlanQuery",
-    											  ALLOCSET_SMALL_MINSIZE,
-    											  ALLOCSET_SMALL_INITSIZE,
-    											  ALLOCSET_DEFAULT_MAXSIZE,
-    											  SHARED_CONTEXT);
+        querytree_context = AllocSetContextCreate(source_context,
+                                                  "GPCCachedPlanQuery",
+                                                  ALLOCSET_SMALL_MINSIZE,
+                                                  ALLOCSET_SMALL_INITSIZE,
+                                                  ALLOCSET_DEFAULT_MAXSIZE,
+                                                  SHARED_CONTEXT);
     }
     else {
-    	querytree_context = AllocSetContextCreate(source_context,
-    											  "CachedPlanQuery",
-    											  ALLOCSET_SMALL_MINSIZE,
-    											  ALLOCSET_SMALL_INITSIZE,
-    											  ALLOCSET_DEFAULT_MAXSIZE);
+        querytree_context = AllocSetContextCreate(source_context,
+                                                  "CachedPlanQuery",
+                                                  ALLOCSET_SMALL_MINSIZE,
+                                                  ALLOCSET_SMALL_INITSIZE,
+                                                  ALLOCSET_DEFAULT_MAXSIZE);
     }
     MemoryContextSwitchTo(querytree_context);
     newsource->query_list = (List*)copyObject(plansource->query_list);
@@ -2042,6 +2041,7 @@ CachedPlanSource* CopyCachedPlan(CachedPlanSource* plansource, bool is_share)
     newsource->opFusionObj = NULL;
     newsource->is_checked_opfusion = false;
     newsource->spi_signature = plansource->spi_signature;
+    newsource->gplan_is_fqs = plansource->gplan_is_fqs;
 
 #ifdef ENABLE_MOT
     newsource->storageEngineType = SE_TYPE_UNSPECIFIED;
@@ -2113,7 +2113,7 @@ List* CachedPlanGetTargetList(CachedPlanSource* plansource)
  * AcquireExecutorLocks: acquire locks needed for execution of a cached plan;
  * or release them if acquire is false.
  */
-static void AcquireExecutorLocks(List* stmt_list, bool acquire)
+void AcquireExecutorLocks(List* stmt_list, bool acquire)
 {
     ListCell* lc1 = NULL;
 
@@ -2179,7 +2179,7 @@ static void AcquireExecutorLocks(List* stmt_list, bool acquire)
  * fail if one has been dropped entirely --- we'll just transiently acquire
  * a non-conflicting lock.
  */
-static void AcquirePlannerLocks(List* stmt_list, bool acquire)
+void AcquirePlannerLocks(List* stmt_list, bool acquire)
 {
     ListCell* lc = NULL;
 

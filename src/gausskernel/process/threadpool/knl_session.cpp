@@ -425,6 +425,8 @@ static void knl_u_plancache_init(knl_u_plancache_context* pcache_cxt)
     pcache_cxt->query_has_params = false;
     pcache_cxt->prepared_queries = NULL;
     pcache_cxt->lightproxy_objs = NULL;
+    pcache_cxt->stmt_lightproxy_htab = NULL;
+    pcache_cxt->unnamed_gpc_lp = NULL;
     pcache_cxt->datanode_queries = NULL;
     pcache_cxt->unnamed_stmt_psrc = NULL;
     pcache_cxt->cur_stmt_psrc = NULL;
@@ -435,6 +437,7 @@ static void knl_u_plancache_init(knl_u_plancache_context* pcache_cxt)
     pcache_cxt->gpc_remote_msg = false;
     pcache_cxt->gpc_first_send = true;
     pcache_cxt->gpc_in_try_store = false;
+    pcache_cxt->gpc_in_batch = false;
 }
 
 static void knl_u_typecache_init(knl_u_typecache_context* tycache_cxt)
