@@ -1388,6 +1388,8 @@ int PostmasterMain(int argc, char* argv[])
         ExitPostmaster(0);
     }
 
+    InitializeNumLwLockPartitions();
+
     noProcLogicTid = GLOBAL_ALL_PROCS;
 
     /* Run as FencedUDF master */

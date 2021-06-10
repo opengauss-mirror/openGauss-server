@@ -300,8 +300,11 @@ void BootStrapProcessMain(int argc, char* argv[])
 
     /* Acquire configuration parameters, unless inherited from postmaster */
     if (!IsUnderPostmaster) {
-        if (!SelectConfigFiles(userDoption, progName))
+        if (!SelectConfigFiles(userDoption, progName)) {
             proc_exit(1);
+        }
+
+        InitializeNumLwLockPartitions();
     }
 
     /* Validate we have been given a reasonable-looking t_thrd.proc_cxt.DataDir */

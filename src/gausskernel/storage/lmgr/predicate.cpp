@@ -891,7 +891,7 @@ void CheckPointPredicate(void)
     LWLockRelease(OldSerXidLock);
 
     /* Truncate away pages that are no longer required */
-    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.OldSerXidSlruCtl, tailPage, false, NUM_SLRU_DEFAULT_PARTITION);
+    SimpleLruTruncate(t_thrd.shemem_ptr_cxt.OldSerXidSlruCtl, tailPage, NUM_SLRU_DEFAULT_PARTITION);
 
     /*
      * Flush dirty SLRU pages to disk

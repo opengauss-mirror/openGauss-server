@@ -378,6 +378,7 @@ extern bool IsCharType(Oid attr_type);
 extern int GetDecimalFromHex(char hex);
 extern char* limit_printout_length(const char* str);
 
+extern bool StrToInt32(const char* s, int *val);
 extern char* TrimStr(const char* str);
 
 #endif /* COPY_H */

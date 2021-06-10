@@ -384,24 +384,6 @@ static RangeVar* InitStatementRel()
     return relrv;
 }
 
-static bool StrToInt32(const char* s, int *val)
-{
-    int base = 10;
-    const char* ptr = s;
-    /* process digits */
-    while (*ptr != '\0') {
-        if (isdigit((unsigned char)*ptr) == 0)
-            return false;
-        int8 digit = (*ptr++ - '0');
-        *val = *val * base + digit;
-        if (*val > PG_INT32_MAX || *val < PG_INT32_MIN) { 
-            return false;
-        }
-    }
-    return true;
-}
-
-
 bool check_statement_retention_time(char** newval, void** extra, GucSource source)
 {
     /* Do str copy and remove space. */
