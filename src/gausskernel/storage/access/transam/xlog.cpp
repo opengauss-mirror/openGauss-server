@@ -539,6 +539,7 @@ static bool XLogArchiveIsBusy(const char *xlog);
 static bool XLogArchiveIsReady(const char *xlog);
 static void XLogArchiveCleanup(const char *xlog);
 static void readRecoveryCommandFile(void);
+static XLogSegNo GetOldestXLOGSegNo(const char *workingPath);
 static void exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endSegNo);
 static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis);
 static void recoveryPausesHere(void);
@@ -4875,11 +4876,11 @@ void CheckXLogRemoved(XLogSegNo segno, TimeLineID tli)
  * NB: the result can be out of date arbitrarily fast, the caller has to deal
  * with that.
  */
-XLogRecPtr XLogGetLastRemovedSegno(void)
+XLogSegNo XLogGetLastRemovedSegno(void)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-    XLogRecPtr lastRemovedSegNo;
+    XLogSegNo lastRemovedSegNo;
 
     SpinLockAcquire(&xlogctl->info_lck);
     lastRemovedSegNo = xlogctl->lastRemovedSegNo;
@@ -6800,6 +6801,9 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedHotStandbyActive = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->WalWriterSleeping = false;
+    if (!IsInitdb) {
+        t_thrd.shemem_ptr_cxt.XLogCtl->lastRemovedSegNo = GetOldestXLOGSegNo(t_thrd.proc_cxt.DataDir);
+    }
 
 #if (!defined __x86_64__) && (!defined __aarch64__)
     SpinLockInit(&t_thrd.shemem_ptr_cxt.XLogCtl->Insert.insertpos_lck);
@@ -6816,6 +6820,46 @@ void XLOGShmemInit(void)
     if (!IsBootstrapProcessingMode()) {
         ReadControlFile();
     }
+}
+
+static XLogSegNo GetOldestXLOGSegNo(const char *workingPath)
+{
+#define XLOGFILENAMELEN 24
+    DIR *xlogDir = NULL;
+    struct dirent *dirEnt = NULL;
+    char xlogDirStr[MAXPGPATH] = {0};
+    char oldestXLogFileName[MAXPGPATH] = {0};
+    TimeLineID tli = 0;
+    uint32 xlogReadLogid = -1;
+    uint32 xlogReadLogSeg = -1;
+    XLogSegNo segno;
+    errno_t rc = EOK;
+
+    rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", workingPath, XLOGDIR);
+    securec_check_ss(rc, "", "");
+    xlogDir = opendir(xlogDirStr);
+    if (!xlogDir) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open xlog dir in GetOldestXLOGSegNo.")));
+    }
+    while ((dirEnt = readdir(xlogDir)) != NULL) {
+        if (strlen(dirEnt->d_name) == XLOGFILENAMELEN &&
+                strspn(dirEnt->d_name, "0123456789ABCDEF") == XLOGFILENAMELEN) {
+            if (strlen(oldestXLogFileName) == 0 || strcmp(dirEnt->d_name, oldestXLogFileName) < 0) {
+                rc = strncpy_s(oldestXLogFileName, MAXPGPATH - 1, dirEnt->d_name, strlen(dirEnt->d_name) + 1);
+                securec_check_ss(rc, "", "");
+                oldestXLogFileName[strlen(dirEnt->d_name)] = '\0';
+            }
+        }
+    }
+
+    (void)closedir(xlogDir);
+
+    if (sscanf_s(oldestXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to translate name to xlog in GetOldestXLOGSegNo.")));
+    }
+    segno = (uint64)xlogReadLogid * XLogSegmentsPerXLogId + xlogReadLogSeg - 1;
+
+    return segno;
 }
 
 static uint64 GetMACAddr(void)
