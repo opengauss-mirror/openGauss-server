@@ -318,6 +318,8 @@ extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
 extern void FreeExprContext(ExprContext* econtext, bool isCommit);
 extern void ReScanExprContext(ExprContext* econtext);
+extern VectorBatch* ExecBatchScan(ScanState* node, ExecScanAccessMtd access_mtd, ExecScanRecheckMtd recheck_mtd);
+extern VectorBatch* ExecBatchSeqScan(SeqScanState* node);
 
 #define ResetExprContext(econtext) MemoryContextReset((econtext)->ecxt_per_tuple_memory)
 

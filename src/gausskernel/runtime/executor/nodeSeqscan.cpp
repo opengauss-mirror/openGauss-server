@@ -40,6 +40,7 @@
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
+#include "vecexecutor/vecexecutor.h" 
 
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
@@ -252,6 +253,11 @@ static bool SeqRecheck(SeqScanState* node, TupleTableSlot* slot)
 TupleTableSlot* ExecSeqScan(SeqScanState* node)
 {
     return ExecScan((ScanState*)node, node->ScanNextMtd, (ExecScanRecheckMtd)SeqRecheck);
+}
+
+VectorBatch* ExecBatchSeqScan(SeqScanState* node)
+{
+    return ExecBatchScan((ScanState*)node, node->ScanNextMtd, (ExecScanRecheckMtd)SeqRecheck);
 }
 
 /* ----------------------------------------------------------------
@@ -541,6 +547,17 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 
     ExecAssignScanProjectionInfo(scanstate);
 
+    if (node->executeBatch) {
+        /*
+         * Init result batch and work batch. Work batch has to contain all columns as qual is
+         * running against it. we shall avoid with this after we fix projection elimination.
+         */
+        scanstate->m_pCurrentBatch = New(CurrentMemoryContext)
+            VectorBatch(CurrentMemoryContext, scanstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor);
+
+        scanstate->ps.vectorized = true;
+    }
+
     return scanstate;
 }
 
@@ -638,6 +655,13 @@ void ExecReScanSeqScan(SeqScanState* node)
 
     scan_handler_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
     ExecScanReScan((ScanState*)node);
+}
+
+void ExecReScanBatchSeqScan(SeqScanState* node)
+{
+    node->is_scan_end = false;
+    node->m_pCurrentBatch->m_rows = 0;
+    ExecReScan(&(node->ps));
 }
 
 /* ----------------------------------------------------------------

@@ -5497,6 +5497,7 @@ static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid)
     plan->righttree = NULL;
     plan->isDeltaTable = false;
     node->scanrelid = scanrelid;
+    node->executeBatch = false;
 
     return node;
 }

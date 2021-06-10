@@ -8209,6 +8209,27 @@ static bool has_column_store_relation(Plan* top_plan)
             }
         } break;
 
+        case T_IndexScan:
+        case T_SeqScan: {
+            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
+                ListCell* cell = NULL;
+                TargetEntry* entry = NULL;
+                Var* var = NULL;
+                foreach (cell, top_plan->targetlist) {
+                    entry = (TargetEntry*)lfirst(cell);
+                    if (IsA(entry->expr, Var)) {
+                        var = (Var*)entry->expr;
+                        if (var->varattno > 0 && var->varoattno > 0 &&
+                            !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+            return false;
+        } break;
+
         default:
             if (outerPlan(top_plan)) {
                 if (has_column_store_relation(outerPlan(top_plan)))
@@ -8475,6 +8496,22 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
                 return false;
             }
         case T_IndexScan:
+            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
+                ListCell* cell = NULL;
+                TargetEntry* entry = NULL;
+                Var* var = NULL;
+                foreach (cell, result_plan->targetlist) {
+                    entry = (TargetEntry*)lfirst(cell);
+                    if (IsA(entry->expr, Var)) {
+                        var = (Var*)entry->expr;
+                        if (var->varattno > 0 && var->varoattno > 0 &&
+                            !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:
         case T_TidScan:
@@ -8812,6 +8849,11 @@ static Plan* fallback_plan(Plan* result_plan)
             }
         } break;
 
+        case T_SeqScan: {
+            ((SeqScan*)result_plan)->executeBatch = false;
+            result_plan->vec_output = false;
+        } break;
+
         default:
             break;
     }
@@ -8877,7 +8919,14 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
                 break;
             }
         case T_SeqScan: {
-            if (result_plan->isDeltaTable) {
+            if (result_plan->isDeltaTable || u_sess->attr.attr_sql.enable_force_vector_engine) {
+                ((SeqScan*)result_plan)->executeBatch = true;
+                result_plan->vec_output = true;
+            }
+            break;
+        }
+        case T_IndexScan: {
+            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
                 result_plan = (Plan*)make_rowtovec(result_plan);
             }
             break;

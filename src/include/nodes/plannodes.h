@@ -542,8 +542,11 @@ typedef struct Scan {
     /* use struct pointer to avoid including parsenodes.h here */
     TableSampleClause* tablesample;
 
-    /*  Memory info for scan node, now it just used on indexscan, indexonlyscan, bitmapscan, dfsindexscan */
+    /* Memory info for scan node, now it just used on indexscan, indexonlyscan, bitmapscan, dfsindexscan */
     OpMemInfo mem_info;
+
+    /* use vector engine to execute this scan */
+    bool executeBatch;
 } Scan;
 
 /* ----------------
