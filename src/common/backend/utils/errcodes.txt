@@ -609,3 +609,8 @@ LL002    E    ERRCODE_RELFILENODEMAP                                         rel
 Section: Class TS - Timeseries Error
 TS000    E    ERRCODE_TS_COMMON_ERROR                                        timeseries_common_error
 TS001    E    ERRCODE_TS_KEYTYPE_MISMATCH                                    column_key_type_mismatch
+
+Section: Class UE - Uncorrected Error & Warning
+UE000    E    ERRCODE_UE_COMMON_ERROR                                        uce_common_error
+UE001    E    ERRCODE_UE_DIRTY_PAGE                                          uce_dirty_page_error
+UE002    E    ERRCODE_UE_CLEAN_PAGE                                          uce_clean_page_error

@@ -1643,6 +1643,9 @@ typedef struct knl_t_utils_context {
     /* Track memory usage in bytes at individual thread level */
     int64 trackedBytes;
 
+    int64 peakedBytesInQueryLifeCycle;
+    int64 basedBytesInQueryLifeCycle;
+
     /* Per thread/query quota in chunks */
     int32 maxChunksPerThread; /* Will be updated by CostSize */
 

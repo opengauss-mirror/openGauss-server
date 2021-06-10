@@ -108,76 +108,6 @@ static void check_source_generic_options(const List* src_options)
 }
 
 /*
- * encrypt_source_generic_options:
- * 	Encrypt data source generic options, before transformation
- *
- * @IN src_options: source options to be encrypted
- * @RETURN: void
- */
-static void encrypt_source_generic_options(List* src_options)
-{
-    int i;
-    int NumSensitiveOptions = sizeof(SensitiveOptionsArray) / sizeof(SensitiveOptionsArray[0]);
-    char* srcString = NULL;
-    char encryptString[EC_CIPHER_TEXT_LENGTH];
-    errno_t ret;
-    ListCell* cell = NULL;
-    bool isPrint = false;
-
-    foreach (cell, src_options) {
-        DefElem* def = (DefElem*)lfirst(cell);
-        Node* arg = def->arg;
-
-        if (def->defaction == DEFELEM_DROP || def->arg == NULL)
-            continue;
-
-        /* Get src string to be encrypted */
-        srcString = defGetString(def);
-        /* For empty value, we do not encrypt */
-        if (srcString == NULL || strlen(srcString) == 0)
-            continue;
-
-        for (i = 0; i < NumSensitiveOptions; i++) {
-            if (0 == pg_strcasecmp(def->defname, SensitiveOptionsArray[i])) {
-                /* For string with prefix='encryptOpt' (probably encrypted), we do not encrypt again */
-                if (IsECEncryptedString(srcString)) {
-                    /* We report warning only once in a CREATE/ALTER stmt. */
-                    if (!isPrint) {
-                        ereport(NOTICE,
-                            (errmodule(MOD_EC),
-                                errcode(ERRCODE_INVALID_PASSWORD),
-                                errmsg("Using probably encrypted option (prefix='encryptOpt') directly and it is not "
-                                       "recommended."),
-                                errhint(
-                                    "The DATA SOURCE object can't be used if the option is not encrypted correctly.")));
-                        isPrint = true;
-                    }
-                    break;
-                }
-
-                /* Encrypt the src string */
-                encryptECString(srcString, encryptString, EC_CIPHER_TEXT_LENGTH);
-
-                /* Substitute the src */
-                def->arg = (Node*)makeString(pstrdup(encryptString));
-
-                /* Clear the encrypted string */
-                ret = memset_s(encryptString, sizeof(encryptString), 0, sizeof(encryptString));
-                securec_check(ret, "\0", "\0");
-
-                /* Clear the src string */
-                ret = memset_s(srcString, strlen(srcString), 0, strlen(srcString));
-                securec_check(ret, "\0", "\0");
-                pfree_ext(srcString);
-                pfree_ext(arg);
-
-                break;
-            }
-        }
-    }
-}
-
-/*
  * CreateDataSource:
  * 	Create a Data Source, only allowed by superuser!
  *
@@ -249,7 +179,7 @@ void CreateDataSource(CreateDataSourceStmt* stmt)
     check_source_generic_options(stmt->options);
 
     /* Encrypt sensitive options before any operations */
-    encrypt_source_generic_options(stmt->options);
+    EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), true);
 
     /* Add source options */
     srcoptions = transformGenericOptions(DataSourceRelationId, PointerGetDatum(NULL), stmt->options, InvalidOid);
@@ -361,7 +291,7 @@ void AlterDataSource(AlterDataSourceStmt* stmt)
         check_source_generic_options((const List*)stmt->options);
 
         /* Encrypt sensitive options before any operations */
-        encrypt_source_generic_options(stmt->options);
+        EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), true);
 
         /* Prepare the options array */
         datum = transformGenericOptions(DataSourceRelationId, datum, stmt->options, InvalidOid);

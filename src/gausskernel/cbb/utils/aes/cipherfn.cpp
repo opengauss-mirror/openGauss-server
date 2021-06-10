@@ -42,10 +42,11 @@
 #include "openssl/rand.h"
 #include "openssl/evp.h"
 #include "openssl/crypto.h"
+#include "commands/defrem.h"
 
 const char* pgname = "gs_encrypt";
 void getOBSKeyString(GS_UCHAR** cipherKey);
-static GS_UCHAR* getECKeyString(void);
+static GS_UCHAR* getECKeyString(KeyMode mode);
 char prefixCipherKey[2] = {'\0'};
 char suffixCipherKey[100] = {'\0'};
 bool gs_encrypt_aes_speed(GS_UCHAR* plaintext, GS_UCHAR* key, GS_UCHAR* ciphertext, GS_UINT32* cipherlen);
@@ -804,12 +805,14 @@ bool gs_decrypt_aes_speed(
  * @IN/OUT cipherKey: get key string and stored in cipherKey
  * @RETURN: void
  */
-static GS_UCHAR* getECKeyString(void)
+static GS_UCHAR* getECKeyString(KeyMode mode)
 {
+    Assert(mode == SOURCE_MODE || mode == USER_MAPPING_MODE);
     GS_UCHAR* plainkey = NULL;
     char* gshome = NULL;
     char cipherdir[MAXPGPATH] = {0};
     char cipherfile[MAXPGPATH] = {0};
+    const char *cipherPrefix = (mode == SOURCE_MODE ? "datasource" : "usermapping");
     int ret = 0;
 
     /*
@@ -827,7 +830,7 @@ static GS_UCHAR* getECKeyString(void)
 
     ret = snprintf_s(cipherdir, MAXPGPATH, MAXPGPATH - 1, "%s/bin", gshome);
     securec_check_ss(ret, "\0", "\0");
-    ret = snprintf_s(cipherfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/datasource.key.cipher", gshome);
+    ret = snprintf_s(cipherfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s.key.cipher", gshome, cipherPrefix);
     securec_check_ss_c(ret, "\0", "\0");
 
     gshome = NULL;
@@ -841,13 +844,13 @@ static GS_UCHAR* getECKeyString(void)
      * Decode cipher file, if not given SOURCE cipher file, we use SERVER mode
      */
     if (file_exists(cipherfile)) {
-        decode_cipher_files(SOURCE_MODE, NULL, cipherdir, plainkey);
+        decode_cipher_files(mode, NULL, cipherdir, plainkey);
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FILE),
-                errmsg("No key file datasource.key.cipher"),
-                errhint("Please create datasource.key.cipher file with gs_guc and gs_ssh, such as : gs_ssh -c \"gs_guc generate -S XXX -D "
-                        "$GAUSSHOME/bin -o datasource\"")));
+                errmsg("No key file %s.key.cipher", cipherPrefix),
+                errhint("Please create %s.key.cipher file with gs_guc and gs_ssh, such as : gs_ssh -c \"gs_guc generate -S XXX -D "
+                        "$GAUSSHOME/bin -o %s\"", cipherPrefix, cipherPrefix)));
     }
     /*
      * Note: plainkey is of length RANDOM_LEN + 1
@@ -866,7 +869,7 @@ static GS_UCHAR* getECKeyString(void)
  * @IN dest_cipher_length: dest buffer length which is given by the caller
  * @RETURN: void
  */
-void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length)
+void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, bool isDataSource)
 {
     GS_UINT32 ciphertextlen = 0;
     GS_UCHAR ciphertext[1024];
@@ -879,7 +882,7 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
     }
 
     /* First, get encrypt key */
-    cipherkey = getECKeyString();
+    cipherkey = getECKeyString(isDataSource ? SOURCE_MODE : USER_MAPPING_MODE);
 
     /* Clear cipher buffer which will be used later */
     ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
@@ -962,9 +965,9 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
  * @OUT dest_plain_text: dest buffer to be filled with plain text, this buffer
  * 	should be given by caller
  * @IN dest_plain_length: dest buffer length which is given by the caller
- * @RETURN: void
+ * @RETURN: bool, true if encrypt success, false if not
  */
-void decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 dest_plain_length)
+bool decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 dest_plain_length, bool isDataSource)
 {
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -974,11 +977,11 @@ void decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 
     errno_t ret = EOK;
 
     if (NULL == src_cipher_text || !IsECEncryptedString(src_cipher_text)) {
-        return;
+        return false;
     }
 
     /* Get key string */
-    cipherkey = getECKeyString();
+    cipherkey = getECKeyString(isDataSource ? SOURCE_MODE : USER_MAPPING_MODE);
 
     /* Step-1: Decode */
     ciphertext = (GS_UCHAR*)(SEC_decodeBase64((char*)(src_cipher_text + strlen(EC_ENCRYPT_PREFIX)), &ciphertextlen));
@@ -1036,6 +1039,7 @@ void decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 
     pfree_ext(cipherkey);
     OPENSSL_free(ciphertext);
     ciphertext = NULL;
+    return true;
 }
 
 /*
@@ -1055,6 +1059,75 @@ bool IsECEncryptedString(const char* src_cipher_text)
         return true;
     } else {
         return false;
+    }
+}
+
+/*
+ * EncryptGenericOptions:
+ * 	Encrypt data source or foreign data wrapper generic options, before transformation
+ *
+ * @IN src_options: source options to be encrypted
+ * @RETURN: void
+ */
+void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, int arrayLength, bool isDataSource)
+{
+    int i;
+    char* srcString = NULL;
+    char encryptString[EC_CIPHER_TEXT_LENGTH];
+    errno_t ret;
+    ListCell* cell = NULL;
+    bool isPrint = false;
+
+    foreach (cell, options) {
+        DefElem* def = (DefElem*)lfirst(cell);
+        Node* arg = def->arg;
+
+        if (def->defaction == DEFELEM_DROP || def->arg == NULL || !IsA(def->arg, String))
+            continue;
+
+        /* Get src string to be encrypted */
+        srcString = strVal(def->arg);
+        /* For empty value, we do not encrypt */
+        if (srcString == NULL || strlen(srcString) == 0)
+            continue;
+
+        for (i = 0; i < arrayLength; i++) {
+            if (0 == pg_strcasecmp(def->defname, sensitiveOptionsArray[i])) {
+                /* For string with prefix='encryptOpt' (probably encrypted), we do not encrypt again */
+                if (IsECEncryptedString(srcString)) {
+                    /* We report warning only once in a CREATE/ALTER stmt. */
+                    if (!isPrint) {
+                        ereport(NOTICE,
+                            (errmodule(MOD_EC),
+                                errcode(ERRCODE_INVALID_PASSWORD),
+                                errmsg("Using probably encrypted option (prefix='encryptOpt') directly and it is not "
+                                       "recommended."),
+                                errhint("The %s object can't be used if the option is not encrypted correctly.",
+                                        isDataSource ? "DATA SOURCE" : "USER MAPPING")));
+                        isPrint = true;
+                    }
+                    break;
+                }
+
+                /* Encrypt the src string */
+                encryptECString(srcString, encryptString, EC_CIPHER_TEXT_LENGTH, isDataSource);
+
+                /* Substitute the src */
+                def->arg = (Node*)makeString(pstrdup(encryptString));
+
+                /* Clear the encrypted string */
+                ret = memset_s(encryptString, sizeof(encryptString), 0, sizeof(encryptString));
+                securec_check(ret, "\0", "\0");
+
+                /* Clear the src string */
+                ret = memset_s(srcString, strlen(srcString), 0, strlen(srcString));
+                securec_check(ret, "\0", "\0");
+                pfree_ext(srcString);
+                pfree_ext(arg);
+
+                break;
+            }
+        }
     }
 }
 
@@ -2365,7 +2438,6 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     errorno = memcpy_s(user_key, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
     securec_check_c(errorno, "\0", "\0");
 
-
     if (keylen < SM4_KEY_LENGTH) {
         errorno = memset_s(user_key + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
         securec_check_c(errorno, "\0", "\0");
@@ -2379,8 +2451,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     if (ret != 1) {
         errorno = memset_s(user_iv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
         securec_check_c(errorno, "", "");
-        (void)fprintf(stderr, _("generate random sm4 vector failed,errcode:%d\n"), ret);
-        return false;
+        ereport(ERROR, (errmsg("generate random sm4 vector failed,errcode:%d", ret)));
     }
 
     /*
@@ -2409,7 +2480,6 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
             (errmsg("sm4 encrypt fail"),
                 errdetail("sm4_ctr_enc_partial_mode fail")));
     }
-
 
     cipherLength = cipherLength + SM4_IV_LENGTH;
     /* encode the ciphertext for nice show and decrypt operation */
@@ -2479,7 +2549,6 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     pfree_ext(key);
     decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
     decodetextlen = strlen((const char*)decodetext);
-
     ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext , &ciphertextlen));
     if ((ciphertext == NULL) || (ciphertextlen < (SM4_IV_LENGTH + 1))) {
         if (ciphertext != NULL) {
@@ -2498,9 +2567,6 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     errorno = memset_s(decodetext, decodetextlen, '\0', decodetextlen);
     securec_check(errorno, "\0", "\0");
     pfree_ext(decodetext);
-
-
-
 
     errorno = memcpy_s(user_iv, SM4_IV_LENGTH,ciphertext, SM4_IV_LENGTH);
     securec_check_c(errorno, "\0", "\0");
@@ -2522,10 +2588,9 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     ret = sm4_ctr_dec_partial_mode(
                 cipherpart, cipherpartlen, encodetext, &encodetextlen, userkey, user_iv);
     if (ret !=  0) {
-		
-		errorno = memset_s(cipherpart, cipherpartlen + 1, '\0', cipherpartlen + 1);
-		securec_check(errorno, "\0", "\0");
-		pfree_ext(cipherpart);
+        errorno = memset_s(cipherpart, cipherpartlen + 1, '\0', cipherpartlen + 1);
+        securec_check(errorno, "\0", "\0");
+        pfree_ext(cipherpart);
         errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
         securec_check(errorno, "\0", "\0");
         pfree_ext(encodetext);
@@ -2533,7 +2598,6 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
             (errmsg("sm4 decrypt fail"),
                 errdetail("sm4_ctr_dec_partial_mode fail")));
     }
-
 
     errorno = memset_s(cipherpart, cipherpartlen + 1, '\0', cipherpartlen + 1);
     securec_check(errorno, "\0", "\0");

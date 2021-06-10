@@ -244,4 +244,5 @@ extern uint64_t mc_timers_us(void);
 extern bool SetDBStateFileState(DbState state, bool optional);
 extern void GPCResetAll();
 extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
+extern void SIGBUS_handler(SIGNAL_ARGS);
 #endif /* _POSTMASTER_H */
