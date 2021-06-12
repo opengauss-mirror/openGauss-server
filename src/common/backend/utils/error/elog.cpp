@@ -514,7 +514,10 @@ void errfinish(int dummy, ...)
     if (edata->elevel >= u_sess->attr.attr_common.backtrace_min_messages) {
         StringInfoData buf;
         initStringInfo(&buf);
+
+        HOLD_INTERRUPTS();
         int ret = output_backtrace_to_log(&buf);
+        RESUME_INTERRUPTS();
 
         if (0 == ret) {
             edata->backtrace_log = pstrdup(buf.data);
