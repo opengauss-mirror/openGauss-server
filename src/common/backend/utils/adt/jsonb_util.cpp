@@ -218,8 +218,7 @@ compareJsonbSuperHeaderValue(JsonbSuperHeader a, JsonbSuperHeader b)
                          */ 
                         if (va.array.rawScalar != vb.array.rawScalar) {
                             res = (va.array.rawScalar) ? -1 : 1;
-                        }
-                        if (va.array.nElems != vb.array.nElems) {
+                        } else if (va.array.nElems != vb.array.nElems) {
                             res = (va.array.nElems > vb.array.nElems) ? 1 : -1;
                         }
                         break;

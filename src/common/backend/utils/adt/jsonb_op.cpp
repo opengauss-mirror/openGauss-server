@@ -124,8 +124,7 @@ jsonb_contains(PG_FUNCTION_ARGS)
     JsonbIterator *it1 = NULL;
     JsonbIterator *it2 = NULL;
 
-    if (JB_ROOT_COUNT(val) < JB_ROOT_COUNT(tmpl) ||
-        JB_ROOT_IS_OBJECT(val) != JB_ROOT_IS_OBJECT(tmpl)) {
+    if (JB_ROOT_IS_OBJECT(val) != JB_ROOT_IS_OBJECT(tmpl)) {
         PG_RETURN_BOOL(false);
     }
 
@@ -145,8 +144,7 @@ jsonb_contained(PG_FUNCTION_ARGS)
     JsonbIterator *it1 = NULL;
     JsonbIterator *it2 = NULL;
 
-    if (JB_ROOT_COUNT(val) < JB_ROOT_COUNT(tmpl) ||
-        JB_ROOT_IS_OBJECT(val) != JB_ROOT_IS_OBJECT(tmpl)) {
+    if (JB_ROOT_IS_OBJECT(val) != JB_ROOT_IS_OBJECT(tmpl)) {
         PG_RETURN_BOOL(false);
     }
 

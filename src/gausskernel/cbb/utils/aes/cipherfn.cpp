@@ -2436,11 +2436,11 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
                 MIN_KEY_LEN, SM4_KEY_LENGTH)));
     }
     errorno = memcpy_s(user_key, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
-    securec_check_c(errorno, "\0", "\0");
+    securec_check(errorno, "\0", "\0");
 
     if (keylen < SM4_KEY_LENGTH) {
         errorno = memset_s(user_key + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
-        securec_check_c(errorno, "\0", "\0");
+        securec_check(errorno, "\0", "\0");
     }
 
     errorno = memset_s(key, keylen, '\0', keylen);
@@ -2450,7 +2450,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     ret = RAND_priv_bytes(user_iv, SM4_IV_LENGTH);
     if (ret != 1) {
         errorno = memset_s(user_iv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
-        securec_check_c(errorno, "", "");
+        securec_check(errorno, "", "");
         ereport(ERROR, (errmsg("generate random sm4 vector failed,errcode:%d", ret)));
     }
 
@@ -2465,7 +2465,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     errorno = memset_s(ciphertext, ciphertextlenmax, '\0', ciphertextlenmax);
     securec_check(errorno, "\0", "\0");
     errorno = memcpy_s(ciphertext , SM4_IV_LENGTH, user_iv, SM4_IV_LENGTH);
-    securec_check_c(errorno, "\0", "\0");
+    securec_check(errorno, "\0", "\0");
 
     ret = sm4_ctr_enc_partial_mode(
         plaintext, plaintextlen, ciphertext + SM4_IV_LENGTH, &cipherLength, user_key, user_iv);
@@ -2537,11 +2537,11 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
                 MIN_KEY_LEN, SM4_KEY_LENGTH)));
     }
     errorno = memcpy_s(userkey, SM4_KEY_LENGTH, (GS_UCHAR*)key, keylen);
-    securec_check_c(errorno, "\0", "\0");
+    securec_check(errorno, "\0", "\0");
 
     if (keylen < SM4_KEY_LENGTH) {
         errorno = memset_s(userkey + keylen, SM4_KEY_LENGTH - keylen, '\0', SM4_KEY_LENGTH - keylen);
-        securec_check_c(errorno, "\0", "\0");
+        securec_check(errorno, "\0", "\0");
     }
 
     errorno = memset_s(key, keylen, '\0', keylen);
@@ -2569,7 +2569,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     pfree_ext(decodetext);
 
     errorno = memcpy_s(user_iv, SM4_IV_LENGTH,ciphertext, SM4_IV_LENGTH);
-    securec_check_c(errorno, "\0", "\0");
+    securec_check(errorno, "\0", "\0");
 
     ciphertextlenmax = ciphertextlen + SM4_BLOCK_SIZE - 1;
     encodetext = (char*)palloc(ciphertextlenmax);

@@ -127,14 +127,14 @@ explain select a, pk, fk from jsonbfk join jsonbpk on fk = pk order by 1,2;
 -- scan indexscan bypass
 set opfusion_debug_mode = log;
 analyze jsonbpk;
-explain select * from jsonbpk;
+explain(costs off) select * from jsonbpk;
 select * from jsonbpk where pk >= '[]';
 select * from jsonbpk where pk >= 'false';
-explain select * from jsonbpk where pk >= 'false';
+explain(costs off) select * from jsonbpk where pk >= 'false';
 
 insert into jsonbpk select generate_series(1,10000)::text::jsonb;
 analyze jsonbpk;
-explain select * from jsonbpk where pk < '0';
+explain(costs off) select * from jsonbpk where pk < '0';
 
 set opfusion_debug_mode = off;
 
