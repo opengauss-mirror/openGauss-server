@@ -97,44 +97,6 @@
 #include "client_logic/client_logic_enums.h"
 #include "storage/checksum_impl.h"
 
-/* State shared by transformCreateStmt and its subroutines */
-typedef struct {
-    ParseState* pstate;             /* overall parser state */
-    const char* stmtType;           /* "CREATE [FOREIGN] TABLE" or "ALTER TABLE" */
-    RangeVar* relation;             /* relation to create */
-    Relation rel;                   /* opened/locked rel, if ALTER */
-    List* inhRelations;             /* relations to inherit from */
-    bool isalter;                   /* true if altering existing table */
-    bool ispartitioned;             /* true if it is for a partitioned table */
-    bool hasoids;                   /* does relation have an OID column? */
-    bool canInfomationalConstraint; /* If the value id true, it means that we can build informational constraint. */
-    List* columns;                  /* ColumnDef items */
-    List* ckconstraints;            /* CHECK constraints */
-    List* clusterConstraints;       /* PARTIAL CLUSTER KEY constraints */
-    List* fkconstraints;            /* FOREIGN KEY constraints */
-    List* ixconstraints;            /* index-creating constraints */
-    List* inh_indexes;              /* cloned indexes from INCLUDING INDEXES */
-    List* blist;                    /* "before list" of things to do before creating the table */
-    List* alist;                    /* "after list" of things to do after creating the table */
-    PartitionState* csc_partTableState;
-    List* reloptions;
-    List* partitionKey; /* partitionkey for partiitoned table */
-    IndexStmt* pkey;    /* PRIMARY KEY index, if any */
-#ifdef PGXC
-    List* fallback_dist_col;    /* suggested column to distribute on */
-    DistributeBy* distributeby; /* original distribute by column of CREATE TABLE */
-    PGXCSubCluster* subcluster; /* original subcluster option of CREATE TABLE */
-#endif
-    Node* node; /* @hdfs record a CreateStmt or AlterTableStmt object. */
-    char* internalData;
-
-    List* uuids;     /* used for create sequence */
-    bool isResizing; /* true if the table is resizing */
-    Oid  bucketOid;     /* bucket oid of the resizing table */
-    List *relnodelist;  /* filenode of the resizing table */
-    List *toastnodelist; /* toast node of the resizing table */
-} CreateStmtContext;
-
 /* State shared by transformCreateSchemaStmt and its subroutines */
 typedef struct {
     const char* stmtType; /* "CREATE SCHEMA" or "ALTER SCHEMA" */
@@ -171,8 +133,6 @@ static void transformTableLikePartitionKeys(
 static void transformTableLikePartitionBoundaries(
     Relation relation, List* partKeyPosList, List* partitionList, List** partitionDefinitions);
 static void transformOfType(CreateStmtContext* cxt, TypeName* ofTypename);
-static IndexStmt* generateClonedIndexStmt(
-    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel);
 static List* get_collation(Oid collation, Oid actual_datatype);
 static List* get_opclass(Oid opclass, Oid actual_datatype);
 static void checkPartitionValue(CreateStmtContext* cxt, CreateStmt* stmt);
@@ -2114,7 +2074,7 @@ char* getTmptableIndexName(const char* srcSchema, const char* srcIndex)
  * Generate an IndexStmt node using information from an already existing index
  * "source_idx".  Attribute numbers should be adjusted according to attmap.
  */
-static IndexStmt* generateClonedIndexStmt(
+IndexStmt* generateClonedIndexStmt(
     CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel)
 {
     Oid source_relid = RelationGetRelid(source_idx);
@@ -2711,7 +2671,8 @@ static void checkConditionForTransformIndex(
      * else dump and reload will produce a different index (breaking
      * pg_upgrade in particular).
      */
-    if (index_rel->rd_rel->relam != get_am_oid(DEFAULT_INDEX_TYPE, false))
+    if (index_rel->rd_rel->relam != get_am_oid(DEFAULT_INDEX_TYPE, false) &&
+        index_rel->rd_rel->relam != get_am_oid(CSTORE_BTREE_INDEX_TYPE, false))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("index \"%s\" is not a btree", index_name),

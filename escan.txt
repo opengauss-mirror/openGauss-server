@@ -1000,6 +1000,7 @@ src/gausskernel/storage/cstore/compression/time_series_compress.cpp
 src/gausskernel/storage/cstore/cstore_allocspace.cpp
 src/gausskernel/storage/cstore/cstore_am.cpp
 src/gausskernel/storage/cstore/cstore_delete.cpp
+src/gausskernel/storage/cstore/cstore_delta.cpp
 src/gausskernel/storage/cstore/cstore_insert.cpp
 src/gausskernel/storage/cstore/cstore_mem_alloc.cpp
 src/gausskernel/storage/cstore/cstore_minmax_func.cpp

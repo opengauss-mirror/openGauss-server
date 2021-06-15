@@ -20,6 +20,7 @@
 
 #include "nodes/print.h"
 
+#include "access/cstore_delta.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
 #include "access/transam.h"
@@ -4607,15 +4608,21 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 true,                                      /* check_rights */
                 !u_sess->upg_cxt.new_catalog_need_storage, /* skip_build */
                 false);                                    /* quiet */
+            if (RelationIsCUFormatByOid(rel_id) && (stmt->primary || stmt->unique)) {
+                DefineDeltaUniqueIndex(rel_id, stmt, indexRelOid);
+            }
             CreateForeignIndex(stmt, indexRelOid);
 #else
-            DefineIndex(rel_id,
+            Oid indexRelOid = DefineIndex(rel_id,
                 stmt,
                 InvalidOid,                                /* no predefined OID */
                 false,                                     /* is_alter_table */
                 true,                                      /* check_rights */
                 !u_sess->upg_cxt.new_catalog_need_storage, /* skip_build */
                 false);                                    /* quiet */
+            if (RelationIsCUFormatByOid(rel_id) && (stmt->primary || stmt->unique)) {
+                DefineDeltaUniqueIndex(rel_id, stmt, indexRelOid);
+            }
 #endif
             pgstat_report_waitstatus(oldStatus);
 #ifdef PGXC
