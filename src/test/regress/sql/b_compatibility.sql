@@ -82,21 +82,21 @@ select cast('s' as int);
 --------------- limit #,#-------------------
 -- limit case in postgresql
 \c regression
-create table test(a int);
-insert into test values (1),(2),(3),(4),(5);
-select * from test order by 1 limit 2,3;
-select * from test order by 1 limit 2,6;
-select * from test order by 1 limit 6,2;
-drop table test;
+create table test_limit(a int);
+insert into test_limit values (1),(2),(3),(4),(5);
+select * from test_limit order by 1 limit 2,3;
+select * from test_limit order by 1 limit 2,6;
+select * from test_limit order by 1 limit 6,2;
+drop table test_limit;
 
 -- limit case in b
 \c b
-create table test(a int);
-insert into test values (1),(2),(3),(4),(5);
-select * from test order by 1 limit 2,3;
-select * from test order by 1 limit 2,6;
-select * from test order by 1 limit 6,2;
-drop table test;
+create table test_limit(a int);
+insert into test_limit values (1),(2),(3),(4),(5);
+select * from test_limit order by 1 limit 2,3;
+select * from test_limit order by 1 limit 2,6;
+select * from test_limit order by 1 limit 6,2;
+drop table test_limit;
 
 --------------timestampdiff-----------------
 -- timestamp with time zone
@@ -188,6 +188,29 @@ select timestampdiff(minute, '2018-01-01 01:01:01.000001',b) from timestamp;;
 select timestampdiff(second, '2018-01-01 01:01:01.000001', b) from timestamp;
 select timestampdiff(microsecond, '2018-01-01 01:01:01.000001', b) from timestamp;
 drop table timestamp;
+
+-- test char/varchar length
+create table char_test(a char(10),b varchar(10));
+insert into char_test values('零一二三四五六七八九','零一二三四五六七八九');
+insert into char_test values('零1二3四5六7八9','零1二3四5六7八9');
+insert into char_test values('零1二3四5六7八9','零1二3四5六7八90');
+insert into char_test values('零1二3四5六7八90','零1二3四5六7八9');
+insert into char_test values('零0','零1二3');
+insert into char_test values('零0  ','零1二3');
+insert into char_test values('零0','零1二3  ');
+insert into char_test values('','');
+insert into char_test values(null,null);
+insert into char_test values('0','0');
+select length(a),length(b) from char_test;
+select lengthb(a),lengthb(b) from char_test;
+select bit_length(a),bit_length(b) from char_test;
+
+create index a on char_test(a);
+create index b on char_test(b);
+set enable_seqscan to off;
+select * from char_test where a = '零0';
+select * from char_test where b = '零1二3';
+drop table char_test;
 
 \c regression
 
