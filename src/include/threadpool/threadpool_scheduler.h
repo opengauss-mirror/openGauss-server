@@ -31,6 +31,7 @@ public:
     ~ThreadPoolScheduler();
     int StartUp();
     void DynamicAdjustThreadPool();
+    void SigHupHandler();
     void GPCScheduleCleaner(int* gpc_count);
     void ShutDown() const;
     inline ThreadId GetThreadId()

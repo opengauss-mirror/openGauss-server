@@ -3169,6 +3169,40 @@ static void exec_parse_message(const char* query_string, /* string to execute */
     if (ENABLE_DN_GPC)
         CleanSessGPCPtr(u_sess);
 
+    is_named = (stmt_name[0] != '\0');
+    if (ENABLE_GPC) {
+        CachedPlanSource * plansource = g_instance.plan_cache->Fetch(query_string, strlen(query_string),
+                                                                     numParams, NULL);
+        if (plansource != NULL) {
+            bool hasGetLock = false;
+            if (is_named) {
+                if (ENABLE_CN_GPC)
+                    StorePreparedStatementCNGPC(stmt_name, plansource, false, true);
+                else {
+                    u_sess->pcache_cxt.cur_stmt_psrc = plansource;
+                    if (g_instance.plan_cache->CheckRecreateCachePlan(plansource, &hasGetLock))
+                        g_instance.plan_cache->RecreateCachePlan(plansource, stmt_name, NULL, NULL, NULL, hasGetLock);
+                }
+                goto pass_parsing;
+            } else {
+                if (ENABLE_DN_GPC)
+                    u_sess->pcache_cxt.private_refcount--;
+                if (!g_instance.plan_cache->CheckRecreateCachePlan(plansource, &hasGetLock)) {
+                    drop_unnamed_stmt();
+                    u_sess->pcache_cxt.unnamed_stmt_psrc = plansource;
+                    goto pass_parsing;
+                } else {
+                    plansource->gpc.status.SubRefCount();
+                    if (hasGetLock) {
+                        AcquirePlannerLocks(plansource->query_list, false);
+                        if (plansource->gplan) {
+                            AcquireExecutorLocks(plansource->gplan->stmt_list, false);
+                        }
+                    }
+                }
+            }
+        }
+    }
     /*
      * Switch to appropriate context for constructing parsetrees.
      *
@@ -3183,24 +3217,7 @@ static void exec_parse_message(const char* query_string, /* string to execute */
      * So in this case, we create the plancache entry's query_context here,
      * and do all the parsing work therein.
      */
-    is_named = (stmt_name[0] != '\0');
     if (is_named) {
-        if (ENABLE_GPC) {
-            CachedPlanSource * plansource = g_instance.plan_cache->Fetch(query_string, strlen(query_string),
-                                                                         numParams, NULL);
-
-            if (plansource != NULL) {
-                if (ENABLE_CN_GPC)
-                    StorePreparedStatementCNGPC(stmt_name, plansource, false, true);
-                else {
-                    u_sess->pcache_cxt.cur_stmt_psrc = plansource;
-                    if (g_instance.plan_cache->CheckRecreateCachePlan(plansource))
-                        g_instance.plan_cache->RecreateCachePlan(plansource, stmt_name, NULL, NULL, NULL);
-                }
-                goto pass_parsing;
-            }
-        }
-
         /* Named prepared statement --- parse in u_sess->parser_cxt.temp_parse_message_context */
         oldcontext = MemoryContextSwitchTo(u_sess->temp_mem_cxt);
     } else {
@@ -4196,6 +4213,7 @@ static void exec_bind_message(StringInfo input_message)
         /* save the cursor in case of error */
         int msg_cursor = input_message->cursor;
         int nodeIdx = getSingleNodeIdx(input_message, psrc, stmt_name);
+        bool enable_unamed_gpc = psrc->gpc.status.InShareTable() && stmt_name[0] == '\0';
         if (nodeIdx != -1) {
             lightProxy* scn = NULL;
             bool enable_gpc = (ENABLE_CN_GPC && stmt_name[0] != '\0');
@@ -4212,7 +4230,12 @@ static void exec_bind_message(StringInfo input_message)
                 if (enable_gpc) {
                     scn->storeLpByStmtName(stmt_name);
                     psrc->lightProxyObj = NULL;
+                } else if (enable_unamed_gpc) {
+                    Assert(u_sess->pcache_cxt.unnamed_gpc_lp == NULL);
+                    Assert(psrc->lightProxyObj == NULL);
+                    u_sess->pcache_cxt.unnamed_gpc_lp = scn;
                 } else {
+                    Assert(!enable_unamed_gpc);
                     psrc->lightProxyObj = scn;
                 }
             } else {
@@ -5401,12 +5424,28 @@ static void drop_unnamed_stmt(void)
     if (u_sess->pcache_cxt.unnamed_stmt_psrc) {
         CachedPlanSource* psrc = u_sess->pcache_cxt.unnamed_stmt_psrc;
         u_sess->pcache_cxt.unnamed_stmt_psrc = NULL;
-        if (ENABLE_GPC) {
-            GPC_LOG("drop private plansource", psrc, psrc->stmt_name);
-        }
-        DropCachedPlan(psrc);
-        if (ENABLE_GPC) {
-            GPC_LOG("drop private plansource end", psrc, 0);
+        if (psrc->gpc.status.InShareTable()) {
+            /* drop unnamed lightproxy */
+            if (u_sess->pcache_cxt.unnamed_gpc_lp) {
+                lightProxy* lp = u_sess->pcache_cxt.unnamed_gpc_lp;
+                u_sess->pcache_cxt.unnamed_gpc_lp = NULL;
+                Assert(lp->m_cplan == psrc);
+                Assert(lp->m_stmtName == NULL || lp->m_stmtName[0] == '\0');
+                if (lp->m_portalName == NULL || lightProxy::locateLightProxy(lp->m_portalName) == NULL) {
+                    lightProxy::tearDown(lp);
+                }
+            }
+            GPC_LOG("delete shared unnamed plansource", psrc, psrc->stmt_name);
+            psrc->gpc.status.SubRefCount();
+        } else {
+            Assert(u_sess->pcache_cxt.unnamed_gpc_lp == NULL);
+            if (ENABLE_GPC) {
+                GPC_LOG("drop private plansource", psrc, psrc->stmt_name);
+            }
+            DropCachedPlan(psrc);
+            if (ENABLE_GPC) {
+                GPC_LOG("drop private plansource end", psrc, 0);
+            }
         }
     }
 }
@@ -7393,6 +7432,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             }
         }
 
+        u_sess->pcache_cxt.gpc_in_batch = false;
         u_sess->pcache_cxt.gpc_in_try_store = false;
 
         OpFusion::tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
@@ -8436,6 +8476,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
                             OpFusion* curr = OpFusion::locateFusion(closeTarget);
                             if (curr != NULL) {
                                 if (curr->IsGlobal()) {
+                                    curr->clean();
                                     OpFusion::tearDown(curr);
                                 } else {
                                     curr->clean();
@@ -9816,10 +9857,11 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
 
     DestReceiver* receiver = NULL;
     bool completed = false;
+    bool hasGetLock = false;
 
     if (ENABLE_GPC && psrc->stmt_name && psrc->stmt_name[0] != '\0' &&
-        g_instance.plan_cache->CheckRecreateCachePlan(psrc)) {
-        g_instance.plan_cache->RecreateCachePlan(psrc, stmt_name, pstmt, NULL, NULL);
+        g_instance.plan_cache->CheckRecreateCachePlan(psrc, &hasGetLock)) {
+        g_instance.plan_cache->RecreateCachePlan(psrc, stmt_name, pstmt, NULL, NULL, hasGetLock);
 #ifdef ENABLE_MULTIPLE_NODES
         psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
 #else
@@ -10358,6 +10400,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
     /* E message */
     const char* exec_portal_name = NULL;
     int max_rows;
+    /* reset gpc batch flag */
+    u_sess->pcache_cxt.gpc_in_batch = false;
 
     /*
      * Only support normal perf mode for PBE, as DestRemoteExecute can not send T message automatically.
@@ -10578,7 +10622,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
     }
 
     /* Make sure the querytree list is valid and we have parse-time locks */
-    if (!ENABLE_CN_GPC && psrc->single_exec_node != NULL)
+    if (psrc->single_exec_node != NULL)
         RevalidateCachedQuery(psrc);
 
     /* record the params set position for light cn to contruct batch message */
@@ -10900,6 +10944,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
         /* 3.run for each dn */
         lightProxy *scn = NULL;
         bool enable_gpc = (ENABLE_CN_GPC && stmt_name[0] != '\0');
+        bool enable_unamed_gpc = psrc->gpc.status.InShareTable() && stmt_name[0] == '\0';
         if (enable_gpc)
             scn = lightProxy::locateLpByStmtName(stmt_name);
         else
@@ -10913,9 +10958,15 @@ static void exec_batch_bind_execute(StringInfo input_message)
             if (enable_gpc) {
                 scn->storeLpByStmtName(stmt_name);
                 psrc->lightProxyObj = NULL;
+            } else if (enable_unamed_gpc) {
+                Assert(u_sess->pcache_cxt.unnamed_gpc_lp == NULL);
+                Assert(psrc->lightProxyObj == NULL);
+                u_sess->pcache_cxt.unnamed_gpc_lp = scn;
             } else {
                 psrc->lightProxyObj = scn;
             }
+        } else {
+            Assert(!enable_unamed_gpc);
         }
         if (enable_gpc) {
             /* cngpc need fill gpc msg just like BuildCachedPlan. */
@@ -10943,6 +10994,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 if (ENABLE_GPC && stmt_name[0] != '\0') {
 #ifdef ENABLE_MULTIPLE_NODES
                     psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
+                    u_sess->pcache_cxt.gpc_in_batch = true;
 #else
                     psrc = pstmt->plansource;
 #endif
@@ -10961,6 +11013,7 @@ static void exec_batch_bind_execute(StringInfo input_message)
                 if (ENABLE_GPC && stmt_name[0] != '\0') {
 #ifdef ENABLE_MULTIPLE_NODES
                     psrc = IS_PGXC_DATANODE ? u_sess->pcache_cxt.cur_stmt_psrc : pstmt->plansource;
+                    u_sess->pcache_cxt.gpc_in_batch = true;
 #else
                     psrc = pstmt->plansource;
 #endif
@@ -10984,6 +11037,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
 
         pfree(completionTag);
     }
+    /* end batch, reset gpc batch flag */
+    u_sess->pcache_cxt.gpc_in_batch = false;
 
     /* Done with the snapshot used */
     if (snapshot_set)

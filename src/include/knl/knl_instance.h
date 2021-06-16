@@ -69,7 +69,7 @@
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
-const int MAX_GLOBAL_CACHEMEM_NUM = 8;
+const int MAX_GLOBAL_CACHEMEM_NUM = 128;
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -894,7 +894,8 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 #define ATOMIC_TRUE                     1
 #define ATOMIC_FALSE                    0
 
-#define GLOBAL_PLANCACHE_MEMCONTEXT  (g_instance.cache_cxt.global_plancache_mem[random() % MAX_GLOBAL_CACHEMEM_NUM])
+#define GLOBAL_PLANCACHE_MEMCONTEXT \
+    (g_instance.cache_cxt.global_plancache_mem[u_sess->session_id % MAX_GLOBAL_CACHEMEM_NUM])
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
 
