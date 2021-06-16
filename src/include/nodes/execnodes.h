@@ -1553,6 +1553,9 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ExecScanAccessMtd ScanNextMtd;
+
+    VectorBatch* m_pScanBatch;     // batch to work on
+    VectorBatch* m_pCurrentBatch;  // output batch
 } ScanState;
 
 /*

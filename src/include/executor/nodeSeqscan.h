@@ -22,6 +22,7 @@ extern void ExecEndSeqScan(SeqScanState* node);
 extern void ExecSeqMarkPos(SeqScanState* node);
 extern void ExecSeqRestrPos(SeqScanState* node);
 extern void ExecReScanSeqScan(SeqScanState* node);
+extern void ExecReScanBatchSeqScan(SeqScanState* node);
 extern void InitScanRelation(SeqScanState* node, EState* estate);
 
 #endif /* NODESEQSCAN_H */
