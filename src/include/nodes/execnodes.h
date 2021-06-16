@@ -1238,7 +1238,7 @@ typedef struct PlanState {
     List* plan_issues;
     bool recursive_reset; /* node already reset? */
     bool qual_is_inited;
-
+    bool do_not_reset_rownum;
     int64 ps_rownum;    /* store current rownum */
 } PlanState;
 
