@@ -211,6 +211,9 @@ typedef struct knl_session_attr_sql {
     /* hypo index */
     bool enable_hypo_index;
     bool hypopg_is_explain;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_custom_parser;
+#endif
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
