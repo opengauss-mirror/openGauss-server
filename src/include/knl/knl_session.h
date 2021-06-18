@@ -1714,6 +1714,7 @@ typedef struct knl_u_relmap_context {
     struct RelMapFile* pending_shared_updates;
     struct RelMapFile* pending_local_updates;
 
+    struct ScanKeyData relfilenodeSkey[2];
     /* Hash table for informations about each relfilenode <-> oid pair */
     struct HTAB* RelfilenodeMapHash;
 } knl_u_relmap_context;
