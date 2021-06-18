@@ -3238,6 +3238,12 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
 #endif
                 }
             } else if (strcmp(nameptr, "replication") == 0) {
+                if (!IsHAPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("replication should connect HA port in thread_pool")));
+                }
+                    
                 /*
                  * Due to backward compatibility concerns the replication
                  * parameter is a hybrid beast which allows the value to be
@@ -3253,11 +3259,6 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     if (!g_instance.attr.attr_storage.enable_mix_replication)
                         t_thrd.datasender_cxt.am_datasender = true;
                 } else if (strcmp(valptr, "database") == 0) {
-                    if (!IsHAPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
-                        ereport(elevel,
-                            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                errmsg("logical replication should connect HA port in thread_pool")));
-                    }
                     t_thrd.role = WAL_DB_SENDER;
                 } else {
                     bool _am_normal_walsender = false;
