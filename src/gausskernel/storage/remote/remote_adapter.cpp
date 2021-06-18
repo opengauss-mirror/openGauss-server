@@ -191,6 +191,10 @@ int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int
         /* read page, if PageIsVerified failed will long jump to PG_CATCH() */
         Buffer buf = ReadBufferForRemote(relfilenode, forknum, blocknum, RBM_FOR_REMOTE, NULL, &hit);
 
+        if (BufferIsInvalid(buf)) {
+            ereport(ERROR, (errmodule(MOD_REMOTE), errmsg("standby page buffer is invalid!")));
+            return REMOTE_READ_BLCKSZ_NOT_SAME;
+        }
         LockBuffer(buf, BUFFER_LOCK_SHARE);
         Block block = BufferGetBlock(buf);
 
