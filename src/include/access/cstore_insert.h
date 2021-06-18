@@ -27,6 +27,7 @@
 #define CSTORE_INSERT_H
 
 #include "access/cstore_am.h"
+#include "access/cstore_delta.h"
 #include "access/cstore_psort.h"
 #include "access/cstore_vector.h"
 #include "access/cstore_minmax_func.h"
@@ -215,6 +216,7 @@ private:
     ResultRelInfo *m_resultRelInfo; /* contain index meta info */
 
     Relation *m_idxRelation;        /* index relations */
+    Relation *m_deltaIdxRelation;   /* delta index relations */
     InsertArg *m_idxInsertArgs;     /* index inserting arguments */
     CStoreInsert **m_idxInsert;     /* index inserter */
     int **m_idxKeyAttr;             /* index keys */
@@ -414,6 +416,31 @@ private:
     bool *m_tmp_null;
 
     Size *m_diskFileSize;
+};
+
+class CUDescScan : public BaseObject {
+public:
+    CUDescScan(_in_ Relation relation);
+
+    virtual ~CUDescScan();
+    virtual void Destroy();
+
+    void ResetSnapshot(Snapshot);
+
+    bool CheckItemIsAlive(ItemPointer tid);
+
+private:
+    inline bool IsDeadRow(uint32 row, unsigned char* cuDelMask);
+
+    bool CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found);
+
+    Relation m_cudesc;
+    Relation m_cudescIndex;
+    ScanKeyData m_scanKey[2];
+    Snapshot m_snapshot;
+    List* m_cuids;
+    List* m_deletemasks;
+    List* m_valids;
 };
 
 #endif

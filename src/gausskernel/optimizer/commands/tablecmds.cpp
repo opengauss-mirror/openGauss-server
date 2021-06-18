@@ -18,6 +18,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/cstore_delete.h"
+#include "access/cstore_delta.h"
 #include "access/cstore_insert.h"
 #include "access/cstore_rewrite.h"
 #include "access/dfs/dfs_am.h"
@@ -395,7 +396,8 @@ typedef OldToNewChunkIdMappingData* OldToNewChunkIdMapping;
         (cmd) == AT_SetTableSpace || (cmd) == AT_SetPartitionTableSpace || (cmd) == AT_SetOptions ||                \
         (cmd) == AT_ResetOptions || (cmd) == AT_SetStorage || (cmd) == AT_SetRelOptions ||                          \
         (cmd) == AT_ResetRelOptions || (cmd) == AT_MergePartition || (cmd) == AT_ChangeOwner ||                     \
-        (cmd) == AT_EnableRls || (cmd) == AT_DisableRls || (cmd) == AT_ForceRls || (cmd) == AT_NoForceRls)
+        (cmd) == AT_EnableRls || (cmd) == AT_DisableRls || (cmd) == AT_ForceRls || (cmd) == AT_NoForceRls ||        \
+        (cmd) == AT_AddIndex || (cmd) == AT_AddIndexConstraint)
 
 #define DFS_SUPPORT_AT_CMD(cmd)                                                                              \
     ((cmd) == AT_AddNodeList || (cmd) == AT_SubCluster || (cmd) == AT_AddColumn || (cmd) == AT_DropColumn || \
@@ -449,6 +451,7 @@ static void ATRewriteTable(AlteredTableInfo* tab, Relation oldrel, Relation newr
 static void ATCStoreRewriteTable(AlteredTableInfo* tab, Relation heapRel, LOCKMODE lockMode, Oid targetTblspc);
 static void ATCStoreRewritePartition(AlteredTableInfo* tab, LOCKMODE lockMode);
 static void at_timeseries_check(Relation rel, AlterTableCmd* cmd);
+static void ATOnlyCheckCStoreTable(AlteredTableInfo* tab, Relation rel);
 
 static void PSortChangeTableSpace(Oid psortOid, Oid newTableSpace, LOCKMODE lockmode);
 static void ForbidToRewriteOrTestCstoreIndex(AlteredTableInfo* tab);
@@ -7913,6 +7916,82 @@ static void ATRewriteTable(AlteredTableInfo* tab, Relation oldrel, Relation newr
 }
 
 /*
+ * ATOnlyCheckCStoreTable
+ * Only support not-null constraint check currently.
+ */
+static void ATOnlyCheckCStoreTable(AlteredTableInfo* tab, Relation rel)
+{
+    TupleDesc oldTupDesc = NULL;
+    TupleDesc newTupDesc = NULL;
+    List* notnullAttrs = NIL;
+    bool needscan = false;
+
+    oldTupDesc = tab->oldDesc;
+    newTupDesc = RelationGetDescr(rel); /* includes all mods */
+
+    if (tab->constraints != NIL || tab->newvals != NIL) {
+        ereport(ERROR,
+        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("Un-support feature"),
+            errdetail("column stored relation doesn't support this feature")));
+    }
+
+    if (tab->new_notnull) {
+        /*
+         * If we added any new NOT NULL constraints, check all not-null constraints.
+         */
+        for (int i = 0; i < newTupDesc->natts; i++) {
+            if (newTupDesc->attrs[i]->attnotnull && !newTupDesc->attrs[i]->attisdropped)
+                notnullAttrs = lappend_int(notnullAttrs, i);
+        }
+        if (notnullAttrs != NULL)
+            needscan = true;
+    }
+
+    if (needscan) {
+        CStoreScanDesc cstoreScan = NULL;
+        VectorBatch* vecScanBatch = NULL;
+        int attrNum = list_length(notnullAttrs);
+        AttrNumber* colIdx = (AttrNumber*)palloc(sizeof(AttrNumber) * attrNum);
+        int n = 0;
+        ListCell* cell;
+        ScalarVector *vec;
+        foreach (cell, notnullAttrs) {
+            colIdx[n++] = lfirst_int(cell) + 1;
+        }
+
+        ereport(DEBUG1, (errmsg("verifying table \"%s\"", RelationGetRelationName(rel))));
+
+        /*
+         * Scan through the cstore, generating a new row if needed and then
+         * checking constraints.
+         */
+        cstoreScan = CStoreBeginScan(rel, attrNum, colIdx, SnapshotNow, false);
+
+        do {
+            vecScanBatch = CStoreGetNextBatch(cstoreScan);
+            vec = vecScanBatch->m_arr;
+            for (int rowIdx = 0; rowIdx < vecScanBatch->m_rows; rowIdx++) {
+                for (n = 0; n < attrNum; ++n ) {
+                    int attn = colIdx[n] - 1;
+                    if (vec[attn].IsNull(rowIdx)) {
+                        ereport(ERROR,
+                        (errcode(ERRCODE_NOT_NULL_VIOLATION),
+                            errmsg("column \"%s\" contains null values", NameStr(newTupDesc->attrs[attn]->attname))));
+                    }
+                }
+            }
+        } while (!CStoreIsEndScan(cstoreScan));
+
+        CStoreEndScan(cstoreScan);
+
+        pfree_ext(colIdx);
+    }
+
+    list_free_ext(notnullAttrs);
+}
+
+/*
  * ATGetQueueEntry: find or create an entry in the ALTER TABLE work queue
  */
 static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel)
@@ -9804,6 +9883,11 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
         check_rights,
         skip_build,
         quiet);
+
+    if (RelationIsCUFormat(rel) && (stmt->primary || stmt->unique)) {
+        DefineDeltaUniqueIndex(RelationGetRelid(rel), stmt, new_index);
+    }
+
 #ifdef ENABLE_MOT
     CreateForeignIndex(stmt, new_index);
 #endif
@@ -22787,10 +22871,12 @@ static void ExecOnlyTestRowTable(AlteredTableInfo* tab)
  */
 static void ExecOnlyTestCStoreTable(AlteredTableInfo* tab)
 {
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Un-support feature"),
-            errdetail("column stored relation doesn't support this feature")));
+    ForbidToRewriteOrTestCstoreIndex(tab);
+
+    Relation rel = heap_open(tab->relid, NoLock);
+    ATOnlyCheckCStoreTable(tab, rel);
+    heap_close(rel, NoLock);
+    return;
 }
 
 /**
@@ -22916,10 +23002,28 @@ static void ExecOnlyTestRowPartitionedTable(AlteredTableInfo* tab)
  */
 static void ExecOnlyTestCStorePartitionedTable(AlteredTableInfo* tab)
 {
-    ereport(ERROR,
-        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Un-support feature"),
-            errdetail("column stored relation doesn't support this feature")));
+    Relation partRel = NULL;
+    Partition partition = NULL;
+    ListCell* cell = NULL;
+    Relation partitionedTableRel = NULL;
+    List* partitions = NULL;
+
+    ForbidToRewriteOrTestCstoreIndex(tab);
+
+    /* get all partitions of target partitioned table */
+    partitionedTableRel = heap_open(tab->relid, NoLock);
+    partitions = relationGetPartitionList(partitionedTableRel, NoLock);
+
+    foreach (cell, partitions) {
+        partition = (Partition)lfirst(cell);
+        partRel = partitionGetRelation(partitionedTableRel, partition);
+        /* check each partition */
+        ATOnlyCheckCStoreTable(tab, partRel);
+        releaseDummyRelation(&partRel);
+    }
+
+    releasePartitionList(partitionedTableRel, &partitions, NoLock);
+    heap_close(partitionedTableRel, NoLock);
 }
 
 /*

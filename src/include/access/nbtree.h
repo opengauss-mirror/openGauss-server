@@ -15,6 +15,7 @@
 #ifndef NBTREE_H
 #define NBTREE_H
 
+#include "access/cstore_insert.h"
 #include "access/genam.h"
 #include "access/itup.h"
 #include "access/sdir.h"
@@ -787,6 +788,14 @@ typedef struct BTOrderedIndexListElement {
     IndexScanDesc indexScanDesc;
 } BTOrderedIndexListElement;
 
+typedef struct BTCheckElement {
+    Buffer buffer;
+    BTStack btStack;
+    ScanKey itupScanKey;
+    OffsetNumber offset;
+    int indnkeyatts;
+} BTCheckElement;
+
 /*
  * prototypes for functions in nbtree.c (external entry points for btree)
  */
@@ -820,6 +829,11 @@ extern Buffer _bt_getstackbuf(Relation rel, BTStack stack);
 extern void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack stack, bool is_root, bool is_only);
 extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
 extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
+extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
+    OffsetNumber offset, ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
+    CUDescScan* cudesc);
+extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    GPIScanDesc gpiScan, CUDescScan* cudescScan, BTCheckElement* element);
 
 /*
  * prototypes for functions in nbtpage.c

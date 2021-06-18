@@ -705,7 +705,8 @@ typedef struct RangePartitionindexDefState {
  */
 
 #define CSTORE_SUPPORT_CONSTRAINT(type) \
-    ((type) == CONSTR_NULL || (type) == CONSTR_NOTNULL || (type) == CONSTR_DEFAULT || (type) == CONSTR_CLUSTER)
+    ((type) == CONSTR_NULL || (type) == CONSTR_NOTNULL || (type) == CONSTR_DEFAULT || \
+     (type) == CONSTR_CLUSTER || (type) == CONSTR_PRIMARY || (type) == CONSTR_UNIQUE)
 
 #define GetConstraintType(type)                \
     ({                                         \

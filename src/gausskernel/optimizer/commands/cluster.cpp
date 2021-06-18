@@ -20,6 +20,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/cstore_delta.h"
 #include "access/dfs/dfs_insert.h"
 #include "access/heapam.h"
 #include "access/relscan.h"
@@ -2931,6 +2932,15 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
         reindex_flags |= REINDEX_REL_CHECK_CONSTRAINTS;
     reindex_relation(OIDOldHeap, reindex_flags, REINDEX_ALL_INDEX, memInfo);
 
+    if (RelationIsCUFormatByOid(OIDOldHeap)) {
+        /*
+         * Each delta table of OIDNewHeap and OIDHeap will not be swapped.
+         * We will build index of new delta table. After swap_relation_files,
+         * OIDNewHeap has the old relfilenode, OIDOldHeap has the new relfilenode.
+         */
+        BuildIndexOnNewDeltaTable(OIDNewHeap, OIDOldHeap);
+    }
+
     /* Destroy new heap with old filenode */
     object.classId = RelationRelationId;
     object.objectId = OIDNewHeap;
@@ -3449,6 +3459,14 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
     /* Rebuild index of partitioned table */
     reindexFlags = REINDEX_REL_SUPPRESS_INDEX_USE;
     (void)reindexPartition(tableOid, partOid, reindexFlags, REINDEX_ALL_INDEX);
+
+    if (RelationIsCUFormatByOid(tableOid)) {
+        /*
+         * After partition heap swap, OIDNewHeap has the old partition relfilenode
+         * and partOid has the new partition relfilenode.
+         */
+        BuildIndexOnNewDeltaTable(OIDNewHeap, partOid, tableOid);
+    }
 
     /* Drop the temp tables for swapping */
     object.classId = RelationRelationId;
