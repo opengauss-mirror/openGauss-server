@@ -44,6 +44,7 @@
 
 #include <signal.h>
 
+#include "access/skey.h"
 #include "c.h"
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
