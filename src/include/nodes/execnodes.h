@@ -1238,7 +1238,7 @@ typedef struct PlanState {
     List* plan_issues;
     bool recursive_reset; /* node already reset? */
     bool qual_is_inited;
-
+    bool do_not_reset_rownum;
     int64 ps_rownum;    /* store current rownum */
 } PlanState;
 
@@ -1553,6 +1553,9 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ExecScanAccessMtd ScanNextMtd;
+
+    VectorBatch* m_pScanBatch;     // batch to work on
+    VectorBatch* m_pCurrentBatch;  // output batch
 } ScanState;
 
 /*

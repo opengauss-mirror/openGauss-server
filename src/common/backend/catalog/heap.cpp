@@ -32,6 +32,7 @@
 #include "fmgr.h"
 #include "knl/knl_variable.h"
 
+#include "access/cstore_delta.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
@@ -5306,6 +5307,7 @@ void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId)
 {
     Partition partIndex = NULL;
     Relation partRel = NULL;
+    ObjectAddress obj;
 
     partIndex = partitionOpen(parentIndex, partIndexId, AccessExclusiveLock);
     partRel = partitionGetRelation(parentIndex, partIndex);
@@ -5313,12 +5315,20 @@ void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId)
     // delete CStore index
     //
     if (partRel->rd_rel->relcudescrelid != InvalidOid) {
-        ObjectAddress obj;
         obj.classId = RelationRelationId;
         obj.objectId = partRel->rd_rel->relcudescrelid;
         obj.objectSubId = 0;
         performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
     }
+
+    /* Deltete index on part delta. */
+    if (RelationIsCUFormat(parentIndex) && partRel->rd_index != NULL && partRel->rd_index->indisunique) {
+        obj.classId = RelationRelationId;
+        obj.objectId = GetDeltaIdxFromCUIdx(RelationGetRelid(partRel), true);
+        obj.objectSubId = 0;
+        performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+    }
+
     /*
      * we should process the predicate lock on the partition
      */

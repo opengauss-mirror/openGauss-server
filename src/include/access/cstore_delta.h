@@ -12,31 +12,32 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
- * cstore_ctlg.h
- *        routines to support ColStore
- * 
- * 
+ *
+ * cstore_delta.h
+ *        routines to support ColStore delta
+ *
+ *
  * IDENTIFICATION
- *        src/include/catalog/cstore_ctlg.h
+ *        src/include/access/cstore_delta.h
  *
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef CSTORE_CTLG_H
-#define	CSTORE_CTLG_H
+#ifndef CSTORE_DELTA_H
+#define CSTORE_DELTA_H
 
-#include "utils/relcache.h"
+#include "postgres.h"
+
 #include "nodes/parsenodes.h"
+#include "utils/relcache.h"
 
-extern void	AlterCStoreCreateTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
+extern void MoveDeltaDataToCU(Relation rel, Relation parentRel=NULL);
+extern void DefineDeltaUniqueIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, Relation parentRel=NULL);
+extern void BuildIndexOnNewDeltaTable(Oid oldColTable, Oid newColTable, Oid parentId=InvalidOid);
+extern void ReindexDeltaIndex(Oid indexId, Oid indexPartId);
+extern void ReindexPartDeltaIndex(Oid indexOid, Oid partOid);
 
-extern bool	CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateStmt *mainTblStmt);
-extern bool	CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition);
-extern bool createDeltaTableForPartition(Oid relOid, Oid partOid, Datum reloptions, CreateStmt *mainTblStmt);
-extern bool createCUDescTableForPartition(Oid relOid, Oid partOid, Datum reloptions);
-extern Datum AddInternalOption(Datum reloptions, int mask);
-extern Datum AddOrientationOption(Datum relOptions, bool isColStore);
+extern Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned);
+extern char* GetCUIdxNameFromDeltaIdx(Relation deltaIdx);
 
 #endif
-

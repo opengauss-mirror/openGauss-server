@@ -53,9 +53,9 @@ static void SchedulerSIGKILLHandler(SIGNAL_ARGS)
     proc_exit(0);
 }
 
-static void SchedulerSIGHUPHandler(SIGNAL_ARGS)
+void ThreadPoolScheduler::SigHupHandler()
 {
-    t_thrd.threadpool_cxt.scheduler->m_getSIGHUP = true;
+    m_getSIGHUP = true;
 }
 
 static void reloadConfigFileIfNecessary()
@@ -70,7 +70,6 @@ void TpoolSchedulerMain(ThreadPoolScheduler *scheduler)
 {
     int gpc_count = 0;
 
-    (void)gspqsignal(SIGHUP, SchedulerSIGHUPHandler);
     (void)gspqsignal(SIGKILL, SchedulerSIGKILLHandler);
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
@@ -130,7 +129,7 @@ void ThreadPoolScheduler::DynamicAdjustThreadPool()
 void ThreadPoolScheduler::GPCScheduleCleaner(int* gpc_count)
 {
     if (ENABLE_GPC && *gpc_count == GPC_CLEAN_TIME) {
-        if (pmState == PM_RUN) {
+        if (pmState == PM_RUN || pmState == PM_HOT_STANDBY) {
             MemoryContext oldCxt = MemoryContextSwitchTo(m_gpcContext);
             pthread_mutex_lock(&g_instance.gpc_reset_lock);
             g_instance.plan_cache->DropInvalid();

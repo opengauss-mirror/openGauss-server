@@ -147,8 +147,6 @@ typedef enum NodeTag {
     T_BitmapAndState,
     T_BitmapOrState,
     T_ScanState,
-    T_SeqScanState,
-    T_IndexScanState,
     T_IndexOnlyScanState,
     T_BitmapIndexScanState,
     T_BitmapHeapScanState,
@@ -663,6 +661,8 @@ typedef enum NodeTag {
     T_VecMaterialState,
     T_VecMergeJoinState,
     T_VecWindowAggState,
+    T_SeqScanState,
+    T_IndexScanState,
 
     // this must put last for vector engine runtime state
     T_VecEndState,

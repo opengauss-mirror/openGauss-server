@@ -16,6 +16,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/cstore_delta.h"
+#include "access/cstore_insert.h"
 #include "access/heapam.h"
 #include "access/nbtree.h"
 #include "access/transam.h"
@@ -50,8 +52,6 @@ typedef struct {
 } FindSplitData;
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
-static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
-    OffsetNumber offset, ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc);
 static void _bt_findinsertloc(Relation rel, Buffer *bufptr, OffsetNumber *offsetptr, int keysz, ScanKey scankey,
                               IndexTuple newtup, BTStack stack, Relation heapRel);
 static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf, BTStack stack, IndexTuple itup,
@@ -65,6 +65,8 @@ static void _bt_checksplitloc(FindSplitData *state, OffsetNumber firstoldonright
 static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off);
 static bool _bt_isequal(Relation idxrel, Page page, OffsetNumber offnum, int keysz, ScanKey scankey);
 static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
+static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead,
+                             CUDescScan* cudescScan);
 
 /*
  *	_bt_doinsert() -- Handle insertion of a single index tuple in the tree.
@@ -92,17 +94,76 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     BTStack stack;
     Buffer buf;
     OffsetNumber offset;
-
-    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
-    Assert(indnkeyatts != 0);
-    /* we need an insertion scan key to do our search, so build one */
-    itup_scankey = _bt_mkscankey(rel, itup);
     GPIScanDesc gpiScan = NULL;
+    CUDescScan* cudescScan = NULL;
 
     if (RelationIsGlobalIndex(rel)) {
         GPIScanInit(&gpiScan);
         gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
     }
+
+    if (RelationIsCUFormat(heapRel)) {
+        cudescScan = (CUDescScan*)New(CurrentMemoryContext) CUDescScan(heapRel);
+    }
+
+    BTCheckElement element;
+    is_unique = SearchBufferAndCheckUnique(rel, itup, checkUnique, heapRel, gpiScan, cudescScan, &element);
+
+    itup_scankey = element.itupScanKey;
+    stack = element.btStack;
+    buf = element.buffer;
+    offset = element.offset;
+    indnkeyatts = element.indnkeyatts;
+
+    if (checkUnique != UNIQUE_CHECK_EXISTING) {
+        /*
+         * The only conflict predicate locking cares about for indexes is when
+         * an index tuple insert conflicts with an existing lock.  Since the
+         * actual location of the insert is hard to predict because of the
+         * random search used to prevent O(N^2) performance when there are
+         * many duplicate entries, we can just use the "first valid" page.
+         * This reasoning also applies to INCLUDE indexes, whose extra
+         * attributes are not considered part of the key space.
+         */
+        CheckForSerializableConflictIn(rel, NULL, buf);
+        /* do the insertion */
+        _bt_findinsertloc(rel, &buf, &offset, indnkeyatts, itup_scankey, itup, stack, heapRel);
+        _bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false);
+    } else {
+        /* just release the buffer */
+        _bt_relbuf(rel, buf);
+    }
+    /* be tidy */
+    _bt_freestack(stack);
+    _bt_freeskey(itup_scankey);
+
+    if (gpiScan != NULL) { // means rel switch happened
+        relation_close(gpiScan->parentRelation, AccessShareLock);
+        GPIScanEnd(gpiScan);
+    }
+
+    if (cudescScan != NULL) {
+        cudescScan->Destroy();
+        cudescScan = NULL;
+    }
+
+    return is_unique;
+}
+
+bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
+    GPIScanDesc gpiScan, CUDescScan* cudescScan, BTCheckElement* element)
+{
+    bool is_unique = false;
+    int indnkeyatts;
+    ScanKey itup_scankey;
+    BTStack stack;
+    Buffer buf;
+    OffsetNumber offset;
+
+    indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
+    Assert(indnkeyatts != 0);
+    /* we need an insertion scan key to do our search, so build one */
+    itup_scankey = _bt_mkscankey(rel, itup);
 
 top:
     /* find the first page containing this key */
@@ -148,7 +209,8 @@ top:
         TransactionId xwait;
 
         offset = _bt_binsrch(rel, buf, indnkeyatts, itup_scankey, false);
-        xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey, checkUnique, &is_unique, gpiScan);
+        xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
+            checkUnique, &is_unique, gpiScan, cudescScan);
 
         if (TransactionIdIsValid(xwait)) {
             /* Have to wait for the other guy ... */
@@ -159,33 +221,12 @@ top:
             goto top;
         }
     }
-    
-    if (checkUnique != UNIQUE_CHECK_EXISTING) {
-        /*
-         * The only conflict predicate locking cares about for indexes is when
-         * an index tuple insert conflicts with an existing lock.  Since the
-         * actual location of the insert is hard to predict because of the
-         * random search used to prevent O(N^2) performance when there are
-         * many duplicate entries, we can just use the "first valid" page.
-         * This reasoning also applies to INCLUDE indexes, whose extra
-         * attributes are not considered part of the key space.
-         */
-        CheckForSerializableConflictIn(rel, NULL, buf);
-        /* do the insertion */
-        _bt_findinsertloc(rel, &buf, &offset, indnkeyatts, itup_scankey, itup, stack, heapRel);
-        _bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false);
-    } else {
-        /* just release the buffer */
-        _bt_relbuf(rel, buf);
-    }
-    /* be tidy */
-    _bt_freestack(stack);
-    _bt_freeskey(itup_scankey);
 
-    if (gpiScan != NULL) { // means rel switch happened
-        relation_close(gpiScan->parentRelation, AccessShareLock);
-        GPIScanEnd(gpiScan);
-    }
+    element->btStack = stack;
+    element->itupScanKey = itup_scankey;
+    element->buffer = buf;
+    element->offset = offset;
+    element->indnkeyatts = indnkeyatts;
 
     return is_unique;
 }
@@ -206,8 +247,8 @@ top:
  * set *is_unique to false if there is a potential conflict, and the
  * core code must redo the uniqueness check later.
  */
-static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan)
+TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
+    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan, CUDescScan* cudescScan)
 {
     int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     SnapshotData SnapshotDirty;
@@ -222,6 +263,10 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
     *is_unique = true;
 
     InitDirtySnapshot(SnapshotDirty);
+
+    if (cudescScan != NULL) {
+        cudescScan->ResetSnapshot(&SnapshotDirty);
+    }
 
     page = BufferGetPage(buf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -310,7 +355,7 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                                 errmsg("failed to re-find tuple within GPI \"%s\"", RelationGetRelationName(rel))));
                     }
                     found = true;
-                } else if (heap_hot_search(&htid, tarRel, &SnapshotDirty, &all_dead)) {
+                } else if (CheckItemIsAlive(&htid, tarRel, &SnapshotDirty, &all_dead, cudescScan)) {
                     /*
                      * We check the whole HOT-chain to see if there is any tuple
                      * that satisfies SnapshotDirty.  This is necessary because we
@@ -360,16 +405,23 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                      * we have a unique key conflict.  The other live tuple is
                      * not part of this chain because it had a different index
                      * entry.
+                     *
+                     * If the itup doesn't point to the heapRel, we skip this check.
                      */
-                    htid = itup->t_tid;
-                    if (heap_hot_search(&htid, heapRel, SnapshotSelf, NULL)) {
-                        /* Normal case --- it's still live */
-                    } else {
-                        /*
-                         * It's been deleted, so no error, and no need to
-                         * continue searching
-                         */
-                        break;
+                    if (ItemPointerIsValid(&(itup->t_tid))) {
+                        htid = itup->t_tid;
+                        if (cudescScan != NULL) {
+                            cudescScan->ResetSnapshot(SnapshotSelf);
+                        }
+                        if (CheckItemIsAlive(&htid, heapRel, SnapshotSelf, NULL, cudescScan)) {
+                            /* Normal case --- it's still live */
+                        } else {
+                            /*
+                            * It's been deleted, so no error, and no need to
+                            * continue searching
+                            */
+                            break;
+                        }
                     }
 
                     /*
@@ -398,9 +450,17 @@ static TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation he
                          */
                         Assert(0 != memcmp(NameStr(rel->rd_rel->relname), "pg_cudesc_", strlen("pg_cudesc_")));
 
+                        const char* relationName = NULL;
+                        if (memcmp(RelationGetRelationName(rel), "pg_delta_", strlen("pg_delta_")) == 0) {
+                            /* index name is like pg_delta_index_xxxx or pg_delta_part_index_xxx. */
+                            relationName = GetCUIdxNameFromDeltaIdx(rel);
+                        } else {
+                            relationName = RelationGetRelationName(rel);
+                        }
+
                         ereport(ERROR, (errcode(ERRCODE_UNIQUE_VIOLATION),
                                         errmsg("duplicate key value violates unique constraint \"%s\"",
-                                               RelationGetRelationName(rel)),
+                                               relationName),
                                         key_desc ? errdetail("Key %s already exists.", key_desc) : 0));
                     }
                 } else if (all_dead) {
@@ -2135,4 +2195,14 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel)
      * separate write to clear it, however.  We will clear it when we split
      * the page.
      */
+}
+
+static bool CheckItemIsAlive(ItemPointer tid, Relation relation, Snapshot snapshot,
+                             bool* all_dead, CUDescScan* cudescScan)
+{
+    if (!RelationIsCUFormat(relation)) {
+        return heap_hot_search(tid, relation, snapshot, all_dead);
+    } else {
+        return cudescScan->CheckItemIsAlive(tid);
+    }
 }

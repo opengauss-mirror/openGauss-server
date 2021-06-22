@@ -53,7 +53,8 @@
 
 #define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
 #define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
-#define MAX_QUERY_LEN 256
+#define MAX_QUERY_LEN 512
+#define MAX_FIELD_LEN 128
 
 typedef struct {
     char table[NAMEDATALEN];
@@ -951,6 +952,9 @@ void field_value_trans(_out_ char *target, A_Const *field_value)
     if (value.type == T_Integer) {
         pg_itoa(value.val.ival, target);
     } else if (value.type == T_String) {
+        if (strlen(value.val.str) > MAX_FIELD_LEN) {
+            return;
+        }
         errno_t rc = sprintf_s(target, MAX_QUERY_LEN, "'%s'", value.val.str);
         securec_check_ss_c(rc, "\0", "\0");
     }
@@ -985,6 +989,9 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
             continue;
         }
         field_value_trans(str, (A_Const *)lfirst(item));
+        if (strlen(str) == 0) {
+            continue;
+        }
         if (i == 0) {
             rc = strcpy_s(field_value, MAX_QUERY_LEN, str);
         } else {

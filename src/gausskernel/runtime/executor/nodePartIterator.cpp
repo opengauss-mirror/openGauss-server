@@ -98,6 +98,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
     TupleTableSlot* slot = NULL;
     PartIterator* pi_node = (PartIterator*)node->ps.plan;
     EState* state = node->ps.lefttree->state;
+    node->ps.lefttree->do_not_reset_rownum = true;
     bool orig_early_free = state->es_skip_early_free;
 
     PlanState* noden = (PlanState*)node->ps.lefttree;

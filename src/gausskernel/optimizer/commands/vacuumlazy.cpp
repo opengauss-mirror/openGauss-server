@@ -241,14 +241,14 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 /* ignore returned value because only one tuple is appended into */
                 (void)batchRow.append_one_tuple(val, null, tupDesc);
 
+                /* delete the current tuple from delta table */
+                simple_heap_delete(deltaRel, &deltaTup->t_self);
+
                 if (batchRow.full_rownum()) {
                     /*  insert into main table */
                     cstoreInsert.BatchInsert(&batchRow, 0);
                     batchRow.reset(true);
                 }
-
-                /* delete the current tuple from delta table */
-                simple_heap_delete(deltaRel, &deltaTup->t_self);
             }
             cstoreInsert.SetEndFlag();
             cstoreInsert.BatchInsert(&batchRow, 0);
