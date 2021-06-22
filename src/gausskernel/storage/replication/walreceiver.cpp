@@ -3031,6 +3031,8 @@ static void InitArchiveStartPoint()
         pfree(xlog_array);
         xlog_array = NULL;
     }
+    FreeDir(xldir);
+    xldir = NULL;
 }
 
 static bool CheckXlogNameValid(char* xlog)

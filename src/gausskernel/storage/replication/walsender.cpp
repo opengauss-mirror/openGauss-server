@@ -3189,7 +3189,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             XLogRecPtr replayPtr;
             bool amSync = false;
             bool got_recptr = false;
-            int standby_nums = list_length(SyncRepGetSyncStandbys(&amSync));
+            List* sync_standbys = SyncRepGetSyncStandbys(&amSync);
+            int standby_nums = list_length(sync_standbys);
+            list_free(sync_standbys);
             got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
             if (got_recptr) {
                 ArchiveXlogOnStandby(flushPtr);
