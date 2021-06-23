@@ -70,6 +70,9 @@ const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
 const int MAX_GLOBAL_CACHEMEM_NUM = 128;
+#ifndef ENABLE_MULTIPLE_NODES
+const int DB_CMPT_MAX = 4;
+#endif
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -868,6 +871,11 @@ typedef struct knl_instance_context {
     struct HTAB* ngroup_hash_table;
     knl_g_hypo_context hypo_cxt;
     knl_sigbus_context sigbus_cxt;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    void *raw_parser_hook[DB_CMPT_MAX];
+    void *plsql_parser_hook[DB_CMPT_MAX];
+#endif
 } knl_instance_context;
 
 extern long random();

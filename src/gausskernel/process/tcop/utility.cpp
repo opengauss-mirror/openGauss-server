@@ -9455,7 +9455,9 @@ bool DropExtensionIsSupported(const char* query_string)
 #ifndef ENABLE_MULTIPLE_NODES
     if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") ||
         strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw") ||
-        strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink"))) {
+        strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink") ||
+        strstr(lower_string, "db_b_parser") || strstr(lower_string, "db_a_parser") ||
+        strstr(lower_string, "db_c_parser") || strstr(lower_string, "db_pg_parser"))) {
 #else
     if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
 #endif
