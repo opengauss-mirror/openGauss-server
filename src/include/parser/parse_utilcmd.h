@@ -17,6 +17,44 @@
 
 #include "parser/parse_node.h"
 
+/* State shared by transformCreateStmt and its subroutines */
+typedef struct {
+    ParseState* pstate;             /* overall parser state */
+    const char* stmtType;           /* "CREATE [FOREIGN] TABLE" or "ALTER TABLE" */
+    RangeVar* relation;             /* relation to create */
+    Relation rel;                   /* opened/locked rel, if ALTER */
+    List* inhRelations;             /* relations to inherit from */
+    bool isalter;                   /* true if altering existing table */
+    bool ispartitioned;             /* true if it is for a partitioned table */
+    bool hasoids;                   /* does relation have an OID column? */
+    bool canInfomationalConstraint; /* If the value id true, it means that we can build informational constraint. */
+    List* columns;                  /* ColumnDef items */
+    List* ckconstraints;            /* CHECK constraints */
+    List* clusterConstraints;       /* PARTIAL CLUSTER KEY constraints */
+    List* fkconstraints;            /* FOREIGN KEY constraints */
+    List* ixconstraints;            /* index-creating constraints */
+    List* inh_indexes;              /* cloned indexes from INCLUDING INDEXES */
+    List* blist;                    /* "before list" of things to do before creating the table */
+    List* alist;                    /* "after list" of things to do after creating the table */
+    PartitionState* csc_partTableState;
+    List* reloptions;
+    List* partitionKey; /* partitionkey for partiitoned table */
+    IndexStmt* pkey;    /* PRIMARY KEY index, if any */
+#ifdef PGXC
+    List* fallback_dist_col;    /* suggested column to distribute on */
+    DistributeBy* distributeby; /* original distribute by column of CREATE TABLE */
+    PGXCSubCluster* subcluster; /* original subcluster option of CREATE TABLE */
+#endif
+    Node* node; /* @hdfs record a CreateStmt or AlterTableStmt object. */
+    char* internalData;
+
+    List* uuids;     /* used for create sequence */
+    bool isResizing; /* true if the table is resizing */
+    Oid  bucketOid;     /* bucket oid of the resizing table */
+    List *relnodelist;  /* filenode of the resizing table */
+    List *toastnodelist; /* toast node of the resizing table */
+} CreateStmtContext;
+
 extern void checkPartitionSynax(CreateStmt *stmt);
 extern List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids,
     bool preCheck, bool isFirstNode = true);
@@ -46,5 +84,8 @@ extern List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionL
 extern bool check_contains_tbllike_in_multi_nodegroup(CreateStmt* stmt);
 extern bool is_multi_nodegroup_createtbllike(PGXCSubCluster* subcluster, Oid oid);
 extern char* getTmptableIndexName(const char* srcSchema, const char* srcIndex);
+
+extern IndexStmt* generateClonedIndexStmt(
+    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel);
 
 #endif /* PARSE_UTILCMD_H */

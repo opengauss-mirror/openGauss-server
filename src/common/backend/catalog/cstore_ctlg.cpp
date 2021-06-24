@@ -58,6 +58,10 @@
 #include "access/tupdesc.h"
 
 extern char* get_namespace_name(Oid nspid);
+extern List* ChooseIndexColumnNames(const List* indexElems);
+extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
+    int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
+    bool amcanorder, bool isconstraint);
 
 static bool createCUDescTableForPartitionedTable(Relation rel, Datum reloptions);
 static bool createDeltaTableForPartitionedTable(Relation rel, Datum reloptions, CreateStmt* mainTblStmt);

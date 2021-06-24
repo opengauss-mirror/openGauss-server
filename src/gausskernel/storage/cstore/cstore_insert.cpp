@@ -27,6 +27,7 @@
 #include "access/tableam.h"
 #include "access/xact.h"
 #include "access/genam.h"
+#include "access/cstore_delta.h"
 #include "access/cstore_rewrite.h"
 #include "access/reloptions.h"
 #include "catalog/catalog.h"
@@ -71,6 +72,8 @@
 int64 adio_write_cache_size = 0;
 
 extern void CUListWriteAbort(int code, Datum arg);
+
+extern void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool* isnull);
 
 static inline void cu_append_null_value(int which, void* cuPtr)
 {
@@ -342,6 +345,10 @@ void CStoreInsert::Destroy()
                 releaseDummyRelation(&m_idxRelation[i]);
             } else {
                 relation_close(m_idxRelation[i], RowExclusiveLock);
+            }
+
+            if (m_deltaIdxRelation[i]) {
+                relation_close(m_deltaIdxRelation[i], RowExclusiveLock);
             }
 
             /* destroy index inserter */
@@ -657,6 +664,7 @@ void CStoreInsert::InitIndexInfo(void)
         m_econtext = GetPerTupleExprContext(m_estate);
         RelationPtr idxRelArray = m_resultRelInfo->ri_IndexRelationDescs;
         m_idxRelation = (Relation*)palloc(sizeof(Relation) * m_resultRelInfo->ri_NumIndices);
+        m_deltaIdxRelation = (Relation*)palloc0(sizeof(Relation) * m_resultRelInfo->ri_NumIndices);
 
         bool isPartition = RelationIsPartition(m_relation);
 
@@ -676,6 +684,11 @@ void CStoreInsert::InitIndexInfo(void)
                     idxOid = partIndex->pd_part->relcudescrelid;
                 else {
                     m_idxRelation[which_index] = partitionGetRelation(rawIndexRel, partIndex);
+                    if (m_idxRelation[which_index]->rd_index != NULL &&
+                        m_idxRelation[which_index]->rd_index->indisunique) {
+                        Oid deltaIdxOid = GetDeltaIdxFromCUIdx(RelationGetRelid(m_idxRelation[which_index]), true);
+                        m_deltaIdxRelation[which_index] = relation_open(deltaIdxOid, RowExclusiveLock);
+                    }
                     idxOid = InvalidOid;
                 }
                 partitionClose(rawIndexRel, partIndex, NoLock);
@@ -687,9 +700,14 @@ void CStoreInsert::InitIndexInfo(void)
             }
 
             /* open this index relation */
-            if (idxOid != InvalidOid)
+            if (idxOid != InvalidOid) {
                 m_idxRelation[which_index] = relation_open(idxOid, RowExclusiveLock);
-
+                Form_pg_index indexInfo = m_idxRelation[which_index]->rd_index;
+                if (indexInfo != NULL && indexInfo->indisunique) {
+                    Oid deltaIdxOid = GetDeltaIdxFromCUIdx(RelationGetRelid(m_idxRelation[which_index]), false);
+                    m_deltaIdxRelation[which_index] = relation_open(deltaIdxOid, RowExclusiveLock);
+                }
+            }
             CStoreInsert::InitIndexColId(which_index);
 
             if (rawIndexRel->rd_rel->relam == PSORT_AM_OID) {
@@ -825,6 +843,26 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
     Datum* values = (Datum*)palloc(sizeof(Datum) * batchRowPtr->m_attr_num);
     bool* nulls = (bool*)palloc(sizeof(bool) * batchRowPtr->m_attr_num);
 
+    Datum idxValues[INDEX_MAX_KEYS];
+    bool idxIsNull[INDEX_MAX_KEYS];
+    List* idxNums = NIL;
+    List* allIndexInfos = NIL;
+    if (relation_has_indexes(m_resultRelInfo)) {
+        for (int i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
+            if (m_deltaIdxRelation[i] != NULL) {
+                IndexInfo* indexInfo = BuildIndexInfo(m_deltaIdxRelation[i]);
+                idxNums = lappend_int(idxNums, i);
+                allIndexInfos = lappend(allIndexInfos, indexInfo);
+            }
+        }
+    }
+
+    bool needInsertIdx = list_length(idxNums) > 0 ? true : false;
+    TupleTableSlot* slot = NULL;
+    if (needInsertIdx) {
+        slot = MakeSingleTupleTableSlot(RelationGetDescr(m_delta_relation));
+    }
+
     bulkload_rows_iter iter;
     iter.begin(batchRowPtr);
     while (iter.not_end()) {
@@ -836,10 +874,41 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
         tmpVal = tmpVal & (~TABLE_INSERT_SKIP_WAL);
 
         (void)tableam_tuple_insert(m_delta_relation, tuple, GetCurrentCommandId(true), (int)tmpVal, NULL);
+
+        if (needInsertIdx) {
+            (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+
+            for (int i = 0; i < list_length(allIndexInfos); i++) {
+                int idxNum = list_nth_int(idxNums, i);
+                IndexInfo* indexInfo = (IndexInfo*)list_nth(allIndexInfos, i);
+                FormIndexDatum(indexInfo, slot, NULL, idxValues, idxIsNull);
+
+                /* Firstly check unique constraint on the CU index. */
+                CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, idxValues, idxIsNull);
+
+                /*
+                 * If pass the check above, we actually insert new index item to delta index.
+                 * It will check unique constraint in delta index insertion implicitly.
+                 */
+                (void)index_insert(m_deltaIdxRelation[idxNum],
+                    idxValues,
+                    idxIsNull,
+                    &(tuple->t_self),
+                    m_delta_relation,
+                    UNIQUE_CHECK_YES);
+            }
+        }
     }
 
     pfree(values);
     pfree(nulls);
+
+    list_free_ext(idxNums);
+    list_free_ext(allIndexInfos);
+
+    if (needInsertIdx) {
+        ExecDropSingleTupleTableSlot(slot);
+    }
 }
 
 void CStoreInsert::InsertNotPsortIdx(int indice)
@@ -866,7 +935,20 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
         ItemPointer tupleid = (ItemPointer) & values[m_idxBatchRow->m_attr_num - 1];
 
         if (!hasIndexExpr) {
-            (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO); 
+            if (indexRel->rd_index->indisunique) {
+                Relation deltaIdxRel = m_deltaIdxRelation[indice];
+
+                /* Firstly check unique constraint on the delta index. */
+                CheckUniqueOnOtherIdx(deltaIdxRel, m_delta_relation, values, isnull);
+
+                /*
+                 * If pass the check above, insert the index item to CU index.
+                 * It will check unique constraint in CU index insertion implicitly.
+                 */
+                (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_YES);
+            } else {
+                (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO);
+            }
         } else {
             for (int i = 0; i < m_idxKeyNum[indice]; i++) {
                 if (!isnull[i]) {
@@ -2911,4 +2993,141 @@ int PartitionValueCache::FillBuffer()
     m_dataLen = retval;
     m_readOffset += retval;
     return retval;
+}
+
+CUDescScan::CUDescScan(_in_ Relation relation)
+    : m_cudesc(NULL), m_cudescIndex(NULL), m_snapshot(NULL), m_cuids(NIL), m_deletemasks(NIL), m_valids(NIL)
+{
+    m_cudesc = heap_open(relation->rd_rel->relcudescrelid, AccessShareLock);
+    m_cudescIndex = index_open(m_cudesc->rd_rel->relcudescidx, AccessShareLock);
+
+    /*
+     * m_scanKey[0] = VitrualDelColID, m_scanKey[1] will be set to CUDI when doing scan.
+     * We only init m_scanKey[0] = 0 here.
+     */
+    ScanKeyInit(&m_scanKey[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(VitrualDelColID));
+    ScanKeyInit(&m_scanKey[1], (AttrNumber)CUDescCUIDAttr, BTEqualStrategyNumber, F_OIDEQ, UInt32GetDatum(0));
+}
+
+CUDescScan::~CUDescScan()
+{
+    m_cudesc = NULL;
+    m_cudescIndex = NULL;
+    m_snapshot = NULL;
+    m_cuids = NIL;
+    m_deletemasks = NIL;
+    m_valids = NIL;
+}
+
+void CUDescScan::Destroy()
+{
+    index_close(m_cudescIndex, AccessShareLock);
+    heap_close(m_cudesc, AccessShareLock);
+    list_free_ext(m_cuids);
+    list_free_ext(m_deletemasks);
+    list_free_ext(m_valids);
+}
+
+void CUDescScan::ResetSnapshot(Snapshot snapshot)
+{
+    m_snapshot = snapshot;
+    list_free_ext(m_cuids);
+    list_free_ext(m_deletemasks);
+    list_free_ext(m_valids);
+}
+
+bool CUDescScan::CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found)
+{
+    ListCell* cuidCell = NULL;
+    ListCell* delmaskCell = NULL;
+    ListCell* validCell = NULL;
+
+    forthree (cuidCell, m_cuids, delmaskCell, m_deletemasks, validCell, m_valids) {
+        /* Oid type is also unit32. */
+        uint32 cachedCUId = (uint32)lfirst_oid(cuidCell);
+        if (cachedCUId == CUId) {
+            *found = true;
+            bool valid = (bool)lfirst_int(validCell);
+            if (valid) {
+                unsigned char* cachedDelMask = (unsigned char*)lfirst(delmaskCell);
+                if (cachedDelMask == NULL) {
+                    /* All rows are alive*/
+                    return true;
+                } else {
+                    return !IsDeadRow(rownum, cachedDelMask);
+                }
+            } else {
+                *found = false;
+                return false;
+            }
+        }
+    }
+
+    *found = false;
+    return false;
+}
+
+bool CUDescScan::CheckItemIsAlive(ItemPointer tid)
+{
+    HeapTuple tup;
+    bool isnull = false;
+    bool isAlive = false;
+
+    uint32 CUId = ItemPointerGetBlockNumber(tid);
+    uint32 rownum = ItemPointerGetOffsetNumber(tid) - 1;
+
+    /* First check in cache, if not found, we do follow scan. */
+    bool foundInCache = false;
+    isAlive = CheckAliveInCache(CUId, rownum, &foundInCache);
+    if (foundInCache) {
+        return isAlive;
+    }
+
+    /* We set m_scanKey[0]=VitrualDelColID in constructor func. Here we set m_scanKey[1]=CUID */
+    m_scanKey[1].sk_argument = UInt32GetDatum(CUId);
+
+    TupleDesc cudescTupdesc = m_cudesc->rd_att;
+    SysScanDesc scanDesc = systable_beginscan_ordered(m_cudesc, m_cudescIndex, m_snapshot, 2, m_scanKey);
+
+    unsigned char* delMask = NULL;
+    bool valid = false;
+
+    if ((tup = systable_getnext_ordered(scanDesc, ForwardScanDirection)) != NULL) {
+        /* Put CUPointer into cudesc->cuPointer. */
+        Datum v = fastgetattr(tup, CUDescCUPointerAttr, cudescTupdesc, &isnull);
+        if (isnull) {
+            /* All rows are alvie. */
+            isAlive = true;
+        } else {
+            int8* bitmap = (int8*)PG_DETOAST_DATUM(DatumGetPointer(v));
+            unsigned char* cuDelMask = (unsigned char*)VARDATA_ANY(bitmap);
+            isAlive = !IsDeadRow(rownum, cuDelMask);
+
+            /* Because new memory may be created, so we have to check and free in time. */
+            if ((Pointer)bitmap != DatumGetPointer(v)) {
+                pfree_ext(bitmap);
+            }
+
+            /* Record the mask. */
+            delMask = cuDelMask;
+        }
+        valid = true;
+    } else {
+        isAlive = false;
+        valid = false;
+    }
+
+    systable_endscan_ordered(scanDesc);
+
+    /* Save the sacn result in cache. */
+    lappend_oid(m_cuids, (Oid)CUId);
+    lappend(m_deletemasks, delMask);
+    lappend_int(m_valids, (int)valid);
+
+    return isAlive;
+}
+
+inline bool CUDescScan::IsDeadRow(uint32 row, unsigned char* cuDelMask)
+{
+    return ((cuDelMask[row >> 3] & (1 << (row % 8))) != 0);
 }

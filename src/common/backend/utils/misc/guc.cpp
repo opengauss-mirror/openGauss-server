@@ -3285,6 +3285,16 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_custom_parser",
+             PGC_USERSET,
+             UNGROUPED,
+             gettext_noop("Enables custom parser"),
+             NULL},
+            &u_sess->attr.attr_sql.enable_custom_parser,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #endif
 
         {{"enable_partition_opfusion", PGC_USERSET, QUERY_TUNING_METHOD,

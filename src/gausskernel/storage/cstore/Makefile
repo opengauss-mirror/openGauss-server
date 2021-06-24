@@ -34,6 +34,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = cu.o custorage.o cucache_mgr.o cstore_allocspace.o cstore_mem_alloc.o cstore_am.o cstore_delete.o cstore_insert.o cstore_psort.o cstore_update.o cstore_minmax_func.o cstore_roughcheck_func.o cstore_rewrite.o cstore_vector.o
+OBJS = cu.o custorage.o cucache_mgr.o cstore_allocspace.o cstore_mem_alloc.o cstore_am.o cstore_delete.o cstore_insert.o cstore_psort.o cstore_update.o cstore_minmax_func.o cstore_roughcheck_func.o cstore_rewrite.o cstore_vector.o cstore_delta.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

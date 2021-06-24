@@ -17,6 +17,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/cstore_delta.h"
 #include "access/reloptions.h"
 #include "access/tableam.h"
 #include "access/xact.h"
@@ -68,7 +69,7 @@
 
 /* non-export function prototypes */
 void CheckPredicate(Expr* predicate);
-static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
+void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
     int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
     bool amcanorder, bool isconstraint);
 Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId);
@@ -836,6 +837,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 #endif
 
+    if (RelationIsCUFormat(rel) && (stmt->primary || stmt->unique)) {
+        /* If it is a unique index, move data on delta to CU. */
+        MoveDeltaDataToCU(rel);
+    }
     /*
      * Extra checks when creating a PRIMARY KEY index.
      * If be informational constraint, we are not to set not null in pg_attribute.
@@ -1517,7 +1522,7 @@ void CheckPredicate(Expr* predicate)
  * Compute per-index-column information, including indexed column numbers
  * or index expressions, opclasses, and indoptions.
  */
-static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
+void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
     int16* colOptionP, List* attList, /* list of IndexElem's */
     List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId, bool amcanorder, bool isconstraint)
 {
@@ -2331,6 +2336,15 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
             (void*)&heapPartOid,
             ShareLock);  // lock on heap partition
     reindex_index(indOid, indPartOid, false, mem_info, false);
+
+    Oid relId = IndexGetRelation(indOid, false);
+    if (RelationIsCUFormatByOid(relId) && irel->rd_index != NULL && irel->rd_index->indisunique) {
+        /*
+         * Unique index on CU owns a unique index on delta table, but delta index is not visble
+         * to user. We reindex delta index manually.
+         */
+        ReindexDeltaIndex(indOid, indPartOid);
+    }
 }
 
 void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const char* partitionName, Oid partId,
