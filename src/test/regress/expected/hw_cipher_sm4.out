@@ -1,8 +1,8 @@
 --function test
 select gs_encrypt('along','1234@abc','sm4');
- gs_encrypt 
-------------
- OOH7ALM=
+          gs_encrypt          
+------------------------------
+--?
 (1 row)
 
 select gs_decrypt(gs_encrypt('along','1234@abc','sm4'),'1234@abc','sm4');
@@ -14,18 +14,15 @@ select gs_decrypt(gs_encrypt('along','1234@abc','sm4'),'1234@abc','sm4');
 select gs_decrypt(gs_encrypt('world','1234@abc','sm4'),'abc@4321','sm4');           --difference key cause error
  gs_decrypt 
 ------------
- B'8
+--?
 (1 row)
 
 select gs_encrypt('along','1234@abc5678abcdefghi','sm4');					--key longer than 16 Byte cause error
 ERROR:  The encryption key must be 8~16 bytes and contain at least three kinds of characters!
 CONTEXT:  referenced column: gs_encrypt
 select gs_decrypt('along','1234@abc','sm4');								--wrong cipher cause error
- gs_decrypt 
-------------
- 3׳
-(1 row)
-
+ERROR:  Decode the cipher text failed or the ciphertext is wrong!
+CONTEXT:  referenced column: gs_decrypt
 --insert/select test
 create table aes_table(name text);
 insert into aes_table values(gs_encrypt('he@#llo','1234@abc','sm4'));		--special characters
@@ -51,10 +48,10 @@ CONTEXT:  referenced column: name
 insert into aes_type_varchar values(gs_encrypt('along','1234@abc','sm4'));
 insert into aes_type_nvarchar2 values(gs_encrypt('along','1234@abc','sm4'));
 insert into aes_type_int values(gs_encrypt('along','1234@abc','sm4'));
-ERROR:  invalid input syntax for integer: "OOH7ALM="
+--?ERROR:  invalid input syntax for integer: .*
 CONTEXT:  referenced column: id
 insert into aes_type_numeric values(gs_encrypt('along','1234@abc','sm4'));
-ERROR:  invalid input syntax for type numeric: "OOH7ALM="
+--?ERROR:  invalid input syntax for type numeric: .*
 CONTEXT:  referenced column: id
 drop table aes_type_bytea;
 drop table aes_type_varchar;
