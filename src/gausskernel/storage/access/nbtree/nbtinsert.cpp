@@ -144,6 +144,7 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
 
     if (cudescScan != NULL) {
         cudescScan->Destroy();
+        delete cudescScan;
         cudescScan = NULL;
     }
 

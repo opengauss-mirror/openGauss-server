@@ -261,6 +261,7 @@ void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool
 
     if (cudescScan != NULL) {
         cudescScan->Destroy();
+        delete cudescScan;
         cudescScan = NULL;
     }
 

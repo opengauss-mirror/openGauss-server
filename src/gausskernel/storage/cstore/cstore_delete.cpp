@@ -261,16 +261,21 @@ void CStoreDelete::PutDeleteBatch(_in_ VectorBatch* batch, _in_ JunkFilter* junk
 
     if (IsFull()) {
         // execute delete if parital sort is full
-        m_totalDeleteNum += (uint64)(this->*m_ExecDeletePtr)();
-
-        // parital delete need commad id ++
-        CommandCounterIncrement();
-
-        // reset sort state
-        ResetSortState();
+        PartialDelete();
     }
 
     return;
+}
+
+void CStoreDelete::PartialDelete()
+{
+    m_totalDeleteNum += (uint64)(this->*m_ExecDeletePtr)();
+
+    // parital delete need commad id ++
+    CommandCounterIncrement();
+
+    // reset sort state
+    ResetSortState();
 }
 
 uint64 CStoreDelete::ExecDelete()
@@ -396,6 +401,17 @@ void CStoreDelete::PutDeleteBatchForUpdate(_in_ VectorBatch* batch, _in_ JunkFil
     m_curSortedNum += batch->m_rows;
 }
 
+void CStoreDelete::PutDeleteBatchForUpdate(_in_ VectorBatch* batch, _in_ int startIdx, _in_ int endIdx) {
+    Assert(batch && m_sortBatch && m_deleteSortState);
+
+    /* copy batch data */
+    m_sortBatch->Copy<false, false>(batch, startIdx, endIdx);
+
+    /* put batch */
+    m_deleteSortState->sort_putbatch(m_deleteSortState, m_sortBatch, 0, m_sortBatch->m_rows);
+    m_curSortedNum += m_sortBatch->m_rows;
+}
+
 uint64 CStoreDelete::ExecDeleteForTable()
 {
     Assert(m_relation && m_estate && m_sortBatch && m_deleteSortState && m_rowOffset);
@@ -513,6 +529,15 @@ uint64 CStoreDelete::ExecDeleteForPartition()
     batchsort_performsort(m_deleteSortState);
 
     batchsort_getbatch(m_deleteSortState, true, m_sortBatch);
+
+    /*
+     * ExecDeleteForPartition may be invoked by CStore update multi times.
+     * We should close the m_deltaRelation opened last time.
+     */
+    if (m_deltaRealtion != NULL) {
+        relation_close(m_deltaRealtion, NoLock);
+        m_deltaRealtion = NULL;
+    }
 
     while (!BatchIsNull(m_sortBatch)) {
         ScalarValue* partidValues = m_sortBatch->m_arr[m_partidIdx - 1].m_vals;

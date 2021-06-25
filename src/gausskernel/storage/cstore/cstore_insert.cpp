@@ -1924,6 +1924,20 @@ void CStoreInsert::CUInsert(_in_ BatchCUData* CUData, _in_ int options)
     SaveAll(options, CUData->bitmap);
 }
 
+void CStoreInsert::SortAndInsert(int options)
+{
+    /* run sort */
+    m_sorter->RunSort();
+
+    /* reset and fetch next batch of values */
+    DoBatchInsert(options);
+
+    m_sorter->Reset(IsEnd());
+
+    /* reset and free all memory blocks */
+    m_tmpBatchRows->reset(false);
+}
+
 // BatchInsert
 // Vertor interface for Insert into CStore table
 void CStoreInsert::BatchInsert(_in_ VectorBatch* pBatch, _in_ int options)
@@ -1945,14 +1959,7 @@ void CStoreInsert::BatchInsert(_in_ VectorBatch* pBatch, _in_ int options)
         }
 
         if (m_sorter->IsFull() || IsEnd()) {
-            m_sorter->RunSort();
-
-            /* reset and fetch next batch of values */
-            DoBatchInsert(options);
-            m_sorter->Reset(IsEnd());
-
-            /* reset and free all memory blocks */
-            m_tmpBatchRows->reset(false);
+            SortAndInsert(options);
         }
     }
 
@@ -2118,16 +2125,7 @@ void CStoreInsert::FlashData(int options)
 
         /* check sorter whether have data which not insert */
         if (m_sorter->GetRowNum() > 0) {
-            /* run sort */
-            m_sorter->RunSort();
-
-            /* reset and fetch next batch of values */
-            DoBatchInsert(options);
-
-            m_sorter->Reset(IsEnd());
-
-            /* reset and free all memory blocks */
-            m_tmpBatchRows->reset(false);
+            SortAndInsert(options);
         }
     } else {
         /* flash buffered batch rows */
@@ -2996,7 +2994,8 @@ int PartitionValueCache::FillBuffer()
 }
 
 CUDescScan::CUDescScan(_in_ Relation relation)
-    : m_cudesc(NULL), m_cudescIndex(NULL), m_snapshot(NULL), m_cuids(NIL), m_deletemasks(NIL), m_valids(NIL)
+    : m_cudesc(NULL), m_cudescIndex(NULL), m_snapshot(NULL),
+      m_cuids(NIL), m_deletemasks(NIL), m_needFreeMasks(NIL), m_valids(NIL)
 {
     m_cudesc = heap_open(relation->rd_rel->relcudescrelid, AccessShareLock);
     m_cudescIndex = index_open(m_cudesc->rd_rel->relcudescidx, AccessShareLock);
@@ -3016,24 +3015,37 @@ CUDescScan::~CUDescScan()
     m_snapshot = NULL;
     m_cuids = NIL;
     m_deletemasks = NIL;
+    m_needFreeMasks = NIL;
     m_valids = NIL;
+}
+
+void CUDescScan::FreeCache()
+{
+    ListCell* needFreeMaskCell = NULL;
+    ListCell* maskCell = NULL;
+    forboth (needFreeMaskCell, m_needFreeMasks, maskCell, m_deletemasks) {
+        if ((bool)lfirst_int(needFreeMaskCell)) {
+            pfree(lfirst(maskCell));
+        }
+    }
+
+    list_free_ext(m_cuids);
+    list_free_ext(m_deletemasks);
+    list_free_ext(m_needFreeMasks);
+    list_free_ext(m_valids);
 }
 
 void CUDescScan::Destroy()
 {
     index_close(m_cudescIndex, AccessShareLock);
     heap_close(m_cudesc, AccessShareLock);
-    list_free_ext(m_cuids);
-    list_free_ext(m_deletemasks);
-    list_free_ext(m_valids);
+    FreeCache();
 }
 
 void CUDescScan::ResetSnapshot(Snapshot snapshot)
 {
     m_snapshot = snapshot;
-    list_free_ext(m_cuids);
-    list_free_ext(m_deletemasks);
-    list_free_ext(m_valids);
+    FreeCache();
 }
 
 bool CUDescScan::CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found)
@@ -3049,7 +3061,8 @@ bool CUDescScan::CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found)
             *found = true;
             bool valid = (bool)lfirst_int(validCell);
             if (valid) {
-                unsigned char* cachedDelMask = (unsigned char*)lfirst(delmaskCell);
+                int8* bitmap = (int8*)lfirst(delmaskCell);
+                unsigned char* cachedDelMask = (unsigned char*)VARDATA_ANY(bitmap);
                 if (cachedDelMask == NULL) {
                     /* All rows are alive*/
                     return true;
@@ -3089,7 +3102,8 @@ bool CUDescScan::CheckItemIsAlive(ItemPointer tid)
     TupleDesc cudescTupdesc = m_cudesc->rd_att;
     SysScanDesc scanDesc = systable_beginscan_ordered(m_cudesc, m_cudescIndex, m_snapshot, 2, m_scanKey);
 
-    unsigned char* delMask = NULL;
+    int8* delMask = NULL;
+    bool needFreeMask = false;
     bool valid = false;
 
     if ((tup = systable_getnext_ordered(scanDesc, ForwardScanDirection)) != NULL) {
@@ -3105,11 +3119,11 @@ bool CUDescScan::CheckItemIsAlive(ItemPointer tid)
 
             /* Because new memory may be created, so we have to check and free in time. */
             if ((Pointer)bitmap != DatumGetPointer(v)) {
-                pfree_ext(bitmap);
+                needFreeMask = true;
             }
 
             /* Record the mask. */
-            delMask = cuDelMask;
+            delMask = bitmap;
         }
         valid = true;
     } else {
@@ -3122,6 +3136,7 @@ bool CUDescScan::CheckItemIsAlive(ItemPointer tid)
     /* Save the sacn result in cache. */
     lappend_oid(m_cuids, (Oid)CUId);
     lappend(m_deletemasks, delMask);
+    lappend_int(m_needFreeMasks, (int)needFreeMask);
     lappend_int(m_valids, (int)valid);
 
     return isAlive;
