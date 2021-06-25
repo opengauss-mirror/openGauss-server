@@ -80,27 +80,39 @@ void statement_init_metric_context()
         statement_commit_metirc_context();
     }
 
+	gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
+	PG_TRY();
+	{
 
-    /* 1, check free list: free detail stat; reuse entry in free list */
-    if (u_sess->statement_cxt.free_count > 0) {
-        reusedHandle = (StatementStatContext*)u_sess->statement_cxt.toFreeStatementList;
-        u_sess->statement_cxt.curStatementMetrics = reusedHandle;
-        u_sess->statement_cxt.toFreeStatementList = reusedHandle->next;
-        u_sess->statement_cxt.free_count--;
-    } else {
-        /* 2, no free slot int free list, allocate new one */
-        if (u_sess->statement_cxt.allocatedCxtCnt < u_sess->attr.attr_common.track_stmt_session_slot) {
-            MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+	    /* 1, check free list: free detail stat; reuse entry in free list */
+	    if (u_sess->statement_cxt.free_count > 0) {
+	        reusedHandle = (StatementStatContext*)u_sess->statement_cxt.toFreeStatementList;
+	        u_sess->statement_cxt.curStatementMetrics = reusedHandle;
+	        u_sess->statement_cxt.toFreeStatementList = reusedHandle->next;
+	        u_sess->statement_cxt.free_count--;
+	    } else {
+	        /* 2, no free slot int free list, allocate new one */
+	        if (u_sess->statement_cxt.allocatedCxtCnt < u_sess->attr.attr_common.track_stmt_session_slot) {
+	            MemoryContext oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
 
-            u_sess->statement_cxt.curStatementMetrics = palloc0_noexcept(sizeof(StatementStatContext));
-            if (u_sess->statement_cxt.curStatementMetrics != NULL) {
-                u_sess->statement_cxt.allocatedCxtCnt++;
-            }
-            (void)MemoryContextSwitchTo(oldcontext);
-        }
-    }
+	            u_sess->statement_cxt.curStatementMetrics = palloc0_noexcept(sizeof(StatementStatContext));
+	            if (u_sess->statement_cxt.curStatementMetrics != NULL) {
+	                u_sess->statement_cxt.allocatedCxtCnt++;
+	            }
+	            (void)MemoryContextSwitchTo(oldcontext);
+	        }
+	    }
+	}
+	PG_CATCH();
+	{		
+		(void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
+		PG_RE_THROW();
+	}
+    PG_END_TRY();	
     (void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
+
+	gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] init - free list length: %d, suspend list length: %d",
         u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
