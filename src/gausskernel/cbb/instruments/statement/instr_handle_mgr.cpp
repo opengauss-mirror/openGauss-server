@@ -112,7 +112,7 @@ void statement_init_metric_context()
     PG_END_TRY();	
     (void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
 
-	RESUME_INTERRUPTS()();
+	RESUME_INTERRUPTS();
 
     ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] init - free list length: %d, suspend list length: %d",
         u_sess->statement_cxt.free_count, u_sess->statement_cxt.suspend_count)));
