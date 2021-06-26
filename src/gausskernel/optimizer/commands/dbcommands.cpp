@@ -2191,7 +2191,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
         RelFileNode tmp = {srcTbSpcId, srcDbId, 0, InvalidBktId};
 
         /* forknum and blockno has no meaning */
-        log_invalid_page(tmp, MAIN_FORKNUM, 0, false);
+        log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT);
     }
 }
 
