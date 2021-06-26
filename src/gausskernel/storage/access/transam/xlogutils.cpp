@@ -62,20 +62,28 @@ typedef struct xl_invalid_page_key {
 
 typedef struct xl_invalid_page {
     xl_invalid_page_key key; /* hash key ... must be first */
-    bool present;            /* page existed but contained zeroes */
+    InvalidPageType type;    /* invalid page type */
 } xl_invalid_page;
 
 /* Report a reference to an invalid page */
-static void report_invalid_page(int elevel, const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, bool present)
+static void report_invalid_page(int elevel, const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type)
 {
     char *path = relpathperm(node, forkno);
 
-    if (present)
+    if (type == NOT_INITIALIZED) {
         ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                          errmsg("page %u of relation %s is uninitialized", blkno, path)));
+    }
+    else if (type == NOT_PRESENT) {
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                                errmsg("page %u of relation %s does not exist", blkno, path)));
+    } else if (type == LSN_CHECK_ERROR) {
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("page %u of relation %s lsn check error", blkno, path)));
+    }
     else
         ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                         errmsg("page %u of relation %s does not exist", blkno, path)));
+                         errmsg("page %u of relation %s unkown error", blkno, path)));
     pfree(path);
 }
 
@@ -103,7 +111,7 @@ void closeXLogRead()
 }
 
 /* Log a reference to an invalid page */
-void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, bool present)
+void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type)
 {
     xl_invalid_page_key key;
     xl_invalid_page *hentry = NULL;
@@ -120,7 +128,7 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
      * something about the XLOG record that generated the reference).
      */
     if (log_min_messages <= DEBUG1 || client_min_messages <= DEBUG1)
-        report_invalid_page(LOG, node, forkno, blkno, present);
+        report_invalid_page(LOG, node, forkno, blkno, type);
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL) {
         /* create hash table when first needed */
@@ -148,7 +156,7 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
 
     if (!found) {
         /* hash_search already filled in the key */
-        hentry->present = present;
+        hentry->type = type;
     } else {
         /* repeat reference ... leave "present" as it was */
     }
@@ -236,7 +244,7 @@ void PrintInvalidPage()
         xl_invalid_page *hentry = NULL;
         hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
         while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-            report_invalid_page(LOG, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->present);
+            report_invalid_page(LOG, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->type);
         }
     }
 }
@@ -290,7 +298,7 @@ static bool XLogCheckInvalidPages_ForSingle(void)
      * only PANIC after we've dumped all the available info.
      */
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-        report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->present);
+        report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->type);
         t_thrd.xlog_cxt.invaildPageCnt++;
         foundone = true;
     }
@@ -351,7 +359,7 @@ void XLogCheckInvalidPages(void)
                  */
                 while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
                     report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno,
-                                        hentry->present);
+                                        hentry->type);
                     t_thrd.xlog_cxt.invaildPageCnt++;
                     foundone = true;
                 }
@@ -581,7 +589,7 @@ Buffer XLogReadBufferExtendedWithLocalBuffer(RelFileNode rnode, ForkNumber forkn
         buffer = ReadBuffer_common_for_localbuf(rnode, RELPERSISTENCE_PERMANENT, forknum, blkno, mode, NULL, &hit);
     } else {
         if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, false);
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -612,7 +620,7 @@ Buffer XLogReadBufferExtendedWithLocalBuffer(RelFileNode rnode, ForkNumber forkn
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             ReleaseBuffer(buffer);
-            log_invalid_page(rnode, forknum, blkno, true);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
             return InvalidBuffer;
         }
     }
@@ -646,7 +654,7 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
         buffer = ReadBuffer_common_for_direct(rnode, RELPERSISTENCE_PERMANENT, forknum, blkno, mode);
     } else {
         if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, false);
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -677,7 +685,7 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             XLogRedoBufferReleaseFunc(buffer);
-            log_invalid_page(rnode, forknum, blkno, true);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
             return InvalidBuffer;
         }
     }
@@ -741,7 +749,7 @@ Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, Bloc
     } else {
         /* hm, page doesn't exist in file */
         if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, false);
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -785,7 +793,7 @@ Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, Bloc
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             ReleaseBuffer(buffer);
-            log_invalid_page(rnode, forknum, blkno, true);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
             return InvalidBuffer;
         }
     }

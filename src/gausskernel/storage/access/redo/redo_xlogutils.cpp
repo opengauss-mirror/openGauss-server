@@ -109,6 +109,9 @@ void DoLsnCheck(RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr lastLsn)
                                     "lsn in current page %lu, page info:%u/%u/%u forknum %d lsn %lu blknum:%u",
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
+        } else if (pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) {
+            log_invalid_page(bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno, 
+                             LSN_CHECK_ERROR);
         } else {
             ereport(PANIC, (errmsg("lsn check error, lsn in record (%X/%X) ,lsn in current page %X/%X, "
                                    "page info:%u/%u/%u forknum %d blknum:%u lsn %X/%X",
