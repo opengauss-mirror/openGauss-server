@@ -27,6 +27,12 @@ typedef enum {
                      * replayed) */
 } XLogRedoAction;
 
+typedef enum {
+    NOT_PRESENT,
+    NOT_INITIALIZED,
+    LSN_CHECK_ERROR,
+}InvalidPageType;
+
 extern bool XLogHaveInvalidPages(void);
 extern void* XLogGetInvalidPages();
 
@@ -44,7 +50,7 @@ extern XLogRedoAction XLogReadBufferForRedo(XLogReaderState* record, uint8 buffe
 extern Relation CreateFakeRelcacheEntry(const RelFileNode& rnode);
 extern Relation CreateCUReplicationRelation(const RelFileNode& rnode, int BackendId, char relpersistence, const char* relname);
 extern void FreeFakeRelcacheEntry(Relation fakerel);
-extern void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber blkno, bool present);
+extern void log_invalid_page(const RelFileNode& node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type);
 extern int read_local_xlog_page(XLogReaderState* state, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
     char* cur_page, TimeLineID* pageTLI);
 extern void closeXLogRead();
