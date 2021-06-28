@@ -110,6 +110,7 @@ void statement_init_metric_context()
 	PG_CATCH();
 	{		
 		(void)syscalllockRelease(&u_sess->statement_cxt.list_protect);
+		RESUME_INTERRUPTS();
 		PG_RE_THROW();
 	}
     PG_END_TRY();	
