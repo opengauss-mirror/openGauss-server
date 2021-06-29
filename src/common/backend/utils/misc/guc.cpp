@@ -1270,6 +1270,16 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
+        {{"track_stmt_parameter",
+            PGC_SIGHUP,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable to track the parameter of statements"), NULL},
+            &u_sess->attr.attr_common.track_stmt_parameter,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
         {{"enable_global_stats",
              PGC_SUSET,
              QUERY_TUNING_METHOD,
