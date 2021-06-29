@@ -148,7 +148,7 @@ void sigbus_handler(int sig, siginfo_t *si, void *uc)
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
     } else {
-        (void)pause();
+        gs_thread_exit(2);
     }
     uint64 buffer_size;
     int buf_id;
