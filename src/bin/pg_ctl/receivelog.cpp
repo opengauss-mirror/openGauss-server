@@ -665,7 +665,7 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
             FD_ZERO(&input_mask);
             FD_SET(PQsocket(conn), &input_mask);
             if (standby_message_timeout) {
-                timeout.tv_sec = last_status + standby_message_timeout - local_now - 1;
+                timeout.tv_sec = last_status + (standby_message_timeout / 2) - local_now - 1;
                 if (timeout.tv_sec <= 0)
                     timeout.tv_sec = 1; /* Always sleep at least 1 sec */
                 timeout.tv_usec = 0;
