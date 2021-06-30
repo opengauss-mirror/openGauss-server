@@ -389,7 +389,7 @@ Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid)
                 BTEqualStrategyNumber, F_INT4EQ,
                 Int32GetDatum(bucketlist->dim1));
 
-    scan = systable_beginscan(pg_hashbucket, HashBucketBidIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(pg_hashbucket, HashBucketBidIndexId, true, NULL, 3, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Datum      bucketDatum;
         bool      isnull = false;
@@ -440,7 +440,7 @@ text* searchMergeListByRelid(Oid reloid, bool *find, bool retresult)
                 BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(reloid));
 
-    scan = systable_beginscan(pgxc_class_rel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(pgxc_class_rel, PgxcClassPgxcRelIdIndexId, true, NULL, 1, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Datum      pgxcDatum;
         bool      isnull = false;

@@ -440,7 +440,7 @@ static PLTemplate* find_language_template(const char* languageName)
     rel = heap_open(PLTemplateRelationId, AccessShareLock);
 
     ScanKeyInit(&key, Anum_pg_pltemplate_tmplname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(languageName));
-    scan = systable_beginscan(rel, PLTemplateNameIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(rel, PLTemplateNameIndexId, true, NULL, 1, &key);
 
     tup = systable_getnext(scan);
     if (HeapTupleIsValid(tup)) {

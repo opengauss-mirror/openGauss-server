@@ -4707,7 +4707,7 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
 
         ScanKeyInit(&partKey, Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partOid));
 
-        partScan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, &partKey);
+        partScan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, NULL, 1, &partKey);
 
         while ((partTuple = systable_getnext(partScan)) != NULL) {
             partForm = (Form_pg_partition)GETSTRUCT(partTuple);

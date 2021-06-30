@@ -1781,7 +1781,7 @@ static char** get_pkey_attnames(Relation rel, int16* indnkeyatts)
     indexRelation = heap_open(IndexRelationId, AccessShareLock);
     ScanKeyInit(&skey, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
 
-    scan = systable_beginscan(indexRelation, IndexIndrelidIndexId, true, SnapshotNow, 1, &skey);
+    scan = systable_beginscan(indexRelation, IndexIndrelidIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(indexTuple = systable_getnext(scan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(indexTuple);

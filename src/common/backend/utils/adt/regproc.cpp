@@ -56,7 +56,7 @@ static Datum regprocin_booststrap(char* procname)
     ScanKeyInit(&skey[0], Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(procname));
 
     hdesc = heap_open(ProcedureRelationId, AccessShareLock);
-    sysscan = systable_beginscan(hdesc, ProcedureNameArgsNspIndexId, true, SnapshotNow, 1, skey);
+    sysscan = systable_beginscan(hdesc, ProcedureNameArgsNspIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
         result = (RegProcedure)HeapTupleGetOid(tuple);
@@ -416,7 +416,7 @@ Datum regoperin(PG_FUNCTION_ARGS)
             &skey[0], Anum_pg_operator_oprname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(opr_name_or_oid));
 
         hdesc = heap_open(OperatorRelationId, AccessShareLock);
-        sysscan = systable_beginscan(hdesc, OperatorNameNspIndexId, true, SnapshotNow, 1, skey);
+        sysscan = systable_beginscan(hdesc, OperatorNameNspIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
             result = HeapTupleGetOid(tuple);
@@ -730,7 +730,7 @@ Datum regclassin(PG_FUNCTION_ARGS)
             &skey[0], Anum_pg_class_relname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(class_name_or_oid));
 
         hdesc = heap_open(RelationRelationId, AccessShareLock);
-        sysscan = systable_beginscan(hdesc, ClassNameNspIndexId, true, SnapshotNow, 1, skey);
+        sysscan = systable_beginscan(hdesc, ClassNameNspIndexId, true, NULL, 1, skey);
 
         if (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
             result = HeapTupleGetOid(tuple);
@@ -877,7 +877,7 @@ Datum regtypein(PG_FUNCTION_ARGS)
         ScanKeyInit(&skey[0], Anum_pg_type_typname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(typ_name_or_oid));
 
         hdesc = heap_open(TypeRelationId, AccessShareLock);
-        sysscan = systable_beginscan(hdesc, TypeNameNspIndexId, true, SnapshotNow, 1, skey);
+        sysscan = systable_beginscan(hdesc, TypeNameNspIndexId, true, NULL, 1, skey);
 
         if (HeapTupleIsValid(tuple = systable_getnext(sysscan)))
             result = HeapTupleGetOid(tuple);

@@ -73,7 +73,7 @@ List* find_inheritance_children(Oid parentrelId, LOCKMODE lockmode)
 
     ScanKeyInit(&key[0], Anum_pg_inherits_inhparent, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentrelId));
 
-    scan = systable_beginscan(relation, InheritsParentIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(relation, InheritsParentIndexId, true, NULL, 1, key);
 
     while ((inheritsTuple = systable_getnext(scan)) != NULL) {
         inhrelid = ((Form_pg_inherits)GETSTRUCT(inheritsTuple))->inhrelid;
@@ -297,7 +297,7 @@ bool typeInheritsFrom(Oid subclassTypeId, Oid superclassTypeId)
 
         ScanKeyInit(&skey, Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(this_relid));
 
-        inhscan = systable_beginscan(inhrel, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, &skey);
+        inhscan = systable_beginscan(inhrel, InheritsRelidSeqnoIndexId, true, NULL, 1, &skey);
 
         while ((inhtup = systable_getnext(inhscan)) != NULL) {
             Form_pg_inherits inh = (Form_pg_inherits)GETSTRUCT(inhtup);

@@ -382,7 +382,7 @@ bool ConstraintNameIsUsed(ConstraintCategory conCat, Oid objId, Oid objNamespace
     ScanKeyInit(
         &skey[1], Anum_pg_constraint_connamespace, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objNamespace));
 
-    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, SnapshotNow, 2, skey);
+    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, NULL, 2, skey);
 
     while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
@@ -464,7 +464,7 @@ char* ChooseConstraintName(const char* name1, const char* name2, const char* lab
                 F_OIDEQ,
                 ObjectIdGetDatum(namespaceid));
 
-            conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, SnapshotNow, 2, skey);
+            conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, NULL, 2, skey);
 
             found = (HeapTupleIsValid(systable_getnext(conscan)));
 
@@ -635,11 +635,11 @@ void AlterConstraintNamespaces(Oid ownerId, Oid oldNspId, Oid newNspId, bool isT
     if (isType) {
         ScanKeyInit(&key[0], Anum_pg_constraint_contypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ownerId));
 
-        scan = systable_beginscan(conRel, ConstraintTypidIndexId, true, SnapshotNow, 1, key);
+        scan = systable_beginscan(conRel, ConstraintTypidIndexId, true, NULL, 1, key);
     } else {
         ScanKeyInit(&key[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ownerId));
 
-        scan = systable_beginscan(conRel, ConstraintRelidIndexId, true, SnapshotNow, 1, key);
+        scan = systable_beginscan(conRel, ConstraintRelidIndexId, true, NULL, 1, key);
     }
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
@@ -721,7 +721,7 @@ Oid get_relation_constraint_oid(Oid relid, const char* conname, bool missing_ok)
 
     ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -770,7 +770,7 @@ Oid get_domain_constraint_oid(Oid typid, const char* conname, bool missing_ok)
 
     ScanKeyInit(&skey[0], Anum_pg_constraint_contypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintTypidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintTypidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -824,7 +824,7 @@ bool check_functional_grouping(Oid relid, Index varno, Index varlevelsup, List* 
 
     ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -914,7 +914,7 @@ List* get_parse_dependency_rel_list(List* conids)
         Oid conid = lfirst_oid(lc);
         ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, conid);
 
-        scan = systable_beginscan(pg_constraint, ConstraintOidIndexId, true, SnapshotNow, 1, skey);
+        scan = systable_beginscan(pg_constraint, ConstraintOidIndexId, true, NULL, 1, skey);
 
         /* Only one record should be qualified, and get the relid */
         if (HeapTupleIsValid(tuple = systable_getnext(scan))) {

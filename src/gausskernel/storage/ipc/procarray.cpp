@@ -4090,6 +4090,7 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     snapshot->takenDuringRecovery = snapxid->takenDuringRecovery;
 
     TransactionId replication_slot_xmin = g_instance.proc_array_idx->replication_slot_xmin;
+    TransactionId replication_slot_catalog_xmin = g_instance.proc_array_idx->replication_slot_catalog_xmin;
 
     if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
         t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapxid->xmin;
@@ -4108,6 +4109,18 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin))
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
 
+    /* Non-catalog tables can be vacuumed if older than this xid */
+    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
+
+    /*
+     * Check whether there's a replication slot requiring an older catalog
+     * xmin.
+     */
+    if (TransactionIdIsNormal(replication_slot_catalog_xmin) &&
+        NormalTransactionIdPrecedes(replication_slot_catalog_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
+        u_sess->utils_cxt.RecentGlobalXmin = replication_slot_catalog_xmin;
+    }
+
     u_sess->utils_cxt.RecentXmin = snapxid->xmin;
     snapshot->xmin = snapxid->xmin;
     snapshot->xmax = snapxid->xmax;
@@ -4117,8 +4130,6 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     snapshot->active_count = 0;
     snapshot->regd_count = 0;
     snapshot->copied = false;
-    /* Non-catalog tables can be vacuumed if older than this xid */
-    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 
     ReleaseSnapshotData(snapshot);
 

@@ -940,7 +940,7 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(relkind));
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
-    scan = systable_beginscan(relation, PartitionParentOidIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(relation, PartitionParentOidIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid((tuple = systable_getnext(scan)))) {
         int2vector* partVec = NULL;
         Datum datum = SysCacheGetAttr(PARTRELID, tuple, Anum_pg_partition_partkey, &isnull);
@@ -1208,7 +1208,7 @@ static int get_table_attribute(
                 ScanKeyInit(
                     &skey[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
-                adscan = systable_beginscan(attrdefDesc, AttrDefaultIndexId, true, SnapshotNow, 1, skey);
+                adscan = systable_beginscan(attrdefDesc, AttrDefaultIndexId, true, NULL, 1, skey);
 
                 while (HeapTupleIsValid(tup = systable_getnext(adscan))) {
                     attrdef = (Form_pg_attrdef)GETSTRUCT(tup);
@@ -1252,7 +1252,7 @@ char* printDistributeKey(Oid relOid)
     ScanKeyInit(&skey, Anum_pgxc_class_pcrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relOid));
 
     pcrel = heap_open(PgxcClassRelationId, AccessShareLock);
-    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, &skey);
+    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, NULL, 1, &skey);
     htup = systable_getnext(pcscan);
 
     if (!HeapTupleIsValid(htup)) {
@@ -1551,7 +1551,7 @@ static void get_foreign_constraint_info(StringInfo buf, Oid tableoid, const char
 
     ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -1606,7 +1606,7 @@ static void get_index_list_info(Oid tableoid, StringInfo buf, const char* relnam
     ScanKeyInit(&skey, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
     indrel = heap_open(IndexRelationId, AccessShareLock);
-    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, SnapshotNow, 1, &skey);
+    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(indscan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(htup);
@@ -1899,7 +1899,7 @@ static void get_table_alter_info(
 
         ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
-        scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+        scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
             Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -2187,7 +2187,7 @@ static char* pg_get_tabledef_worker(Oid tableoid)
 
     ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableoid));
 
-    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_constraint, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -2319,7 +2319,7 @@ static char* pg_get_triggerdef_worker(Oid trigid, bool pretty)
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(trigid));
 
-    tgscan = systable_beginscan(tgrel, TriggerOidIndexId, true, SnapshotNow, 1, skey);
+    tgscan = systable_beginscan(tgrel, TriggerOidIndexId, true, NULL, 1, skey);
 
     ht_trig = systable_getnext(tgscan);
 
@@ -3441,7 +3441,7 @@ Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
     ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attnum));
 
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 3, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
@@ -11136,7 +11136,7 @@ Datum getDistributeKey(PG_FUNCTION_ARGS)
     ScanKeyInit(&skey, Anum_pgxc_class_pcrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relOid));
 
     pcrel = heap_open(PgxcClassRelationId, AccessShareLock);
-    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, &skey);
+    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, NULL, 1, &skey);
     htup = systable_getnext(pcscan);
 
     if (!HeapTupleIsValid(htup)) {

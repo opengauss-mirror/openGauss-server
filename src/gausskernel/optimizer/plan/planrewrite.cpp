@@ -804,7 +804,7 @@ static bool IsEqualOpr(Oid opno)
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, opno);
 
-    scan = systable_beginscan(pg_operator, OperatorOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_operator, OperatorOidIndexId, true, NULL, 1, skey);
 
     /* Only one record should be qualified, and get the relid */
     if (HeapTupleIsValid(tuple = systable_getnext(scan))) {

@@ -8231,7 +8231,7 @@ void find_composite_type_dependencies(Oid typeOid, Relation origRelation, const 
     ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(TypeRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(typeOid));
 
-    depScan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    depScan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(depTup = systable_getnext(depScan))) {
         Form_pg_depend pg_depend = (Form_pg_depend)GETSTRUCT(depTup);
@@ -10638,7 +10638,7 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
      */
     ScanKeyInit(
         &key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -11433,7 +11433,7 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
      */
     ScanKeyInit(
         &key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         ObjectAddress conobj;
@@ -11542,7 +11542,7 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
         CheckTableNotInUse(childrel, "ALTER TABLE");
 
         ScanKeyInit(&key, Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(childrelid));
-        scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, &key);
+        scan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, &key);
 
         /* scan for matching tuple - there should only be one */
         while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
@@ -11966,7 +11966,7 @@ static void ATExecAlterColumnType(AlteredTableInfo* tab, Relation rel, AlterTabl
         &key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
     ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum((int32)attnum));
 
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 3, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
 
     while (HeapTupleIsValid(depTup = systable_getnext(scan))) {
         Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(depTup);
@@ -13135,7 +13135,7 @@ static void change_owner_fix_column_acls(Oid relationOid, Oid oldOwnerId, Oid ne
 
     attRelation = heap_open(AttributeRelationId, RowExclusiveLock);
     ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relationOid));
-    scan = systable_beginscan(attRelation, AttributeRelidNumIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(attRelation, AttributeRelidNumIndexId, true, NULL, 1, key);
     while (HeapTupleIsValid(attributeTuple = systable_getnext(scan))) {
         Form_pg_attribute att = (Form_pg_attribute)GETSTRUCT(attributeTuple);
         Datum repl_val[Natts_pg_attribute];
@@ -13200,7 +13200,7 @@ static void change_owner_recurse_to_sequences(Oid relationOid, Oid newOwnerId, L
         &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relationOid));
     /* we leave refobjsubid unspecified */
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend depForm = (Form_pg_depend)GETSTRUCT(tup);
@@ -14613,7 +14613,7 @@ static void ATExecAddInherit(Relation child_rel, RangeVar* parent, LOCKMODE lock
     catalogRelation = heap_open(InheritsRelationId, RowExclusiveLock);
     ScanKeyInit(
         &key, Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(child_rel)));
-    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, NULL, 1, &key);
 
     /* inhseqno sequences start at 1 */
     inhseqno = 0;
@@ -14834,7 +14834,7 @@ static void MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel
         BTEqualStrategyNumber,
         F_OIDEQ,
         ObjectIdGetDatum(RelationGetRelid(parent_rel)));
-    parent_scan = systable_beginscan(catalog_relation, ConstraintRelidIndexId, true, SnapshotNow, 1, &parent_key);
+    parent_scan = systable_beginscan(catalog_relation, ConstraintRelidIndexId, true, NULL, 1, &parent_key);
 
     while (HeapTupleIsValid(parent_tuple = systable_getnext(parent_scan))) {
         Form_pg_constraint parent_con = (Form_pg_constraint)GETSTRUCT(parent_tuple);
@@ -14856,7 +14856,7 @@ static void MergeConstraintsIntoExisting(Relation child_rel, Relation parent_rel
             BTEqualStrategyNumber,
             F_OIDEQ,
             ObjectIdGetDatum(RelationGetRelid(child_rel)));
-        child_scan = systable_beginscan(catalog_relation, ConstraintRelidIndexId, true, SnapshotNow, 1, &child_key);
+        child_scan = systable_beginscan(catalog_relation, ConstraintRelidIndexId, true, NULL, 1, &child_key);
 
         while (HeapTupleIsValid(child_tuple = systable_getnext(child_scan))) {
             Form_pg_constraint child_con = (Form_pg_constraint)GETSTRUCT(child_tuple);
@@ -14954,7 +14954,7 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
     catalogRelation = heap_open(InheritsRelationId, RowExclusiveLock);
     ScanKeyInit(
         &key[0], Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, NULL, 1, key);
 
     while (HeapTupleIsValid(inheritsTuple = systable_getnext(scan))) {
         Oid inhparent;
@@ -14983,7 +14983,7 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
     catalogRelation = heap_open(AttributeRelationId, RowExclusiveLock);
     ScanKeyInit(
         &key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    scan = systable_beginscan(catalogRelation, AttributeRelidNumIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(catalogRelation, AttributeRelidNumIndexId, true, NULL, 1, key);
     while (HeapTupleIsValid(attributeTuple = systable_getnext(scan))) {
         Form_pg_attribute att = (Form_pg_attribute)GETSTRUCT(attributeTuple);
 
@@ -15022,7 +15022,7 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
         BTEqualStrategyNumber,
         F_OIDEQ,
         ObjectIdGetDatum(RelationGetRelid(parent_rel)));
-    scan = systable_beginscan(catalogRelation, ConstraintRelidIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(catalogRelation, ConstraintRelidIndexId, true, NULL, 1, key);
 
     connames = NIL;
 
@@ -15038,7 +15038,7 @@ static void ATExecDropInherit(Relation rel, RangeVar* parent, LOCKMODE lockmode)
     /* Now scan the child's constraints */
     ScanKeyInit(
         &key[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-    scan = systable_beginscan(catalogRelation, ConstraintRelidIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(catalogRelation, ConstraintRelidIndexId, true, NULL, 1, key);
 
     while (HeapTupleIsValid(constraintTuple = systable_getnext(scan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(constraintTuple);
@@ -15107,7 +15107,7 @@ static void drop_parent_dependency(Oid relid, Oid refclassid, Oid refobjid)
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&key[2], Anum_pg_depend_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(0));
 
-    scan = systable_beginscan(catalogRelation, DependDependerIndexId, true, SnapshotNow, 3, key);
+    scan = systable_beginscan(catalogRelation, DependDependerIndexId, true, NULL, 3, key);
 
     while (HeapTupleIsValid(depTuple = systable_getnext(scan))) {
         Form_pg_depend dep = (Form_pg_depend)GETSTRUCT(depTuple);
@@ -15157,7 +15157,7 @@ static void ATExecAddOf(Relation rel, const TypeName* ofTypename, LOCKMODE lockm
     /* Fail if the table has any inheritance parents. */
     inheritsRelation = heap_open(InheritsRelationId, AccessShareLock);
     ScanKeyInit(&key, Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
-    scan = systable_beginscan(inheritsRelation, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(inheritsRelation, InheritsRelidSeqnoIndexId, true, NULL, 1, &key);
     if (HeapTupleIsValid(systable_getnext(scan)))
         ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("typed tables cannot inherit")));
     systable_endscan(scan);
@@ -16468,7 +16468,7 @@ static void AlterSeqNamespaces(
     ScanKeyInit(
         &key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
     /* we leave refobjsubid unspecified */
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend depForm = (Form_pg_depend)GETSTRUCT(tup);
@@ -19993,7 +19993,7 @@ static void checkColumnForExchange(Relation partTableRel, Relation ordTableRel)
         ScanKeyInit(&scankeys[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ,
             partVals[Anum_pg_attribute_attnum - 1]);
 
-        partAttrdefScan = systable_beginscan(attrdefRel, AttrDefaultIndexId, true, SnapshotNow, 2, scankeys);
+        partAttrdefScan = systable_beginscan(attrdefRel, AttrDefaultIndexId, true, NULL, 2, scankeys);
         partAttrdefTuple = systable_getnext(partAttrdefScan);
 
         ScanKeyInit(&scankeys[0],
@@ -20004,7 +20004,7 @@ static void checkColumnForExchange(Relation partTableRel, Relation ordTableRel)
         ScanKeyInit(&scankeys[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ,
             ordVals[Anum_pg_attribute_attnum - 1]);
 
-        ordAttrdefScan = systable_beginscan(attrdefRel, AttrDefaultIndexId, true, SnapshotNow, 2, scankeys);
+        ordAttrdefScan = systable_beginscan(attrdefRel, AttrDefaultIndexId, true, NULL, 2, scankeys);
         ordAttrdefTuple = systable_getnext(ordAttrdefScan);
 
         if ((partAttrdefTuple != NULL) && (ordAttrdefTuple != NULL)) {
@@ -20081,7 +20081,7 @@ bool checkPartitionLocalIndexesUsable(Oid partitionOid)
     pg_part_rel = relation_open(PartitionRelationId, AccessShareLock);
     ScanKeyInit(
         &scankeys[0], Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partitionOid));
-    partScan = systable_beginscan(pg_part_rel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, scankeys);
+    partScan = systable_beginscan(pg_part_rel, PartitionIndexTableIdIndexId, true, NULL, 1, scankeys);
     while (NULL != (partTuple = systable_getnext(partScan))) {
         Relation indexRel = NULL;
         Partition indexPart = NULL;
@@ -20128,7 +20128,7 @@ bool checkRelationLocalIndexesUsable(Relation relation)
         &skey, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
 
     indrel = heap_open(IndexRelationId, AccessShareLock);
-    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, SnapshotNow, 1, &skey);
+    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(indscan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(htup);
@@ -20306,11 +20306,11 @@ static List* getConstraintList(Oid relOid, char conType)
     if (conType != CONSTRAINT_INVALID) {
         ScanKeyInit(&skey[1], Anum_pg_constraint_contype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(conType));
         nkeys = 2;
-        scan = systable_beginscan(pgConstraint, ConstraintRelidIndexId, false, SnapshotNow, nkeys, skey);
+        scan = systable_beginscan(pgConstraint, ConstraintRelidIndexId, false, NULL, nkeys, skey);
 
     } else {
         nkeys = 1;
-        scan = systable_beginscan(pgConstraint, ConstraintRelidIndexId, true, SnapshotNow, nkeys, skey);
+        scan = systable_beginscan(pgConstraint, ConstraintRelidIndexId, true, NULL, nkeys, skey);
     }
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
@@ -23427,7 +23427,7 @@ static void ResetPartsRedisCtidRelOptions(Relation rel)
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber,F_OIDEQ, 
         ObjectIdGetDatum(RelationGetRelid(rel)));
 
-    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
     redis_reloptions = AlterTableSetRedistribute(rel, REDIS_REL_RESET_CTID, NULL);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         HeapTuple dtuple;

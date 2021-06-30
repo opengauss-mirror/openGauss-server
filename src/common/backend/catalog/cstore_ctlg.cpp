@@ -913,7 +913,7 @@ static void drop_delta_rel(Oid deltataRelId)
     Relation depRel = relation_open(DependRelationId, RowExclusiveLock);
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(deltataRelId));
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         simple_heap_delete(depRel, &tup->t_self);
     }

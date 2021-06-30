@@ -2128,7 +2128,7 @@ void WLMReAdjustAllUserSpaceInternal(bool isReset)
 
     rel = heap_open(RelationRelationId, AccessShareLock);
 
-    SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, NULL, 0, NULL);
 
     /* get all user in system table */
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
@@ -2225,7 +2225,7 @@ void WLMReAdjustUserSpaceWithResetFlagInternal(UserData* userdata, bool isReset)
 
     rel = heap_open(RelationRelationId, AccessShareLock);
 
-    SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, NULL, 0, NULL);
 
     /* get all user in system table */
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {

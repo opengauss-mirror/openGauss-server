@@ -53,7 +53,7 @@ extern bool IsXidVisibleInGtmLiteLocalSnapshot(TransactionId xid, Snapshot snaps
 
 extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);
-extern Snapshot GetCatalogSnapshot(Oid relid);
+extern Snapshot GetCatalogSnapshot();
 extern void SnapshotSetCommandId(CommandId curcid);
 extern Snapshot GetNonHistoricCatalogSnapshot(Oid relid);
 

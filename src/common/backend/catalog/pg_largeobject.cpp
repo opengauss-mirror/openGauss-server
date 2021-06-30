@@ -95,7 +95,7 @@ void LargeObjectDrop(Oid loid)
      */
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(loid));
 
-    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, NULL, 1, skey);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
@@ -110,7 +110,7 @@ void LargeObjectDrop(Oid loid)
      */
     ScanKeyInit(&skey[0], Anum_pg_largeobject_loid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(loid));
 
-    scan = systable_beginscan(pg_largeobject, LargeObjectLOidPNIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_largeobject, LargeObjectLOidPNIndexId, true, NULL, 1, skey);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         simple_heap_delete(pg_largeobject, &tuple->t_self);
     }
@@ -140,7 +140,7 @@ void LargeObjectAlterOwner(Oid loid, Oid newOwnerId)
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(loid));
 
-    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, NULL, 1, skey);
 
     oldtup = systable_getnext(scan);
     if (!HeapTupleIsValid(oldtup))
@@ -232,7 +232,7 @@ bool LargeObjectExists(Oid loid)
 
     pg_lo_meta = heap_open(LargeObjectMetadataRelationId, AccessShareLock);
 
-    sd = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, SnapshotNow, 1, skey);
+    sd = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, NULL, 1, skey);
 
     tuple = systable_getnext(sd);
     if (HeapTupleIsValid(tuple))
