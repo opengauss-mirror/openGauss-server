@@ -59,6 +59,9 @@ else
     exit 1
 fi
 
+export MAKE_JOBS=$(($(cat /proc/cpuinfo | grep processor | wc -l) * 2))
+echo "[makemppdb] $(date +%y-%m-%d' '%T): Make jobs number : ${MAKE_JOBS}"
+
 show_package=false
 
 gcc_version="7.3.0"
@@ -747,12 +750,12 @@ function install_gaussdb()
 
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
-    make -sj 8>> "$LOG_FILE" 2>&1
-    make install -sj 8>> "$LOG_FILE" 2>&1
+    make -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
+    make install -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
-        make install -sj 8>> "$LOG_FILE" 2>&1
+        make install -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
         if [ $? -ne 0 ]; then
-            make install -sj 8>> "$LOG_FILE" 2>&1
+            make install -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
             if [ $? -ne 0 ]; then
                 die "make install failed."
             fi
