@@ -1759,6 +1759,7 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
     }
 }
 
+
 /*
  * unique_sql_post_parse_analyze - generate sql id
  */
@@ -1767,7 +1768,7 @@ void UniqueSq::unique_sql_post_parse_analyze(ParseState* pstate, Query* query)
     Assert(IS_PGXC_COORDINATOR || IS_SINGLE_NODE);
 
     if (pstate != NULL) {
-        /* generate unique sql id */
+        /* generate unique sql id */        
         if (is_unique_sql_enabled()) {
             GenerateUniqueSQLInfo(pstate->p_sourcetext, query);
         }
@@ -1823,6 +1824,76 @@ static void SetLocalUniqueSQLId(List* query_list)
     }
 }
 
+/* Set parameters from portal */
+void SetParamsFromPortal(Portal portal)
+{
+    CHECK_STMT_HANDLE();
+    Assert(portal);
+
+    if (!u_sess->attr.attr_common.track_stmt_parameter || CURRENT_STMT_METRIC_HANDLE->params) {
+        return;
+    }
+    
+    ParamListInfo params = portal->portalParams;
+    /* We mustn't call user-defined I/O functions when in an aborted xact */
+    if (params && params->numParams > 0 && !IsAbortedTransactionBlockState()) {
+        StringInfoData param_str;
+        MemoryContext oldcontext;
+        int paramno;
+
+        initStringInfo(&param_str);
+
+        for (paramno = 0; paramno < params->numParams; paramno++) {
+            ParamExternData* prm = &params->params[paramno];
+            Oid typoutput;
+            bool typisvarlena = false;
+            char* pstring = NULL;
+            char* p = NULL;
+
+            appendStringInfo(&param_str, "%s$%d = ", (paramno > 0) ? ", " : " parameters: ", paramno + 1);
+
+            if (prm->isnull || !OidIsValid(prm->ptype)) {
+                appendStringInfoString(&param_str, "NULL");
+                continue;
+            }
+
+            getTypeOutputInfo(prm->ptype, &typoutput, &typisvarlena);
+
+            pstring = OidOutputFunctionCall(typoutput, prm->value);
+
+            appendStringInfoCharMacro(&param_str, '\'');
+            for (p = pstring; *p; p++) {
+                if (*p == '\'') /* double single quotes */
+                    appendStringInfoCharMacro(&param_str, *p);
+                appendStringInfoCharMacro(&param_str, *p);
+            }
+            appendStringInfoCharMacro(&param_str, '\'');
+
+            pfree(pstring);
+        }
+
+        oldcontext = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
+
+        CURRENT_STMT_METRIC_HANDLE->params = pstrdup(param_str.data);
+
+        pfree(param_str.data);
+
+        if (CURRENT_STMT_METRIC_HANDLE->query) {
+            Size len = strlen(CURRENT_STMT_METRIC_HANDLE->query) + strlen(CURRENT_STMT_METRIC_HANDLE->params) + 2;
+            char *tmpstr = (char *)palloc(len * sizeof(char));
+            errno_t rc = sprintf_s(tmpstr, len, "%s;%s", CURRENT_STMT_METRIC_HANDLE->query,
+                                   CURRENT_STMT_METRIC_HANDLE->params);
+            securec_check_ss_c(rc, "\0", "\0");
+            pfree(CURRENT_STMT_METRIC_HANDLE->query);
+            pfree_ext(CURRENT_STMT_METRIC_HANDLE->params);
+            CURRENT_STMT_METRIC_HANDLE->query = tmpstr;
+        }
+
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+}
+
 /*
  * set current prepared statement's unique sql id
  *
@@ -1839,6 +1910,8 @@ void SetUniqueSQLIdFromPortal(Portal portal, CachedPlanSource* unnamed_psrc)
     if (!is_unique_sql_enabled() || !is_local_unique_sql() || portal == NULL) {
         return;
     }
+
+    SetParamsFromPortal(portal);
 
     List* query_list = NULL;
     if (portal->prepStmtName && portal->prepStmtName[0] != '\0') {
