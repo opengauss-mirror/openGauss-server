@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details.
 import importlib
 import os
 import types
+import logging
 
 from tuner.exceptions import ConfigureError
 from tuner.executor import ExecutorFactory
