@@ -1205,11 +1205,17 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
     pg_class_desc = heap_open(RelationRelationId, AccessShareLock);
 
     /*
-     * for logical decoding
+     * The caller might need a tuple that's newer than the one the historic
+     * snapshot; currently the only case requiring to do so is looking up the
+     * relfilenode of non mapped system relations during decoding.
      */
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive())
-        snapshot = GetCatalogSnapshot(RelationRelationId);
+    if (HistoricSnapshotActive()) {
+        if (force_non_historic)
+            snapshot = GetNonHistoricCatalogSnapshot(RelationRelationId);
+        else
+            snapshot = GetCatalogSnapshot();
+    }
 
     /*
      * The caller might need a tuple that's newer than the one the historic
@@ -1390,13 +1396,22 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
     ScanKeyInit(&skey[1], Anum_pg_attribute_attnum, BTGreaterStrategyNumber, F_INT2GT, Int16GetDatum(0));
 
     /*
+     * Using historical snapshot in logic decoding.
+     */
+    Snapshot snapshot = NULL;
+    snapshot = SnapshotNow;
+    if (HistoricSnapshotActive()) {
+        snapshot =  GetCatalogSnapshot();
+    }
+
+    /*
      * Open pg_attribute and begin a scan.	Force heap scan if we haven't yet
      * built the critical relcache entries (this includes initdb and startup
      * without a pg_internal.init file).
      */
     pg_attribute_desc = heap_open(AttributeRelationId, AccessShareLock);
     pg_attribute_scan = systable_beginscan(
-        pg_attribute_desc, AttributeRelidNumIndexId, u_sess->relcache_cxt.criticalRelcachesBuilt, SnapshotNow, 2, skey);
+        pg_attribute_desc, AttributeRelidNumIndexId, u_sess->relcache_cxt.criticalRelcachesBuilt, snapshot, 2, skey);
 
     /*
      * add attribute data to relation->rd_att
@@ -1651,7 +1666,7 @@ static void RelationBuildRuleLock(Relation relation)
      */
     rewrite_desc = heap_open(RewriteRelationId, AccessShareLock);
     rewrite_tupdesc = RelationGetDescr(rewrite_desc);
-    rewrite_scan = systable_beginscan(rewrite_desc, RewriteRelRulenameIndexId, true, SnapshotNow, 1, &key);
+    rewrite_scan = systable_beginscan(rewrite_desc, RewriteRelRulenameIndexId, true, NULL, 1, &key);
 
     while (HeapTupleIsValid(rewrite_tuple = systable_getnext(rewrite_scan))) {
         Form_pg_rewrite rewrite_form = (Form_pg_rewrite)GETSTRUCT(rewrite_tuple);
@@ -2619,7 +2634,7 @@ static OpClassCacheEnt* LookupOpclassInfo(Oid operatorClassOid, StrategyNumber n
      */
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(operatorClassOid));
     rel = heap_open(OperatorClassRelationId, AccessShareLock);
-    scan = systable_beginscan(rel, OpclassOidIndexId, indexOK, SnapshotNow, 1, skey);
+    scan = systable_beginscan(rel, OpclassOidIndexId, indexOK, NULL, 1, skey);
 
     if (HeapTupleIsValid(htup = systable_getnext(scan))) {
         Form_pg_opclass opclassform = (Form_pg_opclass)GETSTRUCT(htup);
@@ -2655,7 +2670,7 @@ static OpClassCacheEnt* LookupOpclassInfo(Oid operatorClassOid, StrategyNumber n
             F_OIDEQ,
             ObjectIdGetDatum(opcentry->opcintype));
         rel = heap_open(AccessMethodProcedureRelationId, AccessShareLock);
-        scan = systable_beginscan(rel, AccessMethodProcedureIndexId, indexOK, SnapshotNow, 3, skey);
+        scan = systable_beginscan(rel, AccessMethodProcedureIndexId, indexOK, NULL, 3, skey);
 
         while (HeapTupleIsValid(htup = systable_getnext(scan))) {
             Form_pg_amproc amprocform = (Form_pg_amproc)GETSTRUCT(htup);
@@ -5022,7 +5037,7 @@ static void AttrDefaultFetch(Relation relation)
         &skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
 
     adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
-    adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, SnapshotNow, 1, &skey);
+    adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
     found = 0;
 
     while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
@@ -5087,7 +5102,7 @@ static void CheckConstraintFetch(Relation relation)
         ObjectIdGetDatum(RelationGetRelid(relation)));
 
     conrel = heap_open(ConstraintRelationId, AccessShareLock);
-    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint conform = (Form_pg_constraint)GETSTRUCT(htup);
@@ -5251,7 +5266,7 @@ List* RelationGetIndexList(Relation relation)
         &skey, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
 
     indrel = heap_open(IndexRelationId, AccessShareLock);
-    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, SnapshotNow, 1, &skey);
+    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(indscan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(htup);
@@ -5413,7 +5428,7 @@ int RelationGetIndexNum(Relation relation)
         &skey, Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
 
     indrel = heap_open(IndexRelationId, AccessShareLock);
-    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, SnapshotNow, 1, &skey);
+    indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(indscan))) {
         Form_pg_index index = (Form_pg_index)GETSTRUCT(htup);
@@ -5776,7 +5791,7 @@ static void ClusterConstraintFetch(__inout Relation relation)
         ObjectIdGetDatum(RelationGetRelid(relation)));
 
     conrel = heap_open(ConstraintRelationId, AccessShareLock);
-    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint conform = (Form_pg_constraint)GETSTRUCT(htup);
@@ -6012,7 +6027,7 @@ void RelationGetExclusionInfo(Relation indexRelation, Oid** operators, Oid** pro
         ObjectIdGetDatum(indexRelation->rd_index->indrelid));
 
     conrel = heap_open(ConstraintRelationId, AccessShareLock);
-    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, skey);
     found = false;
 
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
@@ -6936,7 +6951,7 @@ List* PartitionGetPartIndexList(Partition part)
         ObjectIdGetDatum(PartitionGetPartid(part)));
 
     partrel = heap_open(PartitionRelationId, AccessShareLock);
-    indscan = systable_beginscan(partrel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, &skey);
+    indscan = systable_beginscan(partrel, PartitionIndexTableIdIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(parttup = systable_getnext(indscan))) {
         Form_pg_partition partform = (Form_pg_partition)GETSTRUCT(parttup);

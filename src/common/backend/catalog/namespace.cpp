@@ -4737,7 +4737,7 @@ bool checkGroup(Oid relid, bool missing_ok)
              */
             pgxc_group = heap_open(PgxcGroupRelationId, AccessShareLock);
 
-            scan = systable_beginscan(pgxc_group, PgxcGroupGroupNameIndexId, true, SnapshotNow, 0, NULL);
+            scan = systable_beginscan(pgxc_group, PgxcGroupGroupNameIndexId, true, NULL, 0, NULL);
 
             while (HeapTupleIsValid(tuple1 = systable_getnext(scan))) {
                 Form_pgxc_group groupForm = (Form_pgxc_group)GETSTRUCT(tuple1);

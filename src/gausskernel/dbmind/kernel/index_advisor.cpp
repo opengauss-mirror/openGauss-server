@@ -385,7 +385,7 @@ char *search_table_attname(Oid attrelid, int2 attnum)
     ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(attrelid));
     ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
 
-    scan = systable_beginscan(pg_attribute, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(pg_attribute, AttributeRelidNumIndexId, true, NULL, 2, key);
     tup = systable_getnext(scan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(scan);

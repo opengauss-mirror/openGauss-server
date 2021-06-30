@@ -569,7 +569,7 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
     } else
         nkeys = 2;
 
-    scan = systable_beginscan(*depRel, DependDependerIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(*depRel, DependDependerIndexId, true, NULL, nkeys, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(tup);
@@ -718,7 +718,7 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
     } else
         nkeys = 2;
 
-    scan = systable_beginscan(*depRel, DependReferenceIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(*depRel, DependReferenceIndexId, true, NULL, nkeys, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(tup);
@@ -1076,7 +1076,7 @@ static void deleteOneObject(const ObjectAddress* object, Relation* depRel, int f
     } else
         nkeys = 2;
 
-    scan = systable_beginscan(*depRel, DependDependerIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(*depRel, DependDependerIndexId, true, NULL, nkeys, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         simple_heap_delete(*depRel, &tup->t_self);
@@ -1100,7 +1100,7 @@ static void deleteOneObject(const ObjectAddress* object, Relation* depRel, int f
         } else
             nkeys = 2;
 
-        scan = systable_beginscan(*depRel, DependReferenceIndexId, true, SnapshotNow, nkeys, key);
+        scan = systable_beginscan(*depRel, DependReferenceIndexId, true, NULL, nkeys, key);
 
         while (HeapTupleIsValid(tup = systable_getnext(scan))) {
             Form_pg_depend Pinnedobj = (Form_pg_depend)GETSTRUCT(tup);
@@ -2419,7 +2419,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            rcscan = systable_beginscan(castDesc, CastOidIndexId, true, SnapshotNow, 1, skey);
+            rcscan = systable_beginscan(castDesc, CastOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(rcscan);
 
@@ -2503,7 +2503,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            adscan = systable_beginscan(attrdefDesc, AttrDefaultOidIndexId, true, SnapshotNow, 1, skey);
+            adscan = systable_beginscan(attrdefDesc, AttrDefaultOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(adscan);
 
@@ -2595,7 +2595,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            amscan = systable_beginscan(amopDesc, AccessMethodOperatorOidIndexId, true, SnapshotNow, 1, skey);
+            amscan = systable_beginscan(amopDesc, AccessMethodOperatorOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(amscan);
 
@@ -2642,7 +2642,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            amscan = systable_beginscan(amprocDesc, AccessMethodProcedureOidIndexId, true, SnapshotNow, 1, skey);
+            amscan = systable_beginscan(amprocDesc, AccessMethodProcedureOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(amscan);
 
@@ -2687,7 +2687,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            rcscan = systable_beginscan(ruleDesc, RewriteOidIndexId, true, SnapshotNow, 1, skey);
+            rcscan = systable_beginscan(ruleDesc, RewriteOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(rcscan);
 
@@ -2717,7 +2717,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            tgscan = systable_beginscan(trigDesc, TriggerOidIndexId, true, SnapshotNow, 1, skey);
+            tgscan = systable_beginscan(trigDesc, TriggerOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(tgscan);
 
@@ -2885,7 +2885,7 @@ char* getObjectDescription(const ObjectAddress* object)
             ScanKeyInit(
                 &skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-            rcscan = systable_beginscan(defaclrel, DefaultAclOidIndexId, true, SnapshotNow, 1, skey);
+            rcscan = systable_beginscan(defaclrel, DefaultAclOidIndexId, true, NULL, 1, skey);
 
             tup = systable_getnext(rcscan);
 
@@ -2984,7 +2984,7 @@ char* getObjectDescription(const ObjectAddress* object)
                 F_OIDEQ,
                 ObjectIdGetDatum(object->objectId));
 
-            SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, SnapshotNow, 1, scanKey);
+            SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, NULL, 1, scanKey);
 
             HeapTuple tuple = systable_getnext(scanDesc);
             if (HeapTupleIsValid(tuple) == false) {
@@ -3160,7 +3160,7 @@ bool TSConfigurationHasDependentObjects(Oid tsconfoid)
 
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tsconfoid));
 
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Form_pg_depend pg_depend = (Form_pg_depend)GETSTRUCT(tuple);
 
@@ -3227,7 +3227,7 @@ static void findTsDependentObjects(ObjectAddresses* targetObjects, Relation depR
 
         ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cur->classId));
         ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cur->objectId));
-        scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+        scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
         while(HeapTupleIsValid(tup = systable_getnext(scan))) {
             Form_pg_depend foundDep = (Form_pg_depend)GETSTRUCT(tup);
             otherObj.classId = foundDep->classid;

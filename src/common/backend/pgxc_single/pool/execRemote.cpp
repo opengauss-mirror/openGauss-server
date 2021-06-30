@@ -8210,7 +8210,7 @@ bool IsInheritor(Oid relid)
 
     pginherits = heap_open(InheritsRelationId, AccessShareLock);
     ScanKeyInit(&key[0], Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, relid);
-    scan = systable_beginscan(pginherits, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(pginherits, InheritsRelidSeqnoIndexId, true, NULL, 1, key);
     if (HeapTupleIsValid(systable_getnext(scan))) {
         ret = true;
     }

@@ -263,7 +263,7 @@ static void InitInstrWorkloadTransactionUser(void)
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction", MEMORY_CONTEXT_CBB);
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
     HeapTuple tup;
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {

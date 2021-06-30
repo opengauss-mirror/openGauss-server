@@ -1921,7 +1921,7 @@ Oid GetDefaultOpClass(Oid type_id, Oid am_id)
 
     ScanKeyInit(&skey[0], Anum_pg_opclass_opcmethod, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(am_id));
 
-    scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, NULL, 1, skey);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_opclass opclass = (Form_pg_opclass)GETSTRUCT(tup);
@@ -2937,7 +2937,7 @@ static bool relationHasInformationalPrimaryKey(const Relation rel)
     ScanKeyInit(
         &skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
     conrel = heap_open(ConstraintRelationId, ShareUpdateExclusiveLock);
-    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, skey);
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(htup);
 
@@ -3118,7 +3118,7 @@ static bool CheckGlobalIndexCompatible(Oid relOid, bool isGlobal, const IndexInf
 
     ScanKeyInit(&skey[0], Anum_pg_index_indrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relOid));
     indexRelation = heap_open(IndexRelationId, AccessShareLock);
-    sysScan = systable_beginscan(indexRelation, IndexIndrelidIndexId, true, SnapshotNow, 1, skey);
+    sysScan = systable_beginscan(indexRelation, IndexIndrelidIndexId, true, NULL, 1, skey);
 
     AttrNumber* currAttrsArray = (AttrNumber*)palloc0(currSize);
     rc = memcpy_s(currAttrsArray, currSize, indexInfo->ii_KeyAttrNumbers, currSize);

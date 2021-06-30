@@ -692,6 +692,13 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
     }
 
     /* followed by the record's origin, if any */
+    if (u_sess->attr.attr_storage.replorigin_sesssion_origin == 0 &&
+        (u_sess->attr.attr_sql.enable_cluster_resize || t_thrd.role == AUTOVACUUM_WORKER)) {
+        t_thrd.xlog_cxt.include_origin = true;
+        u_sess->attr.attr_storage.replorigin_sesssion_origin = 1;
+    }
+
+    /* followed by the record's origin, if any */
     if (t_thrd.xlog_cxt.include_origin && u_sess->attr.attr_storage.replorigin_sesssion_origin != InvalidRepOriginId) {
         *(scratch++) = XLR_BLOCK_ID_ORIGIN;
         rc = memcpy_s(scratch, sizeof(u_sess->attr.attr_storage.replorigin_sesssion_origin),

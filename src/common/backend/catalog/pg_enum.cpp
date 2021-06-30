@@ -145,7 +145,7 @@ void EnumValuesDelete(Oid enumTypeOid)
 
     ScanKeyInit(&key[0], Anum_pg_enum_enumtypid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(enumTypeOid));
 
-    scan = systable_beginscan(pg_enum, EnumTypIdLabelIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(pg_enum, EnumTypIdLabelIndexId, true, NULL, 1, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         simple_heap_delete(pg_enum, &tup->t_self);

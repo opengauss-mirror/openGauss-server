@@ -362,7 +362,7 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
      */
     rel = heap_open(PgDirectoryRelationId, RowExclusiveLock);
     ScanKeyInit(&scankey, Anum_pg_directory_directory_name, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(dirname));
-    scan = systable_beginscan(rel, PgDirectoryDirectoriesNameIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(rel, PgDirectoryDirectoriesNameIndexId, true, NULL, 1, &scankey);
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple)) {
         heap_close(rel, RowExclusiveLock);
