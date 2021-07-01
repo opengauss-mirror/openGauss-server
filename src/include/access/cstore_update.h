@@ -43,6 +43,11 @@ public:
     MemInfoArg *m_insMemInfo;
 
 private:
+    void BatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options, JunkFilter *junkfilter);
+    void PartitionBatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options, JunkFilter *junkfilter);
+
+    bool CheckHasUniqueIdx();
+
     Relation m_relation;
 
     CStoreDelete *m_delete;
@@ -52,6 +57,7 @@ private:
     ResultRelInfo *m_resultRelInfo;
     EState *m_estate;
     bool m_isPartition;
+    bool m_hasUniqueIdx;
     static int BATCHROW_TIMES;
 
     InsertArg m_insert_args;

@@ -111,6 +111,23 @@ public:
     static void InitIndexInsertArg(Relation heap_rel, const int *keys_map, int nkeys, InsertArg &args);
     void InitInsertMemArg(Plan *plan, MemInfoArg *ArgmemInfo);
 
+    inline CStorePSort* GetSorter()
+    {
+        return m_sorter;
+    }
+
+    inline MemoryContext GetTmpMemCnxt()
+    {
+        return m_tmpMemCnxt;
+    }
+
+    inline bulkload_rows* GetBufferedBatchRows()
+    {
+        return m_bufferedBatchRows;
+    }
+
+    void SortAndInsert(int options);
+
     Relation m_relation;
     CU ***m_aio_cu_PPtr;
     AioDispatchCUDesc_t ***m_aio_dispath_cudesc;
@@ -430,6 +447,7 @@ public:
     bool CheckItemIsAlive(ItemPointer tid);
 
 private:
+    void FreeCache();
     inline bool IsDeadRow(uint32 row, unsigned char* cuDelMask);
 
     bool CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found);
@@ -440,6 +458,7 @@ private:
     Snapshot m_snapshot;
     List* m_cuids;
     List* m_deletemasks;
+    List* m_needFreeMasks;
     List* m_valids;
 };
 
