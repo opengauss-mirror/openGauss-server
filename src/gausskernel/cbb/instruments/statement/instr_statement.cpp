@@ -528,7 +528,6 @@ static void CleanStatementTable()
 static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u_statement_context* statementCxt)
 {
     Assert (suspendList != NULL);
-    RangeVar* relrv = InitStatementRel();
     HeapTuple tuple = NULL;
     StatementStatContext *flushItem = suspendList;
 
@@ -537,6 +536,8 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
     PG_TRY();
     {
         StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
+	RangeVar* relrv = InitStatementRel();
         Relation rel = heap_openrv(relrv, RowExclusiveLock);
         while (flushItem != NULL) {
             tuple = GetStatementTuple(rel, flushItem, statementCxt);
@@ -546,6 +547,7 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
             flushItem = (StatementStatContext *)flushItem->next;
         }
         heap_close(rel, RowExclusiveLock);
+	PopActiveSnapshot();
         CommitTransactionCommand();
     }
     PG_CATCH();
@@ -559,6 +561,7 @@ static void FlushStatementToTable(StatementStatContext* suspendList, const knl_u
         ereport(WARNING, (errmodule(MOD_INSTR),
             errmsg("[Statement] flush suspend list to statement_history failed, reason: '%s'", edata->message)));
         FreeErrorData(edata);
+	PopActiveSnapshot();
         AbortCurrentTransaction();
     }
     PG_END_TRY();
