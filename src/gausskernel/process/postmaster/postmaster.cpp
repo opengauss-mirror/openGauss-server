@@ -263,8 +263,7 @@ static bool isNeedGetLCName = true;
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
 #define CHECK_TIMES 10
-#define SIGBUS_MCEERR_AR 4
-#define SIGBUS_MCEERR_AO 5
+
 static char gaussdb_state_file[MAXPGPATH] = {0};
 
 uint32 noProcLogicTid = 0;
@@ -334,7 +333,6 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
-void SIGBUS_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
 static void startup_alarm(SIGNAL_ARGS);
 static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState others);
@@ -4247,65 +4245,6 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
     errno = save_errno;
 }
-/*
- * SIGBUS -- When uce failure occurs in system memory, sigbus_handler will exit according to the region
-   of its logical address.
-   1. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
-   2. For addresses outside the buffer pool range, print the NIC log and exit
-   3. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
-   4. If the page is not dirty, execute pmdie to exit normally and print warning message. If the page is dirty,
-      print the PANIC log and exit
- */
-void SIGBUS_handler(SIGNAL_ARGS)
-{
-    uint64 buffer_size;
-    int buf_id;
-    int si_code = g_instance.sigbus_cxt.sigbus_code;
-    unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
-    if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
-        ereport(PANIC,
-            (errcode(ERRCODE_UE_COMMON_ERROR),
-                errmsg("errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
-                    ERRCODE_UE_COMMON_ERROR)));
-    }
-#ifdef __aarch64__
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
-#else
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
-#endif
-    unsigned long long startaddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
-    unsigned long long endaddr = startaddr + buffer_size;
-    /* Determine the range of address carried by sigbus, And print the log according to the page state. */
-    if (sigbus_addr >= startaddr && sigbus_addr <= endaddr) {
-        buf_id = floor((sigbus_addr - startaddr) / (Size)BLCKSZ);
-        BufferDesc* buf_desc = GetBufferDescriptor(buf_id);
-        if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
-            buf_desc->state & BM_IO_IN_PROGRESS) {
-            ereport(PANIC,
-                (errcode(ERRCODE_UE_DIRTY_PAGE),
-                    errmsg("errcode:%u, Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut "
-                           "down immediately.",
-                    ERRCODE_UE_DIRTY_PAGE, sigbus_addr)));
-        } else {
-            ereport(WARNING,
-                (errcode(ERRCODE_UE_CLEAN_PAGE),
-                    errmsg("errcode:%u, Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will "
-                           "shutdown.",
-                        ERRCODE_UE_CLEAN_PAGE, sigbus_addr)));
-            pmdie(SIGBUS);
-        }
-    } else if (sigbus_addr == 0) {
-        ereport(PANIC,
-            (errcode(ERRCODE_UE_COMMON_ERROR),
-                errmsg("errcode:%u, SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately",
-                    ERRCODE_UE_COMMON_ERROR)));
-    } else {
-        ereport(PANIC,
-            (errcode(ERRCODE_UE_COMMON_ERROR),
-                errmsg("errcode:%u, SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately",
-                    ERRCODE_UE_COMMON_ERROR, sigbus_addr)));
-    }
-}
 
 void KillGraceThreads(void)
 {
@@ -4346,7 +4285,6 @@ static void pmdie(SIGNAL_ARGS)
     switch (postgres_signal_arg) {
         case SIGTERM:
         case SIGINT:
-        case SIGBUS:
 
             if (STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode && !dummyStandbyMode &&
                 SIGTERM == postgres_signal_arg) {
