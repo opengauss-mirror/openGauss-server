@@ -327,7 +327,7 @@ void initSqlCountUser()
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSqlCount", MEMORY_CONTEXT_OPTIMIZER);
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
     HeapTuple tup = NULL;
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
@@ -3237,7 +3237,7 @@ void DropRole(DropRoleStmt* stmt)
          */
         ScanKeyInit(&scankey, Anum_pg_auth_members_roleid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
 
-        SysScanDesc sscan = systable_beginscan(pg_auth_members_rel, AuthMemRoleMemIndexId, true, SnapshotNow, 1, &scankey);
+        SysScanDesc sscan = systable_beginscan(pg_auth_members_rel, AuthMemRoleMemIndexId, true, NULL, 1, &scankey);
         HeapTuple tmp_tuple = NULL;
         while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan))) {
             simple_heap_delete(pg_auth_members_rel, &tmp_tuple->t_self);
@@ -3247,7 +3247,7 @@ void DropRole(DropRoleStmt* stmt)
 
         ScanKeyInit(&scankey, Anum_pg_auth_members_member, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
 
-        sscan = systable_beginscan(pg_auth_members_rel, AuthMemMemRoleIndexId, true, SnapshotNow, 1, &scankey);
+        sscan = systable_beginscan(pg_auth_members_rel, AuthMemMemRoleIndexId, true, NULL, 1, &scankey);
 
         while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan))) {
             simple_heap_delete(pg_auth_members_rel, &tmp_tuple->t_self);
@@ -4519,7 +4519,7 @@ static void AddAuthHistory(Oid roleID, const char* rolename, const char* passwd,
         fromTime = TimestampGetDatum(fromTimeDatum);
         /* get all the records from pg_auth_history of the roleID */
         ScanKeyInit(&key[0], Anum_pg_auth_history_roloid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleID));
-        scan = systable_beginscan(pg_auth_history_rel, AuthHistoryIndexId, true, SnapshotNow, 1, key);
+        scan = systable_beginscan(pg_auth_history_rel, AuthHistoryIndexId, true, NULL, 1, key);
 
         /* get the tuple according to reverse order of the index */
         while (HeapTupleIsValid(password_tuple = systable_getnext_back(scan))) {
@@ -4620,7 +4620,7 @@ static void DropAuthHistory(Oid roleID)
 
         ScanKeyInit(&scankey, Anum_pg_auth_history_roloid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleID));
 
-        sscan = systable_beginscan(pg_auth_history_rel, AuthHistoryIndexId, true, SnapshotNow, 1, &scankey);
+        sscan = systable_beginscan(pg_auth_history_rel, AuthHistoryIndexId, true, NULL, 1, &scankey);
 
         while (HeapTupleIsValid(tmp_tuple = systable_getnext(sscan))) {
             simple_heap_delete(pg_auth_history_rel, &tmp_tuple->t_self);

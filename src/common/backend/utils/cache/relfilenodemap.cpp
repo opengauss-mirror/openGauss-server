@@ -191,7 +191,10 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
         skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
         skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-        scandesc = systable_beginscan(relation, ClassTblspcRelfilenodeIndexId, true, SnapshotNow, 2, skey);
+        /*
+         * Using historical snapshot in logic decoding.
+         */
+        scandesc = systable_beginscan(relation, ClassTblspcRelfilenodeIndexId, true, NULL, 2, skey);
 
         found = false;
 
@@ -270,7 +273,15 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partati
     skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
     skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-    scandesc = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 2, skey);
+    /*
+     * Using historical snapshot in logic decoding.
+     */
+    Snapshot snapshot = NULL;
+    snapshot = SnapshotNow;
+    if (HistoricSnapshotActive()) {
+        snapshot =  GetCatalogSnapshot();
+    }
+    scandesc = systable_beginscan(relation, InvalidOid, false, NULL, 2, skey);
 
     while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
         if (foundflag)

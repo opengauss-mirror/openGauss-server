@@ -547,7 +547,7 @@ void DefineOpClass(CreateOpClassStmt* stmt)
 
         ScanKeyInit(&skey[0], Anum_pg_opclass_opcmethod, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(amoid));
 
-        scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, SnapshotNow, 1, skey);
+        scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid(tup = systable_getnext(scan))) {
             Form_pg_opclass opclass = (Form_pg_opclass)GETSTRUCT(tup);
@@ -1453,7 +1453,7 @@ void RemoveAmOpEntryById(Oid entryOid)
 
     rel = heap_open(AccessMethodOperatorRelationId, RowExclusiveLock);
 
-    scan = systable_beginscan(rel, AccessMethodOperatorOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(rel, AccessMethodOperatorOidIndexId, true, NULL, 1, skey);
 
     /* we expect exactly one match */
     tup = systable_getnext(scan);
@@ -1477,7 +1477,7 @@ void RemoveAmProcEntryById(Oid entryOid)
 
     rel = heap_open(AccessMethodProcedureRelationId, RowExclusiveLock);
 
-    scan = systable_beginscan(rel, AccessMethodProcedureOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(rel, AccessMethodProcedureOidIndexId, true, NULL, 1, skey);
 
     /* we expect exactly one match */
     tup = systable_getnext(scan);

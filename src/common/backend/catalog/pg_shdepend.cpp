@@ -212,7 +212,7 @@ static void shdepChangeDep(Relation sdepRel, Oid classid, Oid objid, int32 objsu
     ScanKeyInit(&key[2], Anum_pg_shdepend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objid));
     ScanKeyInit(&key[3], Anum_pg_shdepend_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(objsubid));
 
-    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, 4, key);
+    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, NULL, 4, key);
 
     while ((scantup = systable_getnext(scan)) != NULL) {
         /* Ignore if not of the target dependency type */
@@ -478,7 +478,7 @@ SysScanDesc initAndGetScanByRefId(Relation sdepRel, Oid classId, Oid objectId)
     ScanKeyInit(&key[0], Anum_pg_shdepend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
     ScanKeyInit(&key[1], Anum_pg_shdepend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
 
-    return systable_beginscan(sdepRel, SharedDependReferenceIndexId, true, SnapshotNow, NumberOfReferenceKey, key);
+    return systable_beginscan(sdepRel, SharedDependReferenceIndexId, true, NULL, NumberOfReferenceKey, key);
 }
 
 SysScanDesc initAndGetScanByDependerIndexId(
@@ -511,7 +511,7 @@ SysScanDesc initAndGetScanByDependerIndexId(
         }
     }
 
-    return systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, maxAttributeId, key);
+    return systable_beginscan(sdepRel, SharedDependDependerIndexId, true, NULL, maxAttributeId, key);
 }
 
 /*
@@ -708,7 +708,7 @@ void copyTemplateDependencies(Oid templateDbId, Oid newDbId)
     /* Scan all entries with dbid = templateDbId */
     ScanKeyInit(&key[0], Anum_pg_shdepend_dbid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(templateDbId));
 
-    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, NULL, 1, key);
 
     /* Set up to copy the tuples except for inserting newDbId */
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -788,7 +788,7 @@ void dropDatabaseDependencies(Oid databaseId)
      */
     ScanKeyInit(&key[0], Anum_pg_shdepend_dbid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(databaseId));
     /* We leave the other index fields unspecified */
-    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, NULL, 1, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
 #ifdef ENABLE_MOT
@@ -918,7 +918,7 @@ static void shdepDropDependency(Relation sdepRel, Oid classId, Oid objectId, int
         nkeys = 4;
     }
 
-    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, NULL, nkeys, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_shdepend shdepForm = (Form_pg_shdepend)GETSTRUCT(tup);
@@ -1410,7 +1410,7 @@ bool CheckDependencyOnRespool(Oid classId, Oid refobjectId, List** foundlist, bo
         &key[0], Anum_pg_shdepend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ResourcePoolRelationId));
     ScanKeyInit(&key[1], Anum_pg_shdepend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(refobjectId));
 
-    scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(sdepRel, SharedDependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_shdepend sdepForm = (Form_pg_shdepend)GETSTRUCT(tup);

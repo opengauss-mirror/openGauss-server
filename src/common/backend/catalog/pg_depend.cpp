@@ -250,7 +250,7 @@ long deleteDependencyRecordsFor(Oid classId, Oid objectId, bool skipExtensionDep
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         if (skipExtensionDeps && ((Form_pg_depend)GETSTRUCT(tup))->deptype == DEPENDENCY_EXTENSION)
@@ -291,7 +291,7 @@ long deleteDependencyRecordsForClass(Oid classId, Oid objectId, Oid refclassId, 
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
@@ -361,7 +361,7 @@ long changeDependencyFor(Oid classId, Oid objectId, Oid refClassId, Oid oldRefOb
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
@@ -420,7 +420,7 @@ static bool isObjectPinned(const ObjectAddress* object, Relation rel)
 
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
 
-    scan = systable_beginscan(rel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(rel, DependReferenceIndexId, true, NULL, 2, key);
 
     /*
      * Since we won't generate additional pg_depend entries for pinned
@@ -469,7 +469,7 @@ Oid getExtensionOfObject(Oid classId, Oid objectId)
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
@@ -511,7 +511,7 @@ bool sequenceIsOwned(Oid seqId, Oid* tableId, int32* colId)
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(seqId));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Form_pg_depend depform = (Form_pg_depend)GETSTRUCT(tup);
@@ -559,7 +559,7 @@ List* getOwnedSequences(Oid relid, List* attrList)
         &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
@@ -612,7 +612,7 @@ Oid get_constraint_index(Oid constraintId)
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(constraintId));
     ScanKeyInit(&key[2], Anum_pg_depend_refobjsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(0));
 
-    scan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 3, key);
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 3, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);
@@ -657,7 +657,7 @@ Oid get_index_constraint(Oid indexId)
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(indexId));
     ScanKeyInit(&key[2], Anum_pg_depend_objsubid, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(0));
 
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 3, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 3, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         Form_pg_depend deprec = (Form_pg_depend)GETSTRUCT(tup);

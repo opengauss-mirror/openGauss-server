@@ -63,7 +63,7 @@ void AlterSetting(Oid databaseid, Oid roleid, VariableSetStmt* setstmt)
     ScanKeyInit(
         &scankey[0], Anum_pg_db_role_setting_setdatabase, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(databaseid));
     ScanKeyInit(&scankey[1], Anum_pg_db_role_setting_setrole, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
-    scan = systable_beginscan(rel, DbRoleSettingDatidRolidIndexId, true, SnapshotNow, 2, scankey);
+    scan = systable_beginscan(rel, DbRoleSettingDatidRolidIndexId, true, NULL, 2, scankey);
     tuple = systable_getnext(scan);
 
     /*
@@ -238,7 +238,7 @@ void ApplySetting(Oid databaseid, Oid roleid, Relation relsetting, GucSource sou
         &keys[0], Anum_pg_db_role_setting_setdatabase, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(databaseid));
     ScanKeyInit(&keys[1], Anum_pg_db_role_setting_setrole, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(roleid));
 
-    scan = systable_beginscan(relsetting, DbRoleSettingDatidRolidIndexId, true, SnapshotNow, 2, keys);
+    scan = systable_beginscan(relsetting, DbRoleSettingDatidRolidIndexId, true, NULL, 2, keys);
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         bool isnull = false;
         Datum datum;

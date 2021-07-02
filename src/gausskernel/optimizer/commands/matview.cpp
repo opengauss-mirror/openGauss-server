@@ -506,7 +506,7 @@ static void ExecutorMatMapDelete(Oid mapid, Oid relid, ItemPointer rel_ctid, Oid
     }
     Oid indexOid = (Oid)linitial_oid(indexOidList);
 
-    scan = systable_beginscan(mapRel, indexOid, true, SnapshotNow, 3, scankey);
+    scan = systable_beginscan(mapRel, indexOid, true, NULL, 3, scankey);
     if (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         Datum matctid = heap_getattr(tuple,
                                      MatMapAttributeMatctid,
@@ -1981,7 +1981,7 @@ Oid find_matview_mlog_table(Oid relid)
 
     ScanKeyInit(&scanKey, Anum_pg_class_relname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(mlogname));
     rel = heap_open(RelationRelationId, AccessShareLock);
-    scan = systable_beginscan(rel, ClassNameNspIndexId, true, SnapshotNow, 1, &scanKey);
+    scan = systable_beginscan(rel, ClassNameNspIndexId, true, NULL, 1, &scanKey);
     tup = systable_getnext(scan);
 
     if (HeapTupleIsValid(tup)) {
@@ -2472,7 +2472,7 @@ static List* get_distkey_info(Oid oid) {
 
     ScanKeyInit(&scanKey, Anum_pgxc_class_pcrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(oid));
     rel = heap_open(PgxcClassRelationId, AccessShareLock);
-    scan = systable_beginscan(rel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, &scanKey);
+    scan = systable_beginscan(rel, PgxcClassPgxcRelIdIndexId, true, NULL, 1, &scanKey);
     tup = systable_getnext(scan);
 
     Assert(HeapTupleIsValid(tup));

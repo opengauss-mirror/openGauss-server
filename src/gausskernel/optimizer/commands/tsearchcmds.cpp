@@ -1297,7 +1297,7 @@ static void makeConfigurationDependencies(HeapTuple tuple, bool removeOld, Relat
         ScanKeyInit(
             &skey, Anum_pg_ts_config_map_mapcfg, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(myself.objectId));
 
-        scan = systable_beginscan(mapRel, TSConfigMapIndexId, true, SnapshotNow, 1, &skey);
+        scan = systable_beginscan(mapRel, TSConfigMapIndexId, true, NULL, 1, &skey);
         while (HeapTupleIsValid((maptup = systable_getnext(scan)))) {
             Form_pg_ts_config_map cfgmap = (Form_pg_ts_config_map)GETSTRUCT(maptup);
 
@@ -1442,7 +1442,7 @@ void DefineTSConfiguration(List* names, List* parameters, List* cfoptions)
 
         mapRel = heap_open(TSConfigMapRelationId, RowExclusiveLock);
         ScanKeyInit(&skey, Anum_pg_ts_config_map_mapcfg, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(sourceOid));
-        scan = systable_beginscan(mapRel, TSConfigMapIndexId, true, SnapshotNow, 1, &skey);
+        scan = systable_beginscan(mapRel, TSConfigMapIndexId, true, NULL, 1, &skey);
         while (HeapTupleIsValid((maptup = systable_getnext(scan)))) {
             Form_pg_ts_config_map cfgmap = (Form_pg_ts_config_map)GETSTRUCT(maptup);
             HeapTuple newmaptup;
@@ -1598,7 +1598,7 @@ void RemoveTSConfigurationById(Oid cfgId)
     /* Remove any pg_ts_config_map entries */
     relMap = heap_open(TSConfigMapRelationId, RowExclusiveLock);
     ScanKeyInit(&skey, Anum_pg_ts_config_map_mapcfg, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cfgId));
-    scan = systable_beginscan(relMap, TSConfigMapIndexId, true, SnapshotNow, 1, &skey);
+    scan = systable_beginscan(relMap, TSConfigMapIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         simple_heap_delete(relMap, &tup->t_self);
@@ -1836,7 +1836,7 @@ static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
                 F_INT4EQ,
                 Int32GetDatum(tokens[i]));
 
-            scan = systable_beginscan(relMap, TSConfigMapIndexId, true, SnapshotNow, 2, skey);
+            scan = systable_beginscan(relMap, TSConfigMapIndexId, true, NULL, 2, skey);
 
             while (HeapTupleIsValid((maptup = systable_getnext(scan)))) {
                 simple_heap_delete(relMap, &maptup->t_self);
@@ -1868,7 +1868,7 @@ static void MakeConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
 
         ScanKeyInit(&skey[0], Anum_pg_ts_config_map_mapcfg, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(cfgId));
 
-        scan = systable_beginscan(relMap, TSConfigMapIndexId, true, SnapshotNow, 1, skey);
+        scan = systable_beginscan(relMap, TSConfigMapIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid((maptup = systable_getnext(scan)))) {
             Form_pg_ts_config_map cfgmap = (Form_pg_ts_config_map)GETSTRUCT(maptup);
@@ -1969,7 +1969,7 @@ static void DropConfigurationMapping(AlterTSConfigurationStmt* stmt, HeapTuple t
         ScanKeyInit(
             &skey[1], Anum_pg_ts_config_map_maptokentype, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(tokens[i]));
 
-        scan = systable_beginscan(relMap, TSConfigMapIndexId, true, SnapshotNow, 2, skey);
+        scan = systable_beginscan(relMap, TSConfigMapIndexId, true, NULL, 2, skey);
 
         while (HeapTupleIsValid((maptup = systable_getnext(scan)))) {
             simple_heap_delete(relMap, &maptup->t_self);

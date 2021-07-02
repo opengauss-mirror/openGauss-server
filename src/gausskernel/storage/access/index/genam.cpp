@@ -323,6 +323,10 @@ SysScanDesc systable_beginscan(Relation heap_relation, Oid index_id, bool index_
     } else
         irel = NULL;
 
+    if (snapshot == NULL) {
+        snapshot = GetCatalogSnapshot();
+    }
+
     sysscan = (SysScanDesc)palloc(sizeof(SysScanDescData));
 
     sysscan->heap_rel = heap_relation;

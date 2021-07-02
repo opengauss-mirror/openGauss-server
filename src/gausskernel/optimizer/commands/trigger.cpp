@@ -516,7 +516,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     if (!isInternal) {
         ScanKeyInit(
             &key, Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
-        tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, 1, &key);
+        tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 1, &key);
         while (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
             Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(tuple);
             if (namestrcmp(&(pg_trigger->tgname), trigname) == 0)
@@ -1033,7 +1033,7 @@ void RemoveTriggerById(Oid trigOid)
      */
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(trigOid));
 
-    tgscan = systable_beginscan(tgrel, TriggerOidIndexId, true, SnapshotNow, 1, skey);
+    tgscan = systable_beginscan(tgrel, TriggerOidIndexId, true, NULL, 1, skey);
 
     tup = systable_getnext(tgscan);
     if (!HeapTupleIsValid(tup))
@@ -1103,7 +1103,7 @@ Oid get_trigger_oid(Oid relid, const char* trigname, bool missing_ok)
     ScanKeyInit(&skey[0], Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&skey[1], Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(trigname));
 
-    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, 2, skey);
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 2, skey);
 
     tup = systable_getnext(tgscan);
     if (!HeapTupleIsValid(tup)) {
@@ -1199,7 +1199,7 @@ void renametrig(RenameStmt* stmt)
      */
     ScanKeyInit(&key[0], Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&key[1], Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, PointerGetDatum(stmt->newname));
-    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, 2, key);
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 2, key);
     if (HeapTupleIsValid(tuple = systable_getnext(tgscan)))
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_OBJECT),
@@ -1213,7 +1213,7 @@ void renametrig(RenameStmt* stmt)
      */
     ScanKeyInit(&key[0], Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&key[1], Anum_pg_trigger_tgname, BTEqualStrategyNumber, F_NAMEEQ, PointerGetDatum(stmt->subname));
-    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, 2, key);
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 2, key);
     if (HeapTupleIsValid(tuple = systable_getnext(tgscan))) {
         /*
          * Update pg_trigger tuple with new tgname.
@@ -1289,7 +1289,7 @@ void EnableDisableTrigger(Relation rel, const char* tgname, char fires_when, boo
     } else
         nkeys = 1;
 
-    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, nkeys, keys);
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, nkeys, keys);
 
     found = changed = false;
 
@@ -1383,7 +1383,7 @@ void RelationBuildTriggers(Relation relation)
         &skey, Anum_pg_trigger_tgrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
 
     tgrel = heap_open(TriggerRelationId, AccessShareLock);
-    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, SnapshotNow, 1, &skey);
+    tgscan = systable_beginscan(tgrel, TriggerRelidNameIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(tgscan))) {
         Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(htup);
@@ -4490,7 +4490,7 @@ void AfterTriggerSetState(ConstraintsSetStmt* stmt)
                     F_OIDEQ,
                     ObjectIdGetDatum(namespaceId));
 
-                conscan = systable_beginscan(conrel, ConstraintNameNspIndexId, true, SnapshotNow, 2, skey);
+                conscan = systable_beginscan(conrel, ConstraintNameNspIndexId, true, NULL, 2, skey);
 
                 while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
                     Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
@@ -4543,7 +4543,7 @@ void AfterTriggerSetState(ConstraintsSetStmt* stmt)
 
             ScanKeyInit(&skey, Anum_pg_trigger_tgconstraint, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(conoid));
 
-            tgscan = systable_beginscan(tgrel, TriggerConstraintIndexId, true, SnapshotNow, 1, &skey);
+            tgscan = systable_beginscan(tgrel, TriggerConstraintIndexId, true, NULL, 1, &skey);
 
             while (HeapTupleIsValid(htup = systable_getnext(tgscan))) {
                 Form_pg_trigger pg_trigger = (Form_pg_trigger)GETSTRUCT(htup);
@@ -5686,7 +5686,7 @@ void InvalidRelcacheForTriggerFunction(Oid funcoid, Oid returnType)
      * Find associated trigger with given function, and send invalid message to
      * the relation holding these triggers.
      */
-    sscan = systable_beginscan(trigRel, InvalidOid, false, SnapshotNow, 0, NULL);
+    sscan = systable_beginscan(trigRel, InvalidOid, false, NULL, 0, NULL);
     while (HeapTupleIsValid(tuple = systable_getnext(sscan))) {
         Form_pg_trigger trigger = (Form_pg_trigger)GETSTRUCT(tuple);
         if (trigger->tgfoid == funcoid) {

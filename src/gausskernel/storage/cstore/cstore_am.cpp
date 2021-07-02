@@ -4720,7 +4720,7 @@ void CStoreDropColumnInCuDesc(Relation rel, AttrNumber attrnum)
     int attrno = attrnum;
     ScanKeyInit(&key[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(attrno));
 
-    scan = systable_beginscan(cudescHeap, rel->rd_rel->relcudescidx, false, SnapshotNow, 1, key);
+    scan = systable_beginscan(cudescHeap, rel->rd_rel->relcudescidx, false, NULL, 1, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         simple_heap_delete(cudescHeap, &tup->t_self);

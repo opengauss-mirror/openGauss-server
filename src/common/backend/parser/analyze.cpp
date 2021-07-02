@@ -3972,7 +3972,7 @@ static bool is_rel_child_of_rel(RangeTblEntry* child_rte, RangeTblEntry* parent_
     /* Scan pg_inherits and get all the subclass OIDs one by one. */
     relation = heap_open(InheritsRelationId, AccessShareLock);
     ScanKeyInit(&key[0], Anum_pg_inherits_inhparent, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentOID));
-    scan = systable_beginscan(relation, InheritsParentIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(relation, InheritsParentIndexId, true, NULL, 1, key);
 
     while ((inheritsTuple = systable_getnext(scan)) != NULL) {
         inhrelid = ((Form_pg_inherits)GETSTRUCT(inheritsTuple))->inhrelid;

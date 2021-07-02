@@ -1237,7 +1237,7 @@ void vac_update_datfrozenxid(void)
      */
     relation = heap_open(RelationRelationId, AccessShareLock);
 
-    scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     while ((classTup = systable_getnext(scan)) != NULL) {
         Form_pg_class classForm = (Form_pg_class)GETSTRUCT(classTup);
@@ -2700,7 +2700,7 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
         F_OIDEQ,
         ObjectIdGetDatum(RelationGetRelid(partitionRel)));
 
-    SysScanDesc partScan = systable_beginscan(partRel, PartitionParentOidIndexId, true, SnapshotNow, 2, partKey);
+    SysScanDesc partScan = systable_beginscan(partRel, PartitionParentOidIndexId, true, NULL, 2, partKey);
 
     HeapTuple partTuple = NULL;
     /* compute all pages, tuples and the minimum frozenXid */

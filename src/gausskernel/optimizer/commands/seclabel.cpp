@@ -151,7 +151,7 @@ static char* GetSharedSecurityLabel(const ObjectAddress* object, const char* pro
 
     pg_shseclabel = heap_open(SharedSecLabelRelationId, AccessShareLock);
 
-    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, SnapshotNow, 3, keys);
+    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, NULL, 3, keys);
 
     tuple = systable_getnext(scan);
     if (HeapTupleIsValid(tuple)) {
@@ -193,7 +193,7 @@ char* GetSecurityLabel(const ObjectAddress* object, const char* provider)
 
     pg_seclabel = heap_open(SecLabelRelationId, AccessShareLock);
 
-    scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, SnapshotNow, 4, keys);
+    scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, NULL, 4, keys);
 
     tuple = systable_getnext(scan);
     if (HeapTupleIsValid(tuple)) {
@@ -243,7 +243,7 @@ static void SetSharedSecurityLabel(const ObjectAddress* object, const char* prov
 
     pg_shseclabel = heap_open(SharedSecLabelRelationId, RowExclusiveLock);
 
-    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, SnapshotNow, 3, keys);
+    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, NULL, 3, keys);
 
     oldtup = systable_getnext(scan);
     if (HeapTupleIsValid(oldtup)) {
@@ -312,7 +312,7 @@ void SetSecurityLabel(const ObjectAddress* object, const char* provider, const c
 
     Relation pg_seclabel = heap_open(SecLabelRelationId, RowExclusiveLock);
 
-    SysScanDesc scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, SnapshotNow, 4, keys);
+    SysScanDesc scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, NULL, 4, keys);
 
     HeapTuple oldtup = systable_getnext(scan);
     if (HeapTupleIsValid(oldtup)) {
@@ -357,7 +357,7 @@ void DeleteSharedSecurityLabel(Oid objectId, Oid classId)
 
     pg_shseclabel = heap_open(SharedSecLabelRelationId, RowExclusiveLock);
 
-    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, SnapshotNow, 2, skey);
+    scan = systable_beginscan(pg_shseclabel, SharedSecLabelObjectIndexId, true, NULL, 2, skey);
     while (HeapTupleIsValid(oldtup = systable_getnext(scan)))
         simple_heap_delete(pg_shseclabel, &oldtup->t_self);
     systable_endscan(scan);
@@ -395,7 +395,7 @@ void DeleteSecurityLabel(const ObjectAddress* object)
 
     pg_seclabel = heap_open(SecLabelRelationId, RowExclusiveLock);
 
-    scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, SnapshotNow, nkeys, skey);
+    scan = systable_beginscan(pg_seclabel, SecLabelObjectIndexId, true, NULL, nkeys, skey);
     while (HeapTupleIsValid(oldtup = systable_getnext(scan)))
         simple_heap_delete(pg_seclabel, &oldtup->t_self);
     systable_endscan(scan);

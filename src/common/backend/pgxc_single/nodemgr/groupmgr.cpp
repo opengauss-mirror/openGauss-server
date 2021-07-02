@@ -3367,7 +3367,7 @@ char* PgxcGroupGetFirstLogicCluster()
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTGreaterStrategyNumber, F_OIDGT, ObjectIdGetDatum(0));
 
-    scan = systable_beginscan(pgxc_group_rel, PgxcGroupOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pgxc_group_rel, PgxcGroupOidIndexId, true, NULL, 1, skey);
 
     while ((tup = systable_getnext(scan)) != NULL) {
         group_kind = get_group_kind(tup);
@@ -4614,7 +4614,7 @@ List* PgxcGroupGetLogicClusterList(Bitmapset* nodeids)
     }
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTGreaterStrategyNumber, F_OIDGT, ObjectIdGetDatum(0));
-    scan = systable_beginscan(pgxc_group_rel, PgxcGroupOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(pgxc_group_rel, PgxcGroupOidIndexId, true, NULL, 1, skey);
 
     while ((tup = systable_getnext(scan)) != NULL) {
         Oid group_oid = HeapTupleGetOid(tup);

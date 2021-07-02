@@ -963,7 +963,7 @@ void RelationBuildLocator(Relation rel)
         &skey, Anum_pgxc_class_pcrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(rel)));
 
     pcrel = heap_open(PgxcClassRelationId, AccessShareLock);
-    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, SnapshotNow, 1, &skey);
+    pcscan = systable_beginscan(pcrel, PgxcClassPgxcRelIdIndexId, true, NULL, 1, &skey);
     htup = systable_getnext(pcscan);
     if (!HeapTupleIsValid(htup)) {
         /* Assume local relation only */

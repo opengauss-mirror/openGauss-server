@@ -694,7 +694,7 @@ List* getPartitionObjectIdList(Oid relid, char relkind)
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(relkind));
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(relation, PartitionParentOidIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(relation, PartitionParentOidIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid((tuple = systable_getnext(scan)))) {
         partitionid = HeapTupleGetOid(tuple);
 
@@ -728,7 +728,7 @@ List* searchPartitionIndexesByblid(Oid blid)
 
     ScanKeyInit(&key[0], Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(blid));
 
-    scan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, NULL, 1, key);
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         dtp = heap_copytuple(tup);
         l = lappend(l, dtp);
@@ -761,7 +761,7 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(parttype));
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentId));
 
-    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         dtuple = heap_copytuple(tuple);
 

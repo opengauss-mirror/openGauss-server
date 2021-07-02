@@ -149,6 +149,10 @@ static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapsh
             (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("cannot read pg_class without having selected a database")));
     }
 
+    if (snapshot == NULL) {
+        snapshot = GetCatalogSnapshot();
+    }
+
     /*
      * form a scan key
      */
@@ -237,7 +241,7 @@ static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbukc
     /*
      * find the tuple in pg_class corresponding to the given relation id
      */
-    pg_partition_tuple = ScanPgPartition(targetPartId, true, SnapshotNow);
+    pg_partition_tuple = ScanPgPartition(targetPartId, true, NULL);
     /*
      * if no such tuple exists, return NULL
      */
@@ -378,7 +382,7 @@ Partition PartitionIdGetPartition(Oid partitionId, bool isbucket)
 
 char* PartitionOidGetName(Oid partOid)
 {
-    HeapTuple tuple = ScanPgPartition(partOid, true, SnapshotNow);
+    HeapTuple tuple = ScanPgPartition(partOid, true, NULL);
     if (!HeapTupleIsValid(tuple)) {
         return NULL;
     }
@@ -394,7 +398,7 @@ char* PartitionOidGetName(Oid partOid)
 
 Oid PartitionOidGetTablespace(Oid partOid)
 {
-    HeapTuple tuple = ScanPgPartition(partOid, true, SnapshotNow);
+    HeapTuple tuple = ScanPgPartition(partOid, true, NULL);
     if (!HeapTupleIsValid(tuple)) {
         return InvalidOid;
     }
@@ -1333,7 +1337,7 @@ static void PartitionReloadIndexInfo(Partition part)
      */
     Assert(NULL == part->pd_smgr);
 
-    pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true, SnapshotNow);
+    pg_partition_tuple = ScanPgPartition(PartitionGetPartid(part), true, NULL);
     if (!HeapTupleIsValid(pg_partition_tuple)) {
         ereport(ERROR,
             (errcode(ERRCODE_NO_DATA),
@@ -2008,7 +2012,7 @@ bool PartitionMetadataDisabledClean(Relation pgPartition)
         &key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(PART_OBJ_TYPE_PARTED_TABLE));
 
     partTupdesc = RelationGetDescr(pgPartition);
-    scan = systable_beginscan(pgPartition, PartitionParentOidIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(pgPartition, PartitionParentOidIndexId, true, NULL, 1, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         bool isNull = false;
         Datum partOptions = fastgetattr(tuple, Anum_pg_partition_reloptions, partTupdesc, &isNull);
