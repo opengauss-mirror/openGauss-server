@@ -151,6 +151,13 @@ void sigbus_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
+#ifndef ENABLE_MEMORY_CHECK
+        sigset_t intMask;
+        sigset_t oldMask;
+
+        sigfillset(&intMask);
+        pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
+#endif
         /* If si_code is not 4 or 5, it is not Uncorrected Error. then gaussdb will PANIC*/
         if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
             ereport(PANIC,
