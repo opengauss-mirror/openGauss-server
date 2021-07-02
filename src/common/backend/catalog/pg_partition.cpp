@@ -761,18 +761,7 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(parttype));
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentId));
 
-    /*
-     * The caller might need a tuple that's newer than the one the historic
-     * snapshot; currently the only case requiring to do so is looking up the
-     * relfilenode of non mapped system relations during decoding.
-     */
-    Snapshot snapshot = NULL;
-    snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
-        snapshot = GetCatalogSnapshot();
-    }
-
-    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, snapshot, 2, key);
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         dtuple = heap_copytuple(tuple);
 
