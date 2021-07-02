@@ -223,7 +223,7 @@ bool scan_to_delete_from_relation(long long row_id, Relation relation, unsigned 
                 BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(row_id));
 
-    SysScanDesc tgscan = systable_beginscan(relation, index_id, true, SnapshotNow, 1, &skey);
+    SysScanDesc tgscan = systable_beginscan(relation, index_id, true, NULL, 1, &skey);
 
     HeapTuple tup = systable_getnext(tgscan);
     if (!HeapTupleIsValid(tup)) {

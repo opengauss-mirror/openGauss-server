@@ -1174,7 +1174,7 @@ void PgxcNodeAlter(AlterNodeStmt* stmt)
 
         HeapTuple tmptup;
         TupleDesc pg_node_dsc = RelationGetDescr(rel);
-        SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, SnapshotNow, 0, NULL);
+        SysScanDesc scan = systable_beginscan(rel, InvalidOid, false, NULL, 0, NULL);
         while (HeapTupleIsValid((tmptup = systable_getnext(scan)))) {
             bool isnull = true;
             Oid scanoid = HeapTupleGetOid(tmptup);

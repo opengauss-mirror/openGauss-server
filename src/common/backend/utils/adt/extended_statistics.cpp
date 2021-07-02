@@ -921,7 +921,7 @@ List* es_explore_declared_stats(Oid relid, VacuumStmt* vacstmt, bool inh)
     ScanKeyInit(&key[2], Anum_pg_statistic_ext_stainherit, BTEqualStrategyNumber, F_BOOLEQ, BoolGetDatum(inh));
 
     Relation relation = heap_open(StatisticExtRelationId, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, SnapshotNow, 3, key);
+    SysScanDesc scan = systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, NULL, 3, key);
 
     List* es_list = NIL;
     for (HeapTuple tuple = NULL; NULL != (tuple = systable_getnext(scan));) {
@@ -1114,7 +1114,7 @@ static List* es_search_extended_statistics(
 
     Relation relation = heap_open(StatisticExtRelationId, AccessShareLock);
     SysScanDesc scan =
-        systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, SnapshotNow, num_key, key);
+        systable_beginscan(relation, StatisticExtRelidKindInhKeyIndexId, true, NULL, num_key, key);
 
     int count = 0;
     for (HeapTuple tuple = NULL; NULL != (tuple = systable_getnext(scan));) {

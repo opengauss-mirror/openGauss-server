@@ -3341,7 +3341,7 @@ static List* GetAllSliceTuples(Relation pgxcSliceRel, Oid tableOid)
         F_OIDEQ, ObjectIdGetDatum(tableOid));
     ScanKeyInit(&skey[1], Anum_pgxc_slice_type, BTEqualStrategyNumber,
         F_CHAREQ, CharGetDatum(PGXC_SLICE_TYPE_SLICE));
-    sliceScan = systable_beginscan(pgxcSliceRel, PgxcSliceOrderIndexId, true, SnapshotNow, 2, skey);
+    sliceScan = systable_beginscan(pgxcSliceRel, PgxcSliceOrderIndexId, true, NULL, 2, skey);
     while (HeapTupleIsValid((htup = systable_getnext(sliceScan)))) {
         dtup = heap_copytuple(htup);
         sliceList = lappend(sliceList, dtup);

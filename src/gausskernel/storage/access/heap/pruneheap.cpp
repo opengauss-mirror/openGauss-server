@@ -81,7 +81,12 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
     if (RecoveryInProgress())
         return;
 
-    oldest_xmin = u_sess->utils_cxt.RecentGlobalXmin;
+    if (IsCatalogRelation(relation) ||
+        RelationIsAccessibleInLogicalDecoding(relation)) {
+        oldest_xmin = u_sess->utils_cxt.RecentGlobalXmin;
+    } else {
+        oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+    }
 
     Assert(TransactionIdIsValid(oldest_xmin));
 

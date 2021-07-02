@@ -188,7 +188,7 @@ void SaveDataToFile(const char* filename)
 {
     Oid encodingTable = RelnameGetRelid("gs_wlm_plan_encoding_table");
     Relation relation = heap_open(encodingTable, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
     HeapTuple tuple;
     TreeEncPtr enc;
     FILE* fpout = NULL;

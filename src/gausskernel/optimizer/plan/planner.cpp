@@ -10704,7 +10704,7 @@ bool findConstraintByVar(Var* var, Oid relid, constraintType conType)
     ScanKeyInit(&skey[0], Anum_pg_constraint_conrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
     conrel = heap_open(ConstraintRelationId, AccessShareLock);
-    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, SnapshotNow, 1, skey);
+    conscan = systable_beginscan(conrel, ConstraintRelidIndexId, true, NULL, 1, skey);
 
     /* Forantion table only can exist one information constraint now. */
     while (HeapTupleIsValid(htup = systable_getnext(conscan))) {

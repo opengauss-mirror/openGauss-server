@@ -208,7 +208,7 @@ static HeapTuple GetDatabaseTuple(const char* dbname)
      */
     relation = heap_open(DatabaseRelationId, AccessShareLock);
     scan = systable_beginscan(
-        relation, DatabaseNameIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, SnapshotNow, 1, key);
+        relation, DatabaseNameIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, NULL, 1, key);
 
     tuple = systable_getnext(scan);
 
@@ -245,7 +245,7 @@ static HeapTuple GetDatabaseTupleByOid(Oid dboid)
      */
     relation = heap_open(DatabaseRelationId, AccessShareLock);
     scan = systable_beginscan(
-        relation, DatabaseOidIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, SnapshotNow, 1, key);
+        relation, DatabaseOidIndexId, u_sess->relcache_cxt.criticalSharedRelcachesBuilt, NULL, 1, key);
 
     tuple = systable_getnext(scan);
 

@@ -328,7 +328,7 @@ static void update_filters(const filters_set *filters_to_update, Relation policy
 
         /* Search tuple by index */
         SysScanDesc scanDesc = systable_beginscan(policy_filters_relation, GsAuditingPolicyFiltersPolicyOidIndexId, 
-                                                  true, SnapshotNow, 1, scanKey);
+                                                  true, NULL, 1, scanKey);
 
         HeapTuple auditingPolicyTuple = systable_getnext(scanDesc);
         if (!HeapTupleIsValid(auditingPolicyTuple)) {
@@ -483,7 +483,7 @@ static bool update_policy(const GsPolicyStruct *policy, Relation relation, bool 
     /*
      * set up for heap-or-index scan, not need to check tgscan as systable_getnext will deal with sysscan->irel = NULL
      */
-    SysScanDesc tgscan = systable_beginscan(relation, GsAuditingPolicyOidIndexId, true, SnapshotNow, 1, &skey);
+    SysScanDesc tgscan = systable_beginscan(relation, GsAuditingPolicyOidIndexId, true, NULL, 1, &skey);
     HeapTuple tup;
     tup = systable_getnext(tgscan);
     if (!tup || !HeapTupleIsValid(tup)) {

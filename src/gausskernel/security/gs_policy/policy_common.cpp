@@ -782,7 +782,7 @@ static void remove_policy_label(Relation relation, GsPolicyLabel *item,
     ScanKeyData skey;
     /* Find the label row to delete. */
     ScanKeyInit(&skey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(item->m_id));
-    SysScanDesc tgscan = systable_beginscan(relation, GsPolicyLabelOidIndexId, true, SnapshotNow, 1, &skey);
+    SysScanDesc tgscan = systable_beginscan(relation, GsPolicyLabelOidIndexId, true, NULL, 1, &skey);
     HeapTuple tup = systable_getnext(tgscan);
     if (!HeapTupleIsValid(tup)) {
         ereport(ERROR, (errcode(ERRCODE_TRIGGERED_INVALID_TUPLE), 
@@ -943,7 +943,7 @@ static void remove_label(const policy_labels_set *label_resources, Relation rela
          * Find the label row to delete.
          */
         ScanKeyInit(&skey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(it->m_id));
-        SysScanDesc tgscan = systable_beginscan(relation, GsPolicyLabelOidIndexId, true, SnapshotNow, 1, &skey);
+        SysScanDesc tgscan = systable_beginscan(relation, GsPolicyLabelOidIndexId, true, NULL, 1, &skey);
         HeapTuple tup = systable_getnext(tgscan);
         if (!HeapTupleIsValid(tup))
             ereport(ERROR,

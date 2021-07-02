@@ -54,7 +54,7 @@ void RemoveRewriteRuleById(Oid ruleOid)
      */
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ruleOid));
 
-    rcscan = systable_beginscan(RewriteRelation, RewriteOidIndexId, true, SnapshotNow, 1, skey);
+    rcscan = systable_beginscan(RewriteRelation, RewriteOidIndexId, true, NULL, 1, skey);
 
     tuple = systable_getnext(rcscan);
 

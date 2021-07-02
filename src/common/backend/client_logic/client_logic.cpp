@@ -992,7 +992,7 @@ void remove_cmk_args_by_id(Oid id)
     HeapTuple tuple;
 
     ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(id));
-    scan = systable_beginscan(ce_rel, ClientLogicGlobalSettingsArgsOidIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(ce_rel, ClientLogicGlobalSettingsArgsOidIndexId, true, NULL, 1, &scankey);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
@@ -1010,7 +1010,7 @@ void remove_cek_args_by_id(Oid id)
     HeapTuple tuple;
 
     ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(id));
-    scan = systable_beginscan(ce_rel, ClientLogicColumnSettingsArgsOidIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(ce_rel, ClientLogicColumnSettingsArgsOidIndexId, true, NULL, 1, &scankey);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
@@ -1032,7 +1032,7 @@ void get_global_setting_description(StringInfo buffer, const ObjectAddress *obje
     cmKeys = heap_open(ClientLogicGlobalSettingsId, AccessShareLock);
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
-    rcscan = systable_beginscan(cmKeys, ClientLogicGlobalSettingsOidIndexId, true, SnapshotNow, 1, skey);
+    rcscan = systable_beginscan(cmKeys, ClientLogicGlobalSettingsOidIndexId, true, NULL, 1, skey);
     tup = systable_getnext(rcscan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(rcscan);
@@ -1057,7 +1057,7 @@ void get_column_setting_description(StringInfo buffer, const ObjectAddress *obje
     column_setting_rel = heap_open(ClientLogicColumnSettingsId, AccessShareLock);
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
-    rcscan = systable_beginscan(column_setting_rel, ClientLogicColumnSettingsOidIndexId, true, SnapshotNow, 1, skey);
+    rcscan = systable_beginscan(column_setting_rel, ClientLogicColumnSettingsOidIndexId, true, NULL, 1, skey);
     tup = systable_getnext(rcscan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(rcscan);
@@ -1105,7 +1105,7 @@ void get_global_setting_args_description(StringInfo buffer, const ObjectAddress 
     rel = heap_open(ClientLogicGlobalSettingsArgsId, AccessShareLock);
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
-    rcscan = systable_beginscan(rel, ClientLogicGlobalSettingsArgsOidIndexId, true, SnapshotNow, 1, skey);
+    rcscan = systable_beginscan(rel, ClientLogicGlobalSettingsArgsOidIndexId, true, NULL, 1, skey);
     tup = systable_getnext(rcscan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(rcscan);
@@ -1129,7 +1129,7 @@ void get_column_setting_args_description(StringInfo buffer, const ObjectAddress 
     rel = heap_open(ClientLogicColumnSettingsArgsId, AccessShareLock);
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(object->objectId));
-    rcscan = systable_beginscan(rel, ClientLogicColumnSettingsArgsOidIndexId, true, SnapshotNow, 1, skey);
+    rcscan = systable_beginscan(rel, ClientLogicColumnSettingsArgsOidIndexId, true, NULL, 1, skey);
     tup = systable_getnext(rcscan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(rcscan);

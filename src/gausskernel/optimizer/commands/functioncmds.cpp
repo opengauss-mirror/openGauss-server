@@ -2114,7 +2114,7 @@ void DropCastById(Oid castOid)
     relation = heap_open(CastRelationId, RowExclusiveLock);
 
     ScanKeyInit(&scankey, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(castOid));
-    scan = systable_beginscan(relation, CastOidIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(relation, CastOidIndexId, true, NULL, 1, &scankey);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))

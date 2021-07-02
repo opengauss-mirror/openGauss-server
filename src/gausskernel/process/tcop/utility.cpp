@@ -508,7 +508,7 @@ static void check_xact_readonly(Node* parse_tree)
  */
 void PreventCommandIfReadOnly(const char* cmd_name)
 {
-    if (u_sess->attr.attr_common.XactReadOnly)
+    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.replorigin_sesssion_origin == 0)
         ereport(ERROR,
             (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),
                 /* translator: %s is name of a SQL command, eg CREATE */

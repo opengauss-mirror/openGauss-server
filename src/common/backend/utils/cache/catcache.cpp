@@ -1575,7 +1575,7 @@ static HeapTuple SearchCatCacheMiss(
         ereport(DEBUG1, (errmsg("cache->cc_reloid - %d", cache->cc_reloid)));
 
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), NULL, nkeys, cur_skey);
 
         while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
             ct = CatalogCacheCreateEntry(cache, ntp, arguments, hashValue, hashIndex, false);
@@ -2452,7 +2452,7 @@ CatCList* SearchCatCacheList(CatCache* cache, int nkeys, Datum v1, Datum v2, Dat
         relation = heap_open(cache->cc_reloid, AccessShareLock);
 
         scandesc = systable_beginscan(
-            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), SnapshotNow, nkeys, cur_skey);
+            relation, cache->cc_indexoid, IndexScanOK(cache, cur_skey), NULL, nkeys, cur_skey);
 
         /* The list will be ordered iff we are doing an index scan */
         ordered = (scandesc->irel != NULL);
