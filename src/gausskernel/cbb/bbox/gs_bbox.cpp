@@ -130,20 +130,30 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
 /*
  * SIGBUS -- When uce failure occurs in system memory, sigbus_handler will exit according to the region
  * of its logical address.
- * 1. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
- * 2. For addresses outside the buffer pool range, print the NIC log and exit
- * 3. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
- * 4. If the page is not dirty, the thread will send SIGINT to poma, then the thread that triggers the SIGBUS
+ * 1. If the enableIncrementalCheckpoint is turned off, the uce feature no longer takes effect
+ * 2. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
+ * 3. For addresses outside the buffer pool range, print the PANIC log and exit
+ * 4. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
+ * 5. If the page is not dirty, the thread will send SIGINT to poma, then the thread that triggers the SIGBUS
  *    exit first and print warning message. If the page is dirty, print the PANIC log and coredump.
  */
 void sigbus_handler(int sig, siginfo_t *si, void *uc)
 {
+    if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        if (u_sess->attr.attr_common.enable_bbox_dump)
+            bbox_handler(sig, si, uc);
+        else {
+            coredump_handler(sig, si, uc);
+        }
+    }
+
     static volatile int64 first_tid = INVALID_TID;
     int64 cur_tid = (int64)pthread_self();
     uint64 buffer_size;
     int buf_id;
     int si_code = si->si_code;
     unsigned long long sigbus_addr = (unsigned long long)si->si_addr;
+
     if (first_tid == INVALID_TID &&
             __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
         /* Only first fatal error will set db state and generate fatal error log */
@@ -189,7 +199,7 @@ void sigbus_handler(int sig, siginfo_t *si, void *uc)
                                "shutdown.",
                             ERRCODE_UE_CLEAN_PAGE, sigbus_addr)));
                 gs_signal_send(PostmasterPid, SIGINT);
-                gs_thread_exit(1);
+                gs_thread_exit(1); // Prevent the same thread from being paused after entering the handler again, and cannot be correctly exited by POMA
             }
         } else if (sigbus_addr == 0) {
             ereport(PANIC,
