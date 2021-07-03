@@ -709,10 +709,10 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
             if (standby_message_timeout_local) {
 #ifdef HAVE_INT64_TIMESTAMP
             timeout.tv_sec = CalculateCopyStreamSleeptime(local_now,
-                                                          standby_message_timeout_local,
+                                                          standby_message_timeout_local / 2,
                                                           last_status);
 #else
-            timeout.tv_sec = last_status + standby_message_timeout_local - local_now - 1;
+            timeout.tv_sec = last_status + (standby_message_timeout_local / 2) - local_now - 1;
 #endif
                 if (timeout.tv_sec <= 0)
                     timeout.tv_sec = 1; /* Always sleep at least 1 sec */

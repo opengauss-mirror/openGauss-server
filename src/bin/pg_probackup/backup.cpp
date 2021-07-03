@@ -1273,11 +1273,13 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
     XLogSegNo	targetSegNo;
     char    pg_wal_dir[MAXPGPATH];
     char    wal_segment_path[MAXPGPATH],
+            partial_file[MAXPGPATH],
              *wal_segment_dir,
               wal_segment[MAXFNAMELEN];
     bool    file_exists = false;
     uint32  try_count = 0,
                 timeout;
+    int     rc = 0;
     const char  *wal_delivery_str = (const char *)(in_stream_dir ? "streamed":"archived");
 
 #ifdef HAVE_LIBZ
@@ -1311,6 +1313,8 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
         join_path_components(wal_segment_path, arclog_path, wal_segment);
         wal_segment_dir = arclog_path;
     }
+    rc = sprintf_s(partial_file, MAXPGPATH, "%s.partial", wal_segment_path);
+    securec_check_ss_c(rc, "\0", "\0");
 
     /* TODO: remove this in 3.0 (it is a cludge against some old bug with archive_timeout) */
     timeout = (instance_config.archive_timeout > 0) ? instance_config.archive_timeout : ARCHIVE_TIMEOUT_DEFAULT;
@@ -1333,6 +1337,10 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
         if (!file_exists)
         {
             file_exists = fileExists(wal_segment_path, FIO_BACKUP_HOST);
+            if(!file_exists)
+            {
+                file_exists = fileExists(partial_file, FIO_BACKUP_HOST);
+            }
             tryToFindCompressedWALFile(&file_exists, gz_wal_segment_path, wal_segment_path);
         }
         
