@@ -312,8 +312,9 @@ void CStoreUpdate::BatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, in
             if (needInsert) {
                 {
                     AutoContextSwitch updateContext(updateCnxt);
-                    m_insert->BatchInsertCommon(bufferedBatchRows, options);
+                    m_delete->PartialDelete();
                 }
+                m_insert->BatchInsertCommon(bufferedBatchRows, options);
                 bufferedBatchRows->reset(true);
                 lastStartIdx = startIdx;
             } else {
