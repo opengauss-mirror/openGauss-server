@@ -757,12 +757,14 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
         WRITE_NODE_FIELD(updateTlist);
         WRITE_NODE_FIELD(exclRelTlist);
         WRITE_INT_FIELD(exclRelRTIndex);
+        WRITE_BOOL_FIELD(partKeyUpsert);
     }
 #else
     WRITE_ENUM_FIELD(upsertAction, UpsertAction);
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelRTIndex);
+    WRITE_BOOL_FIELD(partKeyUpsert);
 #endif		
 }
 
@@ -782,6 +784,7 @@ static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelIndex);
+    WRITE_BOOL_FIELD(partKeyUpsert);
 }
 static void _outMergeWhenClause(StringInfo str, const MergeWhenClause* node)
 {

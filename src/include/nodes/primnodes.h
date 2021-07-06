@@ -1398,6 +1398,7 @@ typedef struct UpsertExpr {
     List* updateTlist;        /* List of UPDATE TargetEntrys */
     List* exclRelTlist;       /* tlist of the 'EXCLUDED' pseudo relation */
     int exclRelIndex;        /* RT index of 'EXCLUDED' relation */
+    bool partKeyUpsert;      /* we allow upsert index key and partition key in B_FORMAT */
 } UpsertExpr;
 
 #endif /* PRIMNODES_H */

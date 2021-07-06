@@ -432,6 +432,7 @@ typedef struct ModifyTable {
     List* updateTlist;			/* List of UPDATE target */
     List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
+    bool partKeyUpsert;
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
 } ModifyTable;

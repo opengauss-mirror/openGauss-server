@@ -309,6 +309,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelRTIndex);
+    COPY_SCALAR_FIELD(partKeyUpsert);
 
     return newnode;
 }
@@ -3489,7 +3490,7 @@ static UpsertExpr* _copyUpsertExpr(const UpsertExpr* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelIndex);
-
+    COPY_SCALAR_FIELD(partKeyUpsert);
     return newnode;
 }
 static CommonTableExpr* _copyCommonTableExpr(const CommonTableExpr* from)

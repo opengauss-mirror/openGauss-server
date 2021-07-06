@@ -8760,6 +8760,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         node->updateTlist = upsertClause->updateTlist;
         node->exclRelTlist = upsertClause->exclRelTlist;
         node->exclRelRTIndex = upsertClause->exclRelIndex;
+        node->partKeyUpsert = upsertClause->partKeyUpsert;
     } else {
         node->upsertAction = UPSERT_NONE;
         node->updateTlist = NIL;

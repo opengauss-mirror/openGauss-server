@@ -533,7 +533,7 @@ checktest:
 
     *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
                             upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
-                            mtstate, canSetTag, false);
+                            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpsert);
     ReleaseBuffer(buffer);
     return true;
 }

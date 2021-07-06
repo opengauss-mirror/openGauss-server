@@ -3682,7 +3682,7 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(exclRelRTIndex) {
         READ_INT_FIELD(exclRelRTIndex);
     }
-
+    READ_BOOL_FIELD(partKeyUpsert);
     READ_DONE();
 }
 
@@ -3694,7 +3694,7 @@ static UpsertExpr* _readUpsertExpr(void)
     READ_NODE_FIELD(updateTlist);
     READ_NODE_FIELD(exclRelTlist);
     READ_INT_FIELD(exclRelIndex);
-
+    READ_BOOL_FIELD(partKeyUpsert);
     READ_DONE();
 }
 
