@@ -151,7 +151,7 @@ void RemoveCollationById(Oid collationOid)
 
     ScanKeyInit(&scanKeyData, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(collationOid));
 
-    scandesc = systable_beginscan(rel, CollationOidIndexId, true, SnapshotNow, 1, &scanKeyData);
+    scandesc = systable_beginscan(rel, CollationOidIndexId, true, NULL, 1, &scanKeyData);
 
     tuple = systable_getnext(scandesc);
 

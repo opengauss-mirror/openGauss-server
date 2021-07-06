@@ -253,6 +253,8 @@ typedef HeapPageHeaderData* HeapPageHeader;
  */
 #define PageIsNew(page) (((PageHeader)(page))->pd_upper == 0)
 
+#define PageUpperIsInitNew(page) (((PageHeader)(page))->pd_upper == ((PageHeader)(page))->pd_special)
+
 /*
  * PageGetItemId
  *		Returns an item identifier of a page.

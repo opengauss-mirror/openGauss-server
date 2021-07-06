@@ -52,6 +52,7 @@ public:
     void RemoveEntry(uint32 htblIdx, GPCEntry *entry);
     template<PlansourceInvalidAction action_type>
     void RemovePlanSource(CachedPlanSource* plansource, const char* stmt_name);
+    void MoveIntoInvalidPlanList(CachedPlanSource* psrc);
     bool TryStore(CachedPlanSource *plansource,  PreparedStatement *ps);
     Datum PlanClean();
     void CleanUpByTime();
@@ -63,9 +64,9 @@ public:
 
     /* transaction */
     void RecreateCachePlan(CachedPlanSource* oldsource, const char* stmt_name,
-                           PreparedStatement *entry, SPIPlanPtr spiplan, ListCell* spiplanCell);
+                           PreparedStatement *entry, SPIPlanPtr spiplan, ListCell* spiplanCell, bool hasGetLock);
     void Commit();
-    bool CheckRecreateCachePlan(CachedPlanSource* psrc);
+    bool CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGetLock);
 
     void CNCommit();
     void DNCommit();

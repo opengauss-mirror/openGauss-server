@@ -69,7 +69,10 @@
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
-const int MAX_GLOBAL_CACHEMEM_NUM = 8;
+const int MAX_GLOBAL_CACHEMEM_NUM = 128;
+#ifndef ENABLE_MULTIPLE_NODES
+const int DB_CMPT_MAX = 4;
+#endif
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -698,6 +701,7 @@ typedef struct knl_g_wal_context {
     volatile bool isWalWriterSleeping;
     pthread_mutex_t criticalEntryMutex;
     pthread_cond_t criticalEntryCV;
+    pthread_condattr_t criticalEntryAtt;
     volatile uint32 walWaitFlushCount; /* only for xlog statistics use */
     volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
     int lastWalStatusEntryFlushed;
@@ -867,6 +871,11 @@ typedef struct knl_instance_context {
     struct HTAB* ngroup_hash_table;
     knl_g_hypo_context hypo_cxt;
     knl_sigbus_context sigbus_cxt;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    void *raw_parser_hook[DB_CMPT_MAX];
+    void *plsql_parser_hook[DB_CMPT_MAX];
+#endif
 } knl_instance_context;
 
 extern long random();
@@ -893,7 +902,8 @@ extern void add_numa_alloc_info(void* numaAddr, size_t length);
 #define ATOMIC_TRUE                     1
 #define ATOMIC_FALSE                    0
 
-#define GLOBAL_PLANCACHE_MEMCONTEXT  (g_instance.cache_cxt.global_plancache_mem[random() % MAX_GLOBAL_CACHEMEM_NUM])
+#define GLOBAL_PLANCACHE_MEMCONTEXT \
+    (g_instance.cache_cxt.global_plancache_mem[u_sess->session_id % MAX_GLOBAL_CACHEMEM_NUM])
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_H_ */
 

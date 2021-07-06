@@ -38,6 +38,5 @@ extern bool createCUDescTableForPartition(Oid relOid, Oid partOid, Datum relopti
 extern Datum AddInternalOption(Datum reloptions, int mask);
 extern Datum AddOrientationOption(Datum relOptions, bool isColStore);
 
-
 #endif
 

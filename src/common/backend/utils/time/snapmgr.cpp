@@ -598,7 +598,7 @@ Snapshot GetLatestSnapshot(void)
  *      Get a snapshot that is sufficiently up-to-date for scan of the
  *      system catalog with the specified OID.
  */
-Snapshot GetCatalogSnapshot(Oid relid)
+Snapshot GetCatalogSnapshot()
 {
     /*
      * Return historic snapshot if we're doing logical decoding, but
@@ -608,7 +608,7 @@ Snapshot GetCatalogSnapshot(Oid relid)
     if (HistoricSnapshotActive())
         return u_sess->utils_cxt.HistoricSnapshot;
 
-    return GetNonHistoricCatalogSnapshot(relid);
+    return SnapshotNow;
 }
 
 /*

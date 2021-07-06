@@ -518,7 +518,7 @@ static double calculate_source_database_size()
     /*scan the pg_class to fetch the reltuples of every relation.*/
     class_rel = heap_open(RelationRelationId, AccessShareLock);
     pg_class_tuple_desc = class_rel->rd_att;
-    scan = systable_beginscan(class_rel, InvalidOid, false, SnapshotNow, 0, NULL);
+    scan = systable_beginscan(class_rel, InvalidOid, false, NULL, 0, NULL);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         tuple_class = (Form_pg_class)GETSTRUCT(tuple);
         Oid relid = HeapTupleHeaderGetOid(tuple->t_data);

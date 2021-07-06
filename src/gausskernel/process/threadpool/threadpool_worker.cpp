@@ -144,8 +144,8 @@ int ThreadPoolWorker::StartUp()
 
 void PreventSignal()
 {
-    gs_signal_block_sigusr2();
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
+    HOLD_INTERRUPTS();
+    t_thrd.int_cxt.ignoreBackendSignal = true;
     t_thrd.int_cxt.QueryCancelPending = false;
     disable_sig_alarm(true);
 }
@@ -153,8 +153,8 @@ void PreventSignal()
 void AllowSignal()
 {
     /* now we can accept signal. out of this, we rely on signal handle. */
-    gs_signal_unblock_sigusr2();
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    t_thrd.int_cxt.ignoreBackendSignal = false;
+    RESUME_INTERRUPTS();
 }
 
 void ThreadPoolWorker::WaitMission()
@@ -616,6 +616,8 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     if (!t_thrd.proc_cxt.proc_exit_inprogress) {
         if (ENABLE_DN_GPC)
             CleanSessGPCPtr(m_currentSession);
+        if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable())
+            u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.SubRefCount();
         CNGPCCleanUpSession();
     }
 

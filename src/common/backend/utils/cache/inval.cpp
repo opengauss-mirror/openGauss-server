@@ -101,6 +101,7 @@
 #include "catalog/pg_proc.h"
 #include "commands/prepare.h"
 #include "miscadmin.h"
+#include "postmaster/postmaster.h"
 #include "storage/sinval.h"
 #include "storage/smgr.h"
 #include "utils/inval.h"
@@ -561,7 +562,11 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
 
     if (ENABLE_GPC) {
         bool check = GlobalPlanCache::MsgCheck(msg);
+#ifdef ENABLE_MULTIPLE_NODES
         if (check == true && u_sess->pcache_cxt.gpc_remote_msg == false) {
+#else
+        if (check == true && (u_sess->pcache_cxt.gpc_remote_msg == false || pmState == PM_HOT_STANDBY)) {
+#endif
             u_sess->pcache_cxt.gpc_in_ddl = true;
         }
     }

@@ -27,6 +27,7 @@
 #define CSTORE_INSERT_H
 
 #include "access/cstore_am.h"
+#include "access/cstore_delta.h"
 #include "access/cstore_psort.h"
 #include "access/cstore_vector.h"
 #include "access/cstore_minmax_func.h"
@@ -109,6 +110,23 @@ public:
     static void DeInitInsertArg(InsertArg &args);
     static void InitIndexInsertArg(Relation heap_rel, const int *keys_map, int nkeys, InsertArg &args);
     void InitInsertMemArg(Plan *plan, MemInfoArg *ArgmemInfo);
+
+    inline CStorePSort* GetSorter()
+    {
+        return m_sorter;
+    }
+
+    inline MemoryContext GetTmpMemCnxt()
+    {
+        return m_tmpMemCnxt;
+    }
+
+    inline bulkload_rows* GetBufferedBatchRows()
+    {
+        return m_bufferedBatchRows;
+    }
+
+    void SortAndInsert(int options);
 
     Relation m_relation;
     CU ***m_aio_cu_PPtr;
@@ -215,6 +233,7 @@ private:
     ResultRelInfo *m_resultRelInfo; /* contain index meta info */
 
     Relation *m_idxRelation;        /* index relations */
+    Relation *m_deltaIdxRelation;   /* delta index relations */
     InsertArg *m_idxInsertArgs;     /* index inserting arguments */
     CStoreInsert **m_idxInsert;     /* index inserter */
     int **m_idxKeyAttr;             /* index keys */
@@ -414,6 +433,33 @@ private:
     bool *m_tmp_null;
 
     Size *m_diskFileSize;
+};
+
+class CUDescScan : public BaseObject {
+public:
+    CUDescScan(_in_ Relation relation);
+
+    virtual ~CUDescScan();
+    virtual void Destroy();
+
+    void ResetSnapshot(Snapshot);
+
+    bool CheckItemIsAlive(ItemPointer tid);
+
+private:
+    void FreeCache();
+    inline bool IsDeadRow(uint32 row, unsigned char* cuDelMask);
+
+    bool CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found);
+
+    Relation m_cudesc;
+    Relation m_cudescIndex;
+    ScanKeyData m_scanKey[2];
+    Snapshot m_snapshot;
+    List* m_cuids;
+    List* m_deletemasks;
+    List* m_needFreeMasks;
+    List* m_valids;
 };
 
 #endif

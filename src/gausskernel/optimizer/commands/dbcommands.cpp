@@ -1362,7 +1362,7 @@ static void movedb(const char* dbname, const char* tblspcname)
          * Update the database's pg_database tuple
          */
         ScanKeyInit(&scankey, Anum_pg_database_datname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(dbname));
-        sysscan = systable_beginscan(pgdbrel, DatabaseNameIndexId, true, SnapshotNow, 1, &scankey);
+        sysscan = systable_beginscan(pgdbrel, DatabaseNameIndexId, true, NULL, 1, &scankey);
         oldtuple = systable_getnext(sysscan);
         if (!HeapTupleIsValid(oldtuple)) /* shouldn't happen... */
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
@@ -1597,7 +1597,7 @@ void AlterDatabase(AlterDatabaseStmt* stmt, bool isTopLevel)
      */
     rel = heap_open(DatabaseRelationId, RowExclusiveLock);
     ScanKeyInit(&scankey, Anum_pg_database_datname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(stmt->dbname));
-    scan = systable_beginscan(rel, DatabaseNameIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(rel, DatabaseNameIndexId, true, NULL, 1, &scankey);
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", stmt->dbname)));
@@ -1688,7 +1688,7 @@ void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
      */
     rel = heap_open(DatabaseRelationId, RowExclusiveLock);
     ScanKeyInit(&scankey, Anum_pg_database_datname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(dbname));
-    scan = systable_beginscan(rel, DatabaseNameIndexId, true, SnapshotNow, 1, &scankey);
+    scan = systable_beginscan(rel, DatabaseNameIndexId, true, NULL, 1, &scankey);
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
@@ -1803,7 +1803,7 @@ static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ow
          */
         ScanKeyInit(&scanKey, Anum_pg_database_datname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(name));
 
-        scan = systable_beginscan(relation, DatabaseNameIndexId, true, SnapshotNow, 1, &scanKey);
+        scan = systable_beginscan(relation, DatabaseNameIndexId, true, NULL, 1, &scanKey);
 
         tuple = systable_getnext(scan);
 
@@ -2084,7 +2084,7 @@ Oid get_database_oid(const char* dbname, bool missing_ok)
      */
     pg_database = heap_open(DatabaseRelationId, AccessShareLock);
     ScanKeyInit(&entry[0], Anum_pg_database_datname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(dbname));
-    scan = systable_beginscan(pg_database, DatabaseNameIndexId, true, SnapshotNow, 1, entry);
+    scan = systable_beginscan(pg_database, DatabaseNameIndexId, true, NULL, 1, entry);
 
     dbtuple = systable_getnext(scan);
 
@@ -2191,7 +2191,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
         RelFileNode tmp = {srcTbSpcId, srcDbId, 0, InvalidBktId};
 
         /* forknum and blockno has no meaning */
-        log_invalid_page(tmp, MAIN_FORKNUM, 0, false);
+        log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT);
     }
 }
 

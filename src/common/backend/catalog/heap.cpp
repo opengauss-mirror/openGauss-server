@@ -32,6 +32,7 @@
 #include "fmgr.h"
 #include "knl/knl_variable.h"
 
+#include "access/cstore_delta.h"
 #include "access/reloptions.h"
 #include "access/sysattr.h"
 #include "access/transam.h"
@@ -2905,7 +2906,7 @@ static void RelationRemoveInheritance(Oid relid)
 
     ScanKeyInit(&key, Anum_pg_inherits_inhrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, SnapshotNow, 1, &key);
+    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, NULL, 1, &key);
 
     while (HeapTupleIsValid(tuple = systable_getnext(scan)))
         simple_heap_delete(catalogRelation, &tuple->t_self);
@@ -2963,7 +2964,7 @@ void DeleteAttributeTuples(Oid relid)
     /* Use the index to scan only attributes of the target relation */
     ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
 
-    scan = systable_beginscan(attrel, AttributeRelidNumIndexId, true, SnapshotNow, 1, key);
+    scan = systable_beginscan(attrel, AttributeRelidNumIndexId, true, NULL, 1, key);
 
     /* Delete all the matching tuples */
     while ((atttup = systable_getnext(scan)) != NULL)
@@ -2996,7 +2997,7 @@ void DeleteSystemAttributeTuples(Oid relid)
     ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTLessEqualStrategyNumber, F_INT2LE, Int16GetDatum(0));
 
-    scan = systable_beginscan(attrel, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(attrel, AttributeRelidNumIndexId, true, NULL, 2, key);
 
     /* Delete all the matching tuples */
     while ((atttup = systable_getnext(scan)) != NULL)
@@ -3156,7 +3157,7 @@ void RemoveAttrDefault(Oid relid, AttrNumber attnum, DropBehavior behavior, bool
     ScanKeyInit(&scankeys[0], Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(&scankeys[1], Anum_pg_attrdef_adnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
 
-    scan = systable_beginscan(attrdef_rel, AttrDefaultIndexId, true, SnapshotNow, 2, scankeys);
+    scan = systable_beginscan(attrdef_rel, AttrDefaultIndexId, true, NULL, 2, scankeys);
 
     /* There should be at most one matching tuple, but we loop anyway */
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
@@ -3204,7 +3205,7 @@ void RemoveAttrDefaultById(Oid attrdefId)
     /* Find the pg_attrdef tuple */
     ScanKeyInit(&scankeys[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(attrdefId));
 
-    scan = systable_beginscan(attrdef_rel, AttrDefaultOidIndexId, true, SnapshotNow, 1, scankeys);
+    scan = systable_beginscan(attrdef_rel, AttrDefaultOidIndexId, true, NULL, 1, scankeys);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
@@ -3945,7 +3946,7 @@ static bool MergeWithExistingConstraint(
         F_OIDEQ,
         ObjectIdGetDatum(RelationGetNamespace(rel)));
 
-    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, SnapshotNow, 2, skey);
+    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, NULL, 2, skey);
 
     while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
@@ -4254,7 +4255,7 @@ void RemoveStatistics(Oid relid, AttrNumber attnum)
     }
 
     pgstatistic = heap_open(StatisticRelationId, RowExclusiveLock);
-    scan = systable_beginscan(pgstatistic, StatisticRelidKindAttnumInhIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(pgstatistic, StatisticRelidKindAttnumInhIndexId, true, NULL, nkeys, key);
 
     /* we must loop even when attnum != 0, in case of inherited stats */
     while (HeapTupleIsValid(tuple = systable_getnext(scan)))
@@ -4269,7 +4270,7 @@ void RemoveStatistics(Oid relid, AttrNumber attnum)
      */
     nkeys = 2;
     pgstatistic = heap_open(StatisticExtRelationId, RowExclusiveLock);
-    scan = systable_beginscan(pgstatistic, StatisticExtRelidKindInhKeyIndexId, true, SnapshotNow, nkeys, key);
+    scan = systable_beginscan(pgstatistic, StatisticExtRelidKindInhKeyIndexId, true, NULL, nkeys, key);
 
     /* we must loop here, in case of inherited stats and extended stats */
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
@@ -4666,7 +4667,7 @@ List* heap_truncate_find_FKs(List* relationIds)
      */
     fkeyRel = heap_open(ConstraintRelationId, AccessShareLock);
 
-    fkeyScan = systable_beginscan(fkeyRel, InvalidOid, false, SnapshotNow, 0, NULL);
+    fkeyScan = systable_beginscan(fkeyRel, InvalidOid, false, NULL, 0, NULL);
 
     while (HeapTupleIsValid(tuple = systable_getnext(fkeyScan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
@@ -5306,6 +5307,7 @@ void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId)
 {
     Partition partIndex = NULL;
     Relation partRel = NULL;
+    ObjectAddress obj;
 
     partIndex = partitionOpen(parentIndex, partIndexId, AccessExclusiveLock);
     partRel = partitionGetRelation(parentIndex, partIndex);
@@ -5313,12 +5315,20 @@ void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId)
     // delete CStore index
     //
     if (partRel->rd_rel->relcudescrelid != InvalidOid) {
-        ObjectAddress obj;
         obj.classId = RelationRelationId;
         obj.objectId = partRel->rd_rel->relcudescrelid;
         obj.objectSubId = 0;
         performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
     }
+
+    /* Deltete index on part delta. */
+    if (RelationIsCUFormat(parentIndex) && partRel->rd_index != NULL && partRel->rd_index->indisunique) {
+        obj.classId = RelationRelationId;
+        obj.objectId = GetDeltaIdxFromCUIdx(RelationGetRelid(partRel), true);
+        obj.objectSubId = 0;
+        performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+    }
+
     /*
      * we should process the predicate lock on the partition
      */
@@ -6750,7 +6760,7 @@ bool FindExistingConstraint(const char* ccname, Relation rel)
         F_OIDEQ,
         ObjectIdGetDatum(RelationGetNamespace(rel)));
 
-    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, SnapshotNow, 2, skey);
+    conscan = systable_beginscan(conDesc, ConstraintNameNspIndexId, true, NULL, 2, skey);
 
     while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
         Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);

@@ -58,6 +58,10 @@
 #include "access/tupdesc.h"
 
 extern char* get_namespace_name(Oid nspid);
+extern List* ChooseIndexColumnNames(const List* indexElems);
+extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
+    int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
+    bool amcanorder, bool isconstraint);
 
 static bool createCUDescTableForPartitionedTable(Relation rel, Datum reloptions);
 static bool createDeltaTableForPartitionedTable(Relation rel, Datum reloptions, CreateStmt* mainTblStmt);
@@ -909,7 +913,7 @@ static void drop_delta_rel(Oid deltataRelId)
     Relation depRel = relation_open(DependRelationId, RowExclusiveLock);
     ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(deltataRelId));
-    scan = systable_beginscan(depRel, DependDependerIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, 2, key);
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
         simple_heap_delete(depRel, &tup->t_self);
     }

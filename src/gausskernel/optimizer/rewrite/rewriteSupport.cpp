@@ -124,7 +124,7 @@ char* get_rewrite_rulename(Oid ruleid, bool missing_ok)
     errno_t rc;
     Relation rewrite_rel = heap_open(RewriteRelationId, AccessShareLock);
     ScanKeyInit(&entry, ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ruleid));
-    scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, SnapshotNow, 1, &entry);
+    scan = systable_beginscan(rewrite_rel, RewriteOidIndexId, true, NULL, 1, &entry);
     rewrite_tup = systable_getnext(scan);
     if (!HeapTupleIsValid(rewrite_tup)) {
         if (missing_ok) {
@@ -158,7 +158,7 @@ bool rel_has_rule(Oid relid, char ev_type)
     HeapTuple rewrite_tup;
     Relation rewrite_rel = heap_open(RewriteRelationId, AccessShareLock);
     ScanKeyInit(&entry, Anum_pg_rewrite_ev_class, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
-    scan = systable_beginscan(rewrite_rel, RewriteRelRulenameIndexId, true, SnapshotNow, 1, &entry);
+    scan = systable_beginscan(rewrite_rel, RewriteRelRulenameIndexId, true, NULL, 1, &entry);
     while (HeapTupleIsValid((rewrite_tup = systable_getnext(scan)))) {
         Form_pg_rewrite pg_rewrite = (Form_pg_rewrite)GETSTRUCT(rewrite_tup);
         if (pg_rewrite->ev_type == ev_type) {            

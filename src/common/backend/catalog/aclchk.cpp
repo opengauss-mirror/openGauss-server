@@ -1526,7 +1526,7 @@ void RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
 
         ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objid));
 
-        scan = systable_beginscan(rel, DefaultAclOidIndexId, true, SnapshotNow, 1, skey);
+        scan = systable_beginscan(rel, DefaultAclOidIndexId, true, NULL, 1, skey);
 
         tuple = systable_getnext(scan);
 
@@ -1623,7 +1623,7 @@ void RemoveDefaultACLById(Oid defaclOid)
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(defaclOid));
 
-    scan = systable_beginscan(rel, DefaultAclOidIndexId, true, SnapshotNow, 1, skey);
+    scan = systable_beginscan(rel, DefaultAclOidIndexId, true, NULL, 1, skey);
 
     tuple = systable_getnext(scan);
 
@@ -2987,7 +2987,7 @@ static void ExecGrant_Largeobject(InternalGrant* istmt)
         /* There's no syscache for pg_largeobject_metadata */
         ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(loid));
 
-        scan = systable_beginscan(relation, LargeObjectMetadataOidIndexId, true, SnapshotNow, 1, entry);
+        scan = systable_beginscan(relation, LargeObjectMetadataOidIndexId, true, NULL, 1, entry);
 
         tuple = systable_getnext(scan);
         if (!HeapTupleIsValid(tuple))
@@ -6153,7 +6153,7 @@ bool pg_largeobject_ownercheck(Oid lobj_oid, Oid roleid)
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(lobj_oid));
 
-    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, SnapshotNow, 1, entry);
+    scan = systable_beginscan(pg_lo_meta, LargeObjectMetadataOidIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
@@ -6483,7 +6483,7 @@ bool pg_extension_ownercheck(Oid ext_oid, Oid roleid)
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
 
-    scan = systable_beginscan(pg_extension, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+    scan = systable_beginscan(pg_extension, ExtensionOidIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))

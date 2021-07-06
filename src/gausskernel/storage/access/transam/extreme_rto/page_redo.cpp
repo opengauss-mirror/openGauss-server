@@ -1258,8 +1258,9 @@ void StartupSendFowarder(RedoItem *item)
 
 void SendLsnFowarder()
 {
-    GetCompletedReadEndPtr(g_redoWorker, &g_GlobalLsnForwarder.record.ReadRecPtr, 
-        &g_GlobalLsnForwarder.record.EndRecPtr);
+    // update and read in the same thread, so no need atomic operation
+    g_GlobalLsnForwarder.record.ReadRecPtr = g_redoWorker->lastReplayedReadRecPtr;
+    g_GlobalLsnForwarder.record.EndRecPtr = g_redoWorker->lastReplayedEndRecPtr;
     g_GlobalLsnForwarder.record.refcount = get_real_recovery_parallelism() - XLOG_READER_NUM;
     g_GlobalLsnForwarder.record.isDecode = true;
     PutRecordToReadQueue(&g_GlobalLsnForwarder.record);
@@ -1625,10 +1626,11 @@ void XLogReadPageWorkerMain()
         PutRecordToReadQueue(xlogreader);
         xlogreader = newxlogreader;
 
-        SetCompletedReadEndPtr(g_redoWorker, xlogreader->ReadRecPtr, xlogreader->EndRecPtr);
+        g_redoWorker->lastReplayedReadRecPtr = xlogreader->ReadRecPtr;
+        g_redoWorker->lastReplayedEndRecPtr = xlogreader->EndRecPtr;
 
         RedoInterruptCallBack();
-        if (CheckForForceFinishRedoTrigger(&term_file)) {
+        if (force_finish_enabled() && CheckForForceFinishRedoTrigger(&term_file)) {
             ereport(WARNING,
                     (errmsg("[ForceFinish] force finish triggered in XLogReadPageWorkerMain, ReadRecPtr:%08X/%08X, "
                             "EndRecPtr:%08X/%08X, StandbyMode:%u, startup_processing:%u, dummyStandbyMode:%u",

@@ -334,7 +334,7 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
-static void SIGBUS_handler(SIGNAL_ARGS);
+void SIGBUS_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
 static void startup_alarm(SIGNAL_ARGS);
 static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState others);
@@ -1927,7 +1927,6 @@ int PostmasterMain(int argc, char* argv[])
     (void)gspqsignal(SIGINT, pmdie);          /* send SIGTERM and shut down */
     (void)gspqsignal(SIGQUIT, pmdie);         /* send SIGQUIT and die */
     (void)gspqsignal(SIGTERM, pmdie);         /* wait for children and shut down */
-    (void)gspqsignal(SIGBUS, SIGBUS_handler);   /* send SIGBUS and die or panic */
 
     pqsignal(SIGALRM, SIG_IGN); /* ignored */
     pqsignal(SIGPIPE, SIG_IGN); /* ignored */
@@ -3239,6 +3238,12 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
 #endif
                 }
             } else if (strcmp(nameptr, "replication") == 0) {
+                if (IsLocalPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
+                    ereport(elevel,
+                        (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                            errmsg("replication should connect HA port in thread_pool")));
+                }
+                    
                 /*
                  * Due to backward compatibility concerns the replication
                  * parameter is a hybrid beast which allows the value to be
@@ -4041,6 +4046,7 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         (void)SignalChildren(SIGHUP);
         if (ENABLE_THREAD_POOL) {
             g_threadPoolControler->GetSessionCtrl()->SigHupHandler();
+            g_threadPoolControler->GetScheduler()->SigHupHandler();
         }
 
         if (g_instance.pid_cxt.StartupPID != 0)
@@ -4257,15 +4263,17 @@ static void SIGHUP_handler(SIGNAL_ARGS)
    4. If the page is not dirty, execute pmdie to exit normally and print warning message. If the page is dirty,
       print the PANIC log and exit
  */
-static void SIGBUS_handler(SIGNAL_ARGS)
+void SIGBUS_handler(SIGNAL_ARGS)
 {
     uint64 buffer_size;
     int buf_id;
     int si_code = g_instance.sigbus_cxt.sigbus_code;
     unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
     if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
-        ereport(PANIC, (errmsg("SIGBUS signal received, Gaussdb will shut down immediately")));
+        ereport(PANIC, 
+            (errcode(ERRCODE_UE_COMMON_ERROR),
+                errmsg("errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
+                    ERRCODE_UE_COMMON_ERROR)));
     }
 #ifdef __aarch64__
     buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
@@ -4281,22 +4289,29 @@ static void SIGBUS_handler(SIGNAL_ARGS)
         if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
             buf_desc->state & BM_IO_IN_PROGRESS) {
             ereport(PANIC,
-                (errmsg("Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut down immediately.",
-                    sigbus_addr)));
+                (errcode(ERRCODE_UE_DIRTY_PAGE), 
+                    errmsg("errcode:%u, Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut "
+                           "down immediately.",
+                    ERRCODE_UE_DIRTY_PAGE, sigbus_addr)));
         } else {
             ereport(WARNING,
-                (errmsg(
-                    "Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will shutdown.", sigbus_addr)));
+                (errcode(ERRCODE_UE_CLEAN_PAGE),
+                    errmsg("errcode:%u, Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will "
+                           "shutdown.", 
+                        ERRCODE_UE_CLEAN_PAGE, sigbus_addr)));
             pmdie(SIGBUS);
         }
     } else if (sigbus_addr == 0) {
-        ereport(PANIC, (errmsg("SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately")));
+        ereport(PANIC, 
+            (errcode(ERRCODE_UE_COMMON_ERROR), 
+                errmsg("errcode:%u, SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately",
+                    ERRCODE_UE_COMMON_ERROR)));
     } else {
         ereport(PANIC,
-            (errmsg(
-                "SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", sigbus_addr)));
+            (errcode(ERRCODE_UE_COMMON_ERROR), 
+                errmsg("errcode:%u, SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", 
+                    ERRCODE_UE_COMMON_ERROR, sigbus_addr)));
     }
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 }
 
 void KillGraceThreads(void)

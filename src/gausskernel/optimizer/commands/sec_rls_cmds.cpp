@@ -173,7 +173,7 @@ void CreateRlsPolicy(CreateRlsPolicyStmt* stmt)
 
     /* Search old tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
 
     /* Policy already exists */
@@ -188,7 +188,7 @@ void CreateRlsPolicy(CreateRlsPolicyStmt* stmt)
 
     /* RLS policies for one relation should not large than MaxRlsPolciesForRelation */
     ScanKeyInit(&scanKey[0], Anum_pg_rlspolicy_polrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(tableOid));
-    scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 1, scanKey);
+    scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 1, scanKey);
     int existRlsNum = 0;
     while ((rlsPolicyTuple = systable_getnext(scanDesc)) != NULL) {
         existRlsNum++;
@@ -310,7 +310,7 @@ void AlterRlsPolicy(AlterRlsPolicyStmt* stmt)
 
     /* Search tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
 
     /* Policy does not exists */
@@ -498,7 +498,7 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
 
     /* Search tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
 
     /* Policy already exists */
@@ -516,7 +516,7 @@ void RenameRlsPolicy(RenameStmt* renameStmt)
     ScanKeyInit(&scanKey[0], Anum_pg_rlspolicy_polrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(relid));
     ScanKeyInit(
         &scanKey[1], Anum_pg_rlspolicy_polname, BTEqualStrategyNumber, F_NAMEEQ, NameGetDatum(renameStmt->subname));
-    scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
+    scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 2, scanKey);
     rlsPolicyTuple = systable_getnext(scanDesc);
     /* Policy does not exists */
     if (HeapTupleIsValid(rlsPolicyTuple) == false) {
@@ -572,7 +572,7 @@ bool RemoveRoleFromRlsPolicy(Oid roleid, Oid rlsrelid, Oid rlspolicyid)
     ScanKeyData scanKey[1];
     ScanKeyInit(&scanKey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, rlspolicyid);
     /* search tuple by index */
-    SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, SnapshotNow, 1, scanKey);
+    SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, NULL, 1, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
     if (false == HeapTupleIsValid(rlsPolicyTuple)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("could not find tuple for policy %u", rlspolicyid)));
@@ -686,7 +686,7 @@ void RemoveRlsPolicyById(Oid rlsPolicyOid)
     Relation pg_rlspolicy = heap_open(RlsPolicyRelationId, RowExclusiveLock);
 
     /* Search tuple by index */
-    SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, SnapshotNow, 1, scanKey);
+    SysScanDesc scanDesc = systable_beginscan(pg_rlspolicy, PgRlspolicyOidIndex, true, NULL, 1, scanKey);
 
     HeapTuple tuple = systable_getnext(scanDesc);
     if (!HeapTupleIsValid(tuple)) {
@@ -739,7 +739,7 @@ Oid get_rlspolicy_oid(Oid relid, const char* policy_name, bool missing_ok)
 
     /* Search old tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 2, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 2, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
 
     if (HeapTupleIsValid(rlsPolicyTuple)) {
@@ -783,7 +783,7 @@ void RelationBuildRlsPolicies(Relation relation)
 
     /* Search old tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 1, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 1, scanKey);
 
     MemoryContext oldcxt = NULL;
     /*
@@ -1042,7 +1042,7 @@ bool RelationHasRlspolicy(Oid relid)
 
     /* Search tuple by index */
     SysScanDesc scanDesc =
-        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, SnapshotNow, 1, scanKey);
+        systable_beginscan(pg_rlspolicy, PgRlspolicyPolrelidPolnameIndex, true, NULL, 1, scanKey);
     HeapTuple rlsPolicyTuple = systable_getnext(scanDesc);
     /* Find RLS policy for this relation */
     int findPolicy = false;

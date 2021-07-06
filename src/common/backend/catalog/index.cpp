@@ -21,6 +21,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "access/cstore_delta.h"
 #include "access/reloptions.h"
 #include "access/relscan.h"
 #include "access/sysattr.h"
@@ -4261,6 +4262,10 @@ bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo, 
                 reindex_index(indexOid, InvalidOid, !((static_cast<uint32>(flags)) & REINDEX_REL_CHECK_CONSTRAINTS),
                     memInfo, dbWide);
 
+                if (RelationIsCUFormat(rel) && indexRel->rd_index != NULL && indexRel->rd_index->indisunique) {
+                    ReindexDeltaIndex(indexOid, InvalidOid);
+                }
+
                 CommandCounterIncrement();
             } else {
                 index_close(indexRel, AccessShareLock);
@@ -4567,6 +4572,11 @@ bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType)
 
                 reindexPartIndex(indexOid, partOid, !(((uint32)flags) & REINDEX_REL_CHECK_CONSTRAINTS));
                 index_close(indexRel, AccessShareLock);
+
+                if (RelationIsCUFormat(rel) && indexRel->rd_index != NULL && indexRel->rd_index->indisunique) {
+                    ReindexPartDeltaIndex(indexOid, partOid);
+                }
+
                 CommandCounterIncrement();
             } else
                 index_close(indexRel, AccessShareLock);
@@ -4697,7 +4707,7 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
 
         ScanKeyInit(&partKey, Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partOid));
 
-        partScan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, &partKey);
+        partScan = systable_beginscan(partRel, PartitionIndexTableIdIndexId, true, NULL, 1, &partKey);
 
         while ((partTuple = systable_getnext(partScan)) != NULL) {
             partForm = (Form_pg_partition)GETSTRUCT(partTuple);

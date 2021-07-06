@@ -82,7 +82,7 @@ Datum globalsettingin(PG_FUNCTION_ARGS)
             CStringGetDatum(key_name_or_oid));
 
         hdesc = heap_open(ClientLogicGlobalSettingsId, AccessShareLock);
-        sysscan = systable_beginscan(hdesc, ClientLogicGlobalSettingsNameIndexId, true, SnapshotNow, 1, skey);
+        sysscan = systable_beginscan(hdesc, ClientLogicGlobalSettingsNameIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
             result = Oid HeapTupleGetOid(tuple);
@@ -166,7 +166,7 @@ Datum columnsettingin(PG_FUNCTION_ARGS)
             CStringGetDatum(key_name_or_oid));
 
         hdesc = heap_open(ClientLogicColumnSettingsId, AccessShareLock);
-        sysscan = systable_beginscan(hdesc, ClientLogicColumnSettingsNameIndexId, true, SnapshotNow, 1, skey);
+        sysscan = systable_beginscan(hdesc, ClientLogicColumnSettingsNameIndexId, true, NULL, 1, skey);
 
         while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
             result = Oid HeapTupleGetOid(tuple);

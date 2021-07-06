@@ -53,7 +53,8 @@
 
 #define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
 #define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
-#define MAX_QUERY_LEN 256
+#define MAX_QUERY_LEN 512
+#define MAX_FIELD_LEN 128
 
 typedef struct {
     char table[NAMEDATALEN];
@@ -384,7 +385,7 @@ char *search_table_attname(Oid attrelid, int2 attnum)
     ScanKeyInit(&key[0], Anum_pg_attribute_attrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(attrelid));
     ScanKeyInit(&key[1], Anum_pg_attribute_attnum, BTEqualStrategyNumber, F_INT2EQ, Int16GetDatum(attnum));
 
-    scan = systable_beginscan(pg_attribute, AttributeRelidNumIndexId, true, SnapshotNow, 2, key);
+    scan = systable_beginscan(pg_attribute, AttributeRelidNumIndexId, true, NULL, 2, key);
     tup = systable_getnext(scan);
     if (!HeapTupleIsValid(tup)) {
         systable_endscan(scan);
@@ -868,34 +869,46 @@ void parse_join_expr(Node *item_join)
         return;
     }
 
-    List *l_join_fields = ((ColumnRef *)(join_cond->lexpr))->fields;
-    List *r_join_fields = ((ColumnRef *)(join_cond->rexpr))->fields;
-    char *l_table_name = find_table_name(l_join_fields);
-    char *r_table_name = find_table_name(r_join_fields);
-    char *l_field_name = find_field_name(l_join_fields);
-    char *r_field_name = find_field_name(r_join_fields);
+    List *field_value = NIL;
+    if (IsA(join_cond->lexpr, ColumnRef) && IsA(join_cond->rexpr, A_Const)){
+        // on t1.c1...
+        field_value = lappend(field_value, (A_Const *)join_cond->rexpr);
+        parse_field_expr(((ColumnRef *)join_cond->lexpr)->fields, join_cond->name, field_value);
+    } else if (IsA(join_cond->rexpr, ColumnRef) && IsA(join_cond->lexpr, A_Const)){
+        // on ...t1.c1
+        field_value = lappend(field_value, (A_Const *)join_cond->lexpr);
+        parse_field_expr(((ColumnRef *)join_cond->rexpr)->fields, join_cond->name, field_value);
+    } else if (IsA(join_cond->lexpr, ColumnRef) && IsA(join_cond->rexpr, ColumnRef)){
+        // on t1.c1 = t2.c2
+        List *l_join_fields = ((ColumnRef *)(join_cond->lexpr))->fields;
+        List *r_join_fields = ((ColumnRef *)(join_cond->rexpr))->fields;
+        char *l_table_name = find_table_name(l_join_fields);
+        char *r_table_name = find_table_name(r_join_fields);
+        char *l_field_name = find_field_name(l_join_fields);
+        char *r_field_name = find_field_name(r_join_fields);
 
-    if (!l_table_name || !r_table_name || !l_field_name || !r_field_name) {
-        return;
-    }
+        if (!l_table_name || !r_table_name || !l_field_name || !r_field_name) {
+            return;
+        }
 
-    TableCell *ltable = find_or_create_tblcell(l_table_name, NULL);
-    TableCell *rtable = find_or_create_tblcell(r_table_name, NULL);
+        TableCell *ltable = find_or_create_tblcell(l_table_name, NULL);
+        TableCell *rtable = find_or_create_tblcell(r_table_name, NULL);
 
-    if (!ltable || !rtable) {
-        return;
-    }
+        if (!ltable || !rtable) {
+            return;
+        }
 
-    // add join conditons
-    add_join_cond(ltable, l_field_name, rtable, r_field_name);
-    add_join_cond(rtable, r_field_name, ltable, l_field_name);
+        // add join conditons
+        add_join_cond(ltable, l_field_name, rtable, r_field_name);
+        add_join_cond(rtable, r_field_name, ltable, l_field_name);
 
-    // add possible drived tables
-    if (!list_member(g_drived_tables, ltable)) {
-        g_drived_tables = lappend(g_drived_tables, ltable);
-    }
-    if (!list_member(g_drived_tables, rtable)) {
-        g_drived_tables = lappend(g_drived_tables, rtable);
+        // add possible drived tables
+        if (!list_member(g_drived_tables, ltable)) {
+            g_drived_tables = lappend(g_drived_tables, ltable);
+        }
+        if (!list_member(g_drived_tables, rtable)) {
+            g_drived_tables = lappend(g_drived_tables, rtable);
+        }
     }
 }
 
@@ -903,6 +916,11 @@ void parse_join_expr(Node *item_join)
 void parse_join_expr(JoinExpr *join_tree)
 {
     if (!join_tree) {
+        return;
+    }
+
+    if (nodeTag(join_tree->larg) != T_RangeVar ||
+        nodeTag(join_tree->rarg) != T_RangeVar) {
         return;
     }
 
@@ -934,6 +952,9 @@ void field_value_trans(_out_ char *target, A_Const *field_value)
     if (value.type == T_Integer) {
         pg_itoa(value.val.ival, target);
     } else if (value.type == T_String) {
+        if (strlen(value.val.str) > MAX_FIELD_LEN) {
+            return;
+        }
         errno_t rc = sprintf_s(target, MAX_QUERY_LEN, "'%s'", value.val.str);
         securec_check_ss_c(rc, "\0", "\0");
     }
@@ -968,6 +989,9 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
             continue;
         }
         field_value_trans(str, (A_Const *)lfirst(item));
+        if (strlen(str) == 0) {
+            continue;
+        }
         if (i == 0) {
             rc = strcpy_s(field_value, MAX_QUERY_LEN, str);
         } else {
@@ -1548,7 +1572,7 @@ void add_index_from_group_order(TableCell *table, List *clause, List *target_lis
             ListCell *prev = NULL;
             foreach (cur, table->index) {
                 IndexCell *table_index = (IndexCell *)lfirst(cur);
-                if (strcasecmp(table_index->index_name, index->index_name) == 0) {
+                if (index->index_name == NULL || strcasecmp(table_index->index_name, index->index_name) == 0) {
                     break;
                 }
                 if (table_index->op && strcasecmp(table_index->op, "=") != 0) {

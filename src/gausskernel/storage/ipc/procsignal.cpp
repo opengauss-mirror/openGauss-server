@@ -262,6 +262,9 @@ bool CheckProcSignal(ProcSignalReason reason)
  */
 void procsignal_sigusr1_handler(SIGNAL_ARGS)
 {
+    if (t_thrd.int_cxt.ignoreBackendSignal) {
+        return;
+    }
     int save_errno = errno;
     t_thrd.int_cxt.InterruptByCN = true;
 

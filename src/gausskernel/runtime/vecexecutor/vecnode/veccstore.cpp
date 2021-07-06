@@ -1029,7 +1029,7 @@ static CStoreStrategyNumber GetCStoreScanStrategyNumber(Oid opno)
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(opno));
     hdesc = heap_open(OperatorRelationId, AccessShareLock);
-    sysscan = systable_beginscan(hdesc, OperatorOidIndexId, true, SnapshotNow, 1, skey);
+    sysscan = systable_beginscan(hdesc, OperatorOidIndexId, true, NULL, 1, skey);
 
     tuple = systable_getnext(sysscan);
     if (!HeapTupleIsValid(tuple))

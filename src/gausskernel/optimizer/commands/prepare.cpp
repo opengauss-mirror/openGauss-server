@@ -236,12 +236,12 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
         if (opFusionObj->IsGlobal()) {
             opFusionObj = (OpFusion *)OpFusion::FusionFactory(opFusionObj->m_global->m_type,
-                                                              u_sess->cache_mem_cxt, psrc, NULL, params);
+                                                              u_sess->cache_mem_cxt, psrc, NULL, paramLI);
             Assert(opFusionObj != NULL);
         }
         opFusionObj->setPreparedDestReceiver(dest);
         opFusionObj->useOuterParameter(paramLI);
-        opFusionObj->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
+        opFusionObj->setCurrentOpFusionObj(opFusionObj);
 
         CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
         bool needBucketId = cps != NULL && cps->gplan;
@@ -720,10 +720,11 @@ void StorePreparedStatement(const char* stmt_name, CachedPlanSource* plansource,
 static void FetchPreparedStatementCNGPC(PreparedStatement* entry, const char* stmt_name)
 {
     Assert (entry->plansource->magic == CACHEDPLANSOURCE_MAGIC);
+    bool hasGetLock = false;
     /* check if need recreate */
-    if (g_instance.plan_cache->CheckRecreateCachePlan(entry->plansource)) {
+    if (g_instance.plan_cache->CheckRecreateCachePlan(entry->plansource, &hasGetLock)) {
         entry->has_prepare_dn_stmt = false;
-        g_instance.plan_cache->RecreateCachePlan(entry->plansource, entry->stmt_name, entry, NULL, NULL);
+        g_instance.plan_cache->RecreateCachePlan(entry->plansource, entry->stmt_name, entry, NULL, NULL, hasGetLock);
     }
 #ifdef ENABLE_MULTIPLE_NODES
     Assert (entry->plansource->lightProxyObj == NULL);

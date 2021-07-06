@@ -199,7 +199,7 @@ void CheckRespoolMultiTenantCreate(WLMNodeGroupInfo* ng, char* cgroup, int* memp
     char* groupanme = NULL;
 
     Relation relation = heap_open(ResourcePoolRelationId, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Oid scanrpoid = HeapTupleGetOid(tup);
         char scancgroup[NAMEDATALEN];
@@ -385,7 +385,7 @@ void CheckRespoolMultiTenantAlter(WLMNodeGroupInfo* ng, const char* pool_name, c
 
     /* scan system table of all the resource pools */
     Relation relation = heap_open(ResourcePoolRelationId, AccessShareLock);
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
     Datum groupanme_datum;
     bool isNull = false;
     char* groupanme = NULL;
@@ -2638,7 +2638,7 @@ void DropWorkloadGroup(DropWorkloadGroupStmt* stmt)
 
     relation = heap_open(AppWorkloadGroupMappingRelationId, AccessShareLock);
 
-    scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         app_data = (Form_pg_app_workloadgroup_mapping)GETSTRUCT(tup);
@@ -3161,7 +3161,7 @@ bool BuildResourcePoolHash(LOCKMODE lockmode)
 
     TupleDesc pg_respool_dsc = RelationGetDescr(relation);
 
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Oid rpoid = HeapTupleGetOid(tup);
@@ -3473,7 +3473,7 @@ bool BuildUserInfoHash(LOCKMODE lockmode)
 
     TupleDesc pg_authid_dsc = RelationGetDescr(relation);
 
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     /* get all user in system table */
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
@@ -3799,7 +3799,7 @@ void BuildNodeGroupInfoHash(LOCKMODE lockmode)
 
     TupleDesc pg_group_dsc = RelationGetDescr(relation);
 
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     /* get all user in system table */
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
@@ -3871,7 +3871,7 @@ bool GetUserChildlistFromCatalog(Oid userid, List** childlist, bool findall)
 
     TupleDesc pg_authid_dsc = RelationGetDescr(relation);
 
-    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 0, NULL);
+    SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);
 
     while (HeapTupleIsValid((tup = systable_getnext(scan)))) {
         Datum authidparentidDatum = heap_getattr(tup, Anum_pg_authid_rolparentid, pg_authid_dsc, &isNULL);

@@ -415,5 +415,7 @@ extern void PlanCacheRelCallback(Datum arg, Oid relid);
 extern void PlanCacheFuncCallback(Datum arg, int cacheid, uint32 hashvalue);
 extern void PlanCacheSysCallback(Datum arg, int cacheid, uint32 hashvalue);
 extern bool IsStreamSupport();
+extern void AcquirePlannerLocks(List* stmt_list, bool acquire);
+extern void AcquireExecutorLocks(List* stmt_list, bool acquire);
 
 #endif /* PLANCACHE_H */

@@ -115,6 +115,7 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecVecMaterial),
     reinterpret_cast<VectorEngineFunc>(ExecVecMergeJoin),
     reinterpret_cast<VectorEngineFunc>(ExecVecWindowAgg),
+    reinterpret_cast<VectorEngineFunc>(ExecBatchSeqScan),
 };
 
 FORCE_INLINE

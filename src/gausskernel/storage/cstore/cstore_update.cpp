@@ -61,6 +61,8 @@ CStoreUpdate::CStoreUpdate(_in_ Relation rel, _in_ EState* estate, _in_ Plan* pl
         m_partionInsert->SetPartitionCacheStrategy(FLASH_WHEN_SWICH_PARTITION);
         m_insert = NULL;
     }
+
+    m_hasUniqueIdx = CheckHasUniqueIdx();
 }
 
 CStoreUpdate::~CStoreUpdate()
@@ -212,7 +214,9 @@ uint64 CStoreUpdate::ExecUpdate(_in_ VectorBatch* batch, _in_ int options)
     JunkFilter* junkfilter = m_resultRelInfo->ri_junkFilter;
 
     // delete
-    m_delete->PutDeleteBatch(batch, junkfilter);
+    if (!m_hasUniqueIdx) {
+        m_delete->PutDeleteBatch(batch, junkfilter);
+    }
 
     int oriCols = batch->m_cols;
     batch->m_cols = junkfilter->jf_cleanTupType->natts;
@@ -222,14 +226,133 @@ uint64 CStoreUpdate::ExecUpdate(_in_ VectorBatch* batch, _in_ int options)
         ExecVecConstraints(m_resultRelInfo, batch, m_estate);
 
     // insert then batch
-    if (m_isPartition)
-        m_partionInsert->BatchInsert(batch, options);
-    else
-        m_insert->BatchInsert(batch, options);
+    if (!m_hasUniqueIdx) {
+        /*
+         * When there has no unique index, the delete threshold(e.g. 4200000)
+         * is larger than default insert threshold(e.g. 60000), the relation may
+         * firstly insert and then delete.
+         */
+        if (m_isPartition) {
+            m_partionInsert->BatchInsert(batch, options);
+        } else {
+            m_insert->BatchInsert(batch, options);
+        }
+    } else {
+        /*
+         * When there has unique index, we must delete firstly and then insert,
+         * or the index key of new data and old data may violate.
+        */
+        if (m_isPartition) {
+            PartitionBatchDeleteAndInsert(batch, oriCols, options, junkfilter);
+        } else {
+            BatchDeleteAndInsert(batch, oriCols, options, junkfilter);
+        }
+    }
 
     batch->m_cols = oriCols;
 
     return (uint64)(uint32)batch->m_rows;
+}
+
+/*
+ * @Description: Do batch delete and insert. In this function, the number of rows those are deleted is
+ * strictly equals number of rows will be inserted. It is usually used when cstore has unique index.
+ */
+void CStoreUpdate::BatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options, JunkFilter *junkfilter)
+{
+    int currentCols = batch->m_cols;
+    /* keep memory space from leaking during bulk-insert */
+    MemoryContext insertCnxt = m_insert->GetTmpMemCnxt();
+    MemoryContext updateCnxt = MemoryContextSwitchTo(insertCnxt);
+
+    CStorePSort* sorter = m_insert->GetSorter();
+
+    if (sorter != NULL) {
+        /* Step 1: relation has partial cluster key */
+        Assert(batch->m_cols == m_insert->m_relation->rd_att->natts);
+
+        {
+            AutoContextSwitch updateContext(updateCnxt);
+            batch->m_cols = oriBatchCols;
+            m_delete->PutDeleteBatch(batch, junkfilter);
+            batch->m_cols = currentCols;
+        }
+
+        sorter->PutVecBatch(m_insert->m_relation, batch);
+
+        if (sorter->IsFull()) {
+            {
+                AutoContextSwitch updateContext(updateCnxt);
+                m_delete->PartialDelete();
+            }
+            m_insert->SortAndInsert(options);
+        }
+    } else {
+        /* Step 2: relation doesn't have partial cluster key */
+        bulkload_rows* bufferedBatchRows = m_insert->GetBufferedBatchRows();
+
+        Assert(batch->m_rows <= BatchMaxSize);
+        Assert(batch->m_cols && m_insert->m_relation->rd_att->natts);
+        Assert(bufferedBatchRows->m_rows_maxnum > 0);
+        Assert(bufferedBatchRows->m_rows_maxnum % BatchMaxSize == 0);
+
+        int startIdx = 0;
+        int lastStartIdx = startIdx;
+        for (;;) {
+            /* we need cache data until batchrows is full */
+            bool needInsert = bufferedBatchRows->append_one_vector(
+                RelationGetDescr(m_relation), batch, &startIdx, m_insert->m_cstorInsertMem);
+            if (startIdx > lastStartIdx) {
+                AutoContextSwitch updateContext(updateCnxt);
+                batch->m_cols = oriBatchCols;
+                m_delete->PutDeleteBatchForUpdate(batch, lastStartIdx, startIdx);
+                batch->m_cols = currentCols;
+            }
+
+            if (needInsert) {
+                {
+                    AutoContextSwitch updateContext(updateCnxt);
+                    m_delete->PartialDelete();
+                }
+                m_insert->BatchInsertCommon(bufferedBatchRows, options);
+                bufferedBatchRows->reset(true);
+                lastStartIdx = startIdx;
+            } else {
+                break;
+            }
+        }
+    }
+
+    MemoryContextReset(insertCnxt);
+    (void)MemoryContextSwitchTo(updateCnxt);
+}
+
+void CStoreUpdate::PartitionBatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options, JunkFilter *junkfilter)
+{
+    int currentCols = batch->m_cols;
+    batch->m_cols = oriBatchCols;
+
+    m_delete->PutDeleteBatch(batch, junkfilter);
+    m_delete->PartialDelete();
+
+    batch->m_cols = currentCols;
+
+    m_partionInsert->BatchInsert(batch, options);
+}
+
+bool CStoreUpdate::CheckHasUniqueIdx()
+{
+    bool hasUniqueIdx = false;
+    if (m_resultRelInfo && m_resultRelInfo->ri_NumIndices > 0) {
+            IndexInfo** indexInfos = m_resultRelInfo->ri_IndexRelationInfo;
+            for (int i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
+                if (indexInfos[i]->ii_Unique) {
+                    hasUniqueIdx = true;
+                    break;
+                }
+            }
+        }
+    return hasUniqueIdx;
 }
 
 void CStoreUpdate::EndUpdate(_in_ int options)

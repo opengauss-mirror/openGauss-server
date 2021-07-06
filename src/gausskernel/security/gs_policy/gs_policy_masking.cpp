@@ -142,7 +142,7 @@ void load_existing_masking_labels(policy_labelname_set *policy_labels, Oid polic
 
     /* Search tuple by index */
     SysScanDesc scanDesc = systable_beginscan(relation, GsMaskingPolicyActionsPolicyOidIndexId,
-                                              true, SnapshotNow, 1, scanKey);
+                                              true, NULL, 1, scanKey);
 
     while ((maskingPolicyTuple = systable_getnext(scanDesc)) != NULL) {
         rel_data = (Form_gs_masking_policy_actions)GETSTRUCT(maskingPolicyTuple);
@@ -442,7 +442,7 @@ static void update_masking_filters(const filters_set* filters_to_update, Relatio
         SysScanDesc scanDesc = systable_beginscan(policy_filters_relation,
                                                   GsMaskingPolicyFiltersPolicyOidIndexId,
                                                   true,
-                                                  SnapshotNow,
+                                                  NULL,
                                                   1,
                                                   scanKey);
 
@@ -486,7 +486,7 @@ static void get_policy_filter(gs_stl::gs_string *filter, Oid polid)
     SysScanDesc scanDesc = systable_beginscan(rel,
                                               GsMaskingPolicyFiltersPolicyOidIndexId, 
                                               true,
-                                              SnapshotNow,
+                                              NULL,
                                               1,
                                               scanKey);
 
@@ -736,7 +736,7 @@ static bool update_policy(const GsPolicyStruct* policy, Relation relation,
                 BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(policy->m_id));
 
-    SysScanDesc tgscan = systable_beginscan(relation, GsMaskingPolicyOidIndexId, true, SnapshotNow, 1, &skey);
+    SysScanDesc tgscan = systable_beginscan(relation, GsMaskingPolicyOidIndexId, true, NULL, 1, &skey);
     HeapTuple tup = NULL;
     if (tgscan == NULL) {
         (void)err_msg->append("could not scan index GsMaskingPolicyOidIndexId.");
@@ -818,7 +818,7 @@ static inline bool update_labels_in_masking_action(const PgPolicyMaskingActionSt
                 BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(it->second->begin()->m_id));
 
-    SysScanDesc tgscan = systable_beginscan(relation, GsMaskingPolicyActionsOidIndexId, true, SnapshotNow, 1, &skey);
+    SysScanDesc tgscan = systable_beginscan(relation, GsMaskingPolicyActionsOidIndexId, true, NULL, 1, &skey);
     HeapTuple tup = NULL;
     if (tgscan == NULL) {
         (void)err_msg->append("could not scan index GsMaskingPolicyActionsOidIndexId.");

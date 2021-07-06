@@ -69,6 +69,11 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
+        if (sig == SIGBUS) {
+            g_instance.sigbus_cxt.sigbus_addr = si->si_addr;
+            g_instance.sigbus_cxt.sigbus_code = si->si_code;
+            SIGBUS_handler(sig);
+        }
     } else {
         /*
          * Subsequent fatal error will go to here. If it comes from different thread,
@@ -97,7 +102,11 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
-
+        if (sig == SIGBUS) {
+            g_instance.sigbus_cxt.sigbus_addr = si->si_addr;
+            g_instance.sigbus_cxt.sigbus_code = si->si_code;
+            SIGBUS_handler(sig);
+        }
 #ifndef ENABLE_MEMORY_CHECK
         sigset_t intMask;
         sigset_t oldMask;

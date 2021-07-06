@@ -642,7 +642,7 @@ test: copy2 temp
 test: truncate
 #test: temp_table
 
-#test: b_compatibility
+test: b_compatibility
 test: hw_compatibility
 test: hw_groupingsets hw_row_grouping_set
 test: char_truncation_common char_truncation_cast
@@ -763,3 +763,5 @@ test: leaky_function_operator
 test: smp
 test: sequence_cache_test
 test: procedure_privilege_test
+
+test: cstore_unique_index

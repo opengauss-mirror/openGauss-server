@@ -1419,7 +1419,6 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
 {
     StringInfoData buf;
     XLogRecPtr flushRecPtr;
-    XLogRecPtr minLsn;
     char xpos[MAXFNAMELEN];
     int rc = 0;
 
@@ -1449,19 +1448,6 @@ static void AdvanceLogicalReplication(AdvanceReplicationCmd *cmd)
     ReplicationSlotAcquire(cmd->slotname, false);
 
     Assert(OidIsValid(t_thrd.slot_cxt.MyReplicationSlot->data.database));
-
-    /*
-     * Check if the slot is not moving backwards. Logical slots have confirmed
-     * consumption up to confirmed_lsn, meaning that data older than that is
-     * not available anymore.
-     */
-    minLsn = t_thrd.slot_cxt.MyReplicationSlot->data.confirmed_flush;
-    if (XLByteLT(cmd->confirmed_flush, minLsn)) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot move slot to %X/%X, minimum is %X/%X",
-                               (uint32)(cmd->confirmed_flush >> 32), (uint32)cmd->confirmed_flush,
-                               (uint32)(minLsn >> 32), (uint32)(minLsn))));
-    }
 
     LogicalConfirmReceivedLocation(cmd->confirmed_flush);
 
@@ -3203,12 +3189,15 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             XLogRecPtr replayPtr;
             bool amSync = false;
             bool got_recptr = false;
+            List* sync_standbys = SyncRepGetSyncStandbys(&amSync);
+            int standby_nums = list_length(sync_standbys);
+            list_free(sync_standbys);
             got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
             if (got_recptr) {
                 ArchiveXlogOnStandby(flushPtr);
-            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
-                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
-                            list_length(SyncRepGetSyncStandbys(&amSync)) == 0)) {
+            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL || 
+                        u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH ||
+                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && standby_nums == 0)) {
                 /*
                  * This step is used to deal with the situation that synchronous standbys are not set.
                  */

@@ -116,7 +116,7 @@ Oid get_extension_oid(const char* extname, bool missing_ok)
 
     ScanKeyInit(&entry[0], Anum_pg_extension_extname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(extname));
 
-    scandesc = systable_beginscan(rel, ExtensionNameIndexId, true, SnapshotNow, 1, entry);
+    scandesc = systable_beginscan(rel, ExtensionNameIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scandesc);
 
@@ -153,7 +153,7 @@ char* get_extension_name(Oid ext_oid)
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
 
-    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scandesc);
 
@@ -187,7 +187,7 @@ static Oid get_extension_schema(Oid ext_oid)
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
 
-    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scandesc);
 
@@ -1564,7 +1564,7 @@ void RemoveExtensionById(Oid extId)
     rel = heap_open(ExtensionRelationId, RowExclusiveLock);
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extId));
-    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, NULL, 1, entry);
 
     tuple = systable_getnext(scandesc);
 
@@ -2045,7 +2045,7 @@ Datum pg_extension_config_dump(PG_FUNCTION_ARGS)
         F_OIDEQ,
         ObjectIdGetDatum(u_sess->cmd_cxt.CurrentExtensionObject));
 
-    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, SnapshotNow, 1, key);
+    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
 
@@ -2176,7 +2176,7 @@ static void extension_config_remove(Oid extensionoid, Oid tableoid)
 
     ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionoid));
 
-    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, SnapshotNow, 1, key);
+    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
 
@@ -2351,7 +2351,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
 
     ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionOid));
 
-    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, SnapshotNow, 1, key);
+    extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
 
@@ -2392,7 +2392,7 @@ void AlterExtensionNamespace(List* names, const char* newschema)
         &key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ExtensionRelationId));
     ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionOid));
 
-    depScan = systable_beginscan(depRel, DependReferenceIndexId, true, SnapshotNow, 2, key);
+    depScan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, 2, key);
 
     while (HeapTupleIsValid(depTup = systable_getnext(depScan))) {
         Form_pg_depend pg_depend = (Form_pg_depend)GETSTRUCT(depTup);
@@ -2486,7 +2486,7 @@ void ExecAlterExtensionStmt(AlterExtensionStmt* stmt)
 
     ScanKeyInit(&key[0], Anum_pg_extension_extname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(stmt->extname));
 
-    extScan = systable_beginscan(extRel, ExtensionNameIndexId, true, SnapshotNow, 1, key);
+    extScan = systable_beginscan(extRel, ExtensionNameIndexId, true, NULL, 1, key);
 
     extTup = systable_getnext(extScan);
 
@@ -2610,7 +2610,7 @@ static void ApplyExtensionUpdates(
 
         ScanKeyInit(&key[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionOid));
 
-        extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, SnapshotNow, 1, key);
+        extScan = systable_beginscan(extRel, ExtensionOidIndexId, true, NULL, 1, key);
 
         extTup = systable_getnext(extScan);
 
@@ -2830,7 +2830,7 @@ static void AlterExtensionOwner_internal(Relation rel, Oid extensionOid, Oid new
 
     ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(extensionOid));
 
-    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, SnapshotNow, 1, entry);
+    scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, NULL, 1, entry);
 
     /* We assume that there can be at most one matching tuple */
     tup = systable_getnext(scandesc);

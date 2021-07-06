@@ -216,19 +216,17 @@ select a, b,
 from cmpjsonb order by 1,2,3,4,5,6,7,8,9;
                       a                      |                    b                     | cmp | eq | ne | lt | le | gt | ge 
 ---------------------------------------------+------------------------------------------+-----+----+----+----+----+----+----
- []                                          | []                                       |   0 | t  | f  | f  | t  | f  | t
- []                                          | {}                                       |  -1 | f  | t  | t  | t  | f  | f
- null                                        | []                                       |   1 | f  | t  | f  | f  | t  | t
  null                                        | null                                     |   0 | t  | f  | f  | t  | f  | t
  null                                        | "oooo"                                   |  -1 | f  | t  | t  | t  | f  | f
  null                                        | -350000000                               |  -1 | f  | t  | t  | t  | f  | f
  null                                        | false                                    |  -1 | f  | t  | t  | t  | f  | f
+ null                                        | []                                       |  -1 | f  | t  | t  | t  | f  | f
  null                                        | [1, 2]                                   |  -1 | f  | t  | t  | t  | f  | f
  null                                        | {}                                       |  -1 | f  | t  | t  | t  | f  | f
  null                                        | {"": ""}                                 |  -1 | f  | t  | t  | t  | f  | f
- ""                                          | []                                       |   1 | f  | t  | f  | f  | t  | t
  ""                                          | ""                                       |   0 | t  | f  | f  | t  | f  | t
  ""                                          | false                                    |  -1 | f  | t  | t  | t  | f  | f
+ ""                                          | []                                       |  -1 | f  | t  | t  | t  | f  | f
  "a"                                         | "b"                                      |  -1 | f  | t  | t  | t  | f  | f
  "a"                                         | "cc"                                     |  -1 | f  | t  | t  | t  | f  | f
  "a"                                         | -.586                                    |  -1 | f  | t  | t  | t  | f  | f
@@ -239,20 +237,22 @@ from cmpjsonb order by 1,2,3,4,5,6,7,8,9;
  "x"                                         | {"x": 1}                                 |  -1 | f  | t  | t  | t  | f  | f
  -350000000                                  | 8000                                     |  -1 | f  | t  | t  | t  | f  | f
  -1                                          | true                                     |  -1 | f  | t  | t  | t  | f  | f
- 0                                           | []                                       |   1 | f  | t  | f  | f  | t  | t
  0                                           | 0                                        |   0 | t  | f  | f  | t  | f  | t
+ 0                                           | []                                       |  -1 | f  | t  | t  | t  | f  | f
  0                                           | {}                                       |  -1 | f  | t  | t  | t  | f  | f
  1                                           | false                                    |  -1 | f  | t  | t  | t  | f  | f
  1                                           | [1]                                      |  -1 | f  | t  | t  | t  | f  | f
  1                                           | {"1": 1}                                 |  -1 | f  | t  | t  | t  | f  | f
  9                                           | -9                                       |   1 | f  | t  | f  | f  | t  | t
  100                                         | 100                                      |   0 | t  | f  | f  | t  | f  | t
- false                                       | []                                       |   1 | f  | t  | f  | f  | t  | t
  false                                       | false                                    |   0 | t  | f  | f  | t  | f  | t
  false                                       | true                                     |  -1 | f  | t  | t  | t  | f  | f
+ false                                       | []                                       |  -1 | f  | t  | t  | t  | f  | f
  false                                       | [true]                                   |  -1 | f  | t  | t  | t  | f  | f
  true                                        | {}                                       |  -1 | f  | t  | t  | t  | f  | f
  true                                        | {"false": true}                          |  -1 | f  | t  | t  | t  | f  | f
+ []                                          | []                                       |   0 | t  | f  | f  | t  | f  | t
+ []                                          | {}                                       |  -1 | f  | t  | t  | t  | f  | f
  [[]]                                        | [{}]                                     |  -1 | f  | t  | t  | t  | f  | f
  [[false]]                                   | [1]                                      |   1 | f  | t  | f  | f  | t  | t
  [[{"": ""}]]                                | [{}]                                     |  -1 | f  | t  | t  | t  | f  | f
@@ -278,19 +278,17 @@ select a, b,
 from cmpjsonb order by 1,2,3,4,5,6,7,8;
                       a                      |                    b                     | eq | ne | lt | le | gt | ge 
 ---------------------------------------------+------------------------------------------+----+----+----+----+----+----
- []                                          | []                                       | t  | f  | f  | t  | f  | t
- []                                          | {}                                       | f  | t  | t  | t  | f  | f
- null                                        | []                                       | f  | t  | f  | f  | t  | t
  null                                        | null                                     | t  | f  | f  | t  | f  | t
  null                                        | "oooo"                                   | f  | t  | t  | t  | f  | f
  null                                        | -350000000                               | f  | t  | t  | t  | f  | f
  null                                        | false                                    | f  | t  | t  | t  | f  | f
+ null                                        | []                                       | f  | t  | t  | t  | f  | f
  null                                        | [1, 2]                                   | f  | t  | t  | t  | f  | f
  null                                        | {}                                       | f  | t  | t  | t  | f  | f
  null                                        | {"": ""}                                 | f  | t  | t  | t  | f  | f
- ""                                          | []                                       | f  | t  | f  | f  | t  | t
  ""                                          | ""                                       | t  | f  | f  | t  | f  | t
  ""                                          | false                                    | f  | t  | t  | t  | f  | f
+ ""                                          | []                                       | f  | t  | t  | t  | f  | f
  "a"                                         | "b"                                      | f  | t  | t  | t  | f  | f
  "a"                                         | "cc"                                     | f  | t  | t  | t  | f  | f
  "a"                                         | -.586                                    | f  | t  | t  | t  | f  | f
@@ -301,20 +299,22 @@ from cmpjsonb order by 1,2,3,4,5,6,7,8;
  "x"                                         | {"x": 1}                                 | f  | t  | t  | t  | f  | f
  -350000000                                  | 8000                                     | f  | t  | t  | t  | f  | f
  -1                                          | true                                     | f  | t  | t  | t  | f  | f
- 0                                           | []                                       | f  | t  | f  | f  | t  | t
  0                                           | 0                                        | t  | f  | f  | t  | f  | t
+ 0                                           | []                                       | f  | t  | t  | t  | f  | f
  0                                           | {}                                       | f  | t  | t  | t  | f  | f
  1                                           | false                                    | f  | t  | t  | t  | f  | f
  1                                           | [1]                                      | f  | t  | t  | t  | f  | f
  1                                           | {"1": 1}                                 | f  | t  | t  | t  | f  | f
  9                                           | -9                                       | f  | t  | f  | f  | t  | t
  100                                         | 100                                      | t  | f  | f  | t  | f  | t
- false                                       | []                                       | f  | t  | f  | f  | t  | t
  false                                       | false                                    | t  | f  | f  | t  | f  | t
  false                                       | true                                     | f  | t  | t  | t  | f  | f
+ false                                       | []                                       | f  | t  | t  | t  | f  | f
  false                                       | [true]                                   | f  | t  | t  | t  | f  | f
  true                                        | {}                                       | f  | t  | t  | t  | f  | f
  true                                        | {"false": true}                          | f  | t  | t  | t  | f  | f
+ []                                          | []                                       | t  | f  | f  | t  | f  | t
+ []                                          | {}                                       | f  | t  | t  | t  | f  | f
  [[]]                                        | [{}]                                     | f  | t  | t  | t  | f  | f
  [[false]]                                   | [1]                                      | f  | t  | f  | f  | t  | t
  [[{"": ""}]]                                | [{}]                                     | f  | t  | t  | t  | f  | f
@@ -434,56 +434,50 @@ explain select a, pk, fk from jsonbfk join jsonbpk on fk = pk order by 1,2;
 -- scan indexscan bypass
 set opfusion_debug_mode = log;
 analyze jsonbpk;
-explain select * from jsonbpk;
+explain(costs off) select * from jsonbpk;
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  [No Bypass]reason: Bypass not executed because query's scan operator is not index.
- Seq Scan on jsonbpk  (cost=0.00..1.12 rows=12 width=17)
+ Seq Scan on jsonbpk
 (2 rows)
 
 select * from jsonbpk where pk >= '[]';
             pk            
 --------------------------
- null
- ""
- 0
- false
  []
  {}
- "aaa"
- -250
- true
  [1, 5, "ff", {}]
  {"": ""}
  {"dd": [1, 2], "xx": 55}
-(12 rows)
+(5 rows)
 
 select * from jsonbpk where pk >= 'false';
             pk            
 --------------------------
  false
+ []
  {}
  true
  [1, 5, "ff", {}]
  {"": ""}
  {"dd": [1, 2], "xx": 55}
-(6 rows)
+(7 rows)
 
-explain select * from jsonbpk where pk >= 'false';
+explain(costs off) select * from jsonbpk where pk >= 'false';
                                      QUERY PLAN                                     
 ------------------------------------------------------------------------------------
  [No Bypass]reason: Bypass not executed because query's scan operator is not index.
- Seq Scan on jsonbpk  (cost=0.00..1.15 rows=6 width=17)
+ Seq Scan on jsonbpk
    Filter: (pk >= 'false'::jsonb)
 (3 rows)
 
 insert into jsonbpk select generate_series(1,10000)::text::jsonb;
 analyze jsonbpk;
-explain select * from jsonbpk where pk < '0';
-                                     QUERY PLAN                                     
-------------------------------------------------------------------------------------
+explain(costs off) select * from jsonbpk where pk < '0';
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  [No Bypass]reason: Bypass not executed because query's relation is not support.
- Index Only Scan using jsonbpk_pkey on jsonbpk  (cost=0.00..10.16 rows=50 width=17)
+ Index Only Scan using jsonbpk_pkey on jsonbpk
    Index Cond: (pk < '0'::jsonb)
 (3 rows)
 

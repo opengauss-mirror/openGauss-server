@@ -539,6 +539,7 @@ static void CopyScanFields(const Scan* from, Scan* newnode)
     /* copy remainder of node.*/
     COPY_NODE_FIELD(tablesample);
     CopyMemInfoFields(&from->mem_info, &newnode->mem_info);
+    COPY_SCALAR_FIELD(executeBatch);
 }
 
 /*

@@ -40,6 +40,8 @@ public:
     void InitSortState();
     void InitSortState(_in_ TupleDesc sortTupDesc, _in_ int partidAttNo, _in_ int ctidAttNo);
     void PutDeleteBatch(_in_ VectorBatch *batch, _in_ JunkFilter *junkfilter);
+    void PutDeleteBatchForUpdate(_in_ VectorBatch *batch, _in_ int startIdx=0, _in_ int endIdx=-1);
+    void PartialDelete();
     uint64 ExecDelete();
     void setReportErrorForUpdate(bool isEnable)
     {

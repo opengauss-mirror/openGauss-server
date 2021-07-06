@@ -96,28 +96,9 @@ GlobalPlanCache::GetStatus(uint32 *num)
             stat_array[index].refcount = ps->gpc.status.GetRefCount();
             stat_array[index].valid = ps->gpc.status.IsValid();
             stat_array[index].DatabaseID = entry->key.env.plainenv.database_id;
-            StringInfoData all_schema_name;
-            ListCell *cell = NULL;
-            bool has_schema = false;
-            foreach(cell, entry->key.env.search_path->schemas) {
-                char* nspname = get_namespace_name(lfirst_oid(cell));
-                if (nspname != NULL) {
-                    if (has_schema)
-                        appendStringInfo(&all_schema_name, ", ");
-                    else
-                        initStringInfo(&all_schema_name);
-                    appendStringInfo(&all_schema_name, "%s", nspname);
-                    has_schema = true;
-                }
-                pfree_ext(nspname);
-            }
-            if (!has_schema) {
-                stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
-                rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, entry->key.env.schema_name, NAMEDATALEN);
-                securec_check(rc, "\0", "\0");
-            } else {
-                stat_array[index].schema_name = all_schema_name.data;
-            }
+            stat_array[index].schema_name = (char *)palloc0(sizeof(char) * NAMEDATALEN);
+            rc = memcpy_s(stat_array[index].schema_name, NAMEDATALEN, entry->key.env.schema_name, NAMEDATALEN);
+            securec_check(rc, "\0", "\0");
             stat_array[index].params_num = ps->num_params;
             stat_array[index].func_id = entry->key.spi_signature.func_oid;
             bool printPlan = u_sess->attr.attr_sql.Debug_print_plan && entry->val.plansource->gplan &&

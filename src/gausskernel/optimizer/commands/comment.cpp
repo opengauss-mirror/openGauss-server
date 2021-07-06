@@ -241,7 +241,7 @@ void CreateComments(Oid oid, Oid classoid, int32 subid, const char* comment)
 
     description = heap_open(DescriptionRelationId, RowExclusiveLock);
 
-    sd = systable_beginscan(description, DescriptionObjIndexId, true, SnapshotNow, 3, skey);
+    sd = systable_beginscan(description, DescriptionObjIndexId, true, NULL, 3, skey);
     if ((oldtuple = systable_getnext(sd)) != NULL) {
         /* Found the old tuple, so delete or update it */
         if (comment == NULL) {
@@ -312,7 +312,7 @@ void CreateSharedComments(Oid oid, Oid classoid, const char* comment)
 
     shdescription = heap_open(SharedDescriptionRelationId, RowExclusiveLock);
 
-    sd = systable_beginscan(shdescription, SharedDescriptionObjIndexId, true, SnapshotNow, 2, skey);
+    sd = systable_beginscan(shdescription, SharedDescriptionObjIndexId, true, NULL, 2, skey);
     if ((oldtuple = systable_getnext(sd)) != NULL) {
         /* Found the old tuple, so delete or update it */
         if (comment == NULL)
@@ -368,7 +368,7 @@ void DeleteComments(Oid oid, Oid classoid, int32 subid)
 
     description = heap_open(DescriptionRelationId, RowExclusiveLock);
 
-    sd = systable_beginscan(description, DescriptionObjIndexId, true, SnapshotNow, nkeys, skey);
+    sd = systable_beginscan(description, DescriptionObjIndexId, true, NULL, nkeys, skey);
 
     while ((oldtuple = systable_getnext(sd)) != NULL)
         simple_heap_delete(description, &oldtuple->t_self);
@@ -394,7 +394,7 @@ void DeleteSharedComments(Oid oid, Oid classoid)
 
     shdescription = heap_open(SharedDescriptionRelationId, RowExclusiveLock);
 
-    sd = systable_beginscan(shdescription, SharedDescriptionObjIndexId, true, SnapshotNow, 2, skey);
+    sd = systable_beginscan(shdescription, SharedDescriptionObjIndexId, true, NULL, 2, skey);
 
     while ((oldtuple = systable_getnext(sd)) != NULL)
         simple_heap_delete(shdescription, &oldtuple->t_self);
@@ -424,7 +424,7 @@ char* GetComment(Oid oid, Oid classoid, int32 subid)
     description = heap_open(DescriptionRelationId, AccessShareLock);
     tupdesc = RelationGetDescr(description);
 
-    sd = systable_beginscan(description, DescriptionObjIndexId, true, SnapshotNow, 3, skey);
+    sd = systable_beginscan(description, DescriptionObjIndexId, true, NULL, 3, skey);
 
     comment = NULL;
     if ((tuple = systable_getnext(sd)) != NULL) {

@@ -172,6 +172,9 @@ typedef struct knl_session_attr_common {
 
     /* instrumentation guc parameters */
     int instr_unique_sql_count;
+#ifndef ENABLE_MULTIPLE_NODES
+    double unique_sql_clean_ratio;
+#endif
     bool enable_instr_cpu_timer;
     int unique_sql_track_type;
     bool enable_instr_track_wait;
@@ -179,6 +182,7 @@ typedef struct knl_session_attr_common {
 
     int instr_rt_percentile_interval;
     bool enable_instr_rt_percentile;
+    bool track_stmt_parameter;
     char* percentile_values;
 
     /* instr - full sql/slow sql */

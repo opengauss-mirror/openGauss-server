@@ -2477,12 +2477,20 @@ static bool XLogArchiveCheckDone(const char *xlog)
 
 static bool HasBeenArchivedOnHaMode(const char* xlog)
 {
-    load_server_mode();
-    if (!t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && !t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+    /*
+     * Generally, the validity of the xlog transferred from the upper layer has been verified.
+     * Therefore, if the length of the xlog name transferred is greater than the standard length
+     * of the xlog name (24 characters), the transferred file is a .backup file.
+     * Therefore, if the xlog name contains more than 24 characters, return true.
+     */
+    if (strlen(xlog) > XLOG_NAME_LENGTH) {
         return true;
     }
+
+    load_server_mode();
     int mode = t_thrd.xlog_cxt.server_mode;
     XLogRecPtr minium_lsn = PG_UINT64_MAX;
+
     for (int i = 0; mode == PRIMARY_MODE && i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
@@ -16623,17 +16631,20 @@ bool CheckFinishRedoSignal(void)
 
 extreme_rto::Enum_TriggeredState CheckForSatartupStatus(void)
 {
-    if (CheckForPrimaryTrigger()) {
-        /* update flag */
+    if (t_thrd.startup_cxt.primary_triggered) {
+        ereport(LOG, (errmsg("received primary request")));
+        ResetPrimaryTriggered();
         return extreme_rto::TRIGGER_PRIMARY;
     }
-    if (CheckForStandbyTrigger()) {
+    if (t_thrd.startup_cxt.standby_triggered) {
+        ereport(LOG, (errmsg("received standby request")));
+        ResetStandbyTriggered();
         return extreme_rto::TRIGGER_STADNBY;
     }
-    if (IsFailoverTriggered()) {
+    if (t_thrd.startup_cxt.failover_triggered) {
         return extreme_rto::TRIGGER_FAILOVER;
     }
-    if (IsSwitchoverTriggered()) {
+    if (t_thrd.startup_cxt.switchover_triggered) {
         return extreme_rto::TRIGGER_FAILOVER;
     }
     return extreme_rto::TRIGGER_NORMAL;

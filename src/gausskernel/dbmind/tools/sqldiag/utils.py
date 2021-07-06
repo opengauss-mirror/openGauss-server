@@ -25,20 +25,15 @@ class ResultSaver:
             os.chmod(dirname, stat.S_IRWXU)
         if isinstance(data, (list, tuple)):
             self.save_list(data, realpath)
-        elif isinstance(data, dict):
-            self.save_dict(data, path)
         else:
             raise TypeError("mode should be 'list', 'tuple' or 'dict', but input type is '{}'".format(str(type(data))))
 
     @staticmethod
     def save_list(data, path):
-        data = pd.DataFrame(data)
-        data.to_csv(path, index=False, sep=',', header=False, quoting=csv.QUOTE_NONE, escapechar='\"')
-
-    @staticmethod
-    def save_dict(data, path):
-        data = pd.DataFrame(data.items())
-        data.to_csv(path, index=False, sep=',', header=False, quoting=csv.QUOTE_NONE, escapechar='\"')
+        with open(path, mode='w') as f:
+            for item in data:
+                content = ",".join([str(sub_item) for sub_item in item])
+                f.write(content + '\n') 
 
 
 class DBAgent:
@@ -74,7 +69,7 @@ class DBAgent:
             result = list(self.cursor.fetchall())
             return result
         except Exception as e:
-            logging.getLogger('agent').warning(str(e))
+            logging.warning(str(e))
 
     def close(self):
         self.cursor.close()

@@ -270,7 +270,9 @@ void ExecReScan(PlanState* node)
     }
 
     /* reset the rownum */
-    node->ps_rownum = 0;
+    if (!node->do_not_reset_rownum) {
+        node->ps_rownum = 0;
+    }
 
     /*
      * If we have changed parameters, propagate that info.

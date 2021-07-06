@@ -454,7 +454,7 @@ void MemoryTrackingNodeFree(MemoryTrack track)
  */
 void MemoryTrackingOutputFile(void)
 {
-    if (u_sess->attr.attr_memory.memory_tracking_mode && t_thrd.utils_cxt.ExecutorMemoryTrack) {
+    if (u_sess->attr.attr_memory.memory_tracking_mode > MEMORY_TRACKING_PEAKMEMORY && t_thrd.utils_cxt.ExecutorMemoryTrack) {
         /*
          * output the memory context information into log file
          */

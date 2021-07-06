@@ -55,7 +55,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     IndexBuildResult *result = NULL;
-    double reltuples;
+    double reltuples = 0;
     BTBuildState buildstate;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
@@ -210,4 +210,60 @@ static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, I
         _bt_spool(buildstate.spool, tid, values, isnulls);
         buildstate.indtuples += 1;
     }
+}
+
+/*
+ * Check unique on other index.
+ * This function is usually used between delta index and CU index.
+ * For example, the data tuple is on deta table, but we check uniqe
+ * constraint on CU Idx.
+ * @IN param index: the index will be checked
+ * @IN param heapRel: the relaion owns index
+ * @IN param values: values uesd to form index tuple
+ * @IN param isull: isull used to form index tuple
+ */
+void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool* isnull)
+{
+    bool is_unique = false;
+    ScanKey itup_scankey;
+    BTStack stack;
+    Buffer buf;
+    IndexTuple itup;
+    CUDescScan* cudescScan = NULL;
+
+    /* Generate an index tuple. */
+    itup = index_form_tuple(RelationGetDescr(index), values, isnull);
+
+    /*
+     * We set tid to invalid tid, so the index tuple doesn't point to heapRel.
+     * For example, the data tuple is on delta table, but we check if the key
+     * of data tuple conficts the index on corresponding CU.
+     */
+    ItemPointerSetInvalid(&(itup->t_tid));
+
+    if (RelationIsCUFormat(heapRel)) {
+        cudescScan = (CUDescScan*)New(CurrentMemoryContext) CUDescScan(heapRel);
+    }
+
+    BTCheckElement element;
+    is_unique = SearchBufferAndCheckUnique(index, itup, UNIQUE_CHECK_YES, heapRel, NULL, cudescScan, &element);
+
+    buf = element.buffer;
+    stack = element.btStack;
+    itup_scankey = element.itupScanKey;
+
+    /* release buffer. */
+    _bt_relbuf(index, buf);
+
+    /* be tidy */
+    _bt_freestack(stack);
+    _bt_freeskey(itup_scankey);
+
+    if (cudescScan != NULL) {
+        cudescScan->Destroy();
+        delete cudescScan;
+        cudescScan = NULL;
+    }
+
+    pfree(itup);
 }

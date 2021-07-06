@@ -34,9 +34,6 @@
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
 
-/* built first time through in InitializeRelfilenodeMap */
-ScanKeyData relfilenode_skey[2];
-
 typedef struct {
     Oid reltablespace;
     Oid relfilenode;
@@ -79,26 +76,27 @@ static void RelfilenodeMapInvalidateCallback(Datum arg, Oid relid)
  * RelfilenodeMapInvalidateCallback
  *		Initialize cache, either on first use or after a reset.
  */
-static void InitializeRelfilenodeMap(void)
+static void InitializeRelfilenodeMap()
 {
-    HASHCTL ctl;
     int i;
 
     /* build skey */
-    errno_t ret = memset_s(&relfilenode_skey, sizeof(relfilenode_skey), 0, sizeof(relfilenode_skey));
+    errno_t ret = memset_s(&u_sess->relmap_cxt.relfilenodeSkey, sizeof(u_sess->relmap_cxt.relfilenodeSkey), 0,
+        sizeof(u_sess->relmap_cxt.relfilenodeSkey));
     securec_check(ret, "\0", "\0");
 
     for (i = 0; i < 2; i++) {
-        fmgr_info_cxt(F_OIDEQ, &relfilenode_skey[i].sk_func, u_sess->cache_mem_cxt);
-        relfilenode_skey[i].sk_strategy = BTEqualStrategyNumber;
-        relfilenode_skey[i].sk_subtype = InvalidOid;
-        relfilenode_skey[i].sk_collation = InvalidOid;
+        fmgr_info_cxt(F_OIDEQ, &u_sess->relmap_cxt.relfilenodeSkey[i].sk_func, u_sess->cache_mem_cxt);
+        u_sess->relmap_cxt.relfilenodeSkey[i].sk_strategy = BTEqualStrategyNumber;
+        u_sess->relmap_cxt.relfilenodeSkey[i].sk_subtype = InvalidOid;
+        u_sess->relmap_cxt.relfilenodeSkey[i].sk_collation = InvalidOid;
     }
 
-    relfilenode_skey[0].sk_attno = Anum_pg_class_reltablespace;
-    relfilenode_skey[1].sk_attno = Anum_pg_class_relfilenode;
+    u_sess->relmap_cxt.relfilenodeSkey[0].sk_attno = Anum_pg_class_reltablespace;
+    u_sess->relmap_cxt.relfilenodeSkey[1].sk_attno = Anum_pg_class_relfilenode;
 
     /* Initialize the hash table. */
+    HASHCTL ctl;
     ret = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
     securec_check(ret, "\0", "\0");
     ctl.keysize = sizeof(RelfilenodeMapKey);
@@ -135,8 +133,9 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
     ScanKeyData skey[2];
     Oid relid;
     int rc = 0;
-    if (u_sess->relmap_cxt.RelfilenodeMapHash == NULL)
+    if (u_sess->relmap_cxt.RelfilenodeMapHash == NULL) {
         InitializeRelfilenodeMap();
+    }
 
     /* pg_class will show 0 when the value is actually u_sess->proc_cxt.MyDatabaseTableSpace */
     if (reltablespace == u_sess->proc_cxt.MyDatabaseTableSpace)
@@ -185,14 +184,17 @@ Oid RelidByRelfilenode(Oid reltablespace, Oid relfilenode)
         relation = heap_open(RelationRelationId, AccessShareLock);
 
         /* copy scankey to local copy, it will be modified during the scan */
-        rc = memcpy_s(skey, sizeof(skey), relfilenode_skey, sizeof(skey));
+        rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.relfilenodeSkey, sizeof(skey));
         securec_check(rc, "", "");
 
         /* set scan arguments */
         skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
         skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-        scandesc = systable_beginscan(relation, ClassTblspcRelfilenodeIndexId, true, SnapshotNow, 2, skey);
+        /*
+         * Using historical snapshot in logic decoding.
+         */
+        scandesc = systable_beginscan(relation, ClassTblspcRelfilenodeIndexId, true, NULL, 2, skey);
 
         found = false;
 
@@ -264,14 +266,22 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid& partati
     /* check plain relations by looking in pg_class */
     relation = heap_open(PartitionRelationId, AccessShareLock);
 
-    rc = memcpy_s(skey, sizeof(skey), relfilenode_skey, sizeof(skey));
+    rc = memcpy_s(skey, sizeof(skey), u_sess->relmap_cxt.relfilenodeSkey, sizeof(skey));
     securec_check(rc, "", "");
     skey[0].sk_attno = Anum_pg_partition_reltablespace;
     skey[1].sk_attno = Anum_pg_partition_relfilenode;
     skey[0].sk_argument = ObjectIdGetDatum(reltablespace);
     skey[1].sk_argument = ObjectIdGetDatum(relfilenode);
 
-    scandesc = systable_beginscan(relation, InvalidOid, false, SnapshotNow, 2, skey);
+    /*
+     * Using historical snapshot in logic decoding.
+     */
+    Snapshot snapshot = NULL;
+    snapshot = SnapshotNow;
+    if (HistoricSnapshotActive()) {
+        snapshot =  GetCatalogSnapshot();
+    }
+    scandesc = systable_beginscan(relation, InvalidOid, false, NULL, 2, skey);
 
     while (HeapTupleIsValid(ntp = systable_getnext(scandesc))) {
         if (foundflag)

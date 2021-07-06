@@ -44,6 +44,7 @@
 
 #include <signal.h>
 
+#include "access/skey.h"
 #include "c.h"
 #include "datatype/timestamp.h"
 #include "gs_thread.h"
@@ -768,7 +769,9 @@ typedef struct knl_u_plancache_context {
      */
     HTAB* prepared_queries;
 
-    HTAB* stmt_lightproxy_htab;
+    HTAB* stmt_lightproxy_htab; /* mapping statement name and lightproxy obj, only for gpc */
+
+    lightProxy* unnamed_gpc_lp; /* light proxy ptr for shard unnamed cachedplansource, only for gpc */
 
     HTAB* lightproxy_objs;
 
@@ -792,6 +795,7 @@ typedef struct knl_u_plancache_context {
     bool gpc_remote_msg;
     bool gpc_first_send;
     bool gpc_in_try_store;
+    bool gpc_in_batch; /* true if is doing 2 ~ n batch execute, false if not in batch or doing first batch execute */
 } knl_u_plancache_context;
 
 typedef struct knl_u_typecache_context {
@@ -1732,6 +1736,7 @@ typedef struct knl_u_relmap_context {
     struct RelMapFile* pending_shared_updates;
     struct RelMapFile* pending_local_updates;
 
+    struct ScanKeyData relfilenodeSkey[2];
     /* Hash table for informations about each relfilenode <-> oid pair */
     struct HTAB* RelfilenodeMapHash;
 } knl_u_relmap_context;

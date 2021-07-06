@@ -1281,6 +1281,7 @@ typedef struct knl_t_interrupt_context {
 
     volatile bool InterruptCountResetFlag;
 
+    volatile bool ignoreBackendSignal;
 } knl_t_interrupt_context;
 
 typedef int64 pg_time_t;
@@ -1641,6 +1642,9 @@ typedef struct knl_t_utils_context {
 
     /* Track memory usage in bytes at individual thread level */
     int64 trackedBytes;
+
+    int64 peakedBytesInQueryLifeCycle;
+    int64 basedBytesInQueryLifeCycle;
 
     /* Per thread/query quota in chunks */
     int32 maxChunksPerThread; /* Will be updated by CostSize */
