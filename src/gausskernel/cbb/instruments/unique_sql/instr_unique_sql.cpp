@@ -1711,7 +1711,8 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
      * refer to the assert in method "relation_open"
      */
     if (sql == NULL || query == NULL || g_instance.stat_cxt.UniqueSQLHashtbl == NULL || !is_local_unique_sql() ||
-        IsAbortedTransactionBlockState()) {
+        IsAbortedTransactionBlockState() || 
+        (query->utilityStmt != NULL && IsA(query->utilityStmt, ExplainStmt))) {
         return;
     }
 
