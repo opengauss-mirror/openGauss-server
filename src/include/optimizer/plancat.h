@@ -48,4 +48,6 @@ extern Selectivity join_selectivity(
 extern void estimatePartitionSize(
     Relation relation, Oid partitionid, int32* attr_widths, RelPageType* pages, double* tuples, double* allvisfrac);
 
+extern bool HasStoredGeneratedColumns(const PlannerInfo *root, Index rti);
+
 #endif /* PLANCAT_H */

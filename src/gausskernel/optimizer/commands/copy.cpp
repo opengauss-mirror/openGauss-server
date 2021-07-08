@@ -4074,6 +4074,15 @@ static uint64 CopyFrom(CopyState cstate)
                 resultRelInfo->ri_FdwRoutine->ExecForeignInsert(estate, resultRelInfo, slot, NULL);
                 processed++;
             } else if (!skip_tuple) {
+                /*
+                 * Compute stored generated columns
+                 */
+                if (resultRelInfo->ri_RelationDesc->rd_att->constr &&
+                    resultRelInfo->ri_RelationDesc->rd_att->constr->has_generated_stored) {
+                    ExecComputeStoredGenerated(resultRelInfo, estate, slot, tuple, CMD_INSERT);
+                    tuple = (HeapTuple)slot->tts_tuple;
+                }
+
                 /* Check the constraints of the tuple */
                 if (cstate->rel->rd_att->constr)
                     ExecConstraints(resultRelInfo, slot, estate);
@@ -4911,10 +4920,10 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
         fmgr_info(in_func_oid, &in_functions[attnum - 1]);
 
         /* Get default info if needed */
-        if (!list_member_int(cstate->attnumlist, attnum)) {
+        if (!list_member_int(cstate->attnumlist, attnum) && !ISGENERATEDCOL(tupDesc, attnum - 1)) {
             /* attribute is NOT to be copied from input */
             /* use default value if one exists */
-            Expr* defexpr = (Expr*)build_column_default(cstate->rel, attnum);
+            Expr *defexpr = (Expr *)build_column_default(cstate->rel, attnum);
 
             if (defexpr != NULL) {
 #ifdef PGXC
@@ -7101,6 +7110,11 @@ List* CopyGetAllAttnums(TupleDesc tupDesc, Relation rel)
  * or NIL if there was none (in which case we want all the non-dropped
  * columns).
  *
+ * We don't include generated columns in the generated full list and we don't
+ * allow them to be specified explicitly.  They don't make sense for COPY
+ * FROM, but we could possibly allow them for COPY TO.  But this way it's at
+ * least ensured that whatever we copy out can be copied back in.
+ *
  * rel can be NULL ... it's only used for error reports.
  */
 List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist)
@@ -7109,12 +7123,14 @@ List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist)
 
     if (attnamelist == NIL) {
         /* Generate default column list */
-        Form_pg_attribute* attr = tupDesc->attrs;
+        Form_pg_attribute *attr = tupDesc->attrs;
         int attr_count = tupDesc->natts;
         int i;
 
         for (i = 0; i < attr_count; i++) {
             if (attr[i]->attisdropped)
+                continue;
+            if (ISGENERATEDCOL(tupDesc, i))
                 continue;
             attnums = lappend_int(attnums, i + 1);
         }
@@ -7133,6 +7149,11 @@ List* CopyGetAttnums(TupleDesc tupDesc, Relation rel, List* attnamelist)
                 if (tupDesc->attrs[i]->attisdropped)
                     continue;
                 if (namestrcmp(&(tupDesc->attrs[i]->attname), name) == 0) {
+                    if (ISGENERATEDCOL(tupDesc, i)) {
+                        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                            errmsg("column \"%s\" is a generated column", name),
+                            errdetail("Generated columns cannot be used in COPY.")));
+                    }
                     attnum = tupDesc->attrs[i]->attnum;
                     break;
                 }

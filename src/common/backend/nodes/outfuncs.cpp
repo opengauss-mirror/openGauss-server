@@ -3637,6 +3637,10 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     WRITE_NODE_FIELD(constraints);
     WRITE_NODE_FIELD(fdwoptions);
     WRITE_NODE_FIELD(clientLogicColumnRef);
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        if (node->generatedCol)
+            WRITE_CHAR_FIELD(generatedCol);
+    }
 }
 
 static void _outTypeName(StringInfo str, TypeName* node)
@@ -4172,6 +4176,52 @@ static void _outSetOperationStmt(StringInfo str, SetOperationStmt* node)
     WRITE_TYPEINFO_LIST(colTypes);
 }
 
+static void _outRteRelation(StringInfo str, const RangeTblEntry *node)
+{
+    WRITE_OID_FIELD(relid);
+    WRITE_CHAR_FIELD(relkind);
+    if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isResultRel);
+    }
+    WRITE_NODE_FIELD(tablesample);
+    WRITE_OID_FIELD(partitionOid);
+    WRITE_BOOL_FIELD(isContainPartition);
+    if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
+        WRITE_OID_FIELD(refSynOid);
+    }
+    WRITE_BOOL_FIELD(ispartrel);
+    WRITE_BOOL_FIELD(ignoreResetRelid);
+    WRITE_NODE_FIELD(pname);
+    WRITE_NODE_FIELD(partid_list);
+    WRITE_NODE_FIELD(plist);
+    if (node->relid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->relid) &&
+        node->mainRelName == NULL) {
+        /*
+         * For inherit table, the relname will be different
+         */
+        // shipping out for dn, relid will be different on dn, so relname and relnamespace string will be must.
+
+        char *rteRelname = NULL;
+        char *rteRelnamespace = NULL;
+
+        getNameById(node->relid, "RTE", &rteRelnamespace, &rteRelname);
+
+        appendStringInfo(str, " :relname ");
+        _outToken(str, rteRelname);
+        appendStringInfo(str, " :relnamespace ");
+        _outToken(str, rteRelnamespace);
+
+        /*
+         * Same reason as above,
+         * we need to serialize the namespace and synonym name instead of refSynOid
+         * when relation name is referenced from one synonym,
+         */
+        if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
+            WRITE_SYNINFO_FIELD(refSynOid);
+        }
+    }
+}
+
 static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 {
     WRITE_NODE_TYPE("RTE");
@@ -4192,48 +4242,7 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 
     switch (node->rtekind) {
         case RTE_RELATION:
-            WRITE_OID_FIELD(relid);
-            WRITE_CHAR_FIELD(relkind);
-            if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
-                WRITE_BOOL_FIELD(isResultRel);
-            }
-            WRITE_NODE_FIELD(tablesample);
-            WRITE_OID_FIELD(partitionOid);
-            WRITE_BOOL_FIELD(isContainPartition);
-            if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
-                WRITE_OID_FIELD(refSynOid);
-            }
-            WRITE_BOOL_FIELD(ispartrel);
-            WRITE_BOOL_FIELD(ignoreResetRelid);
-            WRITE_NODE_FIELD(pname);
-            WRITE_NODE_FIELD(partid_list);
-            WRITE_NODE_FIELD(plist);
-            if (node->relid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->relid) &&
-                node->mainRelName == NULL) {
-                /*
-                 * For inherit table, the relname will be different
-                 */
-                // shipping out for dn, relid will be different on dn, so relname and relnamespace string will be must.
-
-                char* rte_relname = NULL;
-                char* rte_relnamespace = NULL;
-
-                getNameById(node->relid, "RTE", &rte_relnamespace, &rte_relname);
-
-                appendStringInfo(str, " :relname ");
-                _outToken(str, rte_relname);
-                appendStringInfo(str, " :relnamespace ");
-                _outToken(str, rte_relnamespace);
-
-                /*
-                 * Same reason as above,
-                 * we need to serialize the namespace and synonym name instead of refSynOid
-                 * when relation name is referenced from one synonym,
-                 */
-                if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
-                    WRITE_SYNINFO_FIELD(refSynOid);
-                }
-            }
+            _outRteRelation(str, node);
             break;
         case RTE_SUBQUERY:
             WRITE_NODE_FIELD(subquery);
@@ -4301,6 +4310,10 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
     }
     if (t_thrd.proc->workingVersionNum >= SUBLINKPULLUP_VERSION_NUM) {
         WRITE_BOOL_FIELD(sublink_pull_up);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        WRITE_BITMAPSET_FIELD(extraUpdatedCols);
     }
 }
 

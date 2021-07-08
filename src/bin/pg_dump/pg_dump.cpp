@@ -61,6 +61,7 @@
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_attrdef.h"
 #include "libpq/libpq-fs.h"
 #include "libpq/libpq-int.h"
 #include "catalog/pgxc_node.h"
@@ -2426,6 +2427,11 @@ static int dumpTableData_insert(Archive* fout, void* dcontext)
             for (field = 0; field < nfields; field++) {
                 if (field > 0)
                     archprintf(fout, ", ");
+                if (tbinfo->attrdefs[field] &&
+                    tbinfo->attrdefs[field]->generatedCol) {
+                    (void)archputs("DEFAULT", fout);
+                    continue;
+                }
                 if (PQgetisnull(res, tuple, field)) {
                     archprintf(fout, "NULL");
                     continue;
@@ -8281,6 +8287,8 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
         if (hasdefaults) {
             AttrDefInfo* attrdefs = NULL;
             int numDefaults;
+            ArchiveHandle* AH = (ArchiveHandle*)fout;
+            bool hasGenColFeature = is_column_exists(AH->connection, AttrDefaultRelationId, "adgencol");
 
             if (g_verbose)
                 write_msg(NULL,
@@ -8288,10 +8296,19 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                     fmtQualifiedId(fout, tbinfo->dobj.nmspace->dobj.name, tbinfo->dobj.name));
 
             resetPQExpBuffer(q);
-            if (fout->remoteVersion >= 70300) {
+            if (hasGenColFeature) {
                 appendPQExpBuffer(q,
                     "SELECT tableoid, oid, adnum, "
                     "pg_catalog.pg_get_expr(adbin, adrelid) AS adsrc "
+                    ", adgencol AS generatedCol "
+                    "FROM pg_catalog.pg_attrdef "
+                    "WHERE adrelid = '%u'::pg_catalog.oid",
+                    tbinfo->dobj.catId.oid);
+            } else if (fout->remoteVersion >= 70300) {
+                appendPQExpBuffer(q,
+                    "SELECT tableoid, oid, adnum, "
+                    "pg_catalog.pg_get_expr(adbin, adrelid) AS adsrc "
+                    ", '' AS generatedCol "
                     "FROM pg_catalog.pg_attrdef "
                     "WHERE adrelid = '%u'::pg_catalog.oid",
                     tbinfo->dobj.catId.oid);
@@ -8300,6 +8317,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 appendPQExpBuffer(q,
                     "SELECT tableoid, 0 AS oid, adnum, "
                     "pg_get_expr(adbin, adrelid) AS adsrc "
+                    ", '' AS generatedCol "
                     "FROM pg_attrdef "
                     "WHERE adrelid = '%u'::oid",
                     tbinfo->dobj.catId.oid);
@@ -8307,6 +8325,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 /* no pg_get_expr, so must rely on adsrc */
                 appendPQExpBuffer(q,
                     "SELECT tableoid, oid, adnum, adsrc "
+                    ", '' AS generatedCol "
                     "FROM pg_attrdef "
                     "WHERE adrelid = '%u'::oid",
                     tbinfo->dobj.catId.oid);
@@ -8316,6 +8335,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                     "SELECT "
                     "(SELECT oid FROM pg_class WHERE relname = 'pg_attrdef') AS tableoid, "
                     "oid, adnum, adsrc "
+                    ", '' AS generatedCol "
                     "FROM pg_attrdef "
                     "WHERE adrelid = '%u'::oid",
                     tbinfo->dobj.catId.oid);
@@ -8346,6 +8366,7 @@ void getTableAttrs(Archive* fout, TableInfo* tblinfo, int numTables)
                 AssignDumpId(&attrdefs[j].dobj);
                 attrdefs[j].adtable = tbinfo;
                 attrdefs[j].adnum = adnum;
+                attrdefs[j].generatedCol = *(PQgetvalue(res, j, 4));
                 attrdefs[j].adef_expr = gs_strdup(PQgetvalue(res, j, 3));
 
                 attrdefs[j].dobj.name = gs_strdup(tbinfo->dobj.name);
@@ -17290,7 +17311,11 @@ static void dumpTableSchema(Archive* fout, TableInfo* tbinfo)
                         default_value = (char *)plaintext;
                     }
 #endif
-                    appendPQExpBuffer(q, " DEFAULT %s", default_value);
+                    if (tbinfo->attrdefs[j]->generatedCol == ATTRIBUTE_GENERATED_STORED)
+                        appendPQExpBuffer(q, " GENERATED ALWAYS AS (%s) STORED",
+                                          default_value);
+                    else
+                        appendPQExpBuffer(q, " DEFAULT %s", default_value);
                 }
                 if (has_notnull)
                     appendPQExpBuffer(q, " NOT NULL");
@@ -20448,10 +20473,15 @@ static const char* fmtCopyColumnList(const TableInfo* ti)
     appendPQExpBuffer(q, "(");
 
     for (i = 0; i < numatts; i++) {
-        if (attisdropped[i])
+        if (attisdropped[i]) {
             continue;
-        if (needComma)
+        }
+        if (ti->attrdefs[i] != NULL && ti->attrdefs[i]->generatedCol) {
+            continue;
+        }
+        if (needComma) {
             appendPQExpBuffer(q, ", ");
+        }
         appendPQExpBuffer(q, "%s", fmtId(attnames[i]));
         needComma = true;
     }

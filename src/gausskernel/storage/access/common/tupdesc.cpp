@@ -192,59 +192,70 @@ TupleDesc CreateTupleDescCopy(TupleDesc tupdesc)
 }
 
 /*
+ * TupleConstrCopy
+ *    This function creates a new TupleConstr by copying from an existing TupleConstr.
+ */
+static TupleConstr *TupleConstrCopy(const TupleDesc tupdesc)
+{
+    TupleConstr *constr = tupdesc->constr;
+    TupleConstr *cpy = (TupleConstr *)palloc0(sizeof(TupleConstr));
+
+    cpy->has_not_null = constr->has_not_null;
+    cpy->has_generated_stored = constr->has_generated_stored;
+
+    errno_t rc = EOK;
+    if ((cpy->num_defval = constr->num_defval) > 0) {
+        cpy->defval = (AttrDefault *)palloc(cpy->num_defval * sizeof(AttrDefault));
+        rc = memcpy_s(cpy->defval, cpy->num_defval * sizeof(AttrDefault), constr->defval,
+            cpy->num_defval * sizeof(AttrDefault));
+        securec_check(rc, "\0", "\0");
+        for (int i = cpy->num_defval - 1; i >= 0; i--) {
+            if (constr->defval[i].adbin) {
+                cpy->defval[i].adbin = pstrdup(constr->defval[i].adbin);
+            }
+        }
+        uint32 genColsLen = (uint32)tupdesc->natts * sizeof(char);
+        cpy->generatedCols = (char *)palloc(genColsLen);
+        rc = memcpy_s(cpy->generatedCols, genColsLen, constr->generatedCols, genColsLen);
+        securec_check(rc, "\0", "\0");
+    }
+
+    if ((cpy->num_check = constr->num_check) > 0) {
+        cpy->check = (ConstrCheck *)palloc(cpy->num_check * sizeof(ConstrCheck));
+        rc = memcpy_s(cpy->check, cpy->num_check * sizeof(ConstrCheck), constr->check,
+            cpy->num_check * sizeof(ConstrCheck));
+        securec_check(rc, "\0", "\0");
+        for (int i = cpy->num_check - 1; i >= 0; i--) {
+            if (constr->check[i].ccname) {
+                cpy->check[i].ccname = pstrdup(constr->check[i].ccname);
+            }
+            if (constr->check[i].ccbin) {
+                cpy->check[i].ccbin = pstrdup(constr->check[i].ccbin);
+            }
+            cpy->check[i].ccvalid = constr->check[i].ccvalid;
+            cpy->check[i].ccnoinherit = constr->check[i].ccnoinherit;
+        }
+    }
+    return cpy;
+}
+
+/*
  * CreateTupleDescCopyConstr
  *		This function creates a new TupleDesc by copying from an existing
  *		TupleDesc (including its constraints and defaults).
  */
 TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
 {
-    TupleDesc desc;
-    TupleConstr *constr = tupdesc->constr;
-    int i;
     errno_t rc = EOK;
+    TupleDesc desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
 
-    desc = CreateTemplateTupleDesc(tupdesc->natts, tupdesc->tdhasoid, tupdesc->tdTableAmType);
-
-    for (i = 0; i < desc->natts; i++) {
+    for (int i = 0; i < desc->natts; i++) {
         rc = memcpy_s(desc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE, tupdesc->attrs[i], ATTRIBUTE_FIXED_PART_SIZE);
         securec_check(rc, "\0", "\0");
     }
 
-    if (constr != NULL) {
-        TupleConstr *cpy = (TupleConstr *)palloc0(sizeof(TupleConstr));
-
-        cpy->has_not_null = constr->has_not_null;
-
-        if ((cpy->num_defval = constr->num_defval) > 0) {
-            cpy->defval = (AttrDefault *)palloc(cpy->num_defval * sizeof(AttrDefault));
-            rc = memcpy_s(cpy->defval, cpy->num_defval * sizeof(AttrDefault), constr->defval,
-                          cpy->num_defval * sizeof(AttrDefault));
-            securec_check(rc, "\0", "\0");
-            for (i = cpy->num_defval - 1; i >= 0; i--) {
-                if (constr->defval[i].adbin) {
-                    cpy->defval[i].adbin = pstrdup(constr->defval[i].adbin);
-                }
-            }
-        }
-
-        if ((cpy->num_check = constr->num_check) > 0) {
-            cpy->check = (ConstrCheck *)palloc(cpy->num_check * sizeof(ConstrCheck));
-            rc = memcpy_s(cpy->check, cpy->num_check * sizeof(ConstrCheck), constr->check,
-                          cpy->num_check * sizeof(ConstrCheck));
-            securec_check(rc, "\0", "\0");
-            for (i = cpy->num_check - 1; i >= 0; i--) {
-                if (constr->check[i].ccname) {
-                    cpy->check[i].ccname = pstrdup(constr->check[i].ccname);
-                }
-                if (constr->check[i].ccbin) {
-                    cpy->check[i].ccbin = pstrdup(constr->check[i].ccbin);
-                }
-                cpy->check[i].ccvalid = constr->check[i].ccvalid;
-                cpy->check[i].ccnoinherit = constr->check[i].ccnoinherit;
-            }
-        }
-
-        desc->constr = cpy;
+    if (tupdesc->constr != NULL) {
+        desc->constr = TupleConstrCopy(tupdesc);
     }
 
     /* copy the attinitdefval */
@@ -257,6 +268,17 @@ TupleDesc CreateTupleDescCopyConstr(TupleDesc tupdesc)
     desc->tdisredistable = tupdesc->tdisredistable;
 
     return desc;
+}
+
+char GetGeneratedCol(TupleDesc tupdesc, int atti)
+{
+    if (!tupdesc->constr)
+        return '\0';
+
+    if (tupdesc->constr->num_defval == 0)
+        return '\0';
+
+    return tupdesc->constr->generatedCols[atti];
 }
 
 /*
@@ -281,6 +303,7 @@ void FreeTupleDesc(TupleDesc tupdesc)
                     pfree(attrdef[i].adbin);
             }
             pfree(attrdef);
+            pfree(tupdesc->constr->generatedCols);
         }
         if (tupdesc->constr->num_check > 0) {
             ConstrCheck *check = tupdesc->constr->check;
@@ -542,6 +565,10 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
             return false;
         }
 
+        if (constr1->has_generated_stored != constr2->has_generated_stored) {
+            return false;
+        }
+
         /* check whether default values are eqaul to. */
         n = constr1->num_defval;
         if (n != (int)constr2->num_defval) {
@@ -565,6 +592,9 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
                 return false;
             }
             if (strcmp(defval1->adbin, defval2->adbin) != 0) {
+                return false;
+            }
+            if (defval1->generatedCol != defval2->generatedCol) {
                 return false;
             }
         }
@@ -606,6 +636,60 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
     return compareInitdefvals(tupdesc1, tupdesc2);
 }
 
+static bool ComparePgAttribute(Form_pg_attribute attr1, Form_pg_attribute attr2)
+{
+    /*
+     * We do not need to check every single field here: we can disregard
+     * attrelid and attnum (which were used to place the row in the attrs
+     * array in the first place).  It might look like we could dispense
+     * with checking attlen/attbyval/attalign, since these are derived
+     * from atttypid; but in the case of dropped columns we must check
+     * them (since atttypid will be zero for all dropped columns) and in
+     * general it seems safer to check them always.
+     *
+     * attcacheoff must NOT be checked since it's possibly not set in both
+     * copies.
+     */
+    if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) != 0)
+        return false;
+    if (attr1->atttypid != attr2->atttypid)
+        return false;
+    if (attr1->attstattarget != attr2->attstattarget)
+        return false;
+    if (attr1->attlen != attr2->attlen)
+        return false;
+    if (attr1->attndims != attr2->attndims)
+        return false;
+    if (attr1->atttypmod != attr2->atttypmod)
+        return false;
+    if (attr1->attbyval != attr2->attbyval)
+        return false;
+    if (attr1->attstorage != attr2->attstorage)
+        return false;
+    if (attr1->attkvtype != attr2->attkvtype)
+        return false;
+    if (attr1->attcmprmode != attr2->attcmprmode)
+        return false;
+    if (attr1->attalign != attr2->attalign)
+        return false;
+    if (attr1->attnotnull != attr2->attnotnull)
+        return false;
+    if (attr1->atthasdef != attr2->atthasdef)
+        return false;
+    
+    if (attr1->attisdropped != attr2->attisdropped)
+        return false;
+    if (attr1->attislocal != attr2->attislocal)
+        return false;
+    if (attr1->attinhcount != attr2->attinhcount)
+        return false;
+    if (attr1->attcollation != attr2->attcollation)
+        return false;
+    /* attacl, attoptions and attfdwoptions are not even present... */
+
+    return true;
+}
+
 /*
  * Compare the delta TupleDesc structures with column store main TupleDesc
  *
@@ -622,53 +706,13 @@ bool equalDeltaTupleDescs(TupleDesc mainTupdesc, TupleDesc deltaTupdesc)
         Form_pg_attribute attr1 = mainTupdesc->attrs[i];
         Form_pg_attribute attr2 = deltaTupdesc->attrs[i];
 
-        /*
-         * We do not need to check every single field here: we can disregard
-         * attrelid and attnum (which were used to place the row in the attrs
-         * array in the first place).  It might look like we could dispense
-         * with checking attlen/attbyval/attalign, since these are derived
-         * from atttypid; but in the case of dropped columns we must check
-         * them (since atttypid will be zero for all dropped columns) and in
-         * general it seems safer to check them always.
-         *
-         * attcacheoff must NOT be checked since it's possibly not set in both
-         * copies.
-         */
-        if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) != 0)
+        if (GetGeneratedCol(mainTupdesc, i) != GetGeneratedCol(deltaTupdesc, i)) {
             return false;
-        if (attr1->atttypid != attr2->atttypid)
+        }
+
+        if (!ComparePgAttribute(attr1, attr2)) {
             return false;
-        if (attr1->attstattarget != attr2->attstattarget)
-            return false;
-        if (attr1->attlen != attr2->attlen)
-            return false;
-        if (attr1->attndims != attr2->attndims)
-            return false;
-        if (attr1->atttypmod != attr2->atttypmod)
-            return false;
-        if (attr1->attbyval != attr2->attbyval)
-            return false;
-        if (attr1->attstorage != attr2->attstorage)
-            return false;
-        if (attr1->attkvtype != attr2->attkvtype)
-            return false;
-        if (attr1->attcmprmode != attr2->attcmprmode)
-            return false;
-        if (attr1->attalign != attr2->attalign)
-            return false;
-        if (attr1->attnotnull != attr2->attnotnull)
-            return false;
-        if (attr1->atthasdef != attr2->atthasdef)
-            return false;
-        if (attr1->attisdropped != attr2->attisdropped)
-            return false;
-        if (attr1->attislocal != attr2->attislocal)
-            return false;
-        if (attr1->attinhcount != attr2->attinhcount)
-            return false;
-        if (attr1->attcollation != attr2->attcollation)
-            return false;
-        /* attacl, attoptions and attfdwoptions are not even present... */
+        }
     }
 
     /* compare the attinitdefval */
@@ -993,6 +1037,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         constr->num_defval = 0;
         constr->check = NULL;
         constr->num_check = 0;
+        constr->generatedCols = NULL;
         desc->constr = constr;
     } else {
         desc->constr = NULL;

@@ -692,6 +692,8 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
 
     for (attrno = 1; attrno <= numattrs; attrno++) {
         TargetEntry* new_tle = new_tles[attrno - 1];
+        bool applyDefault = false;
+        bool generateCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
 
         att_tup = target_relation->rd_att->attrs[attrno - 1];
 
@@ -704,8 +706,28 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
          * it's an INSERT and there's no tlist entry for the column, or the
          * tlist entry is a DEFAULT placeholder node.
          */
-        if ((new_tle == NULL && commandType == CMD_INSERT) ||
-            (new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault))) {
+        applyDefault = ((new_tle == NULL && commandType == CMD_INSERT) ||
+            (new_tle != NULL && new_tle->expr != NULL && IsA(new_tle->expr, SetToDefault)));
+
+        if (generateCol && !applyDefault) {
+            if (commandType == CMD_INSERT && attrno_list == NULL) {
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+            }
+            if (commandType == CMD_UPDATE && new_tle) {
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(att_tup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+            }
+        }
+
+        if (generateCol) {
+            /*
+             * stored generated column will be fixed in executor
+             */
+            new_tle = NULL;
+        } else if (applyDefault) {
             Node* new_expr = NULL;
 
             new_expr = build_column_default(target_relation, attrno, true);
@@ -927,9 +949,10 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
         }
     }
 
-    if (expr == NULL) {
+    if (expr == NULL && !ISGENERATEDCOL(rd_att, attrno - 1)) {
         /*
-         * No per-column default, so look for a default for the type itself.
+         * No per-column default, so look for a default for the type itself.But
+         * not for generated columns.
          */
         expr = get_typdefault(atttype);
     }
@@ -971,14 +994,10 @@ Node* build_column_default(Relation rel, int attrno, bool isInsertCmd)
     }
 
     if (expr == NULL)
-        ereport(ERROR,
-            (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("column \"%s\" is of type %s"
-                       " but default expression is of type %s",
-                    NameStr(att_tup->attname),
-                    format_type_be(atttype),
-                    format_type_be(exprtype)),
-                errhint("You will need to rewrite or cast the expression.")));
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+            errmsg("column \"%s\" is of type %s but %s expression is of type %s", NameStr(att_tup->attname),
+            format_type_be(atttype), ISGENERATEDCOL(rd_att, attrno - 1) ? "generated column" : "deault",
+            format_type_be(exprtype)), errhint("You will need to rewrite or cast the expression.")));
     /*
      * If there is nextval FuncExpr, we should lock the quoted sequence to avoid deadlock,
      * this has beed done in transformFuncExpr. See lockNextvalOnCn for more details.
@@ -1042,19 +1061,26 @@ static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List*
 
         forboth(lc2, sublist, lc3, attrnos)
         {
-            Node* col = (Node*)lfirst(lc2);
+            Node *col = (Node *)lfirst(lc2);
             int attrno = lfirst_int(lc3);
+            Form_pg_attribute att_tup = target_relation->rd_att->attrs[attrno - 1];
+            bool generatedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+            bool applyDefault = IsA(col, SetToDefault);
 
-            if (IsA(col, SetToDefault)) {
-                Form_pg_attribute att_tup;
-                Node* new_expr = NULL;
+            if (generatedCol && !applyDefault) {
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("cannot insert into column \"%s\"", NameStr(att_tup->attname)),
+                    errdetail("Column \"%s\" is a generated column.", NameStr(att_tup->attname))));
+            }
 
-                att_tup = target_relation->rd_att->attrs[attrno - 1];
+            if (applyDefault) {
+                Node *new_expr = NULL;
 
-                if (!att_tup->attisdropped)
-                    new_expr = build_column_default(target_relation, attrno, true);
+                /* stored generated column will be computed in executor */
+                if (att_tup->attisdropped || generatedCol)
+                    new_expr = NULL;
                 else
-                    new_expr = NULL; /* force a NULL if dropped */
+                    new_expr = build_column_default(target_relation, attrno, true);
 
                 /*
                  * If there is no default (ie, default is effectively NULL),
@@ -1073,8 +1099,9 @@ static void rewriteValuesRTE(RangeTblEntry* rte, Relation target_relation, List*
                         new_expr, InvalidOid, -1, att_tup->atttypid, COERCE_IMPLICIT_CAST, -1, false, false);
                 }
                 newList = lappend(newList, new_expr);
-            } else
+            } else {
                 newList = lappend(newList, col);
+            }
         }
         newValues = lappend(newValues, newList);
     }
@@ -1501,6 +1528,7 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
             rte->selectedCols = NULL;
             rte->insertedCols = NULL;
             rte->updatedCols = NULL;
+            rte->extraUpdatedCols = NULL;
 
             /*
              * For the most part, Vars referencing the view should remain as
@@ -1565,12 +1593,14 @@ static Query* ApplyRetrieveRule(Query* parsetree, RewriteRule* rule, int rt_inde
     subrte->selectedCols = rte->selectedCols;
     subrte->insertedCols = rte->insertedCols;
     subrte->updatedCols = rte->updatedCols;
+    subrte->extraUpdatedCols = rte->extraUpdatedCols;
 
     rte->requiredPerms = 0; /* no permission check on subquery itself */
     rte->checkAsUser = InvalidOid;
     rte->selectedCols = NULL;
     rte->insertedCols = NULL;
     rte->updatedCols = NULL;
+    rte->extraUpdatedCols = NULL;
 
     /*
      * If FOR UPDATE/SHARE of view, mark all the contained tables as implicit
@@ -1954,6 +1984,21 @@ static Query* CopyAndAddInvertedQual(Query* parsetree, Node* rule_qual, int rt_i
 
     return parsetree;
 }
+/*
+ * Generated column can not be manually insert or updated. 
+ */
+static void CheckGeneratedColConstraint(CmdType commandType, Form_pg_attribute attTup, const TargetEntry *newTle)
+{
+    if (commandType == CMD_INSERT) {
+        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("cannot insert into column \"%s\"", NameStr(attTup->attname)),
+            errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
+    } else if (commandType == CMD_UPDATE && newTle) {
+        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+            errmsg("column \"%s\" can only be updated to DEFAULT", NameStr(attTup->attname)),
+            errdetail("Column \"%s\" is a generated column.", NameStr(attTup->attname))));
+    }
+}
 
 /*
  * very same to pg's rewriteTargetListIU. we adapt it to use for MergeInto
@@ -2042,8 +2087,17 @@ static List* rewriteTargetListMergeInto(
          */
         apply_default = ((new_tle == NULL && commandType == CMD_INSERT) ||
                          (new_tle && new_tle->expr && IsA(new_tle->expr, SetToDefault)));
-
-        if (apply_default) {
+        
+        bool isGeneratedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+        if (isGeneratedCol) {
+            if (!apply_default) {
+                CheckGeneratedColConstraint(commandType, att_tup, new_tle);
+            }
+            /*
+             * stored generated column will be fixed in executor
+             */
+            new_tle = NULL;
+        } else if (apply_default) {
             Node* new_expr = NULL;
 
             new_expr = build_column_default(target_relation, attrno, (commandType == CMD_INSERT));

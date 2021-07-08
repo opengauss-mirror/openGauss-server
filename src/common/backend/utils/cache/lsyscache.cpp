@@ -835,6 +835,34 @@ AttrNumber get_attnum(Oid relid, const char* attname)
 }
 
 /*
+ * GetGenerated
+ *
+ *        Given the relation id and the attribute number,
+ *        return the "generated" field from the attrdef relation.
+ *
+ *        Errors if not found.
+ *
+ *        Since not generated is represented by '\0', this can also be used as a
+ *        Boolean test.
+ */
+char GetGenerated(Oid relid, AttrNumber attnum)
+{
+    char        result = '\0';
+    Relation    relation;
+    TupleDesc   tupdesc;
+
+    /* Assume we already have adequate lock */
+    relation = heap_open(relid, NoLock);
+
+    tupdesc = RelationGetDescr(relation);
+    result = GetGeneratedCol(tupdesc, attnum - 1);
+
+    heap_close(relation, NoLock);
+
+    return result;
+}
+
+/*
  * get_atttype
  *
  *		Given the relation OID and the attribute number with the relation,

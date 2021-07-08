@@ -77,6 +77,7 @@
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
 #include "parser/parse_relation.h"
+#include "parser/parsetree.h"
 #include "pgxc/groupmgr.h"
 #include "storage/buf/buf.h"
 #include "storage/predicate.h"
@@ -157,6 +158,9 @@ static Oid binary_upgrade_get_next_part_toast_pg_class_oid();
 static Oid binary_upgrade_get_next_part_toast_pg_class_rfoid();
 static Oid binary_upgrade_get_next_part_pg_partition_rfoid();
 static void LockSeqConstraints(Relation rel, List* Constraints);
+static bool ReferenceGenerated(const List *rawdefaultlist, AttrNumber attnum);
+static bool CheckNestedGeneratedWalker(Node *node, ParseState *context);
+static bool CheckNestedGenerated(ParseState *pstate, Node *node);
 extern void getErrorTableFilePath(char* buf, int len, Oid databaseid, Oid reid);
 extern void make_tmptable_cache_key(Oid relNode);
 
@@ -3468,13 +3472,13 @@ void heap_drop_with_catalog(Oid relid)
 /*
  * Store a default expression for column attnum of relation rel.
  */
-void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr)
+void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr, char generatedCol)
 {
     char* adbin = NULL;
     char* adsrc = NULL;
     Relation adrel;
     HeapTuple tuple;
-    Datum values[4];
+    Datum values[Natts_pg_attrdef];
     Relation attrrel;
     HeapTuple atttup;
     Form_pg_attribute attStruct;
@@ -3499,6 +3503,9 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr)
     values[Anum_pg_attrdef_adnum - 1] = attnum;
     values[Anum_pg_attrdef_adbin - 1] = CStringGetTextDatum(adbin);
     values[Anum_pg_attrdef_adsrc - 1] = CStringGetTextDatum(adsrc);
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        values[Anum_pg_attrdef_adgencol - 1] = CharGetDatum(generatedCol);
+    }
 
     adrel = heap_open(AttrDefaultRelationId, RowExclusiveLock);
 
@@ -3555,7 +3562,22 @@ void StoreAttrDefault(Relation rel, AttrNumber attnum, Node* expr)
     /*
      * Record dependencies on objects used in the expression, too.
      */
-    recordDependencyOnExpr(&defobject, expr, NIL, DEPENDENCY_NORMAL);
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED)
+    {
+        /*
+         * Generated column: Dropping anything that the generation expression
+         * refers to automatically drops the generated column.
+         */
+        recordDependencyOnSingleRelExpr(&colobject, expr, RelationGetRelid(rel),
+                                        DEPENDENCY_AUTO,
+                                        DEPENDENCY_AUTO);
+    } else {
+        /*
+         * Normal default: Dropping anything that the default refers to
+         * requires CASCADE and drops the default only.
+         */
+        recordDependencyOnExpr(&defobject, expr, NIL, DEPENDENCY_NORMAL);
+    }
 }
 
 /*
@@ -3678,7 +3700,10 @@ static void StoreConstraints(Relation rel, List* cooked_constraints)
 
         switch (con->contype) {
             case CONSTR_DEFAULT:
-                StoreAttrDefault(rel, con->attnum, con->expr);
+                StoreAttrDefault(rel, con->attnum, con->expr, 0);
+                break;
+            case CONSTR_GENERATED:
+                StoreAttrDefault(rel, con->attnum, con->expr, ATTRIBUTE_GENERATED_STORED);
                 break;
             case CONSTR_CHECK:
                 StoreRelCheck(
@@ -3754,6 +3779,8 @@ List* AddRelationNewConstraints(
     rte = addRangeTableEntryForRelation(pstate, rel, NULL, false, true);
     addRTEtoQuery(pstate, rte, true, true, true);
 
+    pstate->p_rawdefaultlist = newColDefaults;
+
     /*
      * Process column default expressions.
      */
@@ -3761,12 +3788,14 @@ List* AddRelationNewConstraints(
         RawColumnDefault* colDef = (RawColumnDefault*)lfirst(cell);
         Form_pg_attribute atp = rel->rd_att->attrs[colDef->attnum - 1];
 
-        expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname));
+        expr = cookDefault(pstate, colDef->raw_default, atp->atttypid, atp->atttypmod, NameStr(atp->attname),
+            colDef->generatedCol);
 
         /*
          * If the expression is just a NULL constant, we do not bother to make
          * an explicit pg_attrdef entry, since the default behavior is
-         * equivalent.
+         * equivalent.  This applies to column defaults, but not for
+         * generation expressions.
          *
          * Note a nonobvious property of this test: if the column is of a
          * domain type, what we'll get is not a bare null Const but a
@@ -3774,10 +3803,10 @@ List* AddRelationNewConstraints(
          * critical because the column default needs to be retained to
          * override any default that the domain might have.
          */
-        if (expr == NULL || (IsA(expr, Const) && ((Const*)expr)->constisnull))
+        if (expr == NULL || (!colDef->generatedCol && IsA(expr, Const) && ((Const *)expr)->constisnull))
             continue;
 
-        StoreAttrDefault(rel, colDef->attnum, expr);
+        StoreAttrDefault(rel, colDef->attnum, expr, colDef->generatedCol);
 
         cooked = (CookedConstraint*)palloc(sizeof(CookedConstraint));
         cooked->contype = CONSTR_DEFAULT;
@@ -3790,6 +3819,8 @@ List* AddRelationNewConstraints(
         cooked->is_no_inherit = false;
         cookedConstraints = lappend(cookedConstraints, cooked);
     }
+
+    pstate->p_rawdefaultlist = NIL;
     /*
      * Process constraint expressions.
      */
@@ -4045,6 +4076,54 @@ static void SetRelationNumChecks(Relation rel, int numchecks)
     heap_close(relrel, RowExclusiveLock);
 }
 
+static bool ReferenceGenerated(const List *rawdefaultlist, AttrNumber attnum)
+{
+    ListCell *cell = NULL;
+
+    foreach (cell, rawdefaultlist) {
+        RawColumnDefault *colDef = (RawColumnDefault *)lfirst(cell);
+        if (colDef->attnum == attnum && colDef->generatedCol) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Check for references to generated columns
+ */
+static bool CheckNestedGeneratedWalker(Node *node, ParseState *context)
+{
+    ParseState *pstate = context;
+    if (node == NULL) {
+        return false;
+    } else if (IsA(node, Var)) {
+        Var *var = (Var *)node;
+        RangeTblEntry *rte = rt_fetch(var->varno, pstate->p_rtable);
+        Oid relid = rte->relid;
+        AttrNumber attnum = var->varattno;
+
+        if (OidIsValid(relid) && AttributeNumberIsValid(attnum) &&
+            (ReferenceGenerated(pstate->p_rawdefaultlist, attnum) || GetGenerated(relid, attnum))) {
+            ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("cannot use generated column \"%s\" in column generation expression",
+                get_attname(relid, attnum)),
+                errdetail("A generated column cannot reference another generated column."),
+                parser_errposition(pstate, var->location)));
+        }
+
+        return false;
+    } else {
+        return expression_tree_walker(node, (bool (*)())CheckNestedGeneratedWalker, context);
+    }
+}
+
+static bool CheckNestedGenerated(ParseState *pstate, Node *node)
+{
+    return CheckNestedGeneratedWalker(node, pstate);
+}
+
 Node* parseParamRef(ParseState* pstate, ParamRef* pref)
 {
     Node* param_expr = NULL;
@@ -4087,7 +4166,8 @@ Node* parseParamRef(ParseState* pstate, ParamRef* pref)
  * type (and typmod atttypmod).   attname is only needed in this case:
  * it is used in the error message, if any.
  */
-Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 atttypmod, char* attname)
+Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
+    char generatedCol)
 {
     Node* expr = NULL;
 
@@ -4099,7 +4179,18 @@ Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 att
     /*
      * Transform raw parsetree to executable expression.
      */
+    pstate->p_expr_kind = generatedCol ? EXPR_KIND_GENERATED_COLUMN : EXPR_KIND_COLUMN_DEFAULT;
     expr = transformExpr(pstate, raw_default);
+    pstate->p_expr_kind = EXPR_KIND_NONE;
+
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED)
+    {
+        (void)CheckNestedGenerated(pstate, expr);
+
+        if (contain_mutable_functions(expr))
+            ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("generation expression is not immutable")));
+    }
 
     /* Version control for DDL PBE */
     if (t_thrd.proc->workingVersionNum >= DDL_PBE_VERSION_NUM)
@@ -4107,7 +4198,7 @@ Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 att
     /*
      * Make sure default expr does not refer to any vars.
      */
-    if (contain_var_clause(expr))
+    if (contain_var_clause(expr) && !generatedCol)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("cannot use column references in default expression")));
 
@@ -4121,19 +4212,21 @@ Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 att
      * It can't return a set either.
      */
     if (expression_returns_set(expr))
-        ereport(ERROR, 
-            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("default expression must not return a set")));
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+            errmsg("%s expression must not return a set", generatedCol ? "generated column" : "default")));
 
     /*
      * No subplans or aggregates, either...
      */
     if (pstate->p_hasSubLinks)
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot use subquery in default expression")));
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("cannot use subquery in %s expression", generatedCol ? "generated column" : "default")));
     if (pstate->p_hasAggs)
-        ereport(
-            ERROR, (errcode(ERRCODE_GROUPING_ERROR), errmsg("cannot use aggregate function in default expression")));
+        ereport(ERROR, (errcode(ERRCODE_GROUPING_ERROR),
+            errmsg("cannot use aggregate function in %s expression", generatedCol ? "generated column" : "default")));
     if (pstate->p_hasWindowFuncs)
-        ereport(ERROR, (errcode(ERRCODE_WINDOWING_ERROR), errmsg("cannot use window function in default expression")));
+        ereport(ERROR, (errcode(ERRCODE_WINDOWING_ERROR),
+            errmsg("cannot use window function in %s expression", generatedCol ? "generated column" : "default")));
 
     /*
      * Coerce the expression to the correct type and typmod, if given. This
@@ -4143,17 +4236,13 @@ Node* cookDefault(ParseState* pstate, Node* raw_default, Oid atttypid, int32 att
     if (OidIsValid(atttypid)) {
         Oid type_id = exprType(expr);
 
-        expr = coerce_to_target_type(
-            pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        expr = coerce_to_target_type(pstate, expr, type_id, atttypid, atttypmod, COERCION_ASSIGNMENT,
+            COERCE_IMPLICIT_CAST, -1);
         if (expr == NULL)
-            ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("column \"%s\" is of type %s"
-                           " but default expression is of type %s",
-                        attname,
-                        format_type_be(atttypid),
-                        format_type_be(type_id)),
-                    errhint("You will need to rewrite or cast the expression.")));
+            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmsg("column \"%s\" is of type %s but %s expression is of type %s", attname, format_type_be(atttypid),
+                generatedCol ? "generated column" : "default", format_type_be(type_id)),
+                errhint("You will need to rewrite or cast the expression.")));
     }
 
     /*

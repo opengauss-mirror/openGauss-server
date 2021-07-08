@@ -27,6 +27,7 @@
 typedef struct RawColumnDefault {
     AttrNumber attnum;         /* attribute to attach default to */
     Node      *raw_default;    /* default value (untransformed parse tree) */
+    char       generatedCol;   /* generated column setting */
 } RawColumnDefault;
 
 typedef struct CookedConstraint {
@@ -160,8 +161,9 @@ extern void InsertPgClassTuple(Relation pg_class_desc, Relation new_rel_desc, Oi
 extern List *AddRelationNewConstraints(Relation rel, List *newColDefaults, List *newConstraints, bool allow_merge, bool is_local);
 
 extern List *AddRelClusterConstraints(Relation rel, List *clusterKeys);
-extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr);
-extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname);
+extern void StoreAttrDefault(Relation rel, AttrNumber attnum, Node *expr,  char generatedCol);
+extern Node *cookDefault(ParseState *pstate, Node *raw_default, Oid atttypid, int32 atttypmod, char *attname,
+    char generatedCol);
 extern void DeleteRelationTuple(Oid relid);
 extern void DeleteAttributeTuples(Oid relid);
 extern void DeleteSystemAttributeTuples(Oid relid);

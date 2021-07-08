@@ -337,7 +337,7 @@ static PyObject* PLy_cursor_iternext(PyObject* self)
                 PLy_input_tuple_funcs(&cursor->result, SPI_tuptable->tupdesc);
             }
 
-            ret = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[0], SPI_tuptable->tupdesc);
+            ret = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[0], SPI_tuptable->tupdesc, true);
         }
 
         SPI_freetuptable(SPI_tuptable);
@@ -411,8 +411,7 @@ static PyObject* PLy_cursor_fetch(PyObject* self, PyObject* args)
             ret->rows = PyList_New(SPI_processed);
 
             for (uint32 i = 0; i < SPI_processed; i++) {
-                PyObject* row = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[i], SPI_tuptable->tupdesc);
-
+                PyObject *row = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[i], SPI_tuptable->tupdesc, true);
                 PyList_SetItem(ret->rows, i, row);
             }
         }

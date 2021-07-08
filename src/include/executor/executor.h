@@ -367,6 +367,11 @@ extern bool ExecRelationIsTargetRelation(EState* estate, Index scanrelid);
 extern Relation ExecOpenScanRelation(EState* estate, Index scanrelid);
 extern void ExecCloseScanRelation(Relation scanrel);
 
+static inline RangeTblEntry *exec_rt_fetch(Index rti, EState *estate)
+{
+    return (RangeTblEntry *)list_nth(estate->es_range_table, rti - 1);
+}
+
 extern Partition ExecOpenScanParitition(
     EState* estate, Relation parent, PartitionIdentifier* partID, LOCKMODE lockmode);
 

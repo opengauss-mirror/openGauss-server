@@ -35,6 +35,7 @@
 #include "catalog/heap.h"
 #include "commands/copy.h"
 #include "executor/nodeIndexscan.h"
+#include "executor/nodeModifyTable.h"
 #include "gstrace/executer_gstrace.h"
 #include "instruments/instr_unique_sql.h"
 #include "libpq/pqformat.h"
@@ -1593,6 +1594,18 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
 
     (void)ExecStoreTuple(tuple, m_local.m_reslot, InvalidBuffer, false);
 
+    /*
+     * Compute stored generated columns
+     */
+    if (result_rel_info->ri_RelationDesc->rd_att->constr &&
+        result_rel_info->ri_RelationDesc->rd_att->constr->has_generated_stored) {
+        ExecComputeStoredGenerated(result_rel_info, m_c_local.m_estate, m_local.m_reslot, tuple, CMD_INSERT);
+        if (tuple != (HeapTuple)m_local.m_reslot->tts_tuple) {
+            tableam_tops_free_tuple(tuple);
+            tuple = (HeapTuple)m_local.m_reslot->tts_tuple;
+        }
+    }
+
     if (rel->rd_att->constr) {
         ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
     }
@@ -1996,6 +2009,16 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
         }
 
         (void)ExecStoreTuple(tup, m_local.m_reslot, InvalidBuffer, false);
+
+        if (result_rel_info->ri_RelationDesc->rd_att->constr &&
+            result_rel_info->ri_RelationDesc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, m_c_local.m_estate, m_local.m_reslot, tup, CMD_UPDATE);
+            if (tup != (HeapTuple)m_local.m_reslot->tts_tuple) {
+                tableam_tops_free_tuple(tup);
+                tup = (HeapTuple)m_local.m_reslot->tts_tuple;
+            }
+        }
+
         if (rel->rd_att->constr)
             ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
 

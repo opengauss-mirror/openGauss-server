@@ -95,6 +95,6 @@ extern void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc);
 extern Datum PLyObject_ToCompositeDatum(PLyTypeInfo* info, TupleDesc desc, PyObject* plrv);
 
 /* conversion from heap tuples to Python dictionaries */
-extern PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc);
+extern PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, bool include_generated);
 
 #endif /* PLPY_TYPEIO_H */

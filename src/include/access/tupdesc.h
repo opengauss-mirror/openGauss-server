@@ -49,6 +49,7 @@ const static uint32 UHEAP_TUPLE = 2;
 typedef struct attrDefault {
     AttrNumber adnum;
     char* adbin; /* nodeToString representation of expr */
+    char generatedCol; /* generated column setting */
 } AttrDefault;
 
 typedef struct constrCheck {
@@ -67,6 +68,8 @@ typedef struct tupleConstr {
     uint16 num_defval;
     uint16 num_check;
     bool has_not_null;
+    bool has_generated_stored;
+    char* generatedCols;     /* attribute array */
 } TupleConstr;
 
 /* This structure contains initdefval of a tuple */
@@ -136,6 +139,8 @@ typedef struct tupleDesc {
 
 /* Accessor for the i'th attribute of tupdesc. */
 #define TupleDescAttr(tupdesc, i) (tupdesc->attrs[(i)])
+#define ISGENERATEDCOL(tupdesc, i) \
+    ((tupdesc)->constr != NULL && (tupdesc)->constr->num_defval > 0 && (tupdesc)->constr->generatedCols[(i)])
 
 extern TupleDesc CreateTemplateTupleDesc(int natts, bool hasoid, TableAmType tam = TAM_HEAP);
 
@@ -179,5 +184,7 @@ extern TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, Lis
 extern bool tupledesc_have_pck(TupleConstr* constr);
 
 extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute source);
+
+extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 
 #endif /* TUPDESC_H */

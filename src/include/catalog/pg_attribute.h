@@ -231,5 +231,7 @@ typedef FormData_pg_attribute *Form_pg_attribute;
  * genbki.pl.  Only "bootstrapped" relations need be included.
  * ----------------
  */
+#define ATTRIBUTE_IDENTITY_ALWAYS 'a'
+#define ATTRIBUTE_GENERATED_STORED 's'
 #endif   /* PG_ATTRIBUTE_H */
 

@@ -967,9 +967,10 @@ static List *postgresPlanForeignModify(PlannerInfo *root, ModifyTable *plan, Ind
         }
     } else if (operation == CMD_UPDATE) {
         Bitmapset *tmpset = bms_copy(rte->updatedCols);
+        Bitmapset *allUpdatedCols = bms_union(tmpset, rte->extraUpdatedCols);
         AttrNumber col;
 
-        while ((col = bms_first_member(tmpset)) >= 0) {
+        while ((col = bms_first_member(allUpdatedCols)) >= 0) {
             col += FirstLowInvalidHeapAttributeNumber;
             if (col <= InvalidAttrNumber) { /* shouldn't happen */
                 elog(ERROR, "system-column update is not supported");

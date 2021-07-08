@@ -55,6 +55,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/var.h"
 #include "rewrite/rewriteDefine.h"
+#include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "catalog/storage.h"

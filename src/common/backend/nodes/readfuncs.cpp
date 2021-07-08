@@ -2821,6 +2821,11 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_BOOL_FIELD(sublink_pull_up);
     }
 
+    IF_EXIST(extraUpdatedCols)
+    {
+        READ_BITMAPSET_FIELD(extraUpdatedCols);
+    }
+
     READ_DONE();
 }
 
@@ -4821,6 +4826,10 @@ static ColumnDef* _readColumnDef()
     READ_NODE_FIELD(clientLogicColumnRef);
     if (local_node->storage == '0') {
         local_node->storage = 0;
+    }
+
+    IF_EXIST(generatedCol) {
+        READ_CHAR_FIELD(generatedCol);
     }
 
     READ_DONE();
