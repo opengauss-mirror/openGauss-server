@@ -1589,6 +1589,7 @@ static void expand_inherited_rtentry(PlannerInfo* root, RangeTblEntry* rte, Inde
             childrte->selectedCols = translate_col_privs(rte->selectedCols, appinfo->translated_vars);
             childrte->insertedCols = translate_col_privs(rte->insertedCols, appinfo->translated_vars);
             childrte->updatedCols = translate_col_privs(rte->updatedCols, appinfo->translated_vars);
+            childrte->extraUpdatedCols = translate_col_privs(rte->extraUpdatedCols, appinfo->translated_vars);
         }
 
         /*
@@ -2347,6 +2348,7 @@ void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti)
             childrte->selectedCols = translate_col_privs(rte->selectedCols, appinfo->translated_vars);
             childrte->insertedCols = translate_col_privs(rte->insertedCols, appinfo->translated_vars);
             childrte->updatedCols = translate_col_privs(rte->updatedCols, appinfo->translated_vars);
+            childrte->extraUpdatedCols = translate_col_privs(rte->extraUpdatedCols, appinfo->translated_vars);
         }
 
         /*

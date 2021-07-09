@@ -383,6 +383,53 @@ typedef struct MergeState {
     List* notMatchedActionStates;
 } MergeState;
 
+/* ----------------------------------------------------------------
+ *				 Expression State Trees
+ *
+ * Each executable expression tree has a parallel ExprState tree.
+ *
+ * Unlike PlanState, there is not an exact one-for-one correspondence between
+ * ExprState node types and Expr node types.  Many Expr node types have no
+ * need for node-type-specific run-time state, and so they can use plain
+ * ExprState or GenericExprState as their associated ExprState node type.
+ * ----------------------------------------------------------------
+ */
+
+/* ----------------
+ *		ExprState node
+ *
+ * ExprState is the common superclass for all ExprState-type nodes.
+ *
+ * It can also be instantiated directly for leaf Expr nodes that need no
+ * local run-time state (such as Var, Const, or Param).
+ *
+ * To save on dispatch overhead, each ExprState node contains a function
+ * pointer to the routine to execute to evaluate the node.
+ * ----------------
+ */
+typedef struct ExprState ExprState;
+
+typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
+typedef ScalarVector* (*VectorExprFun)(
+    ExprState* expression, ExprContext* econtext, bool* selVector, ScalarVector* inputVector, ExprDoneCond* isDone);
+
+typedef void* (*exprFakeCodeGenSig)(void*);
+struct ExprState {
+    NodeTag type;
+    Expr* expr;                 /* associated Expr node */
+    ExprStateEvalFunc evalfunc; /* routine to run to execute node */
+
+    // vectorized evaluator
+    //
+    VectorExprFun vecExprFun;
+
+    exprFakeCodeGenSig exprCodeGen; /* routine to run llvm assembler function */
+
+    ScalarVector tmpVector;
+
+    Oid resultType;
+};
+
 /* ----------------
  *	  ResultRelInfo information
  *
@@ -447,6 +494,12 @@ typedef struct ResultRelInfo {
      */
     Index ri_mergeTargetRTI;
     ProjectionInfo* ri_updateProj;
+    
+    /* array of stored generated columns expr states */
+    ExprState **ri_GeneratedExprs;
+
+    /* number of stored generated columns we need to compute */
+    int ri_NumGeneratedNeeded;
 } ResultRelInfo;
 
 /* bloom filter controller */
@@ -679,53 +732,6 @@ typedef HASH_SEQ_STATUS TupleHashIterator;
         hash_seq_init(iter, (htable)->hashtab); \
     } while (0)
 #define ScanTupleHashTable(iter) ((TupleHashEntry)hash_seq_search(iter))
-
-/* ----------------------------------------------------------------
- *				 Expression State Trees
- *
- * Each executable expression tree has a parallel ExprState tree.
- *
- * Unlike PlanState, there is not an exact one-for-one correspondence between
- * ExprState node types and Expr node types.  Many Expr node types have no
- * need for node-type-specific run-time state, and so they can use plain
- * ExprState or GenericExprState as their associated ExprState node type.
- * ----------------------------------------------------------------
- */
-
-/* ----------------
- *		ExprState node
- *
- * ExprState is the common superclass for all ExprState-type nodes.
- *
- * It can also be instantiated directly for leaf Expr nodes that need no
- * local run-time state (such as Var, Const, or Param).
- *
- * To save on dispatch overhead, each ExprState node contains a function
- * pointer to the routine to execute to evaluate the node.
- * ----------------
- */
-typedef struct ExprState ExprState;
-
-typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
-typedef ScalarVector* (*VectorExprFun)(
-    ExprState* expression, ExprContext* econtext, bool* selVector, ScalarVector* inputVector, ExprDoneCond* isDone);
-
-typedef void* (*exprFakeCodeGenSig)(void*);
-struct ExprState {
-    NodeTag type;
-    Expr* expr;                 /* associated Expr node */
-    ExprStateEvalFunc evalfunc; /* routine to run to execute node */
-
-    // vectorized evaluator
-    //
-    VectorExprFun vecExprFun;
-
-    exprFakeCodeGenSig exprCodeGen; /* routine to run llvm assembler function */
-
-    ScalarVector tmpVector;
-
-    Oid resultType;
-};
 
 /* ----------------
  *		GenericExprState node

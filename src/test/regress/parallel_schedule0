@@ -761,6 +761,10 @@ test: leaky_function_operator
 #test: gs_guc
 
 test: smp
+
+#generated column test
+test: generated_col
+
 test: sequence_cache_test
 test: procedure_privilege_test
 

@@ -344,7 +344,7 @@ static PyObject* PLy_function_build_args(FunctionCallInfo fcinfo, PLyProcedure* 
                     tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
                     tmptup.t_data = td;
 
-                    arg = PLyDict_FromTuple(&(proc->args[i]), &tmptup, tupdesc);
+                    arg = PLyDict_FromTuple(&(proc->args[i]), &tmptup, tupdesc, true);
                     ReleaseTupleDesc(tupdesc);
                 }
             } else {
@@ -489,7 +489,8 @@ static PyObject* PLy_trigger_build_args(FunctionCallInfo fcinfo, PLyProcedure* p
                 pltevent = PyString_FromString("INSERT");
 
                 PyDict_SetItemString(pltdata, "old", Py_None);
-                pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att);
+                pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att,
+                                           !TRIGGER_FIRED_BEFORE(tdata->tg_event));
                 PyDict_SetItemString(pltdata, "new", pytnew);
                 Py_DECREF(pytnew);
                 *rv = tdata->tg_trigtuple;
@@ -497,17 +498,18 @@ static PyObject* PLy_trigger_build_args(FunctionCallInfo fcinfo, PLyProcedure* p
                 pltevent = PyString_FromString("DELETE");
 
                 PyDict_SetItemString(pltdata, "new", Py_None);
-                pytold = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att);
+                pytold = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att, true);
                 PyDict_SetItemString(pltdata, "old", pytold);
                 Py_DECREF(pytold);
                 *rv = tdata->tg_trigtuple;
             } else if (TRIGGER_FIRED_BY_UPDATE(tdata->tg_event)) {
                 pltevent = PyString_FromString("UPDATE");
 
-                pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_newtuple, tdata->tg_relation->rd_att);
+                pytnew = PLyDict_FromTuple(&(proc->result), tdata->tg_newtuple, tdata->tg_relation->rd_att,
+                                           !TRIGGER_FIRED_BEFORE(tdata->tg_event));
                 PyDict_SetItemString(pltdata, "new", pytnew);
                 Py_DECREF(pytnew);
-                pytold = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att);
+                pytold = PLyDict_FromTuple(&(proc->result), tdata->tg_trigtuple, tdata->tg_relation->rd_att, true);
                 PyDict_SetItemString(pltdata, "old", pytold);
                 Py_DECREF(pytold);
                 *rv = tdata->tg_newtuple;
@@ -635,6 +637,10 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
                         "key \"%s\" found in TD[\"new\"] does not exist as a column in the triggering row", plattstr)));
             }
             atti = attn - 1;
+
+            if (ISGENERATEDCOL(tupdesc, atti))
+                ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_E_R_I_E_TRIGGER_PROTOCOL_VIOLATED),
+                    errmsg("cannot set generated column \"%s\"", plattstr)));
 
             plval = PyDict_GetItem(plntup, platt);
             if (plval == NULL) {

@@ -204,6 +204,7 @@ static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate);
 
 static void stp_check_transaction_and_set_resource_owner(ResourceOwner oldResourceOwner,TransactionId oldTransactionId);
 static void stp_check_transaction_and_create_econtext(PLpgSQL_execstate* estate,TransactionId oldTransactionId);
+static void RecordSetGeneratedField(PLpgSQL_rec *recNew);
 
 bool plpgsql_get_current_value_stp_with_exception();
 void plpgsql_restore_current_value_stp_with_exception(bool saved_current_stp_with_exception);
@@ -631,6 +632,47 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     return estate.retval;
 }
 
+static void RecordSetGeneratedField(PLpgSQL_rec *recNew)
+{
+    int natts = recNew->tupdesc->natts;
+    Datum* values = NULL;
+    bool* nulls = NULL;
+    bool* replaces = NULL;
+    HeapTuple newtup = NULL;
+    errno_t rc = EOK;
+
+    /*
+    * Set up values/control arrays for heap_modify_tuple. For all
+    * the attributes except the one we want to replace, use the
+    * value that's in the old tuple.
+    */
+    values = (Datum*)palloc(sizeof(Datum) * natts);
+    nulls = (bool*)palloc(sizeof(bool) * natts);
+    replaces = (bool*)palloc(sizeof(bool) * natts);
+
+    rc = memset_s(replaces, sizeof(bool) * natts, false, sizeof(bool) * natts);
+    securec_check(rc, "\0", "\0");
+
+    for (int i = 0; i < recNew->tupdesc->natts; i++) {
+        if (GetGeneratedCol(recNew->tupdesc, i) == ATTRIBUTE_GENERATED_STORED) {
+            replaces[i] = true;
+            values[i] = (Datum)0;
+            nulls[i] = true;
+        }
+    }
+    newtup = heap_modify_tuple(recNew->tup, recNew->tupdesc, values, nulls, replaces);
+    if (recNew->freetup) {
+        heap_freetuple_ext(recNew->tup);
+    }
+
+    recNew->tup = newtup;
+    recNew->freetup = true;
+
+    pfree_ext(values);
+    pfree_ext(nulls);
+    pfree_ext(replaces);
+}
+
 /* ----------
  * plpgsql_exec_trigger		Called by the call handler for
  *				trigger execution.
@@ -698,6 +740,19 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
     } else if (TRIGGER_FIRED_BY_UPDATE(trigdata->tg_event)) {
         rec_new->tup = trigdata->tg_newtuple;
         rec_old->tup = trigdata->tg_trigtuple;
+
+        /*
+         * In BEFORE trigger, stored generated columns are not computed yet,
+         * so make them null in the NEW row.  (Only needed in UPDATE branch;
+         * in the INSERT case, they are already null, but in UPDATE, the field
+         * still contains the old value.)  Alternatively, we could construct a
+         * whole new row structure without the generated columns, but this way
+         * seems more efficient and potentially less confusing.
+         */
+        if (rec_new->tupdesc->constr && rec_new->tupdesc->constr->has_generated_stored &&
+            TRIGGER_FIRED_BEFORE(trigdata->tg_event)) {
+            RecordSetGeneratedField(rec_new);
+        }
     } else if (TRIGGER_FIRED_BY_DELETE(trigdata->tg_event)) {
         rec_new->tup = NULL;
         rec_old->tup = trigdata->tg_trigtuple;

@@ -860,6 +860,7 @@ typedef struct ColumnDef {
     ClientLogicColumnRef *clientLogicColumnRef;
     Position *position;
     Form_pg_attribute dropped_attr; /* strcuture for dropped attribute during create table like OE */
+    char generatedCol;         /* generated column setting */
 } ColumnDef;
 
 /*
@@ -1068,7 +1069,8 @@ typedef enum ConstrType { /* types of constraints */
     CONSTR_ATTR_DEFERRABLE, /* attributes for previous constraint node */
     CONSTR_ATTR_NOT_DEFERRABLE,
     CONSTR_ATTR_DEFERRED,
-    CONSTR_ATTR_IMMEDIATE
+    CONSTR_ATTR_IMMEDIATE,
+    CONSTR_GENERATED
 } ConstrType;
 
 typedef struct Constraint {
@@ -1120,6 +1122,8 @@ typedef struct Constraint {
      * Field used for soft constraint, which works on HDFS foreign table.
      */
     InformationalConstraint *inforConstraint;
+    char generated_when; /* ALWAYS or BY DEFAULT */
+    char generated_kind; /* currently always STORED */
 } Constraint;
 
 /*
@@ -1131,7 +1135,7 @@ typedef struct TableLikeClause {
     bits32 options; /* OR of TableLikeOption flags */
 } TableLikeClause;
 
-#define MAX_TABLE_LIKE_OPTIONS (10)
+#define MAX_TABLE_LIKE_OPTIONS (11)
 typedef enum TableLikeOption {
     CREATE_TABLE_LIKE_DEFAULTS = 1 << 0,
     CREATE_TABLE_LIKE_CONSTRAINTS = 1 << 1,
@@ -1143,6 +1147,7 @@ typedef enum TableLikeOption {
     CREATE_TABLE_LIKE_DISTRIBUTION = 1 << 7,
     CREATE_TABLE_LIKE_OIDS = 1 << 8,
     CREATE_TABLE_LIKE_DEFAULTS_SERIAL = 1 << 9, /* Backward compatibility. Inherits serial defaults by default. */
+    CREATE_TABLE_LIKE_GENERATED = 1 << 10,
     CREATE_TABLE_LIKE_ALL = 0x7FFFFFFF
 } TableLikeOption;
 

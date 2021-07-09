@@ -17,6 +17,7 @@
 
 #include "catalog/pg_class.h"
 #include "catalog/pg_default_acl.h"
+#include "catalog/pg_attrdef.h"
 #include "common.h"
 #include "describe.h"
 #include "dumputils.h"
@@ -1278,6 +1279,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     bool show_modifiers = false;
     bool retval = false;
     bool hasreplident = is_column_exists(pset.db, RelationRelationId, "relreplident");
+    bool hasGenColFeature = is_column_exists(pset.db, AttrDefaultRelationId, "adgencol");
 
     bool has_rlspolicy = false;
     const char* has_rlspolicy_sql =
@@ -1511,6 +1513,14 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         }
         appendPQExpBuffer(&buf, ",\n  a.attkvtype");
     }
+    if (hasGenColFeature) {
+        appendPQExpBuffer(&buf, ",\n (SELECT  h.adgencol"
+            "\n   FROM pg_catalog.pg_attrdef h"
+            "\n   WHERE h.adrelid = a.attrelid AND h.adnum = a.attnum AND a.atthasdef)"
+            " AS generated_column");
+    } else {
+        appendPQExpBuffer(&buf, ", '' AS generated_column ");
+    }
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
     appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND "
                             "a.attkvtype != 4 AND a.attname <> 'tableoid'", oid);
@@ -1682,7 +1692,11 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 appendPQExpBufferStr(&tmpbuf, " ");
             }
             /* translator: default values of column definitions */
-            appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+            if (strlen(PQgetvalue(res, i, PQfnumber(res, "generated_column"))) > 0) {
+                appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), default_value);
+            } else {
+                appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+            }
             }
 #ifdef HAVE_CE
             if (hasFullEncryptFeature &&

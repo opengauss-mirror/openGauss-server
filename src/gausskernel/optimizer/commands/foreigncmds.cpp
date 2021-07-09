@@ -1368,6 +1368,7 @@ ColumnDef* makeColumnDef(const char* colname, char* coltype)
     col->colname = pstrdup(colname);
     col->typname = SystemTypeName(coltype);
     col->kvtype = 0;
+    col->generatedCol = '\0';
     col->inhcount = 0;
     col->is_local = true;
     col->is_not_null = false;

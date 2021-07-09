@@ -147,6 +147,9 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
     (rt_fetch((relinfo)->ri_RangeTableIndex, (estate)->es_range_table)->insertedCols)
 #define GetUpdatedColumns(relinfo, estate) \
     (rt_fetch((relinfo)->ri_RangeTableIndex, (estate)->es_range_table)->updatedCols)
+#define GET_ALL_UPDATED_COLUMNS(relinfo, estate)                                     \
+    (bms_union(exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->updatedCols, \
+        exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->extraUpdatedCols))
 
 /* ----------------------------------------------------------------
  * report_iud_time
@@ -1723,6 +1726,7 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
     }
     resultRelInfo->ri_FdwState = NULL;
     resultRelInfo->ri_ConstraintExprs = NULL;
+    resultRelInfo->ri_GeneratedExprs = NULL;
     resultRelInfo->ri_junkFilter = NULL;
     resultRelInfo->ri_projectReturning = NULL;
     resultRelInfo->ri_mergeTargetRTI = 0;

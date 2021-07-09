@@ -3284,6 +3284,8 @@ static List* transformUpdateTargetList(ParseState* pstate, List* qryTlist, List*
             ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION), errmsg("UPDATE target count mismatch --- internal error")));
     }
 
+    setExtraUpdatedCols(pstate);
+
     return tlist;
 }
 

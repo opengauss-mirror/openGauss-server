@@ -55,10 +55,12 @@
 #include "executor/executor.h"
 #include "executor/execMerge.h"
 #include "executor/nodeModifyTable.h"
+#include "executor/tuptable.h"
 #include "foreign/fdwapi.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "nodes/nodeFuncs.h"
+#include "rewrite/rewriteHandler.h"
 #ifdef PGXC
 #include "parser/parsetree.h"
 #include "pgxc/execRemote.h"
@@ -85,6 +87,7 @@
 
 #ifdef PGXC
 static TupleTableSlot* fill_slot_with_oldvals(TupleTableSlot* slot, HeapTupleHeader oldtuphd, Bitmapset* modifiedCols);
+static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype);
 
 /* Copied from trigger.c */
 #define GetUpdatedColumns(relinfo, estate) \
@@ -292,6 +295,121 @@ static void ExecCheckTIDVisible(EState* estate, Relation rel, ItemPointer tid)
 
     ExecCheckHeapTupleVisible(estate, &tuple, buffer);
     ReleaseBuffer(buffer);
+}
+
+static void RecoredGeneratedExpr(ResultRelInfo *resultRelInfo, EState *estate, CmdType cmdtype)
+{
+    Relation rel = resultRelInfo->ri_RelationDesc;
+    TupleDesc tupdesc = RelationGetDescr(rel);
+    int natts = tupdesc->natts;
+    MemoryContext oldContext;
+
+    Assert(tupdesc->constr && tupdesc->constr->has_generated_stored);
+
+    /*
+     * If first time through for this result relation, build expression
+     * nodetrees for rel's stored generation expressions.  Keep them in the
+     * per-query memory context so they'll survive throughout the query.
+     */
+    if (resultRelInfo->ri_GeneratedExprs == NULL) {
+        oldContext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+        resultRelInfo->ri_GeneratedExprs = (ExprState **)palloc(natts * sizeof(ExprState *));
+        resultRelInfo->ri_NumGeneratedNeeded = 0;
+
+        for (int i = 0; i < natts; i++) {
+            if (GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED) {
+                Expr *expr;
+
+                /*
+                 * If it's an update and the current column was not marked as
+                 * being updated, then we can skip the computation.  But if
+                 * there is a BEFORE ROW UPDATE trigger, we cannot skip
+                 * because the trigger might affect additional columns.
+                 */
+                if (cmdtype == CMD_UPDATE && !(rel->trigdesc && rel->trigdesc->trig_update_before_row) &&
+                    !bms_is_member(i + 1 - FirstLowInvalidHeapAttributeNumber,
+                    exec_rt_fetch(resultRelInfo->ri_RangeTableIndex, estate)->extraUpdatedCols)) {
+                    resultRelInfo->ri_GeneratedExprs[i] = NULL;
+                    continue;
+                }
+
+                expr = (Expr *)build_column_default(rel, i + 1);
+                if (expr == NULL)
+                    elog(ERROR, "no generation expression found for column number %d of table \"%s\"", i + 1,
+                        RelationGetRelationName(rel));
+
+                resultRelInfo->ri_GeneratedExprs[i] = ExecPrepareExpr(expr, estate);
+                resultRelInfo->ri_NumGeneratedNeeded++;
+            }
+        }
+
+        (void)MemoryContextSwitchTo(oldContext);
+    }
+}
+
+/*
+ * Compute stored generated columns for a tuple
+ */
+void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot, HeapTuple oldtuple,
+    CmdType cmdtype)
+{
+    Relation rel = resultRelInfo->ri_RelationDesc;
+    TupleDesc tupdesc = RelationGetDescr(rel);
+    uint32 natts = (uint32)tupdesc->natts;
+    MemoryContext oldContext;
+    Datum *values;
+    bool *nulls;
+    bool *replaces;
+    HeapTuple newtuple;
+    errno_t rc = EOK;
+
+    RecoredGeneratedExpr(resultRelInfo, estate, cmdtype);
+
+    /*
+     * If no generated columns have been affected by this change, then skip
+     * the rest.
+     */
+    if (resultRelInfo->ri_NumGeneratedNeeded == 0)
+        return;
+
+    oldContext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+    values = (Datum *)palloc(sizeof(*values) * natts);
+    nulls = (bool *)palloc(sizeof(*nulls) * natts);
+    replaces = (bool *)palloc0(sizeof(*replaces) * natts);
+    rc = memset_s(replaces, sizeof(bool) * natts, 0, sizeof(bool) * natts);
+    securec_check(rc, "\0", "\0");
+
+    for (uint32 i = 0; i < natts; i++) {
+        Form_pg_attribute attr = TupleDescAttr(tupdesc, i);
+
+        if (GetGeneratedCol(tupdesc, i) == ATTRIBUTE_GENERATED_STORED && resultRelInfo->ri_GeneratedExprs[i]) {
+            ExprContext *econtext;
+            Datum val;
+            bool isnull;
+
+            econtext = GetPerTupleExprContext(estate);
+            econtext->ecxt_scantuple = slot;
+
+            val = ExecEvalExpr(resultRelInfo->ri_GeneratedExprs[i], econtext, &isnull, NULL);
+
+            /*
+             * We must make a copy of val as we have no guarantees about where
+             * memory for a pass-by-reference Datum is located.
+             */
+            if (!isnull)
+                val = datumCopy(val, attr->attbyval, attr->attlen);
+
+            values[i] = val;
+            nulls[i] = isnull;
+            replaces[i] = true;
+        }
+    }
+
+    newtuple = heap_modify_tuple(oldtuple, tupdesc, values, nulls, replaces);
+    (void)ExecStoreTuple(newtuple, slot, InvalidBuffer, false);
+
+    (void)MemoryContextSwitchTo(oldContext);
 }
 
 static bool ExecConflictUpdate(ModifyTableState* mtstate, ResultRelInfo* resultRelInfo, ItemPointer conflictTid,
@@ -634,6 +752,14 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
         new_id = InvalidOid;
     } else if (result_rel_info->ri_FdwRoutine) {
+        /*
+         * Compute stored generated columns
+         */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_INSERT);
+            tuple = (HeapTuple)slot->tts_tuple;
+        }
+
 #ifdef ENABLE_MOT
         if (result_rel_info->ri_FdwRoutine->GetFdwType && result_rel_info->ri_FdwRoutine->GetFdwType() == MOT_ORC) {
             if (result_relation_desc->rd_att->constr) {
@@ -660,6 +786,13 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
 
         new_id = InvalidOid;
     } else {
+        /*
+         * Compute stored generated columns
+         */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_INSERT);
+            tuple = (HeapTuple)slot->tts_tuple;
+        }
         /*
          * Check the constraints of the tuple
          */
@@ -1356,6 +1489,14 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         tuple = ExecMaterializeSlot(slot);
     } else if (result_rel_info->ri_FdwRoutine) {
         /*
+         * Compute stored generated columns
+         */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
+            tuple = (HeapTuple)slot->tts_tuple;
+        }
+
+        /*
          * update in foreign table: let the FDW do it
          */
 #ifdef ENABLE_MOT
@@ -1380,6 +1521,14 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         tuple = ExecMaterializeSlot(slot);
     } else {
         bool update_indexes = false;
+
+        /*
+         * Compute stored generated columns
+         */
+        if (result_relation_desc->rd_att->constr && result_relation_desc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, estate, slot, tuple, CMD_UPDATE);
+            tuple = (HeapTuple)slot->tts_tuple;
+        }
 
         /*
          * Check the constraints of the tuple
