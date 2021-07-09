@@ -43,6 +43,7 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
 #include "commands/async.h"
+#include "commands/copy.h"
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
 #include "commands/variable.h"
@@ -4980,6 +4981,20 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+        {{"wal_insert_status_entries",
+             PGC_POSTMASTER,
+             WAL_SETTINGS,
+             gettext_noop("Sets the size of wal insert status array for WAL."),
+             NULL,
+            },
+            &g_instance.attr.attr_storage.wal_insert_status_entries,
+            4194304,
+            131072,
+            4194304,
+            check_wal_insert_status_entries,
+            NULL,
+            NULL},
+
         {{"wal_writer_delay",
              PGC_SIGHUP,
              WAL_SETTINGS,
@@ -8560,6 +8575,19 @@ static void InitConfigureNamesString()
                 check_inplace_upgrade_next_oids,
                 NULL,
                 NULL},
+
+           {{"num_internal_lock_partitions",
+                PGC_POSTMASTER,
+                LOCK_MANAGEMENT,
+                gettext_noop("num of csnlog clog and locktable lwlock partitions."),
+                NULL,
+                GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+                &g_instance.attr.attr_storage.num_internal_lock_partitions_str,
+                "CLOG_PART=256,CSNLOG_PART=512,LOG2_LOCKTABLE_PART=4,TWOPHASE_PART=1",
+                NULL,
+                NULL,
+                NULL}, 
+
             /* analysis options for dfx */
             {{"analysis_options",
                  PGC_USERSET,
@@ -19874,6 +19902,33 @@ bool check_numa_distribute_mode(char** newval, void** extra, GucSource source)
         return true;
     }
     return false;
+}
+
+/* Initialize storage critical lwlock partition num */
+void InitializeNumLwLockPartitions(void)
+{
+    /* set default values */
+    SetLWLockPartDefaultNum();
+    /* Do str copy and remove space. */
+    char* attr = TrimStr(g_instance.attr.attr_storage.num_internal_lock_partitions_str);
+    if (attr == NULL || attr[0] == '\0') { /* use default values */
+        return;
+    }
+    const char* pdelimiter = ",";
+    List *res = NULL;
+    char* nextToken = NULL;
+    char* token = strtok_s(attr, pdelimiter, &nextToken);
+    while (token != NULL) {
+        res = lappend(res, TrimStr(token));
+        token = strtok_s(NULL, pdelimiter, &nextToken);
+    }
+    pfree(attr);
+    /* check input string and set lwlock num */
+    CheckAndSetLWLockPartInfo(res);
+    /* check range */
+    CheckLWLockPartNumRange();
+
+    list_free_deep(res);
 }
 
 #include "guc-file.inc"

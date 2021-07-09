@@ -8,6 +8,10 @@ subdir = src/gausskernel/runtime
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = codegen  executor  vecexecutor
+SUBDIRS     =  executor  vecexecutor
+
+ifeq ($(enable_llvm), yes)
+SUBDIRS     += codegen
+endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

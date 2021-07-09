@@ -32,7 +32,7 @@
 #ifndef __STDC_CONSTANT_MACROS
 #define __STDC_CONSTANT_MACROS
 #endif
-
+#ifdef ENABLE_LLVM_COMPILE
 #include "llvm/IR/Verifier.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
@@ -53,6 +53,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/raw_os_ostream.h"
+#endif
 
 #undef __STDC_LIMIT_MACROS
 #include "c.h"
@@ -155,6 +156,7 @@ const int llvm_smul_with_overflow = 236;
 const int llvm_ssub_with_overflow = 241;
 
 
+#ifdef ENABLE_LLVM_COMPILE
 /*
  * Declare related LLVM classes to avoid namespace pollution.
  */
@@ -181,6 +183,7 @@ class IRBuilder;
 
 class IRBuilderDefaultInserter;
 }  // namespace llvm
+#endif
 
 namespace dorado {
 
@@ -196,6 +199,7 @@ bool canInitCodegenInvironment();
  */
 bool canInitThreadCodeGen();
 
+#ifdef ENABLE_LLVM_COMPILE
 class GsCodeGen : public BaseObject {
 public:
     void initialize();
@@ -583,6 +587,7 @@ private:
     /* Records the c-function calls in codegen IR fucntion of expression tree */
     List* m_cfunction_calls;
 };
+#endif
 
 /*
  * Macros used to define the variables

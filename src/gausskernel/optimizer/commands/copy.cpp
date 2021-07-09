@@ -7491,6 +7491,25 @@ char* scan_dir(DIR* dir, const char* dirpath, const char* pattern, long* filesiz
     return NULL;
 }
 
+bool StrToInt32(const char* s, int *val)
+{
+    /* set val to zero */
+    *val = 0;
+    int base = 10;
+    const char* ptr = s;
+    /* process digits */
+    while (*ptr != '\0') {
+        if (isdigit((unsigned char)*ptr) == 0)
+            return false;
+        int8 digit = (*ptr++ - '0');
+        *val = *val * base + digit;
+        if (*val > PG_INT32_MAX || *val < PG_INT32_MIN) {
+            return false;
+        }
+    }
+    return true;
+}
+
 char* TrimStr(const char* str)
 {
     if (str == NULL) {

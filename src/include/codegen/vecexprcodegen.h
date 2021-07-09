@@ -33,6 +33,7 @@
 #include "codegen/gscodegen.h"
 
 namespace dorado {
+#ifdef ENABLE_LLVM_COMPILE
 /*
  * @Description	: Arguments used for Vectorized Expression CodeGen Engine.
  */
@@ -464,5 +465,6 @@ public:
      */
     static llvm::Value* MemCxtSwitToCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* context);
 };
+#endif
 }  // namespace dorado
 #endif

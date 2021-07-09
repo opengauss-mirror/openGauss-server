@@ -677,6 +677,7 @@ CStoreScanState* ExecInitCStoreScan(
     InitCStoreRelation(scan_stat, estate, idx_flag, parent_heap_rel);
     scan_stat->ps.ps_TupFromTlist = false;
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * First, not only consider the LLVM native object, but also consider the cost of
      * the LLVM compilation time. We will not use LLVM optimization if there is
@@ -702,6 +703,7 @@ CStoreScanState* ExecInitCStoreScan(
                 llvm_code_gen->addFunctionToMCJit(jitted_vecqual, reinterpret_cast<void**>(&(scan_stat->jitted_vecqual)));
         }
     }
+#endif
 
     /*
      * Initialize result tuple type and projection info.
@@ -758,6 +760,7 @@ CStoreScanState* ExecInitCStoreScan(
         scan_stat->m_pScanBatch->CreateSysColContainer(CurrentMemoryContext, plan_stat->ps_ProjInfo->pi_sysAttrList);
     }
 
+#ifdef ENABLE_LLVM_COMPILE
     /**
      * Since we separate the target list elements into simple var references and
      * generic expression, we only need to deal the generic expression with LLVM
@@ -776,6 +779,7 @@ CStoreScanState* ExecInitCStoreScan(
             llvm_code_gen->addFunctionToMCJit(
                 jitted_vectarget, reinterpret_cast<void**>(&(plan_stat->ps_ProjInfo->jitted_vectarget)));
     }
+#endif
 
     scan_stat->m_pScanRunTimeKeys = NULL;
     scan_stat->m_ScanRunTimeKeysNum = 0;

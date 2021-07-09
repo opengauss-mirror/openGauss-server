@@ -883,7 +883,7 @@ void TruncateCSNLOG(TransactionId oldestXact)
      */
     cutoffPage = TransactionIdToCSNPage(oldestXact);
 
-    SimpleLruTruncate(CsnlogCtl(0), cutoffPage, true, NUM_CSNLOG_PARTITIONS);
+    SimpleLruTruncate(CsnlogCtl(0), cutoffPage, NUM_CSNLOG_PARTITIONS);
 
     elog(LOG, "truncate CSN log oldestXact %lu, next xid %lu", oldestXact, t_thrd.xact_cxt.ShmemVariableCache->nextXid);
 }

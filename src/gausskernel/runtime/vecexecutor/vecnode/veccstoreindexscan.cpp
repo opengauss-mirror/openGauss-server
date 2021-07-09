@@ -295,6 +295,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
     rc = memcpy_s(indexstate, sizeof(CStoreScanState), scanstate, sizeof(CStoreScanState));
     securec_check(rc, "\0", "\0");
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * First, not only consider the LLVM native object, but also consider the cost of
      * the LLVM compilation time. We will not use LLVM optimization if there is
@@ -315,6 +316,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
         if (jitted_vecqual != NULL)
             llvmCodeGen->addFunctionToMCJit(jitted_vecqual, reinterpret_cast<void**>(&(indexstate->jitted_vecqual)));
     }
+#endif
 
     indexstate->ps.plan = (Plan*)node;
     indexstate->ps.state = estate;

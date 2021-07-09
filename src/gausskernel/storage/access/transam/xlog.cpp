@@ -6649,6 +6649,27 @@ bool check_wal_buffers(int *newval, void **extra, GucSource source)
 }
 
 /*
+ * GUC check_hook for wal_insert_status_entries
+ */
+bool check_wal_insert_status_entries(int *newval, void **extra, GucSource source)
+{
+    // if newval not power of 2
+    if (!((*newval != 0) && ((*newval & (*newval - 1)) == 0))) {
+        // get next Power Of 2 form newval
+        unsigned count = 0;
+        unsigned n = *newval;
+        while( n != 0)
+        {
+            n >>= 1;
+            count += 1;
+        }
+        *newval = 1 << count;
+    }
+
+    return true;
+}
+
+/*
  * Initialization of shared memory for XLOG
  */
 Size XLOGShmemSize(void)

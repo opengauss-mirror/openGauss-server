@@ -6978,6 +6978,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
             gstrace_exit(GS_TRC_ID_PostgresMain);
             proc_exit(1);
         }
+        InitializeNumLwLockPartitions();
     }
 
     /* initialize guc variables which need to be sended to stream threads */
@@ -7841,7 +7842,9 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         u_sess->attr.attr_sql.explain_allow_multinode = false;
         MemoryContext oldMemory =
             MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+#ifdef ENABLE_LLVM_COMPILE
         CodeGenThreadInitialize();
+#endif
         (void)MemoryContextSwitchTo(oldMemory);
         u_sess->exec_cxt.single_shard_stmt = false;
         /* Set statement_timestamp */

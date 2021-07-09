@@ -727,6 +727,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
     aggstate->numaggs = aggno + 1;
     aggstate->aggRun = NULL;
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Generate IR function for HashAggRunner::BuildAggTbl function, which
      * contains hashing part, allocate hashcell and agg part
@@ -741,6 +742,7 @@ VecAggState* ExecInitVecAggregation(VecAgg* node, EState* estate, int eflags)
             dorado::VecHashAggCodeGen::HashAggCodeGen(aggstate);
         }
     }
+#endif
 
     return aggstate;
 }

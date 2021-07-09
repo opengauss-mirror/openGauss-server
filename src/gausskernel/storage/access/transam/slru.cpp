@@ -1076,11 +1076,12 @@ int SimpleLruFlush(SlruCtl ctl, bool checkpoint)
 /*
  * Remove all segments before the one holding the passed page number
  */
-void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, bool isPart, int partitionNum)
+void SimpleLruTruncate(SlruCtl ctl, int64 cutoffPage, int partitionNum)
 {
     SlruShared shared = NULL;
     int64 slotno;
     bool isCsnLogCtl = strcmp(ctl->dir, "pg_csnlog") == 0;
+    bool isPart = (partitionNum > NUM_SLRU_DEFAULT_PARTITION);
 
     /*
      * The cutoff point is the start of the segment containing cutoffPage.

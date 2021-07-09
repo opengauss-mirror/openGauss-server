@@ -103,7 +103,9 @@ int StreamMain()
     
     MemoryContext oldMemory = MemoryContextSwitchTo(
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+#ifdef ENABLE_LLVM_COMPILE
     CodeGenThreadInitialize();
+#endif
     (void)MemoryContextSwitchTo(oldMemory);
     
     /* We can now handle ereport(ERROR) */

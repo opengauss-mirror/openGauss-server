@@ -141,11 +141,12 @@ bool HdfsScanPredicate<T, baseType>::BuildHdfsScanPredicateFromClause(Expr *expr
             return runningTimeSet;
         }
 
+#ifdef ENABLE_LLVM_COMPILE
         /* Build IR according to expr node. */
         if (CodeGenThreadObjectReady()) {
             (void)ForeignScanExprCodeGen(expr, NULL, &m_jittedFunc);
         }
-
+#endif
         if (IsA(rightop, Const)) {
             datumValue = ((Const *)rightop)->constvalue;
             datumType = ((Const *)rightop)->consttype;

@@ -170,6 +170,7 @@ VecGroupState* ExecInitVecGroup(VecGroup* node, EState* estate, int eflags)
     grp_state->ss.ps.targetlist = (List*)ExecInitVecExpr((Expr*)node->plan.targetlist, (PlanState*)grp_state);
     grp_state->ss.ps.qual = (List*)ExecInitVecExpr((Expr*)node->plan.qual, (PlanState*)grp_state);
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Check if nlstate->js.joinqual and nlstate->js.ps.qual expr list could be
      * codegened or not.
@@ -184,6 +185,7 @@ VecGroupState* ExecInitVecGroup(VecGroup* node, EState* estate, int eflags)
         if (grp_vecqual != NULL)
             llvm_code_gen->addFunctionToMCJit(grp_vecqual, reinterpret_cast<void**>(&(grp_state->jitted_vecqual)));
     }
+#endif
 
     // initialize child nodes
     outerPlanState(grp_state) = ExecInitNode(outerPlan(node), estate, eflags);
