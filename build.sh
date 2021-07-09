@@ -4,6 +4,7 @@ declare build_version_mode='release'
 declare build_binarylib_dir='None'
 declare wrap_binaries='NO'
 declare not_optimized=''
+declare config_file=''
 #########################################################################
 ##read command line paramenters
 #######################################################################
@@ -12,11 +13,12 @@ function print_help()
 {
     echo "Usage: $0 [OPTION]
     -h|--help                         show help information
-    -m|--version_mode                 this values of paramenter is debug, release or memcheck, the default value is release
+    -m|--version_mode                 this values of paramenter is debug, release, memcheck or mini, the default value is release
     -3rd|--binarylib_dir              the parent directory of binarylibs
     -pkg|--package                    (deprecated option)package the project,by default, only compile the project
     -wrap|--wrap_binaries             wrop up the project binaries. By default, only compile the project
     -nopt|--not_optimized             on kunpeng platform, like 1616 version, without LSE optimized
+    -f|--config_file                  set postgresql.conf.sample from config_file when packing
     "
 }
 
@@ -28,7 +30,7 @@ while [ $# -gt 0 ]; do
             ;;
         -m|--version_mode)
             if [ "$2"X = X ]; then
-                echo "no given correct version information, such as: debug/release/memcheck"
+                echo "no given correct version information, such as: debug/release/memcheck/mini"
                 exit 1
             fi
             build_version_mode=$2
@@ -50,6 +52,15 @@ while [ $# -gt 0 ]; do
             not_optimized='-nopt'
             shift 1
             ;;
+        -f|--config_file)
+            if [[ ! -f "$2" ]]
+            then
+                echo "config_file does not exist"
+                exit 1
+            fi
+            config_file=$(realpath "$2")
+            shift 2
+            ;;
          *)
             echo "Internal Error: option processing error: $1" 1>&2
             echo "please input right paramtenter, the following command may help you"
@@ -67,6 +78,6 @@ sh build_opengauss.sh -m ${build_version_mode} -3rd ${build_binarylib_dir} ${not
 if [ "${wrap_binaries}"X = "YES"X ]
 then
     chmod a+x build_opengauss.sh
-    sh package_opengauss.sh -3rd ${build_binarylib_dir}
+    sh package_opengauss.sh -3rd ${build_binarylib_dir} -m ${build_version_mode} -f ${config_file}
 fi
 exit 0

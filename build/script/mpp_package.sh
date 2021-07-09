@@ -735,6 +735,8 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiudebug"x ]; then
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+        elif [ "$version_mode"x == "mini"x ]; then
+            ./configure $shared_opt CFLAGS="-O2 ${GAUSSDB_EXTRA_FLAGS}" --disable-llvm CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         fi

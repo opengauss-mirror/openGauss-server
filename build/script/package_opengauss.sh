@@ -19,6 +19,7 @@
 
 declare version_mode='release'
 declare binarylib_dir='None'
+declare config_file=''
 
 #detect platform information.
 PLATFORM=32
@@ -72,6 +73,52 @@ fi
 declare release_file_list="opengauss_release_list_${kernel}_single"
 declare dest_list=""
 
+#########################################################################
+##read command line paramenters
+#######################################################################
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            print_help
+            exit 1
+            ;;
+        -v|--version)
+            print_version
+            exit 1
+            ;;
+        -m|--version_mode)
+            if [ "$2"X = X ]; then
+                echo "no given version number values"
+                exit 1
+            fi
+            version_mode=$2
+            shift 2
+            ;;
+        -3rd|--binarylibs_dir)
+            if [ "$2"X = X ]; then
+                echo "no given binarylib directory values"
+                exit 1
+            fi
+            binarylib_dir=$2
+            shift 2
+            ;;
+        -f|--config_file)
+            if [ "$2"X = X ]; then
+                echo "no given config file"
+                shift 1
+            else
+                config_file=$2
+                shift 2
+            fi
+            ;;
+         *)
+            echo "Internal Error: option processing error: $1" 1>&2
+            echo "please input right paramtenter, the following command may help you"
+            echo "./package.sh --help or ./package.sh -h"
+            exit 1
+    esac
+done
+
 ##add platform architecture information
 PLATFORM_ARCH=$(uname -p)
 if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
@@ -81,6 +128,10 @@ if [ "$PLATFORM_ARCH"X == "aarch64"X ] ; then
     fi
 
     release_file_list="opengauss_release_list_${kernel}_aarch64_single"
+fi
+
+if [ "$version_mode" = "mini"  ]; then
+    release_file_list="opengauss_release_list_mini"
 fi
 
 ##default install version storage path
@@ -149,43 +200,6 @@ SCRIPT_DIR=$(cd $(dirname $0) && pwd)
 
 test -d ${SCRIPT_DIR}/../../output || mkdir -p ${SCRIPT_DIR}/../../output && rm -fr ${SCRIPT_DIR}/../../output/*
 output_path=$(cd ${SCRIPT_DIR}/../../output && pwd)
-
-#########################################################################
-##read command line paramenters
-#######################################################################
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -h|--help)
-            print_help
-            exit 1
-            ;;
-        -v|--version)
-            print_version
-            exit 1
-            ;;
-        -m|--version_mode)
-            if [ "$2"X = X ]; then
-                echo "no given version number values"
-                exit 1
-            fi
-            version_mode=$2
-            shift 2
-            ;;
-        -3rd|--binarylibs_dir)
-            if [ "$2"X = X ]; then
-                echo "no given binarylib directory values"
-                exit 1
-            fi
-            binarylib_dir=$2
-            shift 2
-            ;;
-         *)
-            echo "Internal Error: option processing error: $1" 1>&2
-            echo "please input right paramtenter, the following command may help you"
-            echo "./package.sh --help or ./package.sh -h"
-            exit 1
-    esac
-done
 
 read_srv_version
 
@@ -270,7 +284,7 @@ die()
 function install_gaussdb()
 {
     cd $SCRIPT_DIR
-    if [ "$version_mode" = "release"  ]; then
+    if [ "$version_mode" = "release" ] || [ "$version_mode" = "mini" ]; then
         chmod +x ./separate_debug_information.sh
         ./separate_debug_information.sh
         cd $SCRIPT_DIR
@@ -304,11 +318,40 @@ function copy_files_list()
 }
 
 #######################################################################
+# set postgresql.conf.sample from config_file when packing
+#######################################################################
+function set_config_sample()
+{
+    if [[ -f $config_file ]]
+    then
+        config_sample_file=${BUILD_DIR}/share/postgresql/postgresql.conf.sample
+        if [[ ! -f "$config_sample_file" ]]
+        then
+            echo "postgresql.conf.sample does not exist"
+            exit 1
+        else
+            echo "#------------------------------------------------------------------------------" >> $config_sample_file
+            echo "# USER SET CONFIG ON COMPILING TIME" >> $config_sample_file
+            echo "#------------------------------------------------------------------------------" >> $config_sample_file
+            while IFS= read -r line; do
+                SUBSTRING=$(echo $line | cut -d'=' -f 1)"= "
+                if grep -q "$SUBSTRING" $config_sample_file ; then
+                    sed -i "/$SUBSTRING/c$line" $config_sample_file
+                else
+                    echo $line >> $config_sample_file
+                fi
+            done < $config_file
+        fi
+    fi
+}
+
+#######################################################################
 ##copy target file into temporary directory temp
 #######################################################################
 function target_file_copy()
 {
     cd ${BUILD_DIR}
+    set_config_sample
     copy_files_list "$1" $2
 
     cp ${SCRIPT_DIR}/version.cfg ${BUILD_DIR}/temp
