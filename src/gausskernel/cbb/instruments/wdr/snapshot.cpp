@@ -1444,6 +1444,9 @@ void SnapshotNameSpace::SubSnapshotMain(void)
             SnapshotNameSpace::take_snapshot();
             PopActiveSnapshot();
             finish_xact_command();
+            if (OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
+                pgstat_report_stat(true);
+            }
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
 
             /*  a snapshot has token on next_timestamp, we need get next_timestamp */
