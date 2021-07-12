@@ -462,3 +462,71 @@ select * from test where id < 2 union select * from (select * from test order by
 
 drop table student;
 drop table test;
+
+--test partition table
+-- partition by RANGE
+CREATE TABLE partition_range (c1 int , c2 int)
+ PARTITION BY RANGE (c2) (
+ PARTITION p1 START(1) END(1000),
+ PARTITION p2 END(2000),
+ PARTITION p3 START(2000) END(2500)
+);
+
+insert into partition_range values(1,200);
+insert into partition_range values(1,300);
+insert into partition_range values(1,400);
+insert into partition_range values(1,1500);
+insert into partition_range values(1,1600);
+insert into partition_range values(1,1700);
+insert into partition_range values(1,2100);
+insert into partition_range values(1,2300);
+
+select rownum,* from partition_range;
+select * from partition_range where rownum < 5;
+
+drop table partition_range;
+
+-- partition by LIST
+create table partition_list(id int,name varchar,age int)
+partition by list(id)
+(partition p1 values(10),
+ partition p2 values(20),
+ partition p3 values(30),
+ partition p4 values(40)
+);
+
+insert into partition_list values(10,'ten',10);
+insert into partition_list values(10,'thirteen',13);
+insert into partition_list values(20,'twenty',20);
+insert into partition_list values(20,'twenty-three',23);
+insert into partition_list values(30,'thirty',30);
+insert into partition_list values(30,'Thirty-three',33);
+insert into partition_list values(40,'forty',40);
+insert into partition_list values(40,'forty-three',43);
+
+select rownum,* from partition_list;
+select * from partition_list where rownum < 5;
+
+drop table partition_list;
+
+-- partition by HASH
+create table partition_hash(id int,name varchar,age int)
+partition by hash(id)
+(partition p1,
+ partition p2,
+ partition p3
+);
+
+insert into partition_hash values(10,'ten',10);
+insert into partition_hash values(10,'thirteen',13);
+insert into partition_hash values(20,'twenty',20);
+insert into partition_hash values(20,'twenty-three',23);
+insert into partition_hash values(30,'thirty',30);
+insert into partition_hash values(30,'Thirty-three',33);
+insert into partition_hash values(40,'forty',40);
+insert into partition_hash values(40,'forty-three',43);
+
+select rownum,* from partition_hash;
+select * from partition_hash where rownum < 5;
+
+drop table partition_hash;
