@@ -3955,6 +3955,16 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                 break;
 
             case AT_SplitPartition:
+                if (!RELATION_IS_PARTITIONED(rel))
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmodule(MOD_OPT),
+                            errmsg("can not split partition against NON-PARTITIONED table")));
+                if (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split LIST/HASH partition table")));
+                }
+
                 /* transform the boundary of range partition: from A_Const into Const */
                 splitDefState = (SplitPartitionState*)cmd->def;
                 if (!PointerIsValid(splitDefState->split_point)) {
@@ -3974,12 +3984,6 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     Const* lowBound = NULL;
                     Const* upBound = NULL;
                     Oid srcPartOid = InvalidOid;
-
-                    if (!RELATION_IS_PARTITIONED(rel))
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                                errmodule(MOD_OPT),
-                                errmsg("can not split partition against NON-PARTITIONED table")));
 
                     /* get partition number */
                     partNum = getNumberOfPartitions(rel);
@@ -5414,6 +5418,7 @@ static void get_src_partition_bound(Relation partTableRel, Oid srcPartOid, Const
                 errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("CAN NOT get detail info from a partitioned relation WITHOUT specified partition.")));
 
+    Assert(partTableRel->partMap->type == PART_TYPE_RANGE || partTableRel->partMap->type == PART_TYPE_INTERVAL);
     partMap = (RangePartitionMap*)partTableRel->partMap;
 
     srcPartSeq = partOidGetPartSequence(partTableRel, srcPartOid) - 1;
