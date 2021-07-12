@@ -94,6 +94,7 @@ typedef struct knl_instance_attr_common {
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
     int sync_config_strategy;
+    bool enable_auto_clean_unique_sql;
 #endif
 } knl_instance_attr_common;
 

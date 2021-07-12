@@ -903,6 +903,9 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     unique_sql_cxt->unique_sql_sort_instr->has_sorthash = false;
     unique_sql_cxt->unique_sql_hash_instr->has_sorthash = false;
     unique_sql_cxt->portal_nesting_level = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+    unique_sql_cxt->unique_sql_text = NULL;
+#endif
 }
 
 static void knl_u_percentile_init(knl_u_percentile_context* percentile_cxt)

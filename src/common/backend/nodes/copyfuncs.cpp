@@ -4211,6 +4211,9 @@ static Query* _copyQuery(const Query* from)
     COPY_SCALAR_FIELD(use_star_targets);
     COPY_SCALAR_FIELD(is_from_full_join_rewrite);
     COPY_SCALAR_FIELD(uniqueSQLId);
+#ifndef ENABLE_MULTIPLE_NODES
+    COPY_STRING_FIELD(unique_sql_text);
+#endif
     COPY_SCALAR_FIELD(can_push);
     COPY_SCALAR_FIELD(unique_check);
 
