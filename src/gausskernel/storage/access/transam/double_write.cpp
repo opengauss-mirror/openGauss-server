@@ -1803,8 +1803,18 @@ bool dw_single_file_recycle(bool trunc_file)
 
 bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
 {
-    if (item->data_page_idx == 0 || item->dwn != dwn) {
+    if (item->dwn != dwn) {
         return false;
+    }
+
+    if (item->buf_tag.forkNum == InvalidForkNumber || item->buf_tag.blockNum == InvalidBlockNumber || 
+        item->buf_tag.rnode.relNode == InvalidOid) {
+        ereport(DEBUG1, 
+            (errmsg("dw recovery, find invalid item [page_idx %hu dwn %hu] skip this item,"
+            "buf_tag[rel %u/%u/%u blk %u fork %d]", item->data_page_idx, item->dwn, 
+            item->buf_tag.rnode.spcNode, item->buf_tag.rnode.dbNode, item->buf_tag.rnode.relNode, 
+            item->buf_tag.blockNum, item->buf_tag.forkNum)));
+        return false;    
     }
     pg_crc32c crc;
     /* Contents are protected with a CRC */
