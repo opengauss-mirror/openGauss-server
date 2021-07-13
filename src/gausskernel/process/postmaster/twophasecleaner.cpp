@@ -158,7 +158,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #ifdef USE_ASSERT_CHECKING
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -v -r -j %d >>%s 2>&1",
+                    "gs_clean -a -p %d -h localhost -w -v -r -j %d >>%s 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers,
                     t_thrd.tpcleaner_cxt.pgxc_clean_log_path);
@@ -166,7 +166,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -v -r -j %d > /dev/null 2>&1",
+                    "gs_clean -a -p %d -h localhost -w -v -r -j %d > /dev/null 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers);
                 securec_check_ss(rc, "\0", "\0");
@@ -174,7 +174,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -e -v -r -j %d > /dev/null 2>&1",
+                    "gs_clean -a -p %d -h localhost -e -w -v -r -j %d > /dev/null 2>&1",
                     g_instance.attr.attr_network.PostPortNumber,
                     u_sess->attr.attr_storage.twophase_clean_workers);
                 securec_check_ss(rc, "\0", "\0");
