@@ -769,3 +769,5 @@ test: sequence_cache_test
 test: procedure_privilege_test
 
 test: cstore_unique_index
+
+test: cast_privileges_test

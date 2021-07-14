@@ -16,6 +16,7 @@
 #include "plpgsql.h"
 
 #include "auditfuncs.h"
+#include "catalog/pg_cast.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
@@ -172,6 +173,10 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     int rc;
     Oid func_oid = fcinfo->flinfo->fn_oid;
     Oid* saved_Pseudo_CurrentUserId = NULL;
+    Oid old_user = InvalidOid;
+    int save_sec_context = 0;
+    Oid cast_owner = InvalidOid;
+    bool has_switch = false;
     // PGSTAT_INIT_PLSQL_TIME_RECORD
     int64 startTime = 0;
     bool needRecord = false;
@@ -185,6 +190,15 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
                 IsA(fcinfo->context, FunctionScanState) &&
                 !castNode(FunctionScanState, fcinfo->context)->atomic;
 
+    /* get cast owner and make sure current user is cast owner when execute cast-func */
+    GetUserIdAndSecContext(&old_user, &save_sec_context);
+    cast_owner = u_sess->exec_cxt.cast_owner;
+    if (InvalidCastOwnerId == cast_owner || !OidIsValid(cast_owner)) {
+        ereport(LOG, (errmsg("old system table pg_cast does not have castowner column, use old default permission")));
+    } else {
+        SetUserIdAndSecContext(cast_owner, save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
+        has_switch = true;
+    }
     bool outer_is_stream = false;
     bool outer_is_stream_support = false;
     int fun_arg = fcinfo->nargs;
@@ -323,7 +337,10 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     u_sess->opt_cxt.is_stream = outer_is_stream;
     u_sess->opt_cxt.is_stream_support = outer_is_stream_support;
 #endif
-
+    if (has_switch) {
+        SetUserIdAndSecContext(old_user, save_sec_context);
+        u_sess->exec_cxt.cast_owner = InvalidOid;
+    }
     return retval;
 }
 

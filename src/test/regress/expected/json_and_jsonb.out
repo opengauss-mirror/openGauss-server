@@ -141,10 +141,10 @@ select oid, * from pg_opfamily where oid in (4033, 4034, 4035, 4036, 4037) order
 (5 rows)
 
 select * from pg_cast where castsource in (114, 3802) order by castsource, casttarget;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
-        114 |       3802 |        0 | e           | i
-       3802 |        114 |        0 | e           | i
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
+        114 |       3802 |        0 | e           | i          |        10
+       3802 |        114 |        0 | e           | i          |        10
 (2 rows)
 
 select * from pg_opclass where opcfamily in (4033, 4034, 4035, 4036, 4037) order by opcfamily;

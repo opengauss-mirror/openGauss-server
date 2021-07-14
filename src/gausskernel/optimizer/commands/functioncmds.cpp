@@ -1802,6 +1802,7 @@ void CreateCast(CreateCastStmt* stmt)
     char targettyptype;
     Oid funcid;
     Oid castid;
+    Oid ownerid;
     int nargs;
     char castcontext;
     char castmethod;
@@ -2038,6 +2039,14 @@ void CreateCast(CreateCastStmt* stmt)
     values[Anum_pg_cast_castfunc - 1] = ObjectIdGetDatum(funcid);
     values[Anum_pg_cast_castcontext - 1] = CharGetDatum(castcontext);
     values[Anum_pg_cast_castmethod - 1] = CharGetDatum(castmethod);
+    ownerid = GetUserId();
+    ereport(LOG, (errmsg("the owner: %d", ownerid)));
+    if (OidIsValid(ownerid)) {
+        values[Anum_pg_cast_castowner - 1] = ObjectIdGetDatum(ownerid);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("invalid current user oid for cast")));
+    }
 
     ss_rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(ss_rc, "", "");
