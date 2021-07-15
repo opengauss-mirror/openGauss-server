@@ -75,9 +75,9 @@ def get_parsed_sql(file, user, database, sql_amount, statement):
                 if output_valid_sql(sql):
                     SQL_AMOUNT += 1
                     yield output_valid_sql(sql)
-                [current_user, current_database] = line.split(' ')[2:4]
-                if (user and current_user != user) or (
-                        database and current_database != database):
+                log_info = line.split(' ')
+                if (user and user not in log_info) or (
+                        database and database not in log_info):
                     line = file.readline()
                     continue
                 execute_flag = True
