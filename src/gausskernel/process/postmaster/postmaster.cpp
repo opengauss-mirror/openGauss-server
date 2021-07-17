@@ -10074,6 +10074,20 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     /* Do this sooner rather than later... */
     IsUnderPostmaster = true; /* we are a postmaster subprocess now */
     Assert(thread_role == arg->role);
+    /*
+     * We should set bn at the beginning of this function, cause if we meet some error before set bn, then we
+     * can't set t_thrd.bn->dead_end to true(check gs_thread_exit), which will lead CleanupBackend failed.
+     * The logic of get child slot refer to PortInitialize -> read_backend_variables -> restore_backend_variables
+     */
+    int childSlot = 0;
+    if (arg != NULL) {
+        if (arg->role == RPC_WORKER) {
+            childSlot = backend_save_para.MyPMChildSlot;
+        } else {
+            childSlot = ((BackendParameters*)arg->save_para)->MyPMChildSlot;
+        }
+    }
+    t_thrd.bn = GetBackend(childSlot);
     /* Check this thread will use reserved memory or not */
     is_memory_backend_reserved(arg);
     /* Initialize the Memory Protection at the thread level */
@@ -10129,8 +10143,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
     PortInitialize(&port, arg);
-
-    t_thrd.bn = GetBackend(t_thrd.proc_cxt.MyPMChildSlot);
 
     /* We don't need read GUC variables */
     if (!FencedUDFMasterMode) {
