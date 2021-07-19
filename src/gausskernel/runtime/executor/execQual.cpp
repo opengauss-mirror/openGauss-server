@@ -2718,9 +2718,6 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
 {
     /* This is called only the first time through */
     FuncExpr* func = (FuncExpr*)fcache->xprstate.expr;
-    Oid old_user = InvalidOid;
-    int save_sec_context = 0;
-    Oid cast_owner = InvalidOid;
     Oid target_type = InvalidOid;
     Oid source_type = InvalidOid;
 
@@ -2740,16 +2737,23 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
             source_type = proc_struct->proargtypes.values[0];
             ReleaseSysCache(proc_tuple);
         }
-
         HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
                                                 ObjectIdGetDatum(target_type));
+
         if (HeapTupleIsValid(cast_tuple)) {
-            Form_pg_cast castForm = (Form_pg_cast)GETSTRUCT(cast_tuple);
-            cast_owner = castForm->castowner;
+            Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
+            int castowner_Anum = Anum_pg_cast_castowner;
+            if (castowner_Anum <= HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+                bool isnull = true;
+                Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
+                if (!isnull) {
+                    u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
+                } else {
+                    u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
+                }
+            }
+            heap_close(cast_rel, AccessShareLock);
             ReleaseSysCache(cast_tuple);
-        }
-        if (cast_owner != InvalidCastOwnerId && OidIsValid(cast_owner)) {
-            u_sess->exec_cxt.cast_owner = cast_owner;
         }
     }
 

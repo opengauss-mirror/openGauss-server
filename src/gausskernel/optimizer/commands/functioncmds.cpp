@@ -2040,7 +2040,6 @@ void CreateCast(CreateCastStmt* stmt)
     values[Anum_pg_cast_castcontext - 1] = CharGetDatum(castcontext);
     values[Anum_pg_cast_castmethod - 1] = CharGetDatum(castmethod);
     ownerid = GetUserId();
-    ereport(LOG, (errmsg("the owner: %d", ownerid)));
     if (OidIsValid(ownerid)) {
         values[Anum_pg_cast_castowner - 1] = ObjectIdGetDatum(ownerid);
     } else {
