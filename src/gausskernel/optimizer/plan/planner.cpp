@@ -866,7 +866,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     result->query_string = NULL;
     result->MaxBloomFilterNum = root->glob->bloomfilter.bloomfilter_index + 1;
     /* record which suplan belongs to which thread */
+#ifdef ENABLE_MULTIPLE_NODES
     if (IS_STREAM_PLAN) {
+#else
+    if (result->num_streams > 0) {
+#endif
         for (i = 1; i <= list_length(result->subplans); i++)
             result->subplan_ids = lappend_int(result->subplan_ids, subplan_ids[i]);
         result->initPlan = init_plan;
