@@ -127,6 +127,8 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
     exec_cxt->is_exec_trigger_func = false;
     exec_cxt->single_shard_stmt = false;
 
+    exec_cxt->cast_owner = InvalidOid;
+
     exec_cxt->CurrentRouter = NULL;
     exec_cxt->is_dn_enable_router = false;
 }
