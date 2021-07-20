@@ -113,6 +113,7 @@ typedef struct LVRelStats {
     double* new_idx_tuples;
     bool* idx_estimated;
     Oid currVacuumPartOid;    /* current lazy vacuum partition oid */
+    bool hasKeepInvisbleTuples;
 } LVRelStats;
 
 typedef struct ValPrefetchList {
@@ -396,6 +397,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     vacrelstats->num_index_scans = 0;
     vacrelstats->pages_removed = 0;
     vacrelstats->lock_waiter_detected = false;
+    vacrelstats->hasKeepInvisbleTuples = false;
 
     /* Open all indexes of the relation */
     if (RelationIsPartition(onerel)) {
@@ -445,8 +447,9 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         new_rel_allvisible = new_rel_pages;
 
     new_frozen_xid = u_sess->cmd_cxt.FreezeLimit;
-    if (vacrelstats->scanned_pages < vacrelstats->rel_pages)
+    if (vacrelstats->scanned_pages < vacrelstats->rel_pages || vacrelstats->hasKeepInvisbleTuples) {
         new_frozen_xid = InvalidTransactionId;
+    }
 
     if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepart != NULL);
@@ -898,6 +901,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
         OffsetNumber offnum, maxoff;
         bool tupgone = false;
         bool hastup = false;
+	bool keepThisInvisbleTuple = false;
         int prev_dead_count;
         OffsetNumber frozen[MaxOffsetNumber];
         int nfrozen;
@@ -1165,6 +1169,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
             tuple.t_bucketId = RelationGetBktid(onerel);
             HeapTupleCopyBaseFromPage(&tuple, page);
             tupgone = false;
+            keepThisInvisbleTuple = false;
 
             if (u_sess->attr.attr_storage.enable_debug_vacuum)
                 t_thrd.utils_cxt.pRelatedRel = onerel;
@@ -1187,11 +1192,12 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                      * cheaper to get rid of it in the next pruning pass than
                      * to treat it like an indexed tuple.
                      */
-                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple) ||
-                        HeapKeepInvisbleTuple(&tuple, RelationGetDescr(onerel)))
+                    keepThisInvisbleTuple = HeapKeepInvisbleTuple(&tuple, RelationGetDescr(onerel));
+                    if (HeapTupleIsHotUpdated(&tuple) || HeapTupleIsHeapOnly(&tuple) || keepThisInvisbleTuple) {
                         nkeep += 1;
-                    else
+		    } else {
                         tupgone = true; /* we can delete the tuple */
+                    }
                     all_visible = false;
                     break;
                 case HEAPTUPLE_LIVE:
@@ -1265,6 +1271,8 @@ static IndexBulkDeleteResult** lazy_scan_heap(
 
                 tups_vacuumed += 1;
                 has_dead_tuples = true;
+            } else if (keepThisInvisbleTuple) {
+                vacrelstats->hasKeepInvisbleTuples = true;
             } else {
                 num_tuples += 1;
                 hastup = true;
