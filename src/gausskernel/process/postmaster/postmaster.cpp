@@ -3236,7 +3236,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
 #endif
                 }
             } else if (strcmp(nameptr, "replication") == 0) {
-                if (IsLocalPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
+                if (!IsHAPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
                     ereport(elevel,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("replication should connect HA port in thread_pool")));
