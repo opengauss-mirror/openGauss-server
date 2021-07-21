@@ -9035,7 +9035,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
-            upsertClause
+            upsertClause,
             isDfsStore);
         return pgxc_make_modifytable(root, (Plan*)mtplan);
 #endif
