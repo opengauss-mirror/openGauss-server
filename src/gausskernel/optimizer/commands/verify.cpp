@@ -873,7 +873,12 @@ static void DoVerifyIndexRel(VacuumStmt* stmt, Oid indexRelid)
 {
     Oid heapOid = IndexGetRelation(indexRelid, false);
     Relation heapRel = heap_open(heapOid, AccessShareLock);
-    if (RelationIsPartitioned(heapRel)) {
+    Relation indexRel = index_open(indexRelid, AccessShareLock);
+    if (!RelationIsPartitioned(heapRel) || RelationIsGlobalIndex(indexRel)) {
+        VerifyIndexRel(stmt, indexRel);
+        index_close(indexRel, AccessShareLock);
+    } else {
+        index_close(indexRel, AccessShareLock);
         Partition part;
         Relation partRel;
         ListCell* cell = NULL;
@@ -891,10 +896,6 @@ static void DoVerifyIndexRel(VacuumStmt* stmt, Oid indexRelid)
             partitionClose(heapRel, part, AccessShareLock);
             releaseDummyRelation(&partRel);
         }
-    } else {
-        Relation indexRel = index_open(indexRelid, AccessShareLock);
-        VerifyIndexRel(stmt, indexRel);
-        index_close(indexRel, AccessShareLock);
     }
 
     heap_close(heapRel, AccessShareLock);
@@ -969,6 +970,13 @@ static void VerifyPartIndexRels(VacuumStmt* stmt, Relation rel, Relation partiti
     indexIds = RelationGetIndexList(rel);
     foreach (indexId, indexIds) {
         Oid indexOid = lfirst_oid(indexId);
+        Relation indexRel = index_open(indexOid, AccessShareLock);
+        if (RelationIsGlobalIndex(indexRel)) {
+            VerifyIndexRel(stmt, indexRel);
+            index_close(indexRel, AccessShareLock);
+            continue;
+        }
+        index_close(indexRel, AccessShareLock);
         VerifyPartIndexRel(stmt, rel, partitionRel, indexOid);
     }
     return;
