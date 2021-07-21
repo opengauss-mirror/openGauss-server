@@ -929,6 +929,7 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
     HeapTuple tuple = NULL;
     char relkind = 'r';
     char partype = 'v';
+    bool is_interval = false;
     bool is_part = false;
     int spirc;
     int proc;
@@ -952,13 +953,25 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
         if (tableinfo.relkind == RELKIND_FOREIGN_TABLE || tableinfo.relkind == RELKIND_STREAM) {
             appendStringInfo(buf, "PARTITION BY (");
         } else {
-            if (partition->partstrategy == 'r') {
-                partype = 'r';
-                /* restructure range or interval partitioned table definition */
-                appendStringInfo(buf, "PARTITION BY RANGE (");
-            } else {
-                /* put value partition table */
-                appendStringInfo(buf, "PARTITION BY VALUES (");
+            switch (partition->partstrategy) {
+                case PART_STRATEGY_INTERVAL:
+                    is_interval = true;
+                /* fall-through */
+                case PART_STRATEGY_RANGE:
+                    partype = 'r';
+                    appendStringInfo(buf, "PARTITION BY RANGE (");
+                    break;
+                case PART_STRATEGY_LIST:
+                    partype = 'l';
+                    appendStringInfo(buf, "PARTITION BY LIST (");
+                    break;
+                case PART_STRATEGY_HASH:
+                    partype = 'h';
+                    appendStringInfo(buf, "PARTITION BY HASH (");
+                    break;
+                default:
+                    appendStringInfo(buf, "PARTITION BY VALUES (");
+                    break;
             }
         }
 
@@ -989,29 +1002,39 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
     if (partype == 'v')
         return;
 
-    appendStringInfo(buf, "\n( ");
     resetStringInfo(query);
     /* get table partitions info */
-    appendStringInfo(query, "SELECT /*+ hashjoin(p t) */p.relname AS partName, ");
+    appendStringInfo(query, "SELECT q.interval[1], /*+ hashjoin(p t) */p.relname AS partName, ");
 
-    for (i = 1; i <= partkeynum; i++)
-        appendStringInfo(query, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
+    if (partype == 'r') {
+        for (i = 1; i <= partkeynum; i++)
+            appendStringInfo(query, "p.boundaries[%d] AS partBoundary_%d, ", i, i);
+    } else {
+        appendStringInfo(query, "array_to_string(p.boundaries, ',') AS partBoundary_1, ");
+    }
+    
 
     appendStringInfo(query,
-        "t.spcname AS reltblspc "
-        "FROM pg_partition p LEFT JOIN pg_tablespace t "
-        "ON p.reltablespace = t.oid "
-        "WHERE p.parentid = %u AND p.parttype = '%c' "
-        "AND p.partstrategy = '%c' ORDER BY ",
+        "t.spcname AS reltblspc FROM pg_partition q "
+        "LEFT JOIN pg_partition p ON q.parentid = p.parentid "
+        "LEFT JOIN pg_tablespace t ON p.reltablespace = t.oid "
+        "WHERE p.parentid = %u AND p.partstrategy = '%c' "
+        "AND p.parttype = '%c' AND q.parttype = '%c' ORDER BY ",
         tableoid,
+        partype,
         PART_OBJ_TYPE_TABLE_PARTITION,
-        PART_STRATEGY_RANGE);
+        PART_OBJ_TYPE_PARTED_TABLE
+        );
 
-    for (i = 1; i <= partkeynum; i++) {
-        if (i == partkeynum)
-            appendStringInfo(query, "p.boundaries[%d]::%s ASC", i, get_typename(i_partboundary[i - 1]));
-        else
-            appendStringInfo(query, "p.boundaries[%d]::%s, ", i, get_typename(i_partboundary[i - 1]));
+    if (partype == 'r') {
+        for (i = 1; i <= partkeynum; i++) {
+            if (i == partkeynum)
+                appendStringInfo(query, "p.boundaries[%d]::%s ASC", i, get_typename(i_partboundary[i - 1]));
+            else
+                appendStringInfo(query, "p.boundaries[%d]::%s, ", i, get_typename(i_partboundary[i - 1]));
+        }
+    } else {
+        appendStringInfo(query, "p.boundaries ASC");
     }
 
     spirc = SPI_execute(query->data, true, INT_MAX);
@@ -1023,36 +1046,60 @@ static void get_table_partitiondef(StringInfo query, StringInfo buf, Oid tableoi
 
         char* pname = SPI_getvalue(spi_tuple, spi_tupdesc, SPI_fnumber(spi_tupdesc, "partname"));
 
-        if (i > 0)
-            appendStringInfo(buf, ",");
-        appendStringInfo(buf, "\n	 ");
-        appendStringInfo(buf, "PARTITION %s VALUES LESS THAN (", quote_identifier(pname));
-
-        for (int j = 0; j < partkeynum; j++) {
-            char* pvalue = NULL;
-            char checkRowName[32] = {0};
-            int rowNameLen = sizeof(checkRowName);
-
-            int nRet = 0;
-            nRet = snprintf_s(checkRowName, rowNameLen, rowNameLen - 1, "partboundary_%d", j + 1);
-            securec_check_ss(nRet, "\0", "\0");
-
-            pvalue = SPI_getvalue(spi_tuple, spi_tupdesc, SPI_fnumber(spi_tupdesc, checkRowName));
-
-            if (j > 0)
-                appendStringInfo(buf, ", ");
-
-            if (pvalue == NULL) {
-                appendStringInfo(buf, "MAXVALUE");
-                continue;
-            } else {
-                if (isTypeString(i_partboundary[j]))
-                    appendStringInfo(buf, "'%s'", pvalue);
-                else
-                    appendStringInfo(buf, "%s", pvalue);
+        if (i == 0) {
+            if (is_interval) {
+                char* iname = SPI_getvalue(spi_tuple, spi_tupdesc, SPI_fnumber(spi_tupdesc, "interval"));
+                appendStringInfo(buf, "\nINTERVAL('%s')", iname);
             }
+            appendStringInfo(buf, "\n( ");
+        } else {
+            appendStringInfo(buf, ",");
         }
-        appendStringInfo(buf, ")");
+            
+        appendStringInfo(buf, "\n	 ");
+
+        switch (partype) {
+            case PART_STRATEGY_RANGE:
+            /* fall-through */
+            case PART_STRATEGY_INTERVAL:
+                appendStringInfo(buf, "PARTITION %s VALUES LESS THAN (", quote_identifier(pname));
+                break;
+            case PART_STRATEGY_LIST:
+                appendStringInfo(buf, "PARTITION %s VALUES (", quote_identifier(pname));
+                break;
+            default:
+                appendStringInfo(buf, "PARTITION %s", quote_identifier(pname));
+                break;
+        }
+
+        if (partype != 'h') {
+            for (int j = 0; j < partkeynum; j++) {
+                char* pvalue = NULL;
+                char checkRowName[32] = {0};
+                int rowNameLen = sizeof(checkRowName);
+
+                int nRet = 0;
+                nRet = snprintf_s(checkRowName, rowNameLen, rowNameLen - 1, "partboundary_%d", j + 1);
+                securec_check_ss(nRet, "\0", "\0");
+
+                pvalue = SPI_getvalue(spi_tuple, spi_tupdesc, SPI_fnumber(spi_tupdesc, checkRowName));
+
+                if (j > 0)
+                    appendStringInfo(buf, ", ");
+
+                if (pvalue == NULL) {
+                    appendStringInfo(buf, "MAXVALUE");
+                    continue;
+                } else {
+                    if (isTypeString(i_partboundary[j]))
+                        appendStringInfo(buf, "'%s'", pvalue);
+                    else
+                        appendStringInfo(buf, "%s", pvalue);
+                }
+            }
+            appendStringInfo(buf, ")");
+        }
+        
         /*
          * Append partition tablespace.
          * Skip it, if partition tablespace is the same as partitioned table.
