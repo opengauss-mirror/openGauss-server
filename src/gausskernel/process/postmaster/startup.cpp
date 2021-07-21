@@ -241,6 +241,8 @@ void StartupProcessMain(void)
     (void)gs_signal_unblock_sigusr2();
 
     SetStaticConnNum();
+    pgstat_report_appname("Startup");
+    pgstat_report_activity(STATE_IDLE, NULL);
 
     if (dummyStandbyMode) {
         StartupDummyStandby();
