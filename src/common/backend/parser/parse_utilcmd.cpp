@@ -1395,6 +1395,15 @@ static void transformTableLikeClause(
             def->storage = 0;
             /* copy compression mode from source table */
             def->cmprs_mode = attribute->attcmprmode;
+            /*
+             * When analyzing a column-oriented table with default_statistics_target < 0, we will create a row-oriented
+             * temp table. In this case, ignore the compression flag.
+             */
+            if (u_sess->analyze_cxt.is_under_analyze) {
+                if (def->cmprs_mode != ATT_CMPR_UNDEFINED) {
+                    def->cmprs_mode = ATT_CMPR_NOCOMPRESS;
+                }
+            }
             def->raw_default = NULL;
             def->cooked_default = NULL;
             def->collClause = NULL;
