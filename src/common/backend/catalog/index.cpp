@@ -3904,6 +3904,24 @@ static void MotFdwReindex(Relation heapRelation, Relation iRel)
 }
 #endif
 
+void PartRelSetHasIndexState(Oid relid)
+{
+    Relation pg_class = heap_open(RelationRelationId, RowExclusiveLock);
+    HeapTuple tup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("cache lookup failed for relation %u", relid)));
+    }
+    Form_pg_class pgcform = (Form_pg_class)GETSTRUCT(tup);
+
+    /* modify pg_class hasindex is true when reindex and it is false. */
+    if (!pgcform->relhasindex) {
+        pgcform->relhasindex = true;
+        heap_inplace_update(pg_class, tup);
+    }
+    heap_freetuple(tup);
+    heap_close(pg_class, RowExclusiveLock);
+}
+
 /*
  * reindex_index - This routine is used to recreate a single index
  */
@@ -4036,6 +4054,7 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
                 }
                 releasePartitionOidList(&indexPartOidList);
 
+                PartRelSetHasIndexState(heapRelation->rd_id);
                 // call the internal function, update pg_index system table
                 ATExecSetIndexUsableState(IndexRelationId, iRel->rd_id, true);
                 CacheInvalidateRelcache(heapRelation);
