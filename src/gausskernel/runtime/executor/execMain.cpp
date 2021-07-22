@@ -2715,7 +2715,7 @@ ExecAuxRowMark *ExecBuildAuxRowMark(ExecRowMark *erm, List *targetlist)
  * NULL if we determine we shouldn't process the row.
  */
 TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relation, Index rti, ItemPointer tid,
-    TransactionId priorXmax)
+    TransactionId priorXmax, bool partRowMoveUpdate)
 {
     TupleTableSlot *slot = NULL;
     HeapTuple copyTuple;
@@ -2729,6 +2729,19 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
         relation, LockTupleExclusive, tid, priorXmax);
 
     if (copyTuple == NULL) {
+        /*
+         * The tuple has been deleted or update in row movement case.
+         */
+        if (partRowMoveUpdate) {
+            /*
+             * the may be a row movement update action which delete tuple from original
+             * partition and insert tuple to new partition or we can add lock on the tuple
+             * to be delete or updated to avoid throw exception.
+             */
+            ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                errmsg("partition table update conflict"),
+                errdetail("disable row movement of table can avoid this conflict")));
+        }
         return NULL;
     }
 
