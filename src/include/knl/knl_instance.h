@@ -768,11 +768,6 @@ typedef struct knl_g_hypo_context {
     List* hypo_index_list;
 } knl_g_hypo_context;
 
-typedef struct knl_sigbus_context {
-    void* sigbus_addr;
-    int sigbus_code;
-} knl_sigbus_context;
-
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -870,7 +865,6 @@ typedef struct knl_instance_context {
     knl_g_archive_standby_context archive_standby_cxt;
     struct HTAB* ngroup_hash_table;
     knl_g_hypo_context hypo_cxt;
-    knl_sigbus_context sigbus_cxt;
 
 #ifndef ENABLE_MULTIPLE_NODES
     void *raw_parser_hook[DB_CMPT_MAX];
