@@ -1077,7 +1077,7 @@ stmt :
 			| RuleStmt
 			| SecLabelStmt
 			| SelectStmt
-                        | ShutdownStmt
+			| ShutdownStmt
 			| TransactionStmt
 			| TruncateStmt
 			| UnlistenStmt
