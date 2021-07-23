@@ -112,7 +112,7 @@ typedef struct {
     int ulSqlErrcode;  /* mppdb error code */
     char cSqlState[5]; /* sqlstate error code */
     int mppdb_err_msg_locnum;
-    mppdb_err_msg_location_t astErrLocate[ERROR_LOCATION_NUM]; /* location of the error cause */
+    mppdb_err_msg_location_t *astErrLocate[ERROR_LOCATION_NUM]; /* location of the error cause */
     mppdb_detail_errmsg_t stErrmsg;                            /* detail error message of the error code */
     char ucOpFlag;
 } mppdb_err_msg_t;
@@ -337,11 +337,27 @@ int main(int argc, char* argv[])
 void releaseMem(void)
 {
     if (NULL != g_stErrMsg) {
+        for (int i = 0; i < ERRMSG_MAX_NUM; i++) {
+            for (int j = 0; j < ERROR_LOCATION_NUM; j++) {
+                if (g_stErrMsg[i].astErrLocate[j] != NULL) {
+                    free(g_stErrMsg[i].astErrLocate[j]);
+                    g_stErrMsg[i].astErrLocate[j] = NULL;
+                }
+            }
+        }
         free(g_stErrMsg);
         g_stErrMsg = NULL;
     }
 
     if (NULL != g_stErrMsgOld) {
+        for (int i = 0; i < ERRMSG_MAX_NUM; i++) {
+            for (int j = 0; j < ERROR_LOCATION_NUM; j++) {
+                if (g_stErrMsgOld[i].astErrLocate[j] != NULL) {
+                    free(g_stErrMsgOld[i].astErrLocate[j]);
+                    g_stErrMsgOld[i].astErrLocate[j] = NULL;
+                }
+            }
+        }
         free(g_stErrMsgOld);
         g_stErrMsgOld = NULL;
     }
@@ -1208,17 +1224,27 @@ int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno)
         /* the same error message report in many different files, save the location */
         if (0 == memcmp(pstErPara->EpMsg, pstErrMsgItem->stErrmsg.msg, strlen(pstErPara->EpMsg))) {
             for (j = 0; j < pstErrMsgItem->mppdb_err_msg_locnum; j++) {
-                if (0 == strcmp(pstErrMsgItem->astErrLocate[j].szFileName, scanfile) &&
-                    (pstErrMsgItem->astErrLocate[j].ulLineno == (unsigned int)lineno))
+                if (0 == strcmp(pstErrMsgItem->astErrLocate[j]->szFileName, scanfile) &&
+                    (pstErrMsgItem->astErrLocate[j]->ulLineno == (unsigned int)lineno)) {
                     return 0;
+                }
             }
 
             if (ERROR_LOCATION_NUM >= pstErrMsgItem->mppdb_err_msg_locnum + 1) {
-                rc = strcpy_s(pstErrMsgItem->astErrLocate[pstErrMsgItem->mppdb_err_msg_locnum].szFileName,
+                int locNum = pstErrMsgItem->mppdb_err_msg_locnum;
+                pstErrMsgItem->astErrLocate[locNum] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+                if (pstErrMsgItem->astErrLocate[locNum] == NULL) {
+                    return outputLog(logfile, false, "Memory alloc failed for err locate\n");
+                }
+
+                rc = memset_s(pstErrMsgItem->astErrLocate[locNum], sizeof(mppdb_err_msg_location_t),
+                    0, sizeof(mppdb_err_msg_location_t));
+                securec_check_c(rc, "\0", "\0");
+                rc = strcpy_s(pstErrMsgItem->astErrLocate[locNum]->szFileName,
                     FILE_NAME_MAX_LEN,
                     scanfile);
                 securec_check_c(rc, "\0", "\0");
-                pstErrMsgItem->astErrLocate[pstErrMsgItem->mppdb_err_msg_locnum].ulLineno = lineno;
+                pstErrMsgItem->astErrLocate[locNum]->ulLineno = lineno;
                 pstErrMsgItem->mppdb_err_msg_locnum++;
             }
 
@@ -1237,9 +1263,17 @@ int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno)
     } else
         pstErrMsgItem->cSqlState[0] = '\0';
 
-    rc = strcpy_s(pstErrMsgItem->astErrLocate[0].szFileName, FILE_NAME_MAX_LEN, scanfile);
+    pstErrMsgItem->astErrLocate[0] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+    if (pstErrMsgItem->astErrLocate[0] == NULL) {
+        return outputLog(logfile, false, "Memory alloc failed for err locate\n");
+    }
+
+    rc = memset_s(pstErrMsgItem->astErrLocate[0], sizeof(mppdb_err_msg_location_t),
+        0, sizeof(mppdb_err_msg_location_t));
     securec_check_c(rc, "\0", "\0");
-    pstErrMsgItem->astErrLocate[0].ulLineno = lineno;
+    rc = strcpy_s(pstErrMsgItem->astErrLocate[0]->szFileName, FILE_NAME_MAX_LEN, scanfile);
+    securec_check_c(rc, "\0", "\0");
+    pstErrMsgItem->astErrLocate[0]->ulLineno = lineno;
     pstErrMsgItem->mppdb_err_msg_locnum = 1;
     rc = memcpy_s(pstErrMsgItem->stErrmsg.msg, sizeof(pstErrMsgItem->stErrmsg.msg), pstErPara->EpMsg, STRING_MAX_LEN);
     securec_check_c(rc, "\0", "\0");
@@ -1527,12 +1561,24 @@ int compareErrmsg()
             if (0 == memcmp(pstErrMsgItemOld->stErrmsg.msg,
                          pstErrMsgItemNew->stErrmsg.msg,
                          strlen(pstErrMsgItemOld->stErrmsg.msg))) {
-                /* update location info of old errmsg using new errmsg */
-                rc = memcpy_s(&pstErrMsgItemOld->astErrLocate[0],
-                    pstErrMsgItemNew->mppdb_err_msg_locnum * sizeof(mppdb_err_msg_location_t),
-                    &pstErrMsgItemNew->astErrLocate[0],
-                    pstErrMsgItemNew->mppdb_err_msg_locnum * sizeof(mppdb_err_msg_location_t));
-                securec_check_c(rc, "\0", "\0");
+                /*
+                 * update location info of old errmsg using new errmsg.
+                 * 1. if pstErrMsgItemOld->mppdb_err_msg_locnum >= pstErrMsgItemNew->mppdb_err_msg_locnum,
+                 *    copy all new location to old one, there must be enough slot for copy.
+                 * 2. else need to malloc memory for old msg item before copy.
+                 */
+                for (int i = pstErrMsgItemOld->mppdb_err_msg_locnum; i < pstErrMsgItemNew->mppdb_err_msg_locnum; i++) {
+                    pstErrMsgItemOld->astErrLocate[i] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+                    if (pstErrMsgItemOld->astErrLocate[i] == NULL) {
+                        return outputLog(logfile, false, "Memory alloc failed for err locate\n");
+                    }
+                }
+                for (int i = 0; i < pstErrMsgItemNew->mppdb_err_msg_locnum; i++) {
+                    rc = memcpy_s(pstErrMsgItemOld->astErrLocate[i], sizeof(mppdb_err_msg_location_t),
+                        pstErrMsgItemNew->astErrLocate[i], sizeof(mppdb_err_msg_location_t));
+                    securec_check_c(rc, "\0", "\0");
+                }
+
                 pstErrMsgItemOld->mppdb_err_msg_locnum = pstErrMsgItemNew->mppdb_err_msg_locnum;
 
                 pstErrMsgItemNew->ucOpFlag = OP_TYPE_EXIST;
@@ -1566,6 +1612,18 @@ int compareErrmsg()
             pstErrMsgItemOld = &g_stErrMsgOld[g_ulErrMsgOldNum];
             rc = memcpy_s(pstErrMsgItemOld, sizeof(mppdb_err_msg_t), pstErrMsgItemNew, sizeof(mppdb_err_msg_t));
             securec_check_c(rc, "\0", "\0");
+
+            /* for astErrLocate, we should malloc mem and copy one by one */
+            for (int i = 0; i < pstErrMsgItemNew->mppdb_err_msg_locnum; i++) {
+                pstErrMsgItemOld->astErrLocate[i] = (mppdb_err_msg_location_t*)malloc(sizeof(mppdb_err_msg_location_t));
+                if (pstErrMsgItemOld->astErrLocate[i] == NULL) {
+                    return outputLog(logfile, false, "Memory alloc failed for err locate\n");
+                }
+
+                rc = memcpy_s(pstErrMsgItemOld->astErrLocate[i], sizeof(mppdb_err_msg_location_t),
+                    pstErrMsgItemNew->astErrLocate[i], sizeof(mppdb_err_msg_location_t));
+                securec_check_c(rc, "\0", "\0");
+            }
 
             pstErrMsgItemOld->ulSqlErrcode = g_stErrMsgOld[g_ulErrMsgOldNum - 1].ulSqlErrcode + 1;
             pstErrMsgItemOld->ucOpFlag = OP_TYPE_INSERT;
@@ -1733,8 +1791,8 @@ int create_header_files(int iFileType)
             for (ulLocLoop = 0; ulLocLoop < pstErrMsgItem->mppdb_err_msg_locnum; ulLocLoop++) {
                 fprintf(outFile,
                     "{\"%s\", %u}, ",
-                    pstErrMsgItem->astErrLocate[ulLocLoop].szFileName,
-                    pstErrMsgItem->astErrLocate[ulLocLoop].ulLineno);
+                    pstErrMsgItem->astErrLocate[ulLocLoop]->szFileName,
+                    pstErrMsgItem->astErrLocate[ulLocLoop]->ulLineno);
                 if (0 == (ulLocLoop + 1) % 3) {
                     fprintf(outFile, "\n	 ");
                 }
