@@ -4275,12 +4275,9 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
     } else
         dpns->inner_planstate = innerPlanState(ps);
 
-#ifdef ENABLE_MULTIPLE_NODES
     if (IsA(ps, ModifyTableState))
         dpns->inner_tlist = ((ModifyTableState*)ps)->mt_upsert->us_excludedtlist;
-    else
-#endif
-    if (dpns->inner_planstate != NULL)
+    else if (dpns->inner_planstate != NULL)
         dpns->inner_tlist = dpns->inner_planstate->plan->targetlist;
     else
         dpns->inner_tlist = NIL;

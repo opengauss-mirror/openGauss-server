@@ -86,11 +86,7 @@ insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c1 =1, c2 = 1, c
 insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c4 = 1 where c1=1;
 ---- from clause
 insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c4 = 1 from up_neg_04 where c1=1;
----- sub query
-insert into up_neg_05 values(1,1,1,1,1) on duplicate key update (c2) = (select c2 from up_neg_05);
 
----- update distribute key
-insert into up_neg_06 values(101, 1, 1) on duplicate key update c3=101;
 ---- update partition key
 insert into up_neg_07 values(101, 1, 300) on duplicate key update c3=101;
 insert into up_neg_08 values(101, 1, 300) on duplicate key update c3=101;

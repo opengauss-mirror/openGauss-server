@@ -2831,6 +2831,12 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt
  6323 | gs_encrypt
+ 6555 | array_remove
+ 6556 | array_replace
+ 6558 | first_transition
+ 6559 | last_transition
+ 6560 | first
+ 6561 | last
  7777 | sysdate
  7998 | set_working_grand_version_num_manually
  8050 | datalength
@@ -2864,7 +2870,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9134 | has_cek_privilege
  9135 | has_cek_privilege
  9999 | pg_test_err_contain_err
-(2460 rows)
+--?.*
 
 -- **************** pg_cast ****************
 -- Catch bogus values in pg_cast columns (other than cases detected by

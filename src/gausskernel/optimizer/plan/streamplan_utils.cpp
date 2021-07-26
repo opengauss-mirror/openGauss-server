@@ -160,6 +160,12 @@ List* check_op_list_template(Plan* result_plan, List* (*check_eval)(Node*))
 
             res_list = list_concat_unique(res_list, check_eval((Node*)splan->resconstantqual));
         } break;
+        case T_ModifyTable: {
+            ModifyTable* splan = (ModifyTable*)result_plan;
+            if (splan->upsertAction == UPSERT_UPDATE && splan->updateTlist != NULL) {
+                res_list = list_concat_unique(res_list, check_eval((Node*)splan->updateTlist));
+            }
+        } break;
         default:
             break;
     }

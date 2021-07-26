@@ -103,12 +103,6 @@ insert into up_neg_05 values(1,1,1,1,1) on duplicate key update c4 = 1 from up_n
 ERROR:  syntax error at or near "from"
 LINE 1: ... values(1,1,1,1,1) on duplicate key update c4 = 1 from up_ne...
                                                              ^
----- sub query
-insert into up_neg_05 values(1,1,1,1,1) on duplicate key update (c2) = (select c2 from up_neg_05);
-ERROR:  Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
----- update distribute key
-insert into up_neg_06 values(101, 1, 1) on duplicate key update c3=101;
-ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
 ---- update partition key
 insert into up_neg_07 values(101, 1, 300) on duplicate key update c3=101;
 ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.

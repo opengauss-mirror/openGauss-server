@@ -15247,6 +15247,17 @@ upsert_clause:
 						/* check subquery in set clause*/
 						ListCell* cell = NULL;
 						ResTarget* res = NULL;
+#ifdef ENABLE_MULTIPLE_NODES
+						foreach (cell, $5) {
+							res = (ResTarget*)lfirst(cell);
+							if (IsA(res->val,SubLink)) {
+								ereport(ERROR,
+									(errmodule(MOD_PARSER),
+									errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
+							}
+						}
+#endif
 
 						UpsertClause *uc = makeNode(UpsertClause);
 						uc->targetList = $5;
