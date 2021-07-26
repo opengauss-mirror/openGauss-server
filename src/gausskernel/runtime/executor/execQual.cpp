@@ -2743,7 +2743,7 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
         if (HeapTupleIsValid(cast_tuple)) {
             Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
             int castowner_Anum = Anum_pg_cast_castowner;
-            if (castowner_Anum <= HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
                 bool isnull = true;
                 Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
                 if (!isnull) {
