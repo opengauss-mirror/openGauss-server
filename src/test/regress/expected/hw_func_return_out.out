@@ -29,8 +29,6 @@ begin
 	c := test_return(a);
 end;
 /
-ERROR:  function test_return has no enough parameters
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
 declare
 a int := 1;
 b int;
@@ -276,8 +274,6 @@ AS
 		RETURN result;
     END;
 /
-ERROR:  function test_return has no enough parameters
-CONTEXT:  compilation of PL/pgSQL function "test_return18" near line 1
 CREATE OR REPLACE FUNCTION test_return19( i integer,j out integer)
 RETURN record
 AS
@@ -630,8 +626,6 @@ begin
 	c := test_return(a);
 end;
 /
-ERROR:  function test_return has no enough parameters
-CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 3
 declare
 a int := 1;
 b int;
@@ -877,8 +871,6 @@ AS
 		RETURN result;
     END;
 /
-ERROR:  function test_return has no enough parameters
-CONTEXT:  compilation of PL/pgSQL function "test_return18" near line 1
 CREATE OR REPLACE FUNCTION test_return19( i integer,j out integer)
 RETURN record
 AS
