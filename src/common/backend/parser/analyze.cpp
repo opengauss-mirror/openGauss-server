@@ -1845,6 +1845,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
     List* exclRelTlist = NIL;
     UpsertAction action = UPSERT_NOTHING;
     Relation targetrel = pstate->p_target_relation;
+    bool partKeyUpsert = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (targetrel->rd_rel->relhastriggers) {
@@ -1872,7 +1873,6 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
          * adds have to be reset. markVarForSelectPriv() will add the exact
          * required permissions back.
          */
-
         exclRelTlist = BuildExcludedTargetlist(targetrel, exclRelIndex);
         exclRte->requiredPerms = 0;
         exclRte->selectedCols = NULL;
@@ -1886,6 +1886,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
 
         updateTlist = transformTargetList(pstate, upsertClause->targetList);
         updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList, relation);
+
         /* We can't update primary or unique key in upsert, check it here */
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && !u_sess->attr.attr_sql.enable_upsert_to_merge) {
@@ -1894,6 +1895,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
 #else
         checkUpsertTargetlist(pstate->p_target_relation, updateTlist);
 #endif
+        partKeyUpsert = RELATION_IS_PARTITIONED(targetrel) && targetListHasPartitionKey(updateTlist, targetrel->rd_id);
     }
 
     /* Finally, build DUPLICATE KEY UPDATE [NOTHING | ... ] expression */
@@ -1902,6 +1904,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
     result->exclRelIndex = exclRelIndex;
     result->exclRelTlist = exclRelTlist;
     result->upsertAction = action;
+    result->partKeyUpsert = partKeyUpsert;
     return result;
 }
 

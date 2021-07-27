@@ -1304,6 +1304,11 @@ bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                              errmsg("INSERT ON DUPLICATE KEY UPDATE does not support deferrable"
                                     " unique constraints/exclusion constraints.")));
+
+        /*
+         * We consider a partitioned table with a global index as a normal table,
+         * because conflicts can be between multiple partitions.
+         */
         if (isPartitioned && !RelationIsGlobalIndex(indexRelation)) {
             partitionedindexid = RelationGetRelid(indexRelation);
             if (!PointerIsValid(partitionIndexOidList)) {
