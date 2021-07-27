@@ -72,6 +72,9 @@ CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* p
     if (list_difference_oid(path1->schemas, path2->schemas) != NULL) {
         return false;
     }
+    if (list_difference_oid(path2->schemas, path1->schemas) != NULL) {
+        return false;
+    }
     return true;
 }
 /*
@@ -349,10 +352,15 @@ CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_
         LWLockRelease(GetMainLWLockByIndex(lock_id));
         return NULL;
     } else {
-        entry->val.plansource->gpc.status.AddRefcount();
+        CachedPlanSource* psrc = entry->val.plansource;
+        if (!psrc->gpc.status.IsValid()) {
+            LWLockRelease(GetMainLWLockByIndex(lock_id));
+            MoveIntoInvalidPlanList(psrc);
+            return NULL;
+        }
+        psrc->gpc.status.AddRefcount();
         if (ENABLE_DN_GPC)
             u_sess->pcache_cxt.private_refcount++;
-        CachedPlanSource* psrc = entry->val.plansource;
         pg_atomic_fetch_add_u32(&entry->val.used_count, 1);
         MemoryContextSwitchTo(oldcontext);
         LWLockRelease(GetMainLWLockByIndex(lock_id));
@@ -480,7 +488,7 @@ void GlobalPlanCache::RemoveEntry(uint32 htblIdx, GPCEntry *entry)
 }
 
 
-bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc)
+bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc, bool* hasGetLock)
 {
     /*
      * Start up a transaction command so we can run parse analysis etc. (Note
@@ -489,6 +497,14 @@ bool GlobalPlanCache::CheckRecreateCachePlan(CachedPlanSource* psrc)
      */
     start_xact_command();
     Assert(psrc->magic == CACHEDPLANSOURCE_MAGIC);
+    /* get lock before check plan is valid or not, release it if need recreate plan */
+    if (psrc->gpc.status.InShareTable()) {
+        AcquirePlannerLocks(psrc->query_list, true);
+        if (psrc->gplan) {
+            AcquireExecutorLocks(psrc->gplan->stmt_list, true);
+        }
+        *hasGetLock = true;
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && !psrc->gpc.status.InShareTable()) {
@@ -526,7 +542,14 @@ bool GlobalPlanCache::CheckRecreateSPICachePlan(SPIPlanPtr spi_plan)
     Assert(spi_plan->magic == _SPI_PLAN_MAGIC);
     foreach(cell, spi_plan->plancache_list) {
         CachedPlanSource* plansource = (CachedPlanSource*)lfirst(cell);
-        if (CheckRecreateCachePlan(plansource)) {
+        bool hasGetLock = false;
+        if (CheckRecreateCachePlan(plansource, &hasGetLock)) {
+            if (hasGetLock) {
+                AcquirePlannerLocks(plansource->query_list, false);
+                if (plansource->gplan) {
+                    AcquireExecutorLocks(plansource->gplan->stmt_list, false);
+                }
+            }
             return true;
         }
     }
@@ -548,51 +571,93 @@ void GlobalPlanCache::RecreateSPICachePlan(SPIPlanPtr spiplan)
         if (!oldsource->gpc.status.InShareTable())
             continue;
         GPC_LOG("recreate spi cachedplan", oldsource, 0);
-        RecreateCachePlan(oldsource, NULL, NULL, spiplan, cell);
+        RecreateCachePlan(oldsource, NULL, NULL, spiplan, cell, false);
     }
     /* pop error context stack */
     t_thrd.log_cxt.error_context_stack = spi_err_context.previous;
     Assert(SPIPlanCacheTableLookup(u_sess->SPI_cxt._current->spi_hash_key));
 }
 
-void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char* stmt_name,
-                                        PreparedStatement *entry, SPIPlanPtr spiplan, ListCell* spiplanCell)
+void GlobalPlanCache::MoveIntoInvalidPlanList(CachedPlanSource* psrc)
+{
+    if (psrc->gpc.status.InShareTable() && !psrc->gpc.status.IsValid()) {
+        GPCKey* key = psrc->gpc.key;
+        uint32 hashCode = GPCHashFunc((const void *) key, sizeof(*key));
+        uint32 bucket_id = GetBucket(hashCode);
+        int lock_id = m_array[bucket_id].lockId;
+        (void)LWLockAcquire(GetMainLWLockByIndex(lock_id), LW_EXCLUSIVE);
+        if (psrc->gpc.status.InShareTableInvalidList() == false) {
+            bool found = false;
+            hash_search(m_array[bucket_id].hash_tbl, (void *)key, HASH_REMOVE, &found);
+            if (unlikely(found == false))
+                elog(PANIC, "should found plan in gpc");
+            m_array[bucket_id].count--;
+            AddInvalidList(psrc);
+        }
+        LWLockRelease(GetMainLWLockByIndex(lock_id));
+    }
+}
+
+void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char* stmt_name, PreparedStatement *entry,
+                                        SPIPlanPtr spiplan, ListCell* spiplanCell, bool hasGetLock)
 {
     GPC_LOG("recreate plan", oldsource, oldsource->stmt_name);
-    CachedPlanSource *newsource = CopyCachedPlan(oldsource, true);
-    MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
-    newsource->stream_enabled = IsStreamSupport();
-    u_sess->exec_cxt.CurrentOpFusionObj = NULL;
-    Assert (oldsource->gpc.status.IsSharePlan());
-    newsource->gpc.status.ShareInit();
-    // If the planSource is set to invalid, the AST must be analyzed again
-    // because the meta has changed.
-    newsource->is_valid = false;
-    bool has_lp = false;
-
-    if (spiplan != NULL) {
-        t_thrd.log_cxt.error_context_stack->arg = (void *)newsource->query_string;
-        newsource->spi_signature = oldsource->spi_signature;
-        newsource->parserSetup = spiplan->parserSetup;
-        newsource->parserSetupArg = spiplan->parserSetupArg;
-    } else if (IS_PGXC_DATANODE) {
-        newsource->stmt_name = pstrdup(stmt_name);
-    } else {
-        newsource->stmt_name = pstrdup(stmt_name);
-#ifdef ENABLE_MULTIPLE_NODES
-        has_lp = (oldsource->single_exec_node != NULL && oldsource->gplan == NULL && oldsource->cplan == NULL);
-        /* clean session's datanode statment on cn */
-        if (has_lp) {
-            /* no lp in newsource, delete old lp */
-            GPCDropLPIfNecessary(stmt_name, false, true, NULL);
-        } else if (oldsource->gplan != NULL) {
-            /* Close any active planned Datanode statements, recreate in BuildCachedPlan later */
-            GPCCleanDatanodeStatement(oldsource->gplan->dn_stmt_num, stmt_name);
+    /* these operator may throw error, make sure shared plan is invalid first */
+    oldsource->gpc.status.SetStatus(GPC_INVALID);
+    oldsource->is_valid = false;
+    CachedPlanSource *newsource = NULL;
+    PG_TRY();
+    {
+        if (hasGetLock) {
+            AcquirePlannerLocks(oldsource->query_list, false);
+            if (oldsource->gplan) {
+                AcquireExecutorLocks(oldsource->gplan->stmt_list, false);
+            }
         }
+        newsource = CopyCachedPlan(oldsource, true);
+        MemoryContext oldcxt = MemoryContextSwitchTo(newsource->context);
+        newsource->stream_enabled = IsStreamSupport();
+        u_sess->exec_cxt.CurrentOpFusionObj = NULL;
+        Assert (oldsource->gpc.status.IsSharePlan());
+        newsource->gpc.status.ShareInit();
+        // If the planSource is set to invalid, the AST must be analyzed again
+        // because the meta has changed.
+        newsource->is_valid = false;
+        bool has_lp = false;
+        if (spiplan != NULL) {
+            t_thrd.log_cxt.error_context_stack->arg = (void *)newsource->query_string;
+            newsource->spi_signature = oldsource->spi_signature;
+            newsource->parserSetup = spiplan->parserSetup;
+            newsource->parserSetupArg = spiplan->parserSetupArg;
+        } else if (IS_PGXC_DATANODE) {
+            newsource->stmt_name = pstrdup(stmt_name);
+        } else {
+            newsource->stmt_name = pstrdup(stmt_name);
+#ifdef ENABLE_MULTIPLE_NODES
+            has_lp = (oldsource->single_exec_node != NULL && oldsource->gplan == NULL && oldsource->cplan == NULL);
+            /* clean session's datanode statment on cn */
+            if (has_lp) {
+                /* no lp in newsource, delete old lp */
+                GPCDropLPIfNecessary(stmt_name, false, true, NULL);
+            } else if (oldsource->gplan != NULL) {
+                /* Close any active planned Datanode statements, recreate in BuildCachedPlan later */
+                GPCCleanDatanodeStatement(oldsource->gplan->dn_stmt_num, stmt_name);
+            }
 #endif
+       }
+        (void)RevalidateCachedQuery(newsource, has_lp);
+        MemoryContextSwitchTo(oldcxt);
     }
-    (void)RevalidateCachedQuery(newsource, has_lp);
+    PG_CATCH();
+    {
+        /* catch only move invalid plansource into gpc invalid list when error occurs */
+        MoveIntoInvalidPlanList(oldsource);
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
 
+    /* newsource has reference on session, forget resource owner */
+    ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, newsource->context);
     newsource->next_saved = u_sess->pcache_cxt.first_saved_plan;
     u_sess->pcache_cxt.first_saved_plan = newsource;
     newsource->is_saved = true;
@@ -610,7 +675,6 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
 #endif
     }
 
-    MemoryContextSwitchTo(oldcxt);
     RemovePlanSource<ACTION_RECREATE>(oldsource, stmt_name);
 }
 

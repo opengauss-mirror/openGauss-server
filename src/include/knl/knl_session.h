@@ -769,7 +769,9 @@ typedef struct knl_u_plancache_context {
      */
     HTAB* prepared_queries;
 
-    HTAB* stmt_lightproxy_htab;
+    HTAB* stmt_lightproxy_htab; /* mapping statement name and lightproxy obj, only for gpc */
+
+    lightProxy* unnamed_gpc_lp; /* light proxy ptr for shard unnamed cachedplansource, only for gpc */
 
     HTAB* lightproxy_objs;
 
@@ -793,6 +795,7 @@ typedef struct knl_u_plancache_context {
     bool gpc_remote_msg;
     bool gpc_first_send;
     bool gpc_in_try_store;
+    bool gpc_in_batch; /* true if is doing 2 ~ n batch execute, false if not in batch or doing first batch execute */
 } knl_u_plancache_context;
 
 typedef struct knl_u_typecache_context {
