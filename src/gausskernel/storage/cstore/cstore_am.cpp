@@ -4771,3 +4771,157 @@ Datum cupointer_bigint(PG_FUNCTION_ARGS)
 
     PG_RETURN_INT64(cu_pointer);
 }
+
+CUDescScan::CUDescScan(_in_ Relation relation)
+    : m_cudesc(NULL), m_cudescIndex(NULL), m_snapshot(NULL),
+      m_cuids(NIL), m_deletemasks(NIL), m_needFreeMasks(NIL), m_valids(NIL)
+{
+    m_cudesc = heap_open(relation->rd_rel->relcudescrelid, AccessShareLock);
+    m_cudescIndex = index_open(m_cudesc->rd_rel->relcudescidx, AccessShareLock);
+
+    /*
+     * m_scanKey[0] = VitrualDelColID, m_scanKey[1] will be set to CUDI when doing scan.
+     * We only init m_scanKey[0] = 0 here.
+     */
+    ScanKeyInit(&m_scanKey[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(VitrualDelColID));
+    ScanKeyInit(&m_scanKey[1], (AttrNumber)CUDescCUIDAttr, BTEqualStrategyNumber, F_OIDEQ, UInt32GetDatum(0));
+}
+
+CUDescScan::~CUDescScan()
+{
+    m_cudesc = NULL;
+    m_cudescIndex = NULL;
+    m_snapshot = NULL;
+    m_cuids = NIL;
+    m_deletemasks = NIL;
+    m_needFreeMasks = NIL;
+    m_valids = NIL;
+}
+
+void CUDescScan::FreeCache()
+{
+    ListCell* needFreeMaskCell = NULL;
+    ListCell* maskCell = NULL;
+    forboth (needFreeMaskCell, m_needFreeMasks, maskCell, m_deletemasks) {
+        if ((bool)lfirst_int(needFreeMaskCell)) {
+            pfree(lfirst(maskCell));
+        }
+    }
+
+    list_free_ext(m_cuids);
+    list_free_ext(m_deletemasks);
+    list_free_ext(m_needFreeMasks);
+    list_free_ext(m_valids);
+}
+
+void CUDescScan::Destroy()
+{
+    index_close(m_cudescIndex, AccessShareLock);
+    heap_close(m_cudesc, AccessShareLock);
+    FreeCache();
+}
+
+void CUDescScan::ResetSnapshot(Snapshot snapshot)
+{
+    m_snapshot = snapshot;
+    FreeCache();
+}
+
+bool CUDescScan::CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found)
+{
+    ListCell* cuidCell = NULL;
+    ListCell* delmaskCell = NULL;
+    ListCell* validCell = NULL;
+
+    forthree (cuidCell, m_cuids, delmaskCell, m_deletemasks, validCell, m_valids) {
+        /* Oid type is also unit32. */
+        uint32 cachedCUId = (uint32)lfirst_oid(cuidCell);
+        if (cachedCUId == CUId) {
+            *found = true;
+            bool valid = (bool)lfirst_int(validCell);
+            if (valid) {
+                int8* bitmap = (int8*)lfirst(delmaskCell);
+                unsigned char* cachedDelMask = (unsigned char*)VARDATA_ANY(bitmap);
+                if (cachedDelMask == NULL) {
+                    /* All rows are alive*/
+                    return true;
+                } else {
+                    return !IsDeadRow(rownum, cachedDelMask);
+                }
+            } else {
+                *found = false;
+                return false;
+            }
+        }
+    }
+
+    *found = false;
+    return false;
+}
+
+bool CUDescScan::CheckItemIsAlive(ItemPointer tid)
+{
+    HeapTuple tup;
+    bool isnull = false;
+    bool isAlive = false;
+
+    uint32 CUId = ItemPointerGetBlockNumber(tid);
+    uint32 rownum = ItemPointerGetOffsetNumber(tid) - 1;
+
+    /* First check in cache, if not found, we do follow scan. */
+    bool foundInCache = false;
+    isAlive = CheckAliveInCache(CUId, rownum, &foundInCache);
+    if (foundInCache) {
+        return isAlive;
+    }
+
+    /* We set m_scanKey[0]=VitrualDelColID in constructor func. Here we set m_scanKey[1]=CUID */
+    m_scanKey[1].sk_argument = UInt32GetDatum(CUId);
+
+    TupleDesc cudescTupdesc = m_cudesc->rd_att;
+    SysScanDesc scanDesc = systable_beginscan_ordered(m_cudesc, m_cudescIndex, m_snapshot, 2, m_scanKey);
+
+    int8* delMask = NULL;
+    bool needFreeMask = false;
+    bool valid = false;
+
+    if ((tup = systable_getnext_ordered(scanDesc, ForwardScanDirection)) != NULL) {
+        /* Put CUPointer into cudesc->cuPointer. */
+        Datum v = fastgetattr(tup, CUDescCUPointerAttr, cudescTupdesc, &isnull);
+        if (isnull) {
+            /* All rows are alvie. */
+            isAlive = true;
+        } else {
+            int8* bitmap = (int8*)PG_DETOAST_DATUM(DatumGetPointer(v));
+            unsigned char* cuDelMask = (unsigned char*)VARDATA_ANY(bitmap);
+            isAlive = !IsDeadRow(rownum, cuDelMask);
+
+            /* Because new memory may be created, so we have to check and free in time. */
+            if ((Pointer)bitmap != DatumGetPointer(v)) {
+                needFreeMask = true;
+            }
+
+            /* Record the mask. */
+            delMask = bitmap;
+        }
+        valid = true;
+    } else {
+        isAlive = false;
+        valid = false;
+    }
+
+    systable_endscan_ordered(scanDesc);
+
+    /* Save the sacn result in cache. */
+    lappend_oid(m_cuids, (Oid)CUId);
+    lappend(m_deletemasks, delMask);
+    lappend_int(m_needFreeMasks, (int)needFreeMask);
+    lappend_int(m_valids, (int)valid);
+
+    return isAlive;
+}
+
+inline bool CUDescScan::IsDeadRow(uint32 row, unsigned char* cuDelMask)
+{
+    return ((cuDelMask[row >> 3] & (1 << (row % 8))) != 0);
+}

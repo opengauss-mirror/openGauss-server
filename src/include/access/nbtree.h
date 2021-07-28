@@ -15,7 +15,7 @@
 #ifndef NBTREE_H
 #define NBTREE_H
 
-#include "access/cstore_insert.h"
+#include "access/cstore_am.h"
 #include "access/genam.h"
 #include "access/itup.h"
 #include "access/sdir.h"

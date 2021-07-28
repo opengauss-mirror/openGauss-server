@@ -435,31 +435,6 @@ private:
     Size *m_diskFileSize;
 };
 
-class CUDescScan : public BaseObject {
-public:
-    CUDescScan(_in_ Relation relation);
 
-    virtual ~CUDescScan();
-    virtual void Destroy();
-
-    void ResetSnapshot(Snapshot);
-
-    bool CheckItemIsAlive(ItemPointer tid);
-
-private:
-    void FreeCache();
-    inline bool IsDeadRow(uint32 row, unsigned char* cuDelMask);
-
-    bool CheckAliveInCache(uint32 CUId, uint32 rownum, bool* found);
-
-    Relation m_cudesc;
-    Relation m_cudescIndex;
-    ScanKeyData m_scanKey[2];
-    Snapshot m_snapshot;
-    List* m_cuids;
-    List* m_deletemasks;
-    List* m_needFreeMasks;
-    List* m_valids;
-};
 
 #endif
