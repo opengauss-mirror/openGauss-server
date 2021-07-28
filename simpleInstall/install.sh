@@ -138,12 +138,14 @@ function check_os() {
     if [ ${sem[0]} -lt 17 ]
         then
             info "On systemwide basis, the maximum number of SEMMSL is not correct. the current SEMMSL value is: ${sem[0]}. Please check it."
+            info "The required value should be greater than 17. You can modify it in file '/etc/sysctl.conf'."
             exit 1
     fi
     let conn_floor=($max_connection+150)/16
     if [ ${sem[3]} -lt $conn_floor ]
     then
       info "On systemwide basis, the maximum number of SEMMNI is not correct. the current SEMMNI value is: ${sem[3]}. Please check it."
+      info "The required value should be greater than ${conn_floor}. You can modify it in file '/etc/sysctl.conf'."
       exit 1
     fi
 
@@ -151,6 +153,7 @@ function check_os() {
     if [ ${sem[1]} -lt $conn_floor ]
     then
       info "On systemwide basis, the maximum number of SEMMNS is not correct. the current SEMMNS value is: ${sem[1]}. Please check it."
+      info "The required value should be greater than ${conn_floor}. You can modify it in file '/etc/sysctl.conf'."
       exit 1
     fi
 }
