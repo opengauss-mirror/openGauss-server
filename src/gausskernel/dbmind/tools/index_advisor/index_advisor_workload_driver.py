@@ -1,17 +1,3 @@
-"""
-Copyright (c) 2020 Huawei Technologies Co.,Ltd.
-
-openGauss is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-
-         http://license.coscl.org.cn/MulanPSL2
-
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details.
-"""
 import os
 import sys
 import argparse
@@ -19,11 +5,9 @@ import copy
 import getpass
 import random
 import re
-import shlex
-import subprocess
-import time
 import select
 import logging
+import psycopg2
 import json
 
 ENABLE_MULTI_NODE = False
@@ -38,7 +22,7 @@ SHARP = '#'
 SCHEMA = None
 JSON_TYPE = False
 BLANK = ' '
-SQL_TYPE = ['select ', 'delete ', 'insert ', 'update ']
+SQL_TYPE = ['select', 'delete', 'insert', 'update']
 SQL_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
                r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
                r'(([^<>]\s*=\s*)|([^<>]\s+))(\d+)(\.\d+)?']  # match single integer
@@ -111,30 +95,36 @@ class IndexInfo:
         self.redundant_obj = []
 
 
-def run_shell_cmd(target_sql_list):
-    cmd = BASE_CMD + ' -c \"'
-    if SCHEMA:
-        cmd += 'set current_schema = %s; ' % SCHEMA
-    for target_sql in target_sql_list:
-        cmd += target_sql + ';'
-    cmd += '\"'
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    (stdout, stderr) = proc.communicate()
-    stdout, stderr = stdout.decode(), stderr.decode()
-    if 'gsql' in stderr or 'failed to connect' in stderr:
-        raise ConnectionError("An error occurred while connecting to the database.\n"
-                              + "Details: " + stderr)
-    return stdout
+class DatabaseConn:
+    def __init__(self, dbname, user, password, host, port):
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+        self.host = host
+        self.port = port
+        self.conn = None
+        self.cur = None
 
+    def init_conn_handle(self):
+        self.conn = psycopg2.connect(dbname=self.dbname,
+                                     user=self.user,
+                                     password=self.password,
+                                     host=self.host,
+                                     port=self.port)
+        self.cur = self.conn.cursor()
 
-def run_shell_sql_cmd(sql_file):
-    cmd = BASE_CMD + ' -f ./' + sql_file
-    try:
-        ret = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        print(e.output, file=sys.stderr)
+    def execute(self, sql):
+        try:
+            self.cur.execute(sql)
+            self.conn.commit()
+            return self.cur.fetchall()
+        except Exception:
+            self.conn.commit()
 
-    return ret.decode()
+    def close_conn(self):
+        if self.conn and self.cur:
+            self.cur.close()
+            self.conn.close()
 
 
 def green(text):
@@ -265,7 +255,7 @@ def record_redundant_indexes(cur_table_indexes, redundant_indexes):
             redundant_indexes.append(index)
 
 
-def check_useless_index(tables):
+def check_useless_index(tables, db):
     whole_indexes = list()
     redundant_indexes = list()
     if not tables:
@@ -280,32 +270,29 @@ def check_useless_index(tables):
           "(i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) AND " \
           "n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % (SCHEMA, tables_string)
 
-    res = run_shell_cmd([sql]).split('\n')
+    res = db.execute(sql)
     if res:
         cur_table_indexes = list()
-        for line in res:
-            if 'tablename' in line or re.match(r'-+', line):
-                continue
-            elif re.match(r'\(\d+ rows?\)', line):
-                continue
-            elif '|' in line:
-                table, index, indexdef, pkey = [item.strip() for item in line.split('|')]
-                cur_columns = re.search(r'\(([^\(\)]*)\)', indexdef).group(1)
-                cur_index_obj = IndexInfo(SCHEMA, table, index, cur_columns, indexdef)
-                if pkey:
-                    cur_index_obj.primary_key = True
-                whole_indexes.append(cur_index_obj)
-                if cur_table_indexes and cur_table_indexes[-1].table != table:
-                    record_redundant_indexes(cur_table_indexes, redundant_indexes)
-                    cur_table_indexes = []
-                cur_table_indexes.append(cur_index_obj)
+        for item in res:
+            cur_columns = re.search(r'\(([^\(\)]*)\)', item[2]).group(1)
+            cur_index_obj = IndexInfo(SCHEMA, item[0], item[1], cur_columns, item[2])
+            if item[3]:
+                cur_index_obj.primary_key = True
+            whole_indexes.append(cur_index_obj)
+            if cur_table_indexes and cur_table_indexes[-1].table != item[0]:
+                record_redundant_indexes(cur_table_indexes, redundant_indexes)
+                cur_table_indexes = []
+            cur_table_indexes.append(cur_index_obj)
         if cur_table_indexes:
             record_redundant_indexes(cur_table_indexes, redundant_indexes)
+
     return whole_indexes, redundant_indexes
 
 
-def get_whole_index(tables, detail_info):
-    whole_index, redundant_indexes = check_useless_index(tables)
+def get_whole_index(tables, db, detail_info):
+    db.init_conn_handle()
+    whole_index, redundant_indexes = check_useless_index(tables, db)
+    db.close_conn()
     print_header_boundary(" Created indexes ")
     detail_info['createdIndexes'] = []
     if not whole_index:
@@ -364,8 +351,7 @@ def check_unused_index_workload(whole_indexes, redundant_indexes, workload_index
         print(statement)
         existing_index = [item.indexname + ':' + item.columns for item in index.redundant_obj]
         redundant_index = {"schemaName": index.schema, "tbName": index.table, "type": 2,
-                           "columns": index.columns, "statement": statement,
-                           "existingIndex": existing_index}
+                           "columns": index.columns, "statement": statement, "existingIndex": existing_index}
         detail_info['uselessIndexes'].append(redundant_index)
 
 
@@ -416,8 +402,8 @@ def get_workload_template(workload):
 
 
 def workload_compression(input_path):
-    compressed_workload = []
     total_num = 0
+    compressed_workload = []
     if JSON_TYPE:
         with open(input_path, 'r') as file:
             templates = json.load(file)
@@ -434,113 +420,78 @@ def workload_compression(input_path):
 
 
 # parse the explain plan to get estimated cost by database optimizer
-def parse_explain_plan(plan):
+def parse_explain_plan(plan, index_config, ori_indexes_name):
     cost_total = -1
-
-    plan_list = plan.split('\n')
-    for line in plan_list:
-        if '(cost=' in line:
+    cost_flag = True
+    for item in plan:
+        if '(cost=' in item[0] and cost_flag:
+            cost_flag = False
             pattern = re.compile(r'\(cost=([^\)]*)\)', re.S)
-            matched_res = re.search(pattern, line)
+            matched_res = re.search(pattern, item[0])
             if matched_res:
                 cost_list = matched_res.group(1).split()
                 if len(cost_list) == 3:
                     cost_total = float(cost_list[0].split('..')[-1])
+        if 'Index' in item[0] and 'Scan' in item[0] and not index_config:
+            ind1, ind2 = re.search(r'Index.*Scan(.*)on ([^\s]+)',
+                                   item[0].strip(), re.IGNORECASE).groups()
+            if ind1.strip():
+                ori_indexes_name.add(ind1.strip().split(' ')[1])
+            else:
+                ori_indexes_name.add(ind2)
             break
 
     return cost_total
 
 
-def update_index_storage(res, index_config, hypo_index_num):
-    index_id = re.findall(r'<\d+>', res)[0].strip('<>')
+def update_index_storage(index_id, index_config, hypo_index_num, db):
     index_size_sql = 'select * from hypopg_estimate_size(%s);' % index_id
-    res = run_shell_cmd([index_size_sql]).split('\n')
-    for item in res:
-        if re.match(r'\d+', item.strip()):
-            index_config[hypo_index_num].storage = float(item.strip()) / 1024 / 1024
+    res = db.execute(index_size_sql)
+    if res:
+        index_config[hypo_index_num].storage = float(res[0][0]) / 1024 / 1024
 
 
-def estimate_workload_cost_file(workload, index_config=None, ori_indexes_name=None):
+def estimate_workload_cost_file(workload, db, index_config=None, ori_indexes_name=None):
     total_cost = 0
-    sql_file = str(time.time()) + '.sql'
-    found_plan = False
-    hypo_index = False
-    is_computed = False
-    select_sql_pos = []
-    with open(sql_file, 'w') as file:
-        if SCHEMA:
-            file.write('SET current_schema = %s;\n' % SCHEMA)
-        if index_config:
-            if len(index_config) == 1 and index_config[0].positive_pos:
-                is_computed = True
-            # create hypo-indexes
-            file.write('SET enable_hypo_index = on;\n')
-            for index in index_config:
-                file.write("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)');\n" %
-                         (index.table, index.columns))
-        if ENABLE_MULTI_NODE:
-            file.write('set enable_fast_query_shipping = off;\n')
-        file.write("set explain_perf_mode = 'normal'; \n")
-
-        for ind, query in enumerate(workload):
-            if 'select ' not in query.statement.lower():
-                workload[ind].cost_list.append(0)
-            else:
-                file.write('EXPLAIN ' + query.statement + ';\n')
-                select_sql_pos.append(ind)
-            # record ineffective sql and negative sql for candidate indexes
-            if is_computed:
-                record_ineffective_negative_sql(index_config[0], query, ind)
-
-    result = run_shell_sql_cmd(sql_file).split('\n')
-    if os.path.exists(sql_file):
-        os.remove(sql_file)
-
-    # parse the result of explain plans
-    i = 0
     hypo_index_num = 0
-    for line in result:
-        if 'QUERY PLAN' in line:
-            found_plan = True
-        if 'ERROR' in line:
-            if i >= len(select_sql_pos):
-                raise ValueError("The size of workload is not correct!")
-            workload[select_sql_pos[i]].cost_list.append(0)
-            i += 1
-        if 'hypopg_create_index' in line:
-            hypo_index = True
-        if found_plan and '(cost=' in line:
-            if i >= len(select_sql_pos):
-                raise ValueError("The size of workload is not correct!")
-            query_cost = parse_explain_plan(line)
-            query_cost *= workload[select_sql_pos[i]].frequency
-            workload[select_sql_pos[i]].cost_list.append(query_cost)
-            total_cost += query_cost
-            found_plan = False
-            i += 1
-        if hypo_index:
-            if 'btree' in line and MAX_INDEX_STORAGE:
-                hypo_index = False
-                update_index_storage(line, index_config, hypo_index_num)
-                hypo_index_num += 1
-        if 'Index' in line and 'Scan' in line and not index_config:
-            ind1, ind2 = re.search(r'Index.*Scan(.*)on ([^\s]+)',
-                                   line.strip(), re.IGNORECASE).groups()
-            if ind1.strip():
-                ori_indexes_name.add(ind1.strip().split(' ')[1])
-            else:
-                ori_indexes_name.add(ind2)
-    while i < len(select_sql_pos):
-        workload[select_sql_pos[i]].cost_list.append(0)
-        i += 1
+    is_computed = False
+    db.execute('SET current_schema = %s' % SCHEMA)
     if index_config:
-        run_shell_cmd(['SELECT hypopg_reset_index();'])
+        if len(index_config) == 1 and index_config[0].positive_pos:
+            is_computed = True
+        # create hypo-indexes
+        db.execute('SET enable_hypo_index = on')
+        for index in index_config:
+            res = db.execute("SELECT * from hypopg_create_index('CREATE INDEX ON %s(%s)')" %
+                             (index.table, index.columns))
+            if MAX_INDEX_STORAGE and res:
+                update_index_storage(res[0][0], index_config, hypo_index_num, db)
+            hypo_index_num += 1
+    if ENABLE_MULTI_NODE:
+        db.execute('set enable_fast_query_shipping = off;set enable_stream_operator = on')
+    db.execute("set explain_perf_mode = 'normal'")
 
+    remove_list = []
+    for ind, query in enumerate(workload):
+        # record ineffective sql and negative sql for candidate indexes
+        if is_computed:
+            record_ineffective_negative_sql(index_config[0], query, ind)
+        if 'select ' not in query.statement.lower():
+            workload[ind].cost_list.append(0)
+        else:
+            res = db.execute('EXPLAIN ' + query.statement)
+            if res:
+                query_cost = parse_explain_plan(res, index_config, ori_indexes_name)
+                query_cost *= workload[ind].frequency
+                workload[ind].cost_list.append(query_cost)
+                total_cost += query_cost
+    if index_config:
+        db.execute('SELECT hypopg_reset_index()')
     return total_cost
 
 
 def make_single_advisor_sql(ori_sql):
-    sql = 'select gs_index_advise(\''
+    sql = 'set current_schema = %s; select gs_index_advise(\'' % SCHEMA
     ori_sql = ori_sql.replace('"', '\'')
     for elem in ori_sql:
         if elem == '\'':
@@ -553,12 +504,12 @@ def make_single_advisor_sql(ori_sql):
 
 def parse_single_advisor_result(res, workload_table_name):
     table_index_dict = {}
-    if len(res) > 2 and res[0:2] == ' (':
-        items = res.split(',', 1)
-        table = items[0][2:]
+    items = res.strip('()').split(',', 1)
+    if len(items) == 2:
+        table = items[0]
         workload_table_name[SCHEMA] = workload_table_name.get(SCHEMA, set())
         workload_table_name[SCHEMA].add(table)
-        indexes = re.split('[()]', items[1][:-1].strip('\"'))
+        indexes = re.split('[()]', items[1].strip('\"'))
         for columns in indexes:
             if columns == '':
                 continue
@@ -570,56 +521,53 @@ def parse_single_advisor_result(res, workload_table_name):
 
 
 # call the single-index-advisor in the database
-def query_index_advisor(query, workload_table_name):
+def query_index_advisor(query, workload_table_name, db):
     table_index_dict = {}
 
     if 'select' not in query.lower():
         return table_index_dict
 
     sql = make_single_advisor_sql(query)
-    result = run_shell_cmd([sql]).split('\n')
-
+    result = db.execute(sql=sql)
+    if not result:
+        return table_index_dict
     for res in result:
-        table_index_dict.update(parse_single_advisor_result(res, workload_table_name))
+        table_index_dict.update(parse_single_advisor_result(res[0], workload_table_name))
 
     return table_index_dict
 
 
 # judge whether the index is used by the optimizer
-def query_index_check(query, query_index_dict):
+def query_index_check(query, query_index_dict, db):
     valid_indexes = {}
     if len(query_index_dict) == 0:
         return valid_indexes
 
     # create hypo-indexes
-    sql_list = ['SET enable_hypo_index = on;']
+    sqls = 'SET enable_hypo_index = on;'
     if ENABLE_MULTI_NODE:
-        sql_list.append('SET enable_fast_query_shipping = off;')
+        sqls += 'SET enable_fast_query_shipping = off;SET enable_stream_operator = on;'
     for table in query_index_dict.keys():
         for columns in query_index_dict[table]:
             if columns != '':
-                sql_list.append("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)')" %
-                                (table, columns))
-    sql_list.append('SELECT hypopg_display_index()')
-    sql_list.append("set explain_perf_mode = 'normal'; explain " + query)
-    sql_list.append('SELECT hypopg_reset_index()')
-    result = run_shell_cmd(sql_list).split('\n')
-
-    # parse the result of explain plan
+                sqls += "SELECT hypopg_create_index('CREATE INDEX ON %s(%s)');" % \
+                            (table, columns)
+    sqls += 'SELECT * from hypopg_display_index();'
+    result = db.execute(sqls)
+    if not result:
+        return valid_indexes
     hypoid_table_column = {}
-    hypo_display = False
-    for line in result:
-        if hypo_display and 'btree' in line:
-            hypo_index_info = line.split(',', 3)
-            if len(hypo_index_info) == 4:
-                hypoid_table_column[hypo_index_info[1]] = \
-                    hypo_index_info[2] + ':' + hypo_index_info[3].strip('"()')
-        if hypo_display and re.search(r'\d+ rows', line):
-            hypo_display = False
-        if 'hypopg_display_index' in line:
-            hypo_display = True
-        if 'Index' in line and 'Scan' in line and 'btree' in line:
-            tokens = line.split(' ')
+    for item in result:
+        if len(item) == 4:
+            hypoid_table_column[str(item[1])] = item[2] + ':' + item[3].strip('()')
+    sqls = "SET explain_perf_mode = 'normal'; explain %s" % query
+    result = db.execute(sqls)
+    if not result:
+        return valid_indexes
+    # parse the result of explain plan
+    for item in result:
+        if 'Index' in item[0] and 'Scan' in item[0] and 'btree' in item[0]:
+            tokens = item[0].split(' ')
             for token in tokens:
                 if 'btree' in token:
                     hypo_index_id = re.search(r'\d+', token.split('_', 1)[0]).group()
@@ -631,7 +579,7 @@ def query_index_check(query, query_index_dict):
                         valid_indexes[table_name] = []
                     if columns not in valid_indexes[table_name]:
                         valid_indexes[table_name].append(columns)
-
+    db.execute('SELECT hypopg_reset_index()')
     return valid_indexes
 
 
@@ -651,16 +599,16 @@ def get_indexable_columns(table_index_dict):
     return query_indexable_columns
 
 
-def generate_candidate_indexes(workload, workload_table_name):
+def generate_candidate_indexes(workload, workload_table_name, db):
     candidate_indexes = []
     index_dict = {}
-
+    db.init_conn_handle()
     for k, query in enumerate(workload):
         if 'select ' in query.statement.lower():
-            table_index_dict = query_index_advisor(query.statement, workload_table_name)
+            table_index_dict = query_index_advisor(query.statement, workload_table_name, db)
             need_check = False
             query_indexable_columns = get_indexable_columns(table_index_dict)
-            valid_index_dict = query_index_check(query.statement, query_indexable_columns)
+            valid_index_dict = query_index_check(query.statement, query_indexable_columns, db)
 
             for i in range(MAX_INDEX_COLUMN_NUM):
                 for table in valid_index_dict.keys():
@@ -671,7 +619,7 @@ def generate_candidate_indexes(workload, workload_table_name):
                                 if single_column not in columns:
                                     valid_index_dict[table].append(columns + ',' + single_column)
                 if need_check:
-                    valid_index_dict = query_index_check(query.statement, valid_index_dict)
+                    valid_index_dict = query_index_check(query.statement, valid_index_dict, db)
                     need_check = False
                 else:
                     break
@@ -693,7 +641,7 @@ def generate_candidate_indexes(workload, workload_table_name):
         for column, sql in column_sqls.items():
             print("table: ", table, "columns: ", column)
             candidate_indexes.append(IndexItem(table, column, sql))
-
+    db.close_conn()
     return candidate_indexes
 
 
@@ -828,7 +776,7 @@ def infer_workload_cost(workload, config, atomic_config_total):
         if max(atomic_subsets_num) >= len(obj.cost_list):
             raise ValueError("Wrong atomic config for current query!")
         # compute the cost for selection
-        min_cost = sys.maxsize
+        min_cost = obj.cost_list[0]
         for num in atomic_subsets_num:
             if num < len(obj.cost_list) and obj.cost_list[num] < min_cost:
                 min_cost = obj.cost_list[num]
@@ -840,25 +788,27 @@ def infer_workload_cost(workload, config, atomic_config_total):
     return total_cost, cur_index_atomic_pos
 
 
-def simple_index_advisor(input_path, max_index_num):
+def simple_index_advisor(input_path, max_index_num, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name)
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
+    db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
-        estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
+        estimate_workload_cost_file(workload, db, ori_indexes_name=ori_indexes_name)
         return ori_indexes_name, workload_table_name, display_info
 
     print_header_boundary(" Determine optimal indexes ")
-    ori_total_cost = estimate_workload_cost_file(workload,  ori_indexes_name=ori_indexes_name)
+    ori_total_cost = estimate_workload_cost_file(workload, db, ori_indexes_name=ori_indexes_name)
     index_cost_total = [ori_total_cost]
     for _, obj in enumerate(candidate_indexes):
-        new_total_cost = estimate_workload_cost_file(workload, [obj])
+        new_total_cost = estimate_workload_cost_file(workload, db, [obj])
         index_cost_total.append(new_total_cost)
         obj.benefit = ori_total_cost - new_total_cost
+    db.close_conn()
     candidate_indexes = sorted(enumerate(candidate_indexes),
                                key=lambda item: item[1].benefit, reverse=True)
     candidate_indexes = [item for item in candidate_indexes if item[1].benefit > 0]
@@ -869,14 +819,14 @@ def simple_index_advisor(input_path, max_index_num):
     return ori_indexes_name, workload_table_name, display_info
 
 
-def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes):
+def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes, origin_sum_cost):
     opt_config = []
     index_num_record = set()
-    min_cost = sys.maxsize
+    min_cost = origin_sum_cost
     for i in range(len(candidate_indexes)):
-        if i == 1 and min_cost == sys.maxsize:
+        if i == 1 and min_cost == origin_sum_cost:
             break
-        cur_min_cost = sys.maxsize
+        cur_min_cost = origin_sum_cost
         cur_index = None
         cur_index_num = -1
         for k, index in enumerate(candidate_indexes):
@@ -906,16 +856,17 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
     return opt_config
 
 
-def complex_index_advisor(input_path):
+def complex_index_advisor(input_path, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name)
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
+    db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
-        estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
+        estimate_workload_cost_file(workload, db, ori_indexes_name=ori_indexes_name)
         return ori_indexes_name, workload_table_name, display_info
 
     print_header_boundary(" Determine optimal indexes ")
@@ -924,10 +875,11 @@ def complex_index_advisor(input_path):
         raise ValueError("The empty atomic config isn't generated!")
     index_cost_total = []
     for atomic_config in atomic_config_total:
-        index_cost_total.append(estimate_workload_cost_file(workload, atomic_config,
+        index_cost_total.append(estimate_workload_cost_file(workload, db, atomic_config,
                                                             ori_indexes_name))
-
-    opt_config = greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes)
+    db.close_conn()
+    opt_config = greedy_determine_opt_config(workload, atomic_config_total,
+                                                             candidate_indexes, index_cost_total[0])
 
     display_recommend_result(workload, opt_config, index_cost_total, True, display_info)
     return ori_indexes_name, workload_table_name, display_info
@@ -962,8 +914,7 @@ def main():
     if args.max_index_storage is not None and args.max_index_storage <= 0:
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_storage)
-    if args.schema:
-        SCHEMA = args.schema
+    SCHEMA = args.schema
     JSON_TYPE = args.json
     MAX_INDEX_NUM = args.max_index_num or 10
     ENABLE_MULTI_NODE = args.multi_node
@@ -978,13 +929,15 @@ def main():
                              + args.U + ' when executing the script.')
     if args.W:
         BASE_CMD += ' -W ' + args.W
+    # Initialize the connection
+    db = DatabaseConn(args.d, args.U, args.W, args.h, args.p)
 
     if args.multi_iter_mode:
-        workload_indexes, tables, detail_info = complex_index_advisor(args.f)
+        workload_indexes, tables, detail_info = complex_index_advisor(args.f, db)
     else:
-        workload_indexes, tables, detail_info = simple_index_advisor(args.f, args.max_index_num)
+        workload_indexes, tables, detail_info = simple_index_advisor(args.f, args.max_index_num, db)
 
-    whole_indexes, redundant_indexes = get_whole_index(tables, detail_info)
+    whole_indexes, redundant_indexes = get_whole_index(tables, db, detail_info)
     # check the unused indexes of the current workload based on the whole index
     check_unused_index_workload(whole_indexes, redundant_indexes, workload_indexes, detail_info)
     if args.show_detail:
