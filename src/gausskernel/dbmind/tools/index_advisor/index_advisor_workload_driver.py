@@ -105,6 +105,7 @@ class IndexInfo:
         self.indexname = indexname
         self.columns = columns
         self.indexdef = indexdef
+        self.primary_key = False
         self.redundant_obj = []
 
 
@@ -168,7 +169,10 @@ def filter_low_benefit(pos_list, candidate_indexes, multi_iter_mode, workload):
             sql_optimzed += 1 - workload[pos].cost_list[cost_list_pos] / workload[pos].cost_list[0]
         negative_ratio = (index.insert_sql_num + index.delete_sql_num + index.update_sql_num) / \
                          index.total_sql_num
-        if sql_optimzed / len(index.positive_pos) < NEGATIVE_RATIO_THRESHOLD < negative_ratio:
+        # filter the candidate indexes that do not meet the conditions of optimization
+        if sql_optimzed / len(index.positive_pos) < 0.1:
+            remove_list.append(key)
+        elif sql_optimzed / len(index.positive_pos) < NEGATIVE_RATIO_THRESHOLD < negative_ratio:
             remove_list.append(key)
     for item in sorted(remove_list, reverse=True):
         candidate_indexes.pop(item)
@@ -204,6 +208,9 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
         sql_info = {'sqlDetails': []}
         benefit_types = [index.ineffective_pos, index.positive_pos, index.negative_pos]
         for category, benefit_type in enumerate(benefit_types):
+            sql_count = 0
+            for item in benefit_type:
+                sql_count += workload[item].frequency
             for ind, pos in enumerate(benefit_type):
                 sql_detail = {}
                 sql_template = workload[pos].statement
@@ -211,23 +218,27 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
                     sql_template = re.sub(pattern, '?', sql_template)
 
                 sql_detail['sqlTemplate'] = sql_template
-                sql_optimzed = (1 - workload[pos].cost_list[cost_list_pos] / workload[pos].cost_list[0])
                 sql_detail['sql'] = workload[pos].statement
+                sql_detail['sqlCount'] = sql_count
                 if category == 1:
-                    sql_detail['optimized'] = '%.2f' % (sql_optimzed * 100)
+                    sql_optimzed = (workload[pos].cost_list[0] -
+                                    workload[pos].cost_list[cost_list_pos]) / \
+                                   workload[pos].cost_list[cost_list_pos]
+                    sql_detail['optimized'] = '%.3f' % sql_optimzed
                 sql_detail['correlationType'] = category
                 sql_info['sqlDetails'].append(sql_detail)
-        workload_optimized = 1 - index_cost_total[cost_list_pos] / index_cost_total[0]
-        sql_info['workloadOptimized'] = '%.2f' % (workload_optimized * 100)
+        workload_optimized = (1 - index_cost_total[cost_list_pos] / index_cost_total[0]) * 100
+        sql_info['workloadOptimized'] = '%.2f' % (workload_optimized if workload_optimized > 1 else 1)
         sql_info['schemaName'] = SCHEMA
         sql_info['tbName'] = table_name
         sql_info['columns'] = index.columns
         sql_info['statement'] = statement
         sql_info['dmlCount'] = round(index.total_sql_num)
-        sql_info['selectRatio'] = round(index.select_sql_num / index.total_sql_num, 2)
-        sql_info['insertRatio'] = round(index.insert_sql_num / index.total_sql_num, 2)
-        sql_info['deleteRatio'] = round(index.delete_sql_num / index.total_sql_num, 2)
-        sql_info['updateRatio'] = round(index.update_sql_num / index.total_sql_num, 2)
+        sql_info['selectRatio'] = round(index.select_sql_num * 100 / index.total_sql_num, 2)
+        sql_info['insertRatio'] = round(index.insert_sql_num * 100 / index.total_sql_num, 2)
+        sql_info['deleteRatio'] = round(index.delete_sql_num * 100 / index.total_sql_num, 2)
+        sql_info['updateRatio'] = round(100 - sql_info['selectRatio'] - sql_info['insertRatio']
+                                        - sql_info['deleteRatio'], 2)
         display_info['recommendIndexes'].append(sql_info)
     return display_info
 
@@ -236,13 +247,25 @@ def record_redundant_indexes(cur_table_indexes, redundant_indexes):
     cur_table_indexes = sorted(cur_table_indexes,
                                key=lambda index_obj: len(index_obj.columns.split(',')))
     # record redundant indexes
+    has_restore = []
     for pos, index in enumerate(cur_table_indexes[:-1]):
         is_redundant = False
         for candidate_index in cur_table_indexes[pos + 1:]:
+            if 'UNIQUE INDEX' in index.indexdef:
+                # ensure that UNIQUE INDEX will not become redundant compared to normal index
+                if 'UNIQUE INDEX' not in candidate_index.indexdef:
+                    continue
+                # ensure redundant index not is pkey
+                elif index.primary_key:
+                    if re.match(r'%s' % candidate_index.columns, index.columns):
+                        candidate_index.redundant_obj.append(index)
+                        redundant_indexes.append(candidate_index)
+                        has_restore.append(candidate_index)
+                    continue
             if re.match(r'%s' % index.columns, candidate_index.columns):
                 is_redundant = True
                 index.redundant_obj.append(candidate_index)
-        if is_redundant:
+        if is_redundant and index not in has_restore:
             redundant_indexes.append(index)
 
 
@@ -252,14 +275,23 @@ def check_useless_index(tables, db):
     if not tables:
         return whole_indexes, redundant_indexes
     tables_string = ','.join(["'%s'" % table for table in tables[SCHEMA]])
-    sql = "select tablename, indexname, indexdef from pg_indexes where " \
-          "schemaname='%s' and tablename in (%s) order by tablename " % (SCHEMA, tables_string)
+    sql = "SELECT c.relname AS tablename, i.relname AS indexname, " \
+          "pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
+          "pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN " \
+          "pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_namespace n " \
+          "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON i.oid = p.conindid" \
+          "WHERE (c.relkind = ANY (ARRAY['r'::\"char\", 'm'::\"char\"])) AND " \
+          "(i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) AND " \
+          "n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % (SCHEMA, tables_string)
+
     res = db.execute(sql)
     if res:
         cur_table_indexes = list()
         for item in res:
-            cur_columns = re.search(r'\((.*)\)', item[2]).group(1)
+            cur_columns = re.search(r'\(([^\(\)]*)\)', item[2]).group(1)
             cur_index_obj = IndexInfo(SCHEMA, item[0], item[1], cur_columns, item[2])
+            if item[3]:
+                cur_index_obj.primary_key = True
             whole_indexes.append(cur_index_obj)
             if cur_table_indexes and cur_table_indexes[-1].table != item[0]:
                 record_redundant_indexes(cur_table_indexes, redundant_indexes)
@@ -292,30 +324,39 @@ def check_unused_index_workload(whole_indexes, redundant_indexes, workload_index
     indexes_name = set(index.indexname for index in whole_indexes)
     unused_index = list(indexes_name.difference(workload_indexes))
     remove_list = []
-    for pos, index in enumerate(redundant_indexes):
-        is_redundant = False
-        for redundant_obj in index.redundant_obj:
-            if redundant_obj.indexname not in unused_index:
-                is_redundant = True
-        if not is_redundant:
-            remove_list.append(pos)
-    for item in sorted(remove_list, reverse=True):
-        redundant_indexes.pop(item)
     print_header_boundary(" Current workload useless indexes ")
     if not unused_index:
         print("No useless index!")
     detail_info['uselessIndexes'] = []
     # useless index
+    unused_index_columns = dict()
     for cur_index in unused_index:
-        if not re.search('_pkey$', cur_index):
-            for index in whole_indexes:
-                if cur_index == index.indexname:
+        for index in whole_indexes:
+            if cur_index == index.indexname:
+                unused_index_columns[cur_index] = index.columns
+                if 'UNIQUE INDEX' not in index.indexdef:
                     statement = "DROP INDEX %s;" % index.indexname
                     print(statement)
                     useless_index = {"schemaName": index.schema, "tbName": index.table, "type": 1,
                                      "columns": index.columns, "statement": statement}
                     detail_info['uselessIndexes'].append(useless_index)
     print_header_boundary(" Redundant indexes ")
+    # filter redundant index
+    for pos, index in enumerate(redundant_indexes):
+        is_redundant = False
+        for redundant_obj in index.redundant_obj:
+            # redundant objects are not in the useless index set or
+            # equal to the column value in the useless index must be redundant index
+            index_exist = redundant_obj.indexname not in unused_index_columns.keys() or \
+                          (unused_index_columns.get(redundant_obj.indexname) and
+                           redundant_obj.columns == unused_index_columns[redundant_obj.indexname])
+            if index_exist:
+                is_redundant = True
+        if not is_redundant:
+            remove_list.append(pos)
+    for item in sorted(remove_list, reverse=True):
+        redundant_indexes.pop(item)
+
     if not redundant_indexes:
         print("No redundant index!")
     # redundant index
@@ -375,6 +416,7 @@ def get_workload_template(workload):
 
 
 def workload_compression(input_path):
+    total_num = 0
     compressed_workload = []
     if JSON_TYPE:
         with open(input_path, 'r') as file:
@@ -387,7 +429,8 @@ def workload_compression(input_path):
         for sql in elem['samples']:
             compressed_workload.append(QueryItem(sql.strip('\n'),
                                                  elem['cnt'] / len(elem['samples'])))
-    return compressed_workload
+        total_num += elem['cnt']
+    return compressed_workload, total_num
 
 
 # parse the explain plan to get estimated cost by database optimizer
@@ -447,17 +490,15 @@ def estimate_workload_cost_file(workload, db, index_config=None, ori_indexes_nam
         # record ineffective sql and negative sql for candidate indexes
         if is_computed:
             record_ineffective_negative_sql(index_config[0], query, ind)
-        res = db.execute('EXPLAIN ' + query.statement)
-        if res:
-            query_cost = parse_explain_plan(res, index_config, ori_indexes_name)
-            query_cost *= workload[ind].frequency
-            workload[ind].cost_list.append(query_cost)
-            total_cost += query_cost
+        if 'select ' not in query.statement.lower():
+            workload[ind].cost_list.append(0)
         else:
-            remove_list.append(ind)
-
-    for item in sorted(remove_list, reverse=True):
-        workload.pop(item)
+            res = db.execute('EXPLAIN ' + query.statement)
+            if res:
+                query_cost = parse_explain_plan(res, index_config, ori_indexes_name)
+                query_cost *= workload[ind].frequency
+                workload[ind].cost_list.append(query_cost)
+                total_cost += query_cost
     if index_config:
         db.execute('SELECT hypopg_reset_index()')
     return total_cost
@@ -572,13 +613,13 @@ def get_indexable_columns(table_index_dict):
     return query_indexable_columns
 
 
-def generate_candidate_indexes(workload, workload_table_name, db, iterate=False):
+def generate_candidate_indexes(workload, workload_table_name, db):
     candidate_indexes = []
     index_dict = {}
     db.init_conn_handle()
     for k, query in enumerate(workload):
-        table_index_dict = query_index_advisor(query.statement, workload_table_name, db)
-        if iterate:
+        if 'select ' in query.statement.lower():
+            table_index_dict = query_index_advisor(query.statement, workload_table_name, db)
             need_check = False
             query_indexable_columns = get_indexable_columns(table_index_dict)
             valid_index_dict = query_index_check(query.statement, query_indexable_columns, db)
@@ -596,22 +637,20 @@ def generate_candidate_indexes(workload, workload_table_name, db, iterate=False)
                     need_check = False
                 else:
                     break
-        else:
-            valid_index_dict = query_index_check(query.statement, table_index_dict, db)
 
-        # filter duplicate indexes
-        for table in valid_index_dict.keys():
-            if table not in index_dict.keys():
-                index_dict[table] = {}
-            for columns in valid_index_dict[table]:
-                if len(workload[k].valid_index_list) >= FULL_ARRANGEMENT_THRESHOLD:
-                    break
-                workload[k].valid_index_list.append(IndexItem(table, columns))
-                if not any(re.match(r'%s' % columns, item) for item in index_dict[table]):
-                    column_sql = {columns: [k]}
-                    index_dict[table].update(column_sql)
-                elif columns in index_dict[table].keys():
-                    index_dict[table][columns].append(k)
+            # filter duplicate indexes
+            for table in valid_index_dict.keys():
+                if table not in index_dict.keys():
+                    index_dict[table] = {}
+                for columns in valid_index_dict[table]:
+                    if len(workload[k].valid_index_list) >= FULL_ARRANGEMENT_THRESHOLD:
+                        break
+                    workload[k].valid_index_list.append(IndexItem(table, columns))
+                    if not any(re.match(r'%s' % columns, item) for item in index_dict[table]):
+                        column_sql = {columns: [k]}
+                        index_dict[table].update(column_sql)
+                    elif columns in index_dict[table].keys():
+                        index_dict[table][columns].append(k)
     for table, column_sqls in index_dict.items():
         for column, sql in column_sqls.items():
             print("table: ", table, "columns: ", column)
@@ -757,14 +796,6 @@ def infer_workload_cost(workload, config, atomic_config_total):
                 min_cost = obj.cost_list[num]
         total_cost += min_cost
 
-        # compute the cost for updating indexes
-        if 'insert' in obj.statement.lower() or 'delete' in obj.statement.lower():
-            for index in config:
-                index_num = get_index_num(index, atomic_config_total)
-                if index_num == -1:
-                    raise ValueError("The index isn't found for current query!")
-                if 0 <= index_num < len(workload[ind].cost_list):
-                    total_cost += obj.cost_list[index_num] - obj.cost_list[0]
         # record ineffective sql and negative sql for candidate indexes
         if is_computed:
             record_ineffective_negative_sql(config[-1], obj, ind)
@@ -772,12 +803,12 @@ def infer_workload_cost(workload, config, atomic_config_total):
 
 
 def simple_index_advisor(input_path, max_index_num, db):
-    workload = workload_compression(input_path)
+    workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
-    display_info = {'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db, True)
+    display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
     db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
@@ -840,12 +871,12 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
 
 
 def complex_index_advisor(input_path, db):
-    workload = workload_compression(input_path)
+    workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
-    display_info = {'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db, True)
+    display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
     db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
@@ -931,4 +962,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
