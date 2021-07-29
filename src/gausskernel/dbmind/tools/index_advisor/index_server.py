@@ -53,15 +53,15 @@ class CreateLogger:
         self.level = level
         self.log_name = log_name
 
-    def create_log(self):
+    def create_log(self, log_path):
         logger = logging.getLogger(self.log_name)
-        log_path = os.path.join(current_dirname, 'log')
+        log_path = os.path.join(os.path.dirname(log_path), 'log')
         if os.path.exists(log_path):
             if os.path.isfile(log_path):
                 os.remove(log_path)
                 os.mkdir(log_path)
         else:
-            os.mkdir(log_path)
+            os.makedirs(log_path)
         agent_handler = handlers.RotatingFileHandler(filename=os.path.join(log_path, self.log_name),
                                                      maxBytes=1024 * 1024 * 100,
                                                      backupCount=5)
@@ -74,30 +74,11 @@ class CreateLogger:
 
 
 class IndexServer:
-    def __init__(self, pid_file, logger, password):
+    def __init__(self, pid_file, logger, password, **kwargs):
         self.pid_file = pid_file
         self.logger = logger
-        self.app_name = None
-        self.database = None
-        self.port = None
-        self.host = None
-        self.user = None
         self.password = password
-        self.wl_user = None
-        self.schema = None
-        self.max_index_num = 0
-        self.max_index_storage = 0
-        self.driver = False
-        self.index_intervals = 0
-        self.sql_amount = 0
-        self.max_generate_log_size = 0
-        self.statement = False
-        self.output_sql_file = None
-        self.pg_log_path = None
-        self.datanode = None
-        self.ai_monitor_url = None
-        self.log_min_duration_statement = None
-        self.log_statement = None
+        self._kwargs = kwargs
 
     def check_proc_exist(self, proc_name):
         """
@@ -123,14 +104,14 @@ class IndexServer:
         proc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
         std, err_msg = proc.communicate()
         if proc.returncode != 0:
-            self.logger.error("Failed to execute command: %s, \nError: %s." % (cmd, str(err_msg)))
+            self.logger.error("Failed to execute command. Error: %s." % str(err_msg))
         return proc.returncode, std.decode()
 
     def save_recommendation_infos(self, recommendation_infos):
         headers = {'Content-Type': 'application/json'}
         data = json.dumps(recommendation_infos, default=lambda o: o.__dict__, sort_keys=True,
                           indent=4).encode()
-        request = Request(url=self.ai_monitor_url, headers=headers,
+        request = Request(url=self._kwargs['ai_monitor_url'], headers=headers,
                           data=data)
 
         response = None
@@ -151,31 +132,31 @@ class IndexServer:
                 detail_info_pos = pos + 1
                 break
         detail_info_json = json.loads('\n'.join(index_info[detail_info_pos:]))
-        detail_info_json['appName'] = self.app_name
-        detail_info_json['nodeHost'] = self.host
-        detail_info_json['dbName'] = self.database
+        detail_info_json['appName'] = self._kwargs.get('app_name')
+        detail_info_json['nodeHost'] = self._kwargs.get('host')
+        detail_info_json['dbName'] = self._kwargs.get('database')
         return detail_info_json
 
     def execute_index_advisor(self):
         self.logger.info('Index advisor task starting.')
         try:
-            cmd = 'echo %s | python3 %s/index_advisor_workload.py %s %s %s -U %s --h %s -W ' \
+            cmd = 'echo %s | python3 %s/index_advisor_workload.py %s %s %s -U %s -W ' \
                   '--schema %s --json --multi_iter_mode --show_detail' % (
-                      self.password, current_dirname, self.port, self.database,
-                      self.output_sql_file, self.user, self.host, self.schema)
-            if self.max_index_storage:
-                cmd += ' --max_index_storage %s ' % self.max_index_storage
-            if self.max_index_num:
-                cmd += ' --max_index_num %s ' % self.max_index_num
-            if self.driver:
+                      self.password, current_dirname, self._kwargs['port'], self._kwargs['database'],
+                      self._kwargs['output_sql_file'], self._kwargs['user'], self._kwargs['schema'])
+            if self._kwargs['max_index_storage']:
+                cmd += ' --max_index_storage %s ' % self._kwargs['max_index_storage']
+            if self._kwargs['max_index_num']:
+                cmd += ' --max_index_num %s ' % self._kwargs['max_index_num']
+            if self._kwargs['driver']:
                 try:
                     import psycopg2
                     cmd = cmd.replace('index_advisor_workload.py', 
                                       'index_advisor_workload_driver.py')
                 except ImportError:
                     self.logger.warning('Driver import failed, use gsql to connect to the database.')
-            self.logger.info('Index advisor cmd:%s' % cmd)
-            if os.path.exists(self.output_sql_file):
+            self.logger.info('Index advisor cmd:%s' % cmd.split('|')[-1])
+            if os.path.exists(self._kwargs['output_sql_file']):
                 _, res = self.execute_cmd(cmd)
                 detail_info_json = self.convert_output_to_recommendation_infos(res)
 
@@ -188,21 +169,70 @@ class IndexServer:
         except Exception as e:
             self.logger.error(e)
 
+    def extract_log(self, start_time):
+        extract_log_cmd = 'python3 %s %s %s --start_time "%s"' % \
+                          (os.path.join(current_dirname, 'extract_log.py'),
+                           self._kwargs['pg_log_path'],
+                           self._kwargs['output_sql_file'], start_time)
+        if self._kwargs['database']:
+            extract_log_cmd += ' -d %s ' % self._kwargs['database']
+        if self._kwargs['wl_user']:
+            extract_log_cmd += ' -U %s ' % self._kwargs['wl_user']
+        if self._kwargs['sql_amount']:
+            extract_log_cmd += ' --sql_amount %s ' % self._kwargs['sql_amount']
+        if self._kwargs['statement']:
+            extract_log_cmd += ' --statement '
+        self.logger.info('Extracting log cmd: %s' % extract_log_cmd)
+        self.execute_cmd(extract_log_cmd)
+        self.logger.info('The current log extraction is complete.')
+
+    def monitor_log_size(self, guc_reset):
+        self.logger.info('Open GUC params.')
+        # get original all file size
+        original_total_size = self.get_directory_size()
+        self.logger.info('Original total file size: %sM' % (original_total_size / 1024 / 1024))
+        deviation_size = 0
+        # open guc
+        guc_reload = 'gs_guc reload -Z datanode -D {datanode} -c "log_min_duration_statement = 0" && ' \
+                     'gs_guc reload -Z datanode -D {datanode} -c "log_statement= \'all\'"' \
+            .format(datanode=self._kwargs['datanode'])
+        self.execute_cmd(guc_reload)
+        start_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(time.time())))
+        # caculate log size
+        count = 0
+        while deviation_size < self._kwargs['max_generate_log_size']:
+            time.sleep(5)
+            current_size = self.get_directory_size()
+            deviation_size = (current_size - original_total_size) / 1024 / 1024
+            if current_size - original_total_size < 0:
+                if count >= 60:
+                    break
+                count += 1
+            self.logger.info('Current log size difference: %sM' % deviation_size)
+        self.logger.info('Start to reset GUC, cmd: %s' % guc_reset)
+        returncode, res = self.execute_cmd(guc_reset)
+        if returncode == 0:
+            self.logger.info('Success to reset GUC setting.')
+        else:
+            self.logger.error('Failed to reset GUC params. please check it.')
+        return start_time
+
     def get_directory_size(self):
-        files = os.listdir(self.pg_log_path)
+        files = os.listdir(self._kwargs['pg_log_path'])
         total_size = 0
         for file in files:
-            total_size += os.path.getsize(os.path.join(self.pg_log_path, file))
+            total_size += os.path.getsize(os.path.join(self._kwargs['pg_log_path'], file))
         return total_size
 
-    def execute_log_index_advisor(self):
+    def execute_index_recommendation(self):
         self.logger.info('Start checking guc.')
         try:
             guc_check = 'gs_guc check -Z datanode -D {datanode} -c "log_min_duration_statement" && ' \
-                        'gs_guc check -Z datanode -D {datanode} -c "log_statement" '.format(datanode=self.datanode)
+                        'gs_guc check -Z datanode -D {datanode} -c "log_statement" '\
+                .format(datanode=self._kwargs['datanode'])
             returncode, res = self.execute_cmd(guc_check)
-            origin_min_duration = self.log_min_duration_statement
-            origin_log_statement = self.log_statement
+            origin_min_duration = self._kwargs['log_min_duration_statement']
+            origin_log_statement = self._kwargs['log_statement']
             if returncode == 0:
                 self.logger.info('Original GUC settings is: %s' % res)
                 match_res = re.findall(r'log_min_duration_statement=(\'?[a-zA-Z0-9]+\'?)', res)
@@ -220,99 +250,33 @@ class IndexServer:
             self.logger.info('Test reseting GUC command...')
             guc_reset = 'gs_guc reload -Z datanode -D %s -c "log_min_duration_statement = %s" && ' \
                         'gs_guc reload -Z datanode -D %s -c "log_statement= %s"' % \
-                        (self.datanode, origin_min_duration, self.datanode, origin_log_statement)
+                        (self._kwargs['datanode'], origin_min_duration,
+                         self._kwargs['datanode'], origin_log_statement)
             returncode, res = self.execute_cmd(guc_reset)
             if returncode != 0:
                 guc_reset = 'gs_guc reload -Z datanode -D %s -c "log_min_duration_statement = %s" && ' \
                             'gs_guc reload -Z datanode -D %s -c "log_statement= %s"' % \
-                            (self.datanode, self.log_min_duration_statement, self.datanode, self.log_statement)
+                            (self._kwargs['datanode'], self._kwargs['log_min_duration_statement'],
+                             self._kwargs['datanode'], self._kwargs['log_statement'])
                 ret, res = self.execute_cmd(guc_reset)
                 if ret != 0:
                     raise Exception('Cannot reset GUC initial value, please check it.')
             self.logger.info('Test successfully')
-
-            self.logger.info('Open GUC params.')
-            # get original all file size
-            original_total_size = self.get_directory_size()
-            self.logger.info('Original total file size: %sM' % (original_total_size/1024/1024))
-            deviation_size = 0
-            # open guc
-            guc_reload = 'gs_guc reload -Z datanode -D {datanode} -c "log_min_duration_statement = 0" && ' \
-                         'gs_guc reload -Z datanode -D {datanode} -c "log_statement= \'all\'"'.format(datanode=self.datanode)
-            self.execute_cmd(guc_reload)
-            start_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(time.time())))
-            # caculate log size
-            count = 0
-            while deviation_size < self.max_generate_log_size:
-                time.sleep(5)
-                current_size = self.get_directory_size()
-                deviation_size = (current_size - original_total_size)/1024/1024
-                if current_size - original_total_size < 0:
-                    if count >= 60:
-                        break
-                    count += 1
-                self.logger.info('Current log size difference: %sM' % deviation_size)
-            self.logger.info('Start to reset GUC, cmd: %s' % guc_reset)
-            returncode, res = self.execute_cmd(guc_reset)
-            if returncode == 0:
-                self.logger.info('Success to reset GUC setting.')
-            else:
-                self.logger.error('Failed to reset GUC params. please check it.')
-
+            # open guc and monitor log real-time size
+            start_time = self.monitor_log_size(guc_reset)
             # extract log
-            extract_log_cmd = 'python3 %s %s %s -d %s -U %s --start_time "%s"' % \
-                              (os.path.join(current_dirname, 'extract_log.py'),
-                               self.pg_log_path, self.output_sql_file,
-                               self.database, self.wl_user, start_time)
-            if self.sql_amount:
-                extract_log_cmd += ' --sql_amount %s ' % self.sql_amount
-            if self.statement:
-                extract_log_cmd += ' --statement '
-            self.logger.info('Extracting log cmd: %s' % extract_log_cmd)
-            self.execute_cmd(extract_log_cmd)
-            self.logger.info('The current log extraction is complete.')
-
-            # index adviss
+            self.extract_log(start_time)
+            # index advise
             self.execute_index_advisor()
         except Exception as e:
             self.logger.error(e)
             guc_reset = 'gs_guc reload -Z datanode -D %s -c "log_min_duration_statement = %s" && ' \
                         'gs_guc reload -Z datanode -D %s -c "log_statement= %s"' % \
-                        (self.datanode, self.log_min_duration_statement, self.datanode,
-                         self.log_statement)
+                        (self._kwargs['datanode'], self._kwargs['log_min_duration_statement'],
+                         self._kwargs['datanode'], self._kwargs['log_statement'])
             self.execute_cmd(guc_reset)
 
-    def parse_check_conf(self, config_path):
-        config = ConfigParser()
-        config.read(config_path)
-        self.app_name = config.get("server", "app_name")
-        self.database = config.get("server", "database")
-        self.port = config.get("server", "port")
-        self.host = config.get("server", "host")
-        self.user = config.get("server", "user")
-        self.wl_user = config.get("server", "workload_user")
-        self.schema = config.get("server", "schema")
-        self.max_index_num = config.getint("server", "max_index_num")
-        self.max_index_storage = config.get("server", "max_index_storage")
-        self.driver = config.getboolean("server", "driver")
-        self.index_intervals = config.getint("server", "index_intervals")
-        self.sql_amount = config.getint("server", "sql_amount")
-        self.output_sql_file = config.get("server", "output_sql_file")
-        self.datanode = config.get("server", "datanode")
-        self.pg_log_path = config.get("server", "pg_log_path")
-        self.ai_monitor_url = config.get("server", "ai_monitor_url")
-        self.max_generate_log_size = config.getfloat("server", "max_generate_log_size")
-        self.statement = config.getboolean("server", "statement")
-        self.log_min_duration_statement = config.get("server", "log_min_duration_statement")
-        self.log_statement = config.get("server", "log_statement")
-        if not self.log_min_duration_statement or not re.match(r'[a-zA-Z0-9]+',
-                                                               self.log_min_duration_statement):
-            raise ValueError("Please enter a legal value of [log_min_duration_statement]")
-        legal_log_statement = ['none', 'all', 'ddl', 'mod']
-        if self.log_statement not in legal_log_statement:
-            raise ValueError("Please enter a legal value of [log_statement]")
-
-    def start_service(self, config_path):
+    def start_service(self):
         # check service is running or not.
         if os.path.isfile(self.pid_file):
             pid = self.check_proc_exist("index_server")
@@ -320,9 +284,6 @@ class IndexServer:
                 raise Exception("Error: Process already running, can't start again.")
             else:
                 os.remove(self.pid_file)
-        # check config file exists
-        if not os.path.isfile(config_path):
-            raise Exception("Config file: %s does not exists." % config_path)
 
         # get listen host and port
         self.logger.info("Start service...")
@@ -332,12 +293,12 @@ class IndexServer:
         with open(self.pid_file, mode='w') as f:
             f.write(str(os.getpid()))
 
-        self.parse_check_conf(config_path)
-
-        self.logger.info("Index advisor execution intervals is: %sh" % self.index_intervals)
-        index_advisor_thread = RepeatTimer(self.index_intervals*60*60, self.execute_log_index_advisor)
+        self.logger.info("Index advisor execution intervals is: %sh" %
+                         self._kwargs['index_intervals'])
+        index_recommendation_thread = RepeatTimer(self._kwargs['index_intervals']*60*60,
+                                           self.execute_index_recommendation)
         self.logger.info("Start timer...")
-        index_advisor_thread.start()
+        index_recommendation_thread.start()
 
 
 def read_input_from_pipe():
@@ -356,12 +317,46 @@ def read_input_from_pipe():
     return input_str
 
 
+def parse_check_conf(config_path):
+    config = ConfigParser()
+    config.read(config_path)
+    config_dict = dict()
+    config_dict['app_name'] = config.get("server", "app_name")
+    config_dict['database'] = config.get("server", "database")
+    config_dict['port'] = config.get("server", "port")
+    config_dict['host'] = config.get("server", "host")
+    config_dict['user'] = config.get("server", "user")
+    config_dict['wl_user'] = config.get("server", "workload_user")
+    config_dict['schema'] = config.get("server", "schema")
+    config_dict['max_index_num'] = config.getint("server", "max_index_num")
+    config_dict['max_index_storage'] = config.get("server", "max_index_storage")
+    config_dict['driver'] = config.getboolean("server", "driver")
+    config_dict['index_intervals'] = config.getint("server", "index_intervals")
+    config_dict['sql_amount'] = config.getint("server", "sql_amount")
+    config_dict['output_sql_file'] = config.get("server", "output_sql_file")
+    config_dict['datanode'] = config.get("server", "datanode")
+    config_dict['pg_log_path'] = config.get("server", "pg_log_path")
+    config_dict['ai_monitor_url'] = config.get("server", "ai_monitor_url")
+    config_dict['max_generate_log_size'] = config.getfloat("server", "max_generate_log_size")
+    config_dict['statement'] = config.getboolean("server", "statement")
+    config_dict['log_min_duration_statement'] = config.get("server", "log_min_duration_statement")
+    config_dict['log_statement'] = config.get("server", "log_statement")
+    if not config_dict['log_min_duration_statement'] or \
+            not re.match(r'[a-zA-Z0-9]+', config_dict['log_min_duration_statement']):
+        raise ValueError("Please enter a legal value of [log_min_duration_statement]")
+    legal_log_statement = ['none', 'all', 'ddl', 'mod']
+    if config_dict['log_statement'] not in legal_log_statement:
+        raise ValueError("Please enter a legal value of [log_statement]")
+    return config_dict
+
+
 def manage_service():
-    LOGGER = CreateLogger("debug", "start_service.log").create_log()
+    config_path = os.path.join(current_dirname, 'database-info.conf')
+    config_dict = parse_check_conf(config_path)
+    LOGGER = CreateLogger("debug", "start_service.log").create_log(config_dict.get('output_sql_file'))
     server_pid_file = os.path.join(current_dirname, 'index_server.pid')
     password = read_input_from_pipe()
-    IndexServer(server_pid_file, LOGGER, password).start_service(
-        os.path.join(current_dirname, 'database-info.conf'))
+    IndexServer(server_pid_file, LOGGER, password, **config_dict).start_service()
 
 
 def main():
@@ -374,4 +369,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

@@ -1,4 +1,3 @@
-
 import re
 import os
 import argparse
@@ -36,12 +35,14 @@ def get_workload_template(templates, sqls):
 
 
 def output_valid_sql(sql):
-    if 'from pg_' in sql.lower() or ' join ' in sql.lower():
+    is_quotation_valid = sql.count("'") % 2
+    if 'from pg_' in sql.lower() or ' join ' in sql.lower() or is_quotation_valid:
         return ''
     if any(tp in sql.lower() for tp in SQL_TYPE[1:]):
-        return sql if sql.endswith('; ') else sql + ';'
+        sql = re.sub(r'for\s+update[\s;]*$', '', sql, flags=re.I)
+        return sql.strip() if sql.endswith('; ') else sql + ';'
     elif SQL_TYPE[0] in sql.lower() and 'from ' in sql.lower():
-        return sql if sql.endswith('; ') else sql + ';'
+        return sql.strip() if sql.endswith('; ') else sql + ';'
     return ''
 
 
@@ -103,9 +104,11 @@ def get_parsed_sql(file, user, database, sql_amount, statement):
                                         reverse=True)
                         for item in param_list:
                             if len(item[1].strip()) >= 256:
-                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else ('$' + item[0].strip()), "''")
+                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
+                                                  ('$' + item[0].strip()), "''")
                             else:
-                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else ('$' + item[0].strip()), item[1].strip())
+                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
+                                                  ('$' + item[0].strip()), item[1].strip())
                         if output_valid_sql(sql):
                             SQL_AMOUNT += 1
                             yield output_valid_sql(sql)
@@ -132,34 +135,47 @@ def get_start_position(start_time, file_path):
     return -1
 
 
-def extract_sql_from_log(log_path, output_path, database, user, start_time, sql_amount, statement):
-    templates = {}
-    files = os.listdir(log_path)
-    files = sorted(files, key=lambda x: os.path.getctime(os.path.join(log_path, x)), reverse=True)
-    valid_files = files
-    time_stamp = int(time.mktime(time.strptime(start_time, '%Y-%m-%d %H:%M:%S')))
-    if start_time:
-        valid_files = []
-        for file in files:
-            if os.path.getmtime(os.path.join(log_path, file)) < time_stamp:
-                break
-            valid_files.insert(0, file)
+def record_sql(valid_files, args, output_obj):
     for ind, file in enumerate(valid_files):
-        if sql_amount and SQL_AMOUNT >= sql_amount:
+        if args.sql_amount and SQL_AMOUNT >= args.sql_amount:
             break
-        file_path = os.path.join(log_path, file)
+        file_path = os.path.join(args.l, file)
         if os.path.isfile(file_path) and re.search(r'.log$', file):
             start_position = 0
             if ind == 0:
-                start_position = get_start_position(start_time, file_path)
+                start_position = get_start_position(args.start_time, file_path)
                 if start_position == -1:
                     continue
             with open(file_path, mode='r') as f:
                 f.seek(start_position, 0)
-                get_workload_template(templates, get_parsed_sql(f, user, database, sql_amount,
-                                                                statement))
-    with open(output_path, 'w') as output_file:
-        json.dump(templates, output_file)
+                if isinstance(output_obj, dict):
+                    get_workload_template(output_obj, get_parsed_sql(f, args.U, args.d,
+                                                                     args.sql_amount,
+                                                                     args.statement))
+                else:
+                    for sql in get_parsed_sql(f, args.U, args.d, args.sql_amount, args.statement):
+                        output_obj.write(sql + '\n')
+
+
+def extract_sql_from_log(args):
+    files = os.listdir(args.l)
+    files = sorted(files, key=lambda x: os.path.getctime(os.path.join(args.l, x)), reverse=True)
+    valid_files = files
+    time_stamp = int(time.mktime(time.strptime(args.start_time, '%Y-%m-%d %H:%M:%S')))
+    if args.start_time:
+        valid_files = []
+        for file in files:
+            if os.path.getmtime(os.path.join(args.l, file)) < time_stamp:
+                break
+            valid_files.insert(0, file)
+    if args.json:
+        templates = {}
+        record_sql(valid_files, args, templates)
+        with open(args.f, 'w') as output_file:
+            json.dump(templates, output_file)
+    else:
+        with open(args.f, 'w') as output_file:
+            record_sql(valid_files, args, output_file)
 
 
 def main():
@@ -172,17 +188,17 @@ def main():
     arg_parser.add_argument("--sql_amount", help="The number of sql collected", type=int)
     arg_parser.add_argument("--statement", action='store_true', help="Extract statement log type",
                             default=False)
+    arg_parser.add_argument("--json", action='store_true',
+                            help="Whether the workload file format is json", default=False)
 
     args = arg_parser.parse_args()
     if args.start_time:
         time.strptime(args.start_time, '%Y-%m-%d %H:%M:%S')
     if args.sql_amount and args.sql_amount <= 0:
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" % args.sql_amount)
-    extract_sql_from_log(args.l, args.f, args.d, args.U, args.start_time, args.sql_amount,
-                         args.statement)
+    extract_sql_from_log(args)
 
 
 if __name__ == '__main__':
     main()
-
 
