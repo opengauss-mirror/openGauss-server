@@ -1102,6 +1102,10 @@ void OpFusion::clean()
 
 void OpFusion::storeFusion(const char *portalname)
 {
+    if (portalname == NULL || portalname[0] == '\0') {
+        pfree_ext(m_local.m_portalName);
+        return;
+    }
     pnFusionObj *entry = NULL;
     if (!u_sess->pcache_cxt.pn_fusion_htab)
         initFusionHtab();
@@ -1257,6 +1261,11 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     } else {
         m_local.m_isCompleted = true;
     }
+    /* for unnamed portal, should no need to wait for next E msg */
+    if (m_local.m_portalName == NULL || m_local.m_portalName[0] == '\0') {
+        m_local.m_isCompleted = true;
+    }
+
     success = true;
 
     /****************
@@ -2613,6 +2622,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
         }
         m_local.m_position += nprocessed;
     } else {
+        m_local.m_isCompleted = true;
+    }
+    /* for unnamed portal, should no need to wait for next E msg */
+    if (m_local.m_portalName == NULL || m_local.m_portalName[0] == '\0') {
         m_local.m_isCompleted = true;
     }
 
