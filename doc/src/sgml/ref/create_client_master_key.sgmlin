@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CREATE CLIENT MASTER KEY  
+CREATE CLIENT MASTER KEY client_master_key_name 
      [WITH] ( ['KEY_STORE' , 'KEY_PATH' , 'ALGORITHM'] );
 </synopsis>
 </refsynopsisdiv>
