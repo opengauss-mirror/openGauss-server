@@ -6936,6 +6936,20 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+        {{"gs_clean_timeout",
+            PGC_SIGHUP,
+            STATS_MONITORING,
+            gettext_noop("Sets the timeout to call gs_clean."),
+            gettext_noop("A value of 0 turns off the timeout."),
+            GUC_UNIT_S},
+            &u_sess->attr.attr_storage.gs_clean_timeout,
+            60,
+            0,
+            INT_MAX / 1000,
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
 
@@ -9566,7 +9580,6 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_common.max_datanode_for_plan = 0;
     u_sess->attr.attr_common.transaction_sync_naptime = 30;
     u_sess->attr.attr_common.transaction_sync_timeout = 600;
-    u_sess->attr.attr_storage.gs_clean_timeout = 300;
     u_sess->attr.attr_storage.twophase_clean_workers = 3;
     /* for Double Guc Variables */
     u_sess->attr.attr_sql.stream_multiple = DEFAULT_STREAM_MULTIPLE;

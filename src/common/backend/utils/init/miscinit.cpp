@@ -32,6 +32,7 @@
 #include <sys/utsname.h>
 
 #include "catalog/pg_authid.h"
+#include "commands/user.h"
 #include "job/job_scheduler.h"
 #include "job/job_worker.h"
 #include "mb/pg_wchar.h"
@@ -789,6 +790,25 @@ void InitializeSessionUserId(const char* rolename)
     }
 
     roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * In opengauss, we allow twophasecleaner to connect to database
+     * as superusers for cleaning up temporary tables.
+     */
+    if (!HeapTupleIsValid(roleTup) && u_sess->proc_cxt.IsInnerMaintenanceTools) {
+        roleTup = SearchSysCache1(AUTHOID, UInt32GetDatum(BOOTSTRAP_SUPERUSERID));
+
+        char userName[NAMEDATALEN];
+        MemoryContext oldcontext = NULL;
+        oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+        if (u_sess->proc_cxt.MyProcPort->user_name)
+            pfree_ext(u_sess->proc_cxt.MyProcPort->user_name);
+        u_sess->proc_cxt.MyProcPort->user_name = pstrdup((char*)GetSuperUserName((char*)userName));
+        (void)MemoryContextSwitchTo(oldcontext);
+        rolename = u_sess->proc_cxt.MyProcPort->user_name;
+    }
+#endif
 
     if (!HeapTupleIsValid(roleTup)) {
         /* 
