@@ -6,7 +6,7 @@ import random
 import time
 from subprocess import Popen, PIPE
 
-SQL_TYPE = ['select', 'delete', 'insert', 'update']
+SQL_TYPE = ['select ', 'delete ', 'insert ', 'update ']
 SQL_AMOUNT = 0
 PLACEHOLDER = r'@@@'
 SAMPLE_NUM = 5
@@ -38,10 +38,12 @@ def output_valid_sql(sql):
     is_quotation_valid = sql.count("'") % 2
     if 'from pg_' in sql.lower() or ' join ' in sql.lower() or is_quotation_valid:
         return ''
-    if any(tp in sql.lower() for tp in SQL_TYPE[1:]):
+    if any(tp in sql.lower() for tp in SQL_TYPE[1:]) or \
+            (SQL_TYPE[0] in sql.lower() and 'from ' in sql.lower()):
+        if ' where ' in sql.lower() and \
+                len(re.search(r'\s+where\s+(.*)', sql, flags=re.I).group(1)) > 256:
+            return ''
         sql = re.sub(r'for\s+update[\s;]*$', '', sql, flags=re.I)
-        return sql.strip() if sql.endswith('; ') else sql + ';'
-    elif SQL_TYPE[0] in sql.lower() and 'from ' in sql.lower():
         return sql.strip() if sql.endswith('; ') else sql + ';'
     return ''
 
@@ -161,8 +163,8 @@ def extract_sql_from_log(args):
     files = os.listdir(args.l)
     files = sorted(files, key=lambda x: os.path.getctime(os.path.join(args.l, x)), reverse=True)
     valid_files = files
-    time_stamp = int(time.mktime(time.strptime(args.start_time, '%Y-%m-%d %H:%M:%S')))
     if args.start_time:
+        time_stamp = int(time.mktime(time.strptime(args.start_time, '%Y-%m-%d %H:%M:%S')))
         valid_files = []
         for file in files:
             if os.path.getmtime(os.path.join(args.l, file)) < time_stamp:
@@ -194,7 +196,7 @@ def main():
     args = arg_parser.parse_args()
     if args.start_time:
         time.strptime(args.start_time, '%Y-%m-%d %H:%M:%S')
-    if args.sql_amount and args.sql_amount <= 0:
+    if args.sql_amount is not None and args.sql_amount <= 0:
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" % args.sql_amount)
     extract_sql_from_log(args)
 
