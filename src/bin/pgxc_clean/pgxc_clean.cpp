@@ -145,16 +145,12 @@ static void usage(void);
 static void showVersion(void);
 static PGconn* loginDatabase(char* host, int port, char* user, char* password, char* dbname, const char* progname,
     char* encoding, const char* password_prompt);
-#ifdef ENABLE_MULTIPLE_NODES
 static void getMyNodename(PGconn* conn);
 static void getMyGtmMode(PGconn* conn);
-#endif
 static void recover2PCForDatabase(database_info* db_info, CleanWorkerInfo* wkinfo);
 static void recover2PC(PGconn* conn, txn_info* txn, int num);
 static void getDatabaseList(PGconn* conn);
-#ifdef ENABLE_MULTIPLE_NODES
 static void getNodeList(PGconn* conn);
-#endif
 static void getPreparedTxnList(PGconn* conn);
 static void getTxnInfoOnOtherNodesAll(CleanWorkerInfo* wkinfo);
 static void do_commit(PGconn* conn, txn_info* txn, int num);
@@ -170,10 +166,8 @@ static void dropTempSchemas(PGconn* conn, bool missing_ok);
 static void dropTempSchema(PGconn* conn, char* nspname, bool missing_ok);
 
 static void getTempSchemaListOnCN(PGconn* conn);
-#ifdef ENABLE_MULTIPLE_NODES
 static void getTempSchemaOnOneDN(PGconn* conn, int no);
 static int getTempSchemaListOnDN(PGconn* conn);
-#endif
 static void checkAllocMem(void* p);
 static void cleanTempSchemaList();
 static void cleanBackendList();
@@ -670,7 +664,6 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
     /*
      * Get my nodename (connected Coordinator) and gtm_mode
      */
@@ -684,7 +677,6 @@ int main(int argc, char* argv[])
             transfor_gtm_optoin(gtm_option, gtm_mode),
             gtm_option_num);
     }
-#endif
 
     /*
      * Get available databases
@@ -712,7 +704,6 @@ int main(int argc, char* argv[])
         }
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
     /*
      * Get list of Nodes
      *
@@ -737,7 +728,6 @@ int main(int argc, char* argv[])
                 pgxc_clean_node_info[ii].type == NODE_TYPE_COORD ? "coordinator" : "datanode");
         }
     }
-#endif
 
     /*
      * Only clean temp schema if clean_temp_schema_only == true,
@@ -751,15 +741,6 @@ int main(int argc, char* argv[])
         }
         exit(0);
     }
-#ifndef ENABLE_MULTIPLE_NODES
-    else {
-        PQfinish(coord_conn);
-        coord_conn = NULL;
-        write_stderr("%s %s: We only clean temp schema in openGauss, please specify '-e' option.\n",
-            formatLogTime(), progname);
-        exit(0);
-    }
-#endif
 
     /*
      * Only clean plan_table if clean_plan_table_only == true,
@@ -1133,9 +1114,7 @@ static void cleanPlanTableSessidList()
 static void dropTempNamespace()
 {
     database_info* cur_database = NULL;
-#ifdef ENABLE_MULTIPLE_NODES
     int datanode_no = -1;
-#endif
 
     if (head_database_info != NULL) {
         for (cur_database = head_database_info; cur_database != NULL; cur_database = cur_database->next) {
@@ -1187,12 +1166,11 @@ static void dropTempNamespace()
             (void)dropTempSchemas(coord_conn, true);
             (void)cleanBackendList();
 
-#ifdef ENABLE_MULTIPLE_NODES
             datanode_no = getTempSchemaListOnDN(coord_conn);
             (void)getActiveBackendListOnCN(coord_conn, datanode_no);
             (void)dropTempSchemas(coord_conn, true);
             (void)cleanBackendList();
-#endif
+
 
             if (verbose_opt)
                 write_stderr("%s %s: drop temp namespace for database \"%s\" finished\n",
@@ -1209,12 +1187,10 @@ static void dropTempSchemas(PGconn* conn, bool missing_ok)
 {
     tempschema_info* cell1 = temp_schema_info;
     activebackend_info* cell2 = NULL;
+    char node_name[NAMEDATALEN];
     char temp_buffer[NAMEDATALEN] = {0};
     char temp_buffer2[NAMEDATALEN] = {0};
-#ifdef ENABLE_MULTIPLE_NODES
-    char node_name[NAMEDATALEN];
     bool onOtherCNNode = false;
-#endif
     errno_t rc;
 
     if (temp_schema_info == NULL || active_backend_info == NULL)
@@ -1254,7 +1230,6 @@ static void dropTempSchemas(PGconn* conn, bool missing_ok)
         }
 
         if (cell2 == NULL) {
-#ifdef ENABLE_MULTIPLE_NODES
             /*
              * now it is not the active backend, furthermore, we need to
              * check whether the schema on the other node:
@@ -1329,9 +1304,6 @@ static void dropTempSchemas(PGconn* conn, bool missing_ok)
                 if (!onOtherCNNode)
                     dropTempSchema(conn, cell1->tempschema_name, missing_ok);
             }
-#else
-            dropTempSchema(conn, cell1->tempschema_name, missing_ok);
-#endif
         }
 
         cell1 = cell1->next;
@@ -1443,7 +1415,6 @@ static char* pg_strdup(const char* string)
     return tmp;
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void getMyNodename(PGconn* conn)
 {
     static const char* stmt = "SELECT pgxc_node_str()";
@@ -1487,7 +1458,6 @@ static void getMyGtmMode(PGconn* conn)
     }
     PQclear(res);
 }
-#endif
 
 static void recover2PCForDatabase(database_info* db_info, CleanWorkerInfo* wkinfo)
 {
@@ -2352,7 +2322,6 @@ static void add_active_backend_info(int64 sessionID, uint32 tempID, uint32 timeL
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 /*
  * @Description: get temp schema list of a random DN.
  * @param[IN] conn:  node connection handle
@@ -2446,7 +2415,6 @@ static void getTempSchemaOnOneDN(PGconn* conn, int no)
 
     PQclear(res);
 }
-#endif
 
 static void getTempSchemaListOnCN(PGconn* conn)
 {
@@ -2458,18 +2426,11 @@ static void getTempSchemaListOnCN(PGconn* conn)
 
     char STMT_GET_TEMP_SCHEMA_LIST[NAMEDATALEN + 128] = {0};
 
-#ifdef ENABLE_MULTIPLE_NODES
     rc = snprintf_s(STMT_GET_TEMP_SCHEMA_LIST,
         sizeof(STMT_GET_TEMP_SCHEMA_LIST),
         sizeof(STMT_GET_TEMP_SCHEMA_LIST) - 1,
         "SELECT NSPNAME FROM PG_NAMESPACE WHERE NSPNAME LIKE 'pg_temp_%s_%%'",
         my_nodename);
-#else
-    rc = snprintf_s(STMT_GET_TEMP_SCHEMA_LIST,
-        sizeof(STMT_GET_TEMP_SCHEMA_LIST),
-        sizeof(STMT_GET_TEMP_SCHEMA_LIST) - 1,
-        "SELECT NSPNAME FROM PG_NAMESPACE WHERE NSPNAME LIKE 'pg_temp_%%'");
-#endif
     securec_check_ss_c(rc, "\0", "\0");
 
     if (verbose_opt)
@@ -2589,7 +2550,6 @@ static void checkAllocMem(void* p)
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void getNodeList(PGconn* conn)
 {
     int ii;
@@ -2672,7 +2632,6 @@ error_exit:
     PQclear(res);
     exit(1);
 }
-#endif
 
 static char* transfor_gtm_optoin(const char* option, const char* gtm_free_mode)
 {
