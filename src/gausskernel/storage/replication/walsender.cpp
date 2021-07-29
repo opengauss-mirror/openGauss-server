@@ -1148,6 +1148,7 @@ static void CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
     isDummyStandby = AmWalSenderToDummyStandby() ? true : false;
 
     if (cmd->kind == REPLICATION_KIND_LOGICAL) {
+        MarkPostmasterChildNormal();
         CheckPMstateAndRecoveryInProgress();
         CheckLogicalDecodingRequirements(u_sess->proc_cxt.MyDatabaseId);
         /*
@@ -1312,6 +1313,7 @@ bool IsLogicalSlot(const char *name)
 static void DropReplicationSlot(DropReplicationSlotCmd *cmd)
 {
     if (IsLogicalSlot(cmd->slotname)) {
+        MarkPostmasterChildNormal();
         CheckPMstateAndRecoveryInProgress();
         ReplicationSlotDrop(cmd->slotname);
         log_slot_drop(cmd->slotname);
@@ -1916,6 +1918,7 @@ static void IdentifyCommand(Node* cmd_node, ReplicationCxt* repCxt, const char *
                 /* break out of the loop */
                 repCxt->replicationStarted = true;
             } else {
+                MarkPostmasterChildNormal();
 #ifdef ENABLE_MULTIPLE_NODES
                 CheckPMstateAndRecoveryInProgress();
 #endif
