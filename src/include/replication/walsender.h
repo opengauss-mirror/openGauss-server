@@ -60,6 +60,8 @@ extern bool WalSndAllInProgress(int type);
 extern bool WalSndQuorumInProgress(int type);
 extern XLogSegNo WalGetSyncCountWindow(void);
 
+bool IsValidArchiverStandby(WalSnd* walsnd);
+
 /*
  * Remember that we want to wakeup walsenders later
  *

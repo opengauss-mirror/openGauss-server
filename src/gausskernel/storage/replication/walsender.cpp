@@ -2553,9 +2553,9 @@ static void ProcessStandbySwitchRequestMessage(void)
 static void ProcessArchiveFeedbackMessage(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMeeeage reply;
+    ArchiveXlogResponseMessage reply;
     /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMessage));
     ereport(LOG,
         (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
             (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
@@ -2580,12 +2580,18 @@ static void ProcessArchiveFeedbackMessage(void)
 static void ProcessStandbyArchiveFeedbackMessage(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMeeeage reply;
+    ArchiveXlogResponseMessage reply;
     /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
-    ereport(LOG,
-        (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMessage));
+    if (reply.pitr_result && reply.archive_result == ARCHIVE_SKIP) {
+        ereport(WARNING,
+                (errmsg("ProcessArchiveFeedbackMessage: %X/%X has been removed in the standby, skip it.", 
+                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    } else {
+        ereport(LOG,
+                (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
+                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    }
     walsnd->arch_finish_result = reply.pitr_result;
     walsnd->archive_target_lsn = reply.targetLsn;
 }
@@ -5742,4 +5748,18 @@ static void CalCatchupRate() {
         walsnd->lastCalTime = now;
     }
     SpinLockRelease(&walsnd->mutex);
+}
+
+/* Check whether the standby node corresponding to the walsnd is a valid standby node for xlog archiving. */
+bool IsValidArchiverStandby(WalSnd* walsnd)
+{
+    if (walsnd == NULL) {
+        return false;
+    }
+    if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
+        walsnd->is_start_archive) {
+        return true;
+    } else {
+        return false;
+    }
 }

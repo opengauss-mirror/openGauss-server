@@ -753,7 +753,6 @@ typedef struct knl_g_archive_standby_context {
     ArchiveXlogMessage archive_task;
     bool need_to_send_archive_status;
     bool archive_enabled;
-    XLogRecPtr standby_archive_start_point;
     Latch* arch_latch;
 } knl_g_archive_standby_context;
 

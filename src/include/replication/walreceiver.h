@@ -194,7 +194,6 @@ typedef struct WalRcvData {
     XLogRecPtr lastRecoveredBarrierLSN;
     Latch* obsArchLatch;
     bool archive_enabled;
-    XLogRecPtr standby_archive_start_point;
     Latch* arch_latch;
     bool arch_finish_result;
     volatile unsigned int arch_task_status;

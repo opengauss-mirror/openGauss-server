@@ -492,9 +492,9 @@ static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
 
 static void knl_g_archive_standby_init(knl_g_archive_standby_context* archive_standby_cxt)
 {
+    Assert(archive_standby_cxt != NULL);
     errno_t rc = memset_s(archive_standby_cxt, sizeof(knl_g_archive_standby_context), 0, sizeof(knl_g_archive_standby_context));
     securec_check(rc, "\0", "\0");
-    Assert(archive_standby_cxt != NULL);
     archive_standby_cxt->arch_task_status = 0;
     archive_standby_cxt->arch_finish_result = false;
     archive_standby_cxt->need_to_send_archive_status = false;
@@ -505,7 +505,6 @@ static void knl_g_archive_standby_init(knl_g_archive_standby_context* archive_st
     archive_standby_cxt->archive_task.targetLsn = 0;
 
     archive_standby_cxt->archive_enabled = false;
-    archive_standby_cxt->standby_archive_start_point = false;
     archive_standby_cxt->arch_latch = NULL;
 }
 

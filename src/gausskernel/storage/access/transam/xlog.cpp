@@ -533,7 +533,6 @@ static void XLogSelfFlush(void);
 static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage, XLogRecPtr CurrPos, int currLRC);
 
 static void XLogArchiveNotifySeg(XLogSegNo segno);
-static bool XLogArchiveCheckDone(const char *xlog);
 static bool HasBeenArchivedOnHaMode(const char* xlog);
 static bool XLogArchiveIsBusy(const char *xlog);
 static bool XLogArchiveIsReady(const char *xlog);
@@ -2431,7 +2430,7 @@ void XLogArchiveForceDone(const char *xlog)
  * The reason we do things this way is so that if the original attempt to
  * create <XLOG>.ready fails, we'll retry during subsequent checkpoints.
  */
-static bool XLogArchiveCheckDone(const char *xlog)
+bool XLogArchiveCheckDone(const char *xlog)
 {
     char archiveStatusPath[MAXPGPATH];
     struct stat stat_buf;
@@ -2509,8 +2508,7 @@ static bool HasBeenArchivedOnHaMode(const char* xlog)
 
     if (mode == STANDBY_MODE && XLogArchivingActive()) {
         XLogRecPtr target_lsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-        XLogRecPtr start_point = g_instance.archive_standby_cxt.standby_archive_start_point;
-        minium_lsn = (target_lsn == 0) ? start_point : target_lsn;
+        minium_lsn = target_lsn;
     }
 
     if (minium_lsn == PG_UINT64_MAX) {
@@ -17718,19 +17716,5 @@ void ExtremRtoUpdateMinCheckpoint()
 {
     if (t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone && t_thrd.xlog_cxt.minRecoveryPoint == InvalidXLogRecPtr) {
         t_thrd.xlog_cxt.minRecoveryPoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
-    }
-}
-
-/* IsArchiverOnStandby */
-extern bool IsValidArchiverStandby(WalSnd* walsnd)
-{
-    if (walsnd == NULL) {
-        return false;
-    }
-    if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
-        walsnd->is_start_archive) {
-        return true;
-    } else {
-        return false;
     }
 }
