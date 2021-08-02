@@ -1774,7 +1774,7 @@ bool WLMIsSimpleQuery(const QueryDesc* queryDesc, bool force_control, bool isQue
 
     g_wlm_params->use_planA = false;
 
-    if (IS_PGXC_DATANODE || (IS_PGXC_COORDINATOR && IsConnFromCoord()) ||
+    if (COORDINATOR_NOT_SINGLE || (IS_SERVICE_NODE && IsConnFromCoord()) ||
         u_sess->attr.attr_resource.parctl_min_cost < 0) {
         return true;
     }
@@ -1853,7 +1853,7 @@ bool WLMIsSimpleQuery(const QueryDesc* queryDesc, bool force_control, bool isQue
  */
 bool WLMNeedTrackResource(const QueryDesc* queryDesc)
 {
-    if ((!(IS_SINGLE_NODE || IS_PGXC_COORDINATOR)) || (IS_PGXC_COORDINATOR && IsConnFromCoord()) ||
+    if ((!IS_SERVICE_NODE) || (IS_PGXC_COORDINATOR && IsConnFromCoord()) ||
         t_thrd.wlm_cxt.collect_info->sdetail.statement == NULL || !u_sess->attr.attr_resource.enable_resource_track ||
         u_sess->attr.attr_resource.resource_track_cost < 0 || u_sess->attr.attr_sql.enable_cluster_resize ||
         t_thrd.wlm_cxt.parctl_state.special) {
@@ -2907,7 +2907,7 @@ void WLMSwitchCGroup(void)
                 }
 
                 /* simple query will skip the cgroup loading */
-                if (IS_PGXC_COORDINATOR && (IsConnFromCoord() || t_thrd.wlm_cxt.parctl_state.simple)) {
+                if (IS_SERVICE_NODE && (IsConnFromCoord() || t_thrd.wlm_cxt.parctl_state.simple)) {
                     return;
                 }
 

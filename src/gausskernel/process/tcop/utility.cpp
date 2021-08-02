@@ -6157,9 +6157,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6216,9 +6213,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_AlterResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-            DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6239,9 +6233,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_DropResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
