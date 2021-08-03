@@ -1876,8 +1876,9 @@ void PostgresInitializer::InitUser()
      * address. We have freed and reinitialized u_sess->proc_cxt.MyProcPort->user_name
      * in function InitializeSessionUserId, and we need to initialize m_username here.
      */
-    if (u_sess->proc_cxt.IsInnerMaintenanceTools)
+    if (u_sess->proc_cxt.IsInnerMaintenanceTools) {
         m_username = u_sess->proc_cxt.MyProcPort->user_name;
+    }
 #endif
 }
 
