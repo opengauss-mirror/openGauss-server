@@ -144,7 +144,7 @@ def record_sql(valid_files, args, output_obj):
         file_path = os.path.join(args.l, file)
         if os.path.isfile(file_path) and re.search(r'.log$', file):
             start_position = 0
-            if ind == 0:
+            if ind == 0 and args.start_time:
                 start_position = get_start_position(args.start_time, file_path)
                 if start_position == -1:
                     continue
