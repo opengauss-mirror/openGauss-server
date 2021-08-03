@@ -53,6 +53,10 @@ select count(*) from gpi_range_table where INV_ITEM_SK < 10000;
 explain (costs off) select count(*) from gpi_range_table where INV_WAREHOUSE_SK < 10000;
 select count(*) from gpi_range_table where INV_WAREHOUSE_SK < 10000;
 
+analyze verify fast local_gpi_range_table_index1;
+analyze verify fast global_gpi_range_table_index1;
+analyze verify fast global_gpi_range_table_index2;
+
 --clean
 drop index if exists local_gpi_range_table_index1;
 drop index if exists global_gpi_range_table_index1;
