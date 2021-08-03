@@ -597,7 +597,6 @@ static void AddActiveBackendInfo(ActiveBackendInfo** activeBackednList,
         tempActiveBackend->next = (*activeBackednList)->next;
         (*activeBackednList)->next = tempActiveBackend;
     }
-
 }
 
 static void GetActiveBackendList(PGconn* conn, ActiveBackendInfo** activeBackendList)
