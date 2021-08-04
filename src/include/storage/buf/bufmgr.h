@@ -306,5 +306,6 @@ extern Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersiste
     BlockNumber blockNum, ReadBufferMode mode, BufferAccessStrategy strategy, bool *hit);
 extern void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
 extern int GetThreadBufferLeakNum(void);
+extern void MemsetHugeMem(char *buffer, Size len, int num = 0);
 
 #endif
