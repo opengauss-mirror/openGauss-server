@@ -2514,8 +2514,21 @@ static void do_autovacuum(void)
             if (!worker->wi_sharedrel && worker->wi_dboid != u_sess->proc_cxt.MyDatabaseId)
                 goto next_worker;
 
-            /* we can not identify it only by oid. */
-            if (worker->wi_tableoid == relid && worker->wi_parentoid == parentid) {
+            /*
+             * we can not identify it only by oid.
+             * check the main table:
+             * 1. other worker handle the main table, need check the worker's tableoid not equal the relid;
+             * 2. other worker handle the part table, need check the worker's parentoid not equal the relid;
+             * check the part table:
+             * 1. other worker handle the main table, need check the worker's tableoid not equal the parentid;
+             * 2. other worker handle the part table, need check the worker's parentoid not equal the parentid;
+             */
+            if (parentid == InvalidOid && (worker->wi_tableoid == relid || worker->wi_parentoid == relid)) {
+                AUTOVAC_LOG(LOG, "parentoid = %u, tableoid = %u is is on autovac, just skip it", parentid, relid);
+                skipit = true;
+                break;
+            }
+            if (parentid != InvalidOid && (worker->wi_tableoid == parentid || worker->wi_parentoid == parentid)) {
                 AUTOVAC_LOG(LOG, "parentoid = %u, tableoid = %u is is on autovac, just skip it", parentid, relid);
                 skipit = true;
                 break;
