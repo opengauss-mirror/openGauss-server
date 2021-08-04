@@ -132,6 +132,8 @@ static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sRep
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
 void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
+static void DeleteAlreadyDropedFile(const char* path, bool is_table_space);
+static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int fileNode);
 
 /*
  * tblspaceDirectory is used for saving the table space directory created by
@@ -1027,6 +1029,8 @@ static void BaseBackup(const char* dirname, uint32 term)
     char nodetablespacepath[MAXPGPATH] = {0};
     char nodetablespaceparentpath[MAXPGPATH] = {0};
     char escaped_label[MAXPGPATH] = {0};
+    char basePath[MAXPGPATH] = {0};
+    char tblspcPath[MAXPGPATH] = {0};
     int i;
     char xlogstart[MAXFNAMELEN] = {0};
     char xlogend[MAXFNAMELEN] = {0};
@@ -1444,6 +1448,14 @@ static void BaseBackup(const char* dirname, uint32 term)
     RENAME_BUILD_FILE(buildstart_file, builddone_file);
 
     show_full_build_process("rename build status file success");
+
+    nRet = snprintf_s(basePath, MAXPGPATH, MAXPGPATH, "%s/base", dirname);
+    securec_check_ss_c(nRet, "\0", "\0");
+    DeleteAlreadyDropedFile(basePath, false);
+
+    nRet = snprintf_s(tblspcPath, MAXPGPATH, MAXPGPATH, "%s/pg_tblspc", dirname);
+    securec_check_ss_c(nRet, "\0", "\0");
+    DeleteAlreadyDropedFile(tblspcPath, true);
 }
 
 /*
@@ -1948,4 +1960,111 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
         }
     }
     xlog_location[MAXPGPATH - 1] = '\0';
+}
+
+static void DeleteAlreadyDropedFile(const char* path, bool is_table_space)
+{
+    char* fileName = NULL;
+    char pathbuf[MAXPGPATH] = {0};
+    unsigned int fileNode = 0;
+    unsigned int spaceNode = 0;
+    unsigned int SegNo = 0;
+    unsigned int dbNode = 0;
+    struct stat statbuf;
+    struct dirent *de = NULL;
+    int nmatch = 0;
+    int res = -1;
+    int rc = 0;
+
+    DIR *dir = opendir(path);
+
+    while ((de = readdir(dir)) != NULL) {
+        /* skip entries point current dir or parent dir */
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        rc = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, de->d_name);
+        securec_check_ss_c(rc, "\0", "\0");
+        if (lstat(pathbuf, &statbuf) != 0) {
+            if (errno != ENOENT) {
+                pg_log(PG_WARNING, _("could not lstat file or directory : %s!\n"), de->d_name);
+                continue;
+            }
+        }
+        if (S_ISDIR(statbuf.st_mode)) {
+            DeleteAlreadyDropedFile(pathbuf, is_table_space);
+        } else if (S_ISREG(statbuf.st_mode)) {
+            if (is_table_space) {
+                if ((fileName = strstr(pathbuf, "pg_tblspc/")) != NULL) {
+                    nmatch = sscanf_s(fileName, "pg_tblspc/%u/%*[^/]/%u/%u.%u", &spaceNode,
+                        &dbNode, &fileNode, &SegNo);
+                    if (nmatch == 4) {
+                        res = DeleteUnusedFile(path, SegNo, fileNode);
+                        if (res < 0) {
+                            (void)closedir(dir);
+                            disconnect_and_exit(1);
+                        }
+                    }
+                }
+            } else {
+                if ((fileName = strstr(pathbuf, "base/")) != NULL) {
+                    nmatch = sscanf_s(fileName, "base/%u/%u.%u", &dbNode, &fileNode, &SegNo);
+                    if (nmatch == 3) {
+                        res = DeleteUnusedFile(path, SegNo, fileNode);
+                        if (res < 0) {
+                            (void)closedir(dir);
+                            disconnect_and_exit(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (void)closedir(dir);
+}
+
+static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int fileNode)
+{
+    char firstFileName[MAXPGPATH] = {0};
+    char beforeFileName[MAXPGPATH] = {0};
+    char currentFileName[MAXPGPATH] = {0};
+    struct stat statbuf;
+    struct stat tmpStatBuf;
+    int rc = 0;
+
+    rc = snprintf_s(currentFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u.%u", path, fileNode, SegNo);
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = snprintf_s(firstFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u", path, fileNode);
+    securec_check_ss_c(rc, "\0", "\0");
+    if (lstat(firstFileName, &statbuf) != 0) {
+        if (errno != ENOENT) {
+            pg_log(PG_WARNING, _("could not lstat file: %s!\n"), firstFileName);
+            return -1;
+        } else {
+            while (SegNo >= 1) {
+                rc = snprintf_s(currentFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u.%u", path, fileNode, SegNo);
+                securec_check_ss_c(rc, "\0", "\0");
+                if (lstat(currentFileName, &tmpStatBuf) == 0) {
+                    pg_log(PG_DEBUG, _("the file %s should be unlink without origin file\n"), currentFileName);
+                    unlink(currentFileName);
+                }
+                SegNo--;
+            }
+            return 0;
+        }
+    }
+    if (statbuf.st_size == 0) {
+        while (SegNo > 1) {
+            SegNo -= 1;
+            rc = snprintf_s(beforeFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u.%u", path, fileNode, SegNo);
+            securec_check_ss_c(rc, "\0", "\0");
+            if (lstat(beforeFileName, &tmpStatBuf) != 0) {
+                if (errno == ENOENT) {
+                    pg_log(PG_DEBUG, _("the file %s before file does not exist\n"), currentFileName);
+                    unlink(currentFileName);
+                    break;
+                }
+            }
+        }
+    }
+    return 0;
 }
