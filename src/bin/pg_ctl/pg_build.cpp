@@ -57,6 +57,8 @@ int g_replication_type = -1;
 #define RT_WITH_DUMMY_STANDBY 0
 #define RT_WITH_MULTI_STANDBY 1
 
+static void walkdir(const char *path, int (*action) (const char *fname, bool isdir), bool process_symlinks);
+
 int32 pg_atoi(const char* s, int size, int c)
 {
     long l;
@@ -1450,5 +1452,180 @@ bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn)
     }
     PQclear(res);
     return ec;
+}
+
+/*
+ * Issue fsync recursively on PGDATA and all its contents.
+ *
+ * We fsync regular files and directories wherever they are, but we follow
+ * symlinks only for pg_wal (or pg_xlog) and immediately under pg_tblspc.
+ * Other symlinks are presumed to point at files we're not responsible for
+ * fsyncing, and might not have privileges to write at all.
+ *
+ */
+void fsync_pgdata(const char *pg_data)
+{
+    bool xlog_is_symlink = false;
+    char pg_xlog[MAXPGPATH] = {0};
+    char pg_tblspc[MAXPGPATH] = {0};
+    errno_t errorno = EOK;
+
+    errorno = snprintf_s(pg_xlog, MAXPGPATH, MAXPGPATH - 1, "%s/pg_xlog", pg_data);
+    securec_check_ss_c(errorno, "\0", "\0");
+    errorno = snprintf_s(pg_tblspc, MAXPGPATH, MAXPGPATH - 1, "%s/pg_tblspc", pg_data);
+    securec_check_ss_c(errorno, "\0", "\0");
+
+#ifndef WIN32
+    {
+        struct stat st;
+
+        if (lstat(pg_xlog, &st) < 0) {
+            pg_log(PG_WARNING, _("could not stat file \"%s\": %m\n"), pg_xlog);
+            exit(1);
+        }
+        else if (S_ISLNK(st.st_mode))
+            xlog_is_symlink = true;
+    }
+#else
+    if (pgwin32_is_junction(pg_xlog))
+        xlog_is_symlink = true;
+#endif
+
+    /*
+     * Now we do the fsync()s in the same order.
+     *
+     * The main call ignores symlinks, so in addition to specially processing
+     * pg_wal if it's a symlink, pg_tblspc has to be visited separately with
+     * process_symlinks = true.  Note that if there are any plain directories
+     * in pg_tblspc, they'll get fsync'd twice.  That's not an expected case
+     * so we don't worry about optimizing it.
+     */
+    walkdir(pg_data, fsync_fname, false);
+    if (xlog_is_symlink)
+        walkdir(pg_xlog, fsync_fname, false);
+    walkdir(pg_tblspc, fsync_fname, true);
+}
+
+/*
+ * walkdir: recursively walk a directory, applying the action to each
+ * regular file and directory (including the named directory itself).
+ *
+ * If process_symlinks is true, the action and recursion are also applied
+ * to regular files and directories that are pointed to by symlinks in the
+ * given directory; otherwise symlinks are ignored.  Symlinks are always
+ * ignored in subdirectories, ie we intentionally don't pass down the
+ * process_symlinks flag to recursive calls.
+ *
+ * Errors are reported but not considered fatal.
+ *
+ * See also walkdir in fd.cpp, which is a backend version of this logic.
+ */
+static void walkdir(const char *path, int (*action) (const char *fname, bool isdir), bool process_symlinks)
+{
+    DIR *dir;
+    struct dirent *de = NULL;
+    errno_t errorno = EOK;
+
+    dir = opendir(path);
+    if (dir == NULL) {
+        pg_log(PG_WARNING, _("could not open directory \"%s\": %m\n"), path);
+        return;
+    }
+
+    while (errno = 0, (de = readdir(dir)) != NULL) {
+        char subpath[MAXPGPATH * 2] = {0};
+        struct stat fst;
+        int sret;
+
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+
+        if (strcmp(de->d_name, "pg_ctl.lock") == 0) {
+            continue;
+        }
+        errorno = snprintf_s(subpath, sizeof(subpath), sizeof(subpath) - 1, "%s/%s", path, de->d_name);
+        securec_check_ss_c(errorno, "\0", "\0");
+
+        if (process_symlinks)
+            sret = stat(subpath, &fst);
+        else
+            sret = lstat(subpath, &fst);
+        if (sret < 0) {
+            pg_log(PG_WARNING, _("could not stat file \"%s\": %m\n"), subpath);
+            continue;
+        }
+
+        if (S_ISREG(fst.st_mode))
+            (*action) (subpath, false);
+        else if (S_ISDIR(fst.st_mode))
+            walkdir(subpath, action, false);
+    }
+
+    if (errno)
+        pg_log(PG_WARNING, _("could not read directory \"%s\": %m\n"), path);
+
+    (void)closedir(dir);
+
+    /*
+     * It's important to fsync the destination directory itself as individual
+     * file fsyncs don't guarantee that the directory entry for the file is
+     * synced.  Recent versions of ext4 have made the window much wider but
+     * it's been an issue for ext3 and other filesystems in the past.
+     */
+    (*action) (path, true);
+}
+
+/*
+ * fsync_fname -- Try to fsync a file or directory
+ *
+ * Ignores errors trying to open unreadable files, or trying to fsync
+ * directories on systems where that isn't allowed/required.  All other errors
+ * are fatal.
+ */
+int fsync_fname(const char *fname, bool isdir)
+{
+    int fd = -1;
+    int flags;
+    int returncode;
+
+    /*
+     * Some OSs require directories to be opened read-only whereas other
+     * systems don't allow us to fsync files opened read-only; so we need both
+     * cases here.  Using O_RDWR will cause us to fail to fsync files that are
+     * not writable by our userid, but we assume that's OK.
+     */
+    flags = PG_BINARY;
+    if (!isdir)
+        flags |= O_RDWR;
+    else
+        flags |= O_RDONLY;
+
+    /*
+     * Open the file, silently ignoring errors about unreadable files (or
+     * unsupported operations, e.g. opening a directory under Windows), and
+     * logging others.
+     */
+    fd = open(fname, flags, 0);
+    if (fd < 0) {
+        if (errno == EACCES || (isdir && errno == EISDIR))
+            return 0;
+        pg_log(PG_WARNING, _("could not open file \"%s\": %m\n"), fname);
+        return -1;
+    }
+
+    returncode = fsync(fd);
+
+    /*
+     * Some OSes don't allow us to fsync directories at all, so we can ignore
+     * those errors. Anything else needs to be reported.
+     */
+    if (returncode != 0 && !(isdir && (errno == EBADF || errno == EINVAL))) {
+        pg_log(PG_WARNING, _("could not fsync file \"%s\": %m\n"), fname);
+        (void) close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    (void) close(fd);
+    return 0;
 }
 
