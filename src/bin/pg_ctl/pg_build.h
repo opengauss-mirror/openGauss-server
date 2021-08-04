@@ -60,5 +60,7 @@ extern char* pg_strdup(const char* in);
 extern void pg_free(void* ptr);
 extern void get_slot_name(char* slotname, size_t len);
 extern bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn);
+extern int fsync_fname(const char *fname, bool isdir);
+extern void fsync_pgdata(const char *pg_data);
 
 #endif /* PG_BUILD_H */
