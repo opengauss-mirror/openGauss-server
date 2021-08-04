@@ -3980,7 +3980,7 @@ static void do_incremental_build(uint32 term)
     /* Concate connection str to primary host for performing rewind. */
     errorno = sprintf_s(connstrSource,
         sizeof(connstrSource),
-        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5",
+        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5  rw_timeout=600",
         (streamConn->pghost != NULL) ? streamConn->pghost : streamConn->pghostaddr,
         streamConn->pgport);
     securec_check_ss_c(errorno, "\0", "\0");
