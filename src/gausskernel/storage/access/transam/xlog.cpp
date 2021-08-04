@@ -6805,10 +6805,7 @@ void XLOGShmemInit(void)
      */
     allocptr = (char *)TYPEALIGN(XLOG_BLCKSZ, allocptr);
     t_thrd.shemem_ptr_cxt.XLogCtl->pages = allocptr;
-    errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->pages,
-                       (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers, 0,
-                       (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
-    securec_check(errorno, "", "");
+    MemsetHugeMem(t_thrd.shemem_ptr_cxt.XLogCtl->pages, (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
 
     if (BBOX_BLACKLIST_XLOG_BUFFER) {
         bbox_blacklist_add(XLOG_BUFFER, t_thrd.shemem_ptr_cxt.XLogCtl->pages,

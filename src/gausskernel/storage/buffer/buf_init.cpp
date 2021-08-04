@@ -28,16 +28,16 @@
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
-static void MemsetPageQueue(char *buffer, Size len)
+void MemsetHugeMem(char *buffer, Size len, int num)
 {
     int rc;
     while (len > 0) {
         if (len < SECUREC_MEM_MAX_LEN) {
-            rc = memset_s(buffer, len, 0, len);
+            rc = memset_s(buffer, len, num, len);
             securec_check(rc, "", "");
             return;
         } else {
-            rc = memset_s(buffer, SECUREC_MEM_MAX_LEN, 0, SECUREC_MEM_MAX_LEN);
+            rc = memset_s(buffer, SECUREC_MEM_MAX_LEN, num, SECUREC_MEM_MAX_LEN);
             securec_check(rc, "", "");
             len -= SECUREC_MEM_MAX_LEN;
             buffer += SECUREC_MEM_MAX_LEN;
@@ -133,7 +133,7 @@ void InitBufferPool(void)
             ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
         }
 
-        MemsetPageQueue((char*)g_instance.ckpt_cxt_ctl->dirty_page_queue, queue_mem_size);
+        MemsetHugeMem((char *)g_instance.ckpt_cxt_ctl->dirty_page_queue, queue_mem_size);
         (void)MemoryContextSwitchTo(oldcontext);
     }
 

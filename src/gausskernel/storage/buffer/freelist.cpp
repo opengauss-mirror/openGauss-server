@@ -478,6 +478,9 @@ BufferAccessStrategy GetAccessStrategy(BufferAccessStrategyType btype)
             return NULL; /* keep compiler quiet */
     }
 
+    /* If the shared buffers is too small, make sure ring size not equal zero. */
+    ring_size = Max(ring_size, 4);
+
     /* Make sure ring isn't an undue fraction of shared buffers */
     if (btype != BAS_BULKWRITE && btype != BAS_BULKREAD)
         ring_size = Min(g_instance.attr.attr_storage.NBuffers / 8, ring_size);
