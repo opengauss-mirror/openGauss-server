@@ -10936,7 +10936,7 @@ void CreateCheckPoint(int flags)
          */
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = curInsert;
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
         }
@@ -11537,7 +11537,7 @@ void wait_all_dirty_page_flush(int flags, XLogRecPtr redo)
     if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
             ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
@@ -11806,7 +11806,7 @@ bool CreateRestartPoint(int flags)
     if (ENABLE_INCRE_CKPT && doFullCkpt) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
         }
@@ -11815,8 +11815,8 @@ bool CreateRestartPoint(int flags)
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPointRecPtr);
+        pg_memory_barrier();
         LWLockRelease(g_instance.ckpt_cxt_ctl->prune_queue_lock);
-        pg_write_barrier();
 
         uint64 head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
         int64 need_flush_num = g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc > head ?
