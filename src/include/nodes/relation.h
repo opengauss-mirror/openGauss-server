@@ -18,6 +18,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
+#include "parser/parsetree.h"
 #include "storage/buf/block.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
