@@ -229,7 +229,7 @@ void ThreadPoolListener::ReaperAllSession()
                 (errmsg("No thread pool worker left while waiting for session close. "
                         "This is a very rare case when all thread pool workers happen to"
                         " encounter FATAL problems before session close.")));
-            ExitPostmaster(1);
+            abort();
         }
 
         elem = m_idleSessionList->RemoveHead();
