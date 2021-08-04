@@ -969,7 +969,7 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
             continue;
         }
         if (i == 0) {
-            appendStringInfo(&field_value, str.data);
+            appendStringInfo(&field_value, "%s", str.data);
         } else {
             appendStringInfo(&field_value, ",%s", str.data);
         }
@@ -1015,7 +1015,6 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
         index->field_expr = field_expr.data;
         add_index_from_field(table_name, index);
     }
-    pfree_ext(field_expr.data);
 }
 
 inline uint4 tuple_to_uint(List *tuples)
