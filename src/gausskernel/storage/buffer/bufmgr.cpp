@@ -3882,6 +3882,7 @@ void CheckPointBuffers(int flags, bool doFullCheckpoint)
          * dirty page num.
          */
         for (;;) {
+            pg_memory_barrier();
             if ((pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head) >=
                  pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc)) ||
                 get_dirty_page_num() == 0) {
