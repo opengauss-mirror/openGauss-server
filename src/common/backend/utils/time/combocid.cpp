@@ -256,7 +256,9 @@ static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
 
         u_sess->utils_cxt.comboHash =
             hash_create("Combo CIDs", CCID_HASH_SIZE, &hash_ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    }
 
+    if (u_sess->utils_cxt.comboCids == NULL) {
         u_sess->utils_cxt.comboCids = (ComboCidKeyData*)MemoryContextAlloc(
             u_sess->top_transaction_mem_cxt, sizeof(ComboCidKeyData) * CCID_ARRAY_SIZE);
         u_sess->utils_cxt.sizeComboCids = CCID_ARRAY_SIZE;
