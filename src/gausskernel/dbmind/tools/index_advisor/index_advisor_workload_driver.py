@@ -205,7 +205,7 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
 
                 sql_detail['sqlTemplate'] = sql_template
                 sql_detail['sql'] = workload[pos].statement
-                sql_detail['sqlCount'] = sql_count
+                sql_detail['sqlCount'] = int(round(sql_count))
                 if category == 1:
                     sql_optimzed = (workload[pos].cost_list[0] -
                                     workload[pos].cost_list[cost_list_pos]) / \
