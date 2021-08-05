@@ -678,6 +678,7 @@ static bool InitSession(knl_session_context* session)
 {
     /* non't send ereport to client now */
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+
     /* Switch context to Session context. */
     AutoContextSwitch memSwitch(session->mcxt_group->GetMemCxtGroup(MEMORY_CONTEXT_DEFAULT));
 
@@ -699,6 +700,9 @@ static bool InitSession(knl_session_context* session)
 
     /* Read in remaining GUC variables */
     read_nondefault_variables();
+    
+    /* now safe to ereport to client */
+    t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
 
     /* now safe to ereport to client */
     t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
