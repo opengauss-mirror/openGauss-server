@@ -102,6 +102,7 @@ enum ModuleId {
     MOD_THREAD_POOL,  /* thread_pool */
     MOD_OPT_AI,     /* ai optimizer */
     MOD_GEN_COL,   /* generated column */
+    MOD_DB4AI,      /* DB4AI & AUTOML */
 
     /* add your module id above */
     MOD_MAX

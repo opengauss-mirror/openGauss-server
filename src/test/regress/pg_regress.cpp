@@ -5071,7 +5071,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1424
+#define BASE_PGXC_LIKE_MACRO_NUM 1422
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 

@@ -57,6 +57,8 @@ typedef enum {
 /* Is the CN receive SQL statement ? */
 #define IS_MAIN_COORDINATOR (IS_PGXC_COORDINATOR && !IsConnFromCoord())
 
+#define IS_SERVICE_NODE (g_instance.role == VCOORDINATOR || g_instance.role == VSINGLENODE)
+
 /* key pair to be used as object id while using advisory lock for backup */
 #define XC_LOCK_FOR_BACKUP_KEY_1 0xFFFF
 #define XC_LOCK_FOR_BACKUP_KEY_2 0xFFFF

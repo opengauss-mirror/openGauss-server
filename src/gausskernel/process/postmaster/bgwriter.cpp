@@ -654,13 +654,9 @@ void candidate_buf_init(void)
     if (found_candidate_buf || found_candidate_fm) {
         Assert(found_candidate_buf && found_candidate_fm);
     } else {
-        errno_t rc;
-        rc = memset_s(g_instance.bgwriter_cxt.candidate_buffers, buffer_num * sizeof(Buffer),
-            -1, buffer_num * sizeof(Buffer));
-        rc = memset_s(g_instance.bgwriter_cxt.candidate_free_map, buffer_num * sizeof(bool),
-            false, buffer_num * sizeof(bool));
-        securec_check(rc, "", "");
-        
+        MemsetHugeMem((char *)g_instance.bgwriter_cxt.candidate_buffers, buffer_num * sizeof(Buffer), -1);
+        MemsetHugeMem((char *)g_instance.bgwriter_cxt.candidate_free_map, buffer_num * sizeof(bool));
+
         if (g_instance.bgwriter_cxt.bgwriter_procs != NULL) {
             int thread_num = g_instance.bgwriter_cxt.bgwriter_num;
             int avg_num = g_instance.attr.attr_storage.NBuffers / thread_num;

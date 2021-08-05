@@ -725,7 +725,17 @@ typedef enum NodeTag {
     T_ClientLogicColumnParam,
     T_CreateClientLogicColumn,
     T_ClientLogicColumnRef,
-    T_ExprWithComma
+    T_ExprWithComma,
+    // DB4AI
+    T_CreateModelStmt = 5000,
+    T_PredictByFunction,
+    T_GradientDescent,
+    T_GradientDescentState,
+    T_GradientDescentExpr,
+    T_GradientDescentExprState,
+    T_KMeans,
+    T_KMeansState,
+    // End DB4AI
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */

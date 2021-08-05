@@ -36,13 +36,10 @@ def get_workload_template(templates, sqls):
 
 def output_valid_sql(sql):
     is_quotation_valid = sql.count("'") % 2
-    if 'from pg_' in sql.lower() or ' join ' in sql.lower() or is_quotation_valid:
+    if 'from pg_' in sql.lower() or is_quotation_valid:
         return ''
     if any(tp in sql.lower() for tp in SQL_TYPE[1:]) or \
             (SQL_TYPE[0] in sql.lower() and 'from ' in sql.lower()):
-        if ' where ' in sql.lower() and \
-                len(re.search(r'\s+where\s+(.*)', sql, flags=re.I).group(1)) > 256:
-            return ''
         sql = re.sub(r'for\s+update[\s;]*$', '', sql, flags=re.I)
         return sql.strip() if sql.endswith('; ') else sql + ';'
     return ''
@@ -105,12 +102,8 @@ def get_parsed_sql(file, user, database, sql_amount, statement):
                         param_list.sort(key=lambda x: int(x[0].strip(' $')),
                                         reverse=True)
                         for item in param_list:
-                            if len(item[1].strip()) >= 256:
-                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
-                                                  ('$' + item[0].strip()), "''")
-                            else:
-                                sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
-                                                  ('$' + item[0].strip()), item[1].strip())
+                            sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
+                                               ('$' + item[0].strip()), item[1].strip())
                         if output_valid_sql(sql):
                             SQL_AMOUNT += 1
                             yield output_valid_sql(sql)
@@ -144,7 +137,7 @@ def record_sql(valid_files, args, output_obj):
         file_path = os.path.join(args.l, file)
         if os.path.isfile(file_path) and re.search(r'.log$', file):
             start_position = 0
-            if ind == 0:
+            if ind == 0 and args.start_time:
                 start_position = get_start_position(args.start_time, file_path)
                 if start_position == -1:
                     continue

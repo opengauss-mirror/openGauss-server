@@ -1,0 +1,474 @@
+CREATE TABLE db4ai_houses (id INT, tax INT, bedroom INT, bath FLOAT, price INT,
+            size INT, lot INT);
+COPY db4ai_houses FROM '@abs_srcdir@/data/houses.txt' DELIMITER '|';
+ALTER TABLE db4ai_houses add column pred boolean;
+-- Error * in FEATURES / TARGET
+CREATE MODEL m using logistic_regression FEATURES * TARGET price FROM db4ai_houses;
+ERROR:  FEATURES clause cannot be *
+CREATE MODEL m using logistic_regression FEATURES size,lot TARGET * FROM db4ai_houses;
+ERROR:  TARGET clause cannot be *
+CREATE MODEL m using logistic_regression FROM db4ai_houses;
+ERROR:  Supervised ML algorithms require FEATURES clause
+-- Error missing target
+CREATE MODEL m using logistic_regression FEATURES size,lot FROM db4ai_houses;
+ERROR:  Supervised ML algorithms require TARGET clause
+-- Errors with semantic validation of hyperparameters
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 0;
+NOTICE:  Hyperparameter batch_size takes value 0
+ERROR:  Hyperparameter batch_size must be in the range [1,2147483647]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 0.0;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value 0.000000
+ERROR:  Hyperparameter decay must be in the range (0,1.7976931e+308]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 0.0;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value 0.000000
+ERROR:  Hyperparameter learning_rate must be in the range (0,1.7976931e+308]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 0;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value 0
+ERROR:  Hyperparameter max_iterations must be in the range [1,2147483647]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = -1;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value -1
+ERROR:  Hyperparameter max_seconds must be in the range [0,2147483647]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = nogd;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value nogd
+ERROR:  Invalid hyperparameter value for optimizer. Valid values are: gd, ngd. (default is gd)
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 0.0;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value 0.000000
+ERROR:  Hyperparameter tolerance must be in the range (0,1.7976931e+308]
+CREATE MODEL m USING logistic_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = ttrue;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+ERROR:  Hyperparameter verbose is not a valid string for boolean (i.e. 'true' or 'false')
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with batch_size = 'a_wrong_parameter';
+ERROR:  Hyperparameter batch_size must be an integer
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with decay = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+ERROR:  Hyperparameter decay must be a floating point number
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with learning_rate = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+ERROR:  Hyperparameter learning_rate must be a floating point number
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_iterations = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+ERROR:  Hyperparameter max_iterations must be an integer
+CREATE MODEL m USING linear_regression FEATURES size, lot TARGET price <100000 FROM db4ai_houses with max_seconds = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+ERROR:  Hyperparameter max_seconds must be an integer
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 0.0;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value 0.000000
+ERROR:  Hyperparameter lambda must be in the range (0,1.7976931e+308]
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with lambda = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+ERROR:  Hyperparameter lambda must be a floating point number
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with optimizer = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value a_wrong_parameter
+ERROR:  Invalid hyperparameter value for optimizer. Valid values are: gd, ngd. (default is gd)
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with tolerance = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+ERROR:  Hyperparameter tolerance must be a floating point number
+CREATE MODEL m USING svm_classification FEATURES size, lot TARGET price <100000 FROM db4ai_houses with verbose = 'a_wrong_parameter';
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+ERROR:  Hyperparameter verbose is not a valid string for boolean (i.e. 'true' or 'false')
+-- Normal model with logistic_regression
+CREATE MODEL m1 using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM db4ai_houses WITH seed = 1;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value 1
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+SELECT id, price, PREDICT BY m1 (FEATURES bedroom, bath) from db4ai_houses ORDER BY id;
+ id | price  | m1_pred 
+----+--------+---------
+  1 |  50000 | t
+  2 |  85000 | f
+  3 |  22500 | t
+  4 |  90000 | f
+  5 | 133000 | f
+  6 |  90500 | t
+  7 | 260000 | f
+  8 | 142500 | t
+  9 | 160000 | f
+ 10 | 240000 | f
+ 11 |  87000 | t
+ 12 | 118600 | f
+ 13 | 140000 | f
+ 14 | 148000 | f
+ 15 |  65000 | f
+(15 rows)
+
+UPDATE db4ai_houses SET pred = PREDICT BY m1 (FEATURES bedroom, bath);
+SELECT id, pred FROM db4ai_houses;
+ id | pred 
+----+------
+  1 | t
+  2 | f
+  3 | t
+  4 | f
+  5 | f
+  6 | t
+  7 | f
+  8 | t
+  9 | f
+ 10 | f
+ 11 | t
+ 12 | f
+ 13 | f
+ 14 | f
+ 15 | f
+(15 rows)
+
+DROP MODEL m1;
+CREATE MODEL m2 using svm_classification FEATURES price / (SELECT max(price) from db4ai_houses) TARGET (size > 2000 AND bath > 2) as large_house FROM db4ai_houses with batch_size=1, lambda=10, tolerance=default, seed = 1, max_iterations=100;
+NOTICE:  Hyperparameter batch_size takes value 1
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value 10.000000
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value 100
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value 1
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 85597
+SELECT id, size, bath, price, PREDICT BY m2(FEATURES price / (SELECT max(price) from db4ai_houses)) as large_house FROM db4ai_houses ORDER BY id;
+ id | size | bath | price  | large_house 
+----+------+------+--------+-------------
+  1 |  770 |    1 |  50000 | f
+  2 | 1410 |    2 |  85000 | f
+  3 | 1060 |    1 |  22500 | f
+  4 | 1300 |    2 |  90000 | f
+  5 | 1500 |    2 | 133000 | f
+  6 |  820 |    1 |  90500 | f
+  7 | 2130 |  2.5 | 260000 | t
+  8 | 1170 |    1 | 142500 | f
+  9 | 1500 |    2 | 160000 | f
+ 10 | 2790 |    2 | 240000 | f
+ 11 | 1030 |    1 |  87000 | f
+ 12 | 1250 |    2 | 118600 | f
+ 13 | 1760 |    2 | 140000 | f
+ 14 | 1550 |    3 | 148000 | f
+ 15 | 1450 |  1.5 |  65000 | f
+(15 rows)
+
+DROP MODEL m2;
+CREATE MODEL m3 using linear_regression FEATURES tax, bath TARGET price FROM db4ai_houses with optimizer=ngd, seed = 1;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value ngd
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value 1
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+SELECT id, tax, bath, price, PREDICT BY m3 (FEATURES tax, bath) FROM db4ai_houses;
+ id | tax  | bath | price  | m3_pred 
+----+------+------+--------+---------
+  1 |  590 |    1 |  50000 |   88805
+  2 | 1050 |    2 |  85000 |  118979
+  3 |   20 |    1 |  22500 |   75963
+  4 |  870 |    2 |  90000 |  114924
+  5 | 1320 |    2 | 133000 |  125062
+  6 | 1350 |    1 |  90500 |  105927
+  7 | 2790 |  2.5 | 260000 |  168085
+  8 |  680 |    1 | 142500 |   90833
+  9 | 1840 |    2 | 160000 |  136777
+ 10 | 3680 |    2 | 240000 |  178231
+ 11 | 1660 |    1 |  87000 |  112911
+ 12 | 1620 |    2 | 118600 |  131821
+ 13 | 3100 |    2 | 140000 |  165164
+ 14 | 2070 |    3 | 148000 |  161769
+ 15 |  650 |  1.5 |  65000 |  100062
+(15 rows)
+
+DROP model m3;
+-- EXPLAIN test
+EXPLAIN CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM db4ai_houses;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   ->  Seq Scan on db4ai_houses  (cost=0.00..26.21 rows=1297 width=16)
+(2 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath as renamed_bath TARGET price < 100000 as target_price FROM db4ai_houses;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Seq Scan on public.db4ai_houses  (cost=0.00..26.21 rows=1297 width=16)
+         Output: (price < 100000), bedroom, bath
+(4 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath::float as transformed_bath TARGET price < 100000 FROM db4ai_houses;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Seq Scan on public.db4ai_houses  (cost=0.00..26.21 rows=1297 width=16)
+         Output: (price < 100000), bedroom, bath
+(4 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using logistic_regression FEATURES bedroom, bath TARGET price < 100000 FROM (SELECT * FROM db4ai_houses);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Seq Scan on public.db4ai_houses  (cost=0.00..26.21 rows=1297 width=16)
+         Output: (db4ai_houses.price < 100000), db4ai_houses.bedroom, db4ai_houses.bath
+(4 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                     QUERY PLAN                                                                                     
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(mse)
+   ->  Subquery Scan on __unnamed_subquery__  (cost=90.03..106.24 rows=1297 width=16)
+         Output: __unnamed_subquery__.price, __unnamed_subquery__.bedroom, __unnamed_subquery__.bath
+         ->  Sort  (cost=90.03..93.27 rows=1297 width=33)
+               Output: db4ai_houses.id, db4ai_houses.tax, db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.size, db4ai_houses.lot, db4ai_houses.pred
+               Sort Key: db4ai_houses.id
+               ->  Seq Scan on public.db4ai_houses  (cost=0.00..22.97 rows=1297 width=33)
+                     Output: db4ai_houses.id, db4ai_houses.tax, db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.size, db4ai_houses.lot, db4ai_houses.pred
+(9 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES bedroom, bath TARGET price FROM (SELECT * FROM db4ai_houses ORDER BY id LIMIT 5);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                        QUERY PLAN                                                                                        
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(mse)
+   ->  Subquery Scan on __unnamed_subquery__  (cost=44.51..44.58 rows=5 width=16)
+         Output: __unnamed_subquery__.price, __unnamed_subquery__.bedroom, __unnamed_subquery__.bath
+         ->  Limit  (cost=44.51..44.53 rows=5 width=33)
+               Output: db4ai_houses.id, db4ai_houses.tax, db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.size, db4ai_houses.lot, db4ai_houses.pred
+               ->  Sort  (cost=44.51..47.76 rows=1297 width=33)
+                     Output: db4ai_houses.id, db4ai_houses.tax, db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.size, db4ai_houses.lot, db4ai_houses.pred
+                     Sort Key: db4ai_houses.id
+                     ->  Seq Scan on public.db4ai_houses  (cost=0.00..22.97 rows=1297 width=33)
+                           Output: db4ai_houses.id, db4ai_houses.tax, db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.size, db4ai_houses.lot, db4ai_houses.pred
+(11 rows)
+
+EXPLAIN VERBOSE CREATE MODEL m using linear_regression FEATURES f1, f2 TARGET price FROM (SELECT bedroom as f1, bath as f2, price FROM db4ai_houses ORDER BY id LIMIT 5);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                      QUERY PLAN                                                                      
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(mse)
+   ->  Subquery Scan on __unnamed_subquery__  (cost=44.51..44.58 rows=5 width=16)
+         Output: __unnamed_subquery__.price, __unnamed_subquery__.f1, __unnamed_subquery__.f2
+         ->  Limit  (cost=44.51..44.53 rows=5 width=20)
+               Output: db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.id
+               ->  Sort  (cost=44.51..47.76 rows=1297 width=20)
+                     Output: db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.id
+                     Sort Key: db4ai_houses.id
+                     ->  Seq Scan on public.db4ai_houses  (cost=0.00..22.97 rows=1297 width=20)
+                           Output: db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price, db4ai_houses.id
+(11 rows)
+
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Subquery Scan on __unnamed_subquery__  (cost=35.94..41.44 rows=200 width=48)
+         Output: (__unnamed_subquery__.price > 100000::numeric), __unnamed_subquery__.f1, __unnamed_subquery__.f2
+         ->  HashAggregate  (cost=35.94..38.94 rows=200 width=88)
+               Output: avg(db4ai_houses.bath), sum(db4ai_houses.bath), avg(db4ai_houses.price), db4ai_houses.bedroom
+               Group By Key: db4ai_houses.bedroom
+               ->  Seq Scan on public.db4ai_houses  (cost=0.00..22.97 rows=1297 width=16)
+                     Output: db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price
+(9 rows)
+
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES f1, f2 TARGET price > 100000 FROM (SELECT AVG(bath) as f1, SUM(bath) as f2, AVG(price) as price FROM db4ai_houses GROUP BY bedroom HAVING bedroom < 15);
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Subquery Scan on __unnamed_subquery__  (cost=30.53..32.38 rows=67 width=48)
+         Output: (__unnamed_subquery__.price > 100000::numeric), __unnamed_subquery__.f1, __unnamed_subquery__.f2
+         ->  HashAggregate  (cost=30.53..31.54 rows=67 width=88)
+               Output: avg(db4ai_houses.bath), sum(db4ai_houses.bath), avg(db4ai_houses.price), db4ai_houses.bedroom
+               Group By Key: db4ai_houses.bedroom
+               ->  Seq Scan on public.db4ai_houses  (cost=0.00..26.21 rows=432 width=16)
+                     Output: db4ai_houses.bedroom, db4ai_houses.bath, db4ai_houses.price
+                     Filter: (db4ai_houses.bedroom < 15)
+(10 rows)
+
+EXPLAIN VERBOSE CREATE model m using svm_classification FEATURES bedroom + bath, tax*1.2 as normalized_tax TARGET price < 100000 FROM db4ai_houses;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter lambda takes value DEFAULT (0.010000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value DEFAULT (0)
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 1375
+                                                                                                       QUERY PLAN                                                                                                       
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Gradient Descent  (cost=0.00..0.00 rows=0 width=0)
+   Output: GD(algorithm), GD(optimizer), GD(result_type), GD(num_iterations), GD(exec_time_msecs), GD(processed), GD(discarded), GD(weights), GD(accuracy), GD(f1), GD(precision), GD(recall), GD(loss), GD(categories)
+   ->  Seq Scan on public.db4ai_houses  (cost=0.00..39.18 rows=1297 width=20)
+         Output: (price < 100000), ((bedroom)::double precision + bath), ((tax)::numeric * 1.2)
+(4 rows)
+
+-- Cleanup
+DROP TABLE IF EXISTS db4ai_houses;
+SELECT 'DB4AI TEST COMPLETED';
+       ?column?       
+----------------------
+ DB4AI TEST COMPLETED
+(1 row)
+

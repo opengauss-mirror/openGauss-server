@@ -162,6 +162,8 @@
 #include "securec.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
+#include "executor/nodeGD.h"
+#include "executor/nodeKMeans.h"
 
 #define NODENAMELEN 64
 
@@ -391,6 +393,10 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitVecMergeJoin((VecMergeJoin*)node, estate, eflags);
         case T_VecWindowAgg:
             return (PlanState*)ExecInitVecWindowAgg((VecWindowAgg*)node, estate, eflags);
+        case T_GradientDescent:
+            return (PlanState*)ExecInitGradientDescent((GradientDescent*)node, estate, eflags);
+        case T_KMeans:
+            return (PlanState*)ExecInitKMeans((KMeans*)node, estate, eflags);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -692,7 +698,10 @@ TupleTableSlot* ExecProcNodeByType(PlanState* node)
             result = ExecStream((StreamState*)node);
             t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
             return result;
-
+        case T_GradientDescentState:
+            return ExecGradientDescent((GradientDescentState*)node);
+        case T_KMeansState:
+            return ExecKMeans((KMeansState*)node);
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
@@ -1343,6 +1352,14 @@ static void ExecEndNodeByType(PlanState* node)
             ExecEndVecWindowAgg((VecWindowAggState*)node);
             break;
 
+        case T_GradientDescentState:
+            ExecEndGradientDescent((GradientDescentState*)node);
+            break;
+    
+        case T_KMeansState:
+            ExecEndKMeans((KMeansState*)node);
+            break;
+            
         default:
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),

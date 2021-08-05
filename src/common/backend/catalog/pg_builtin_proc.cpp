@@ -27,6 +27,7 @@
 #include "catalog/pg_authid.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
+#include "db4ai/predict_by.h"
 #include "access/transam.h"
 #include "utils/fmgroids.h"
 #include "../utils/pg_builtin_proc.h"

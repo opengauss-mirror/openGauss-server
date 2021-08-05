@@ -699,7 +699,7 @@ static bool InitSession(knl_session_context* session)
 
     /* Read in remaining GUC variables */
     read_nondefault_variables();
-
+    
     /* now safe to ereport to client */
     t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
 
