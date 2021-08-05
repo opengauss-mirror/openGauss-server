@@ -1436,6 +1436,13 @@ static void BaseBackup(const char* dirname, uint32 term)
     PQfinish(streamConn);
     streamConn = NULL;
 
+    /* fsync all data come from source */
+    if (!no_need_fsync) {
+        show_full_build_process("starting fsync all files come from source.");
+        (void) fsync_pgdata(basedir);
+        show_full_build_process("finish fsync all files.");
+    }
+
     /* delete dw file if exists, recreate it and write a page of zero */
     backup_dw_file(dirname);
     show_full_build_process("build dummy dw file success");
