@@ -11791,7 +11791,7 @@ bool CreateRestartPoint(int flags)
     } else if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
-        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPoint.redo);
+        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPointRecPtr);
         LWLockRelease(g_instance.ckpt_cxt_ctl->prune_queue_lock);
         pg_write_barrier();
 
@@ -11818,11 +11818,11 @@ bool CreateRestartPoint(int flags)
     XLByteToSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, _logSegNo);
     if (ENABLE_INCRE_CKPT) {
         XLogRecPtr MinRecLSN = ckpt_get_min_rec_lsn();
-        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, lastCheckPoint.redo)) {
+        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, lastCheckPointRecPtr)) {
             ereport(WARNING, (errmsg("current dirty page list head recLSN %08X/%08X smaller than redo lsn %08X/%08X",
                                    (uint32)(MinRecLSN >> XLOG_LSN_SWAP), (uint32)MinRecLSN,
-                                   (uint32)(lastCheckPoint.redo >> XLOG_LSN_SWAP),
-                                   (uint32)lastCheckPoint.redo)));
+                                   (uint32)(lastCheckPointRecPtr >> XLOG_LSN_SWAP),
+                                   (uint32)lastCheckPointRecPtr)));
             LWLockRelease(CheckpointLock);
             smgrsync_with_absorption();
             gstrace_exit(GS_TRC_ID_CreateRestartPoint);
