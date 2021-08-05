@@ -708,6 +708,7 @@ static void ReceiveTarFile(PGconn *conn, PGresult *res, int rownum)
         }
         disconnect_and_exit(1);
     }
+    PQclear(res);
 
     while (true) {
         if (copybuf != NULL) {
@@ -886,6 +887,7 @@ static void ReceiveAndUnpackTarFile(PGconn *conn, PGresult *res, int rownum)
      * Get the COPY data
      */
     res = backup_get_result(conn);
+    PQclear(res);
 
     while (1) {
         int r;
