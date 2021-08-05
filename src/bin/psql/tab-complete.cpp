@@ -480,6 +480,21 @@ static const SchemaQuery Query_for_list_of_matviews = {
     NULL
 };
 
+static const SchemaQuery Query_for_list_of_constraints_with_schema = {
+    /* catname */
+    "pg_catalog.pg_constraint c",
+    /* selcondition */
+    "c.conrelid <> 0",
+    /* viscondition */
+    "true",
+    /* namespace */
+    "c.connamespace",
+    /* result */
+    "pg_catalog.quote_ident(c.conname)",
+    /* qualresult */
+    NULL
+};
+
 /*
  * Queries to get lists of names of various kinds of things, possibly
  * restricted to names matching a partially entered name.  In these queries,
@@ -675,6 +690,8 @@ typedef struct {
 
 static const pgsql_thing_t words_after_create[] = {
     {"AGGREGATE", NULL, &Query_for_list_of_aggregates, 0},
+    {"APP WORKLOAD GROUP", NULL, NULL, 0},
+    {"APP WORKLOAD GROUP MAPPING", NULL, NULL, 0},
 #ifdef PGXC
     {"BARRIER", NULL, NULL, 0}, /* Comes barrier name next, so skip it */
 #endif
@@ -898,7 +915,7 @@ static char** PsqlCompletion(const char *text, int start, int end)
         "COMMENT", "COMMIT", "COPY", "CREATE", "CURSOR", "DEALLOCATE", "DECLARE",
         "DELETE FROM", "DISCARD", "DO", "DROP", "END", "EXECUTE", "EXPLAIN", "FETCH",
         "GRANT", "INSERT", "LISTEN", "LOAD", "LOCK", "MOVE", "NOTIFY", "PREPARE",
-        "REASSIGN", "REFRESH MATERIALIZED VIEW", "REINDEX", "RELEASE", "RESET", "REVOKE", "ROLLBACK",
+        "REASSIGN", "REFRESH", "REINDEX", "RELEASE", "RESET", "REVOKE", "ROLLBACK",
         "SAVEPOINT", "SECURITY LABEL", "SELECT", "SET", "SHOW", "START",
         "TABLE", "TRUNCATE", "UNLISTEN", "UPDATE", "VACUUM", "VALUES", "WITH",
         NULL
@@ -1063,12 +1080,12 @@ static char** PsqlCompletion(const char *text, int start, int end)
      */
     else if (pg_strcasecmp(PREV_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "TABLE") != 0) {
         static const char* const listAlter[] = {
-            "AGGREGATE", "COLLATION", "CONVERSION", "DATABASE", "DEFAULT PRIVILEGES", "DOMAIN",
-            "EXTENSION", "FOREIGN DATA WRAPPER", "FOREIGN TABLE", "FUNCTION",
-            "GROUP", "INDEX", "LANGUAGE", "LARGE OBJECT", "MATERIALIZED VIEW", "OPERATOR",
-            "POLICY", "PROCEDURE", "ROLE", "ROW LEVEL SECURITY POLICY", "RULE", "SCHEMA",
-            "SERVER", "SESSION", "SEQUENCE", "SYSTEM", "TABLE", "TABLESPACE", "TEXT SEARCH", "TRIGGER",
-            "TYPE", "USER", "USER MAPPING FOR", "VIEW", NULL
+            "AGGREGATE", "APP WORKLOAD GROUP", "APP WORKLOAD GROUP MAPPING", "COLLATION", "CONVERSION",
+            "DATABASE", "DEFAULT PRIVILEGES", "DOMAIN", "EXTENSION", "FOREIGN DATA WRAPPER",
+            "FOREIGN TABLE", "FUNCTION", "GROUP", "INDEX", "LANGUAGE", "LARGE OBJECT",
+            "MATERIALIZED VIEW", "OPERATOR", "POLICY", "PROCEDURE", "ROLE", "ROW LEVEL SECURITY POLICY",
+            "RULE", "SCHEMA", "SERVER", "SESSION", "SEQUENCE", "SYSTEM", "TABLE", "TABLESPACE",
+            "TEXT SEARCH", "TRIGGER", "TYPE", "USER", "USER MAPPING FOR", "VIEW", NULL
         };
 
         COMPLETE_WITH_LIST(listAlter);
@@ -1260,11 +1277,11 @@ static char** PsqlCompletion(const char *text, int start, int end)
             "INDEPENDENT", "INHERIT", "LOGIN", "MONADMIN", "NOAUDITADMIN",
             "NOCREATEDB", "NOCREATEROLE", "NOCREATEUSER", "NODE GROUP",
             "NOINDEPENDENT", "NOINHERIT", "NOLOGIN", "NOMONADMIN", "NOOPRADMIN",
-            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSUPERUSER",
+            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION",
             "NOSYSADMIN", "NOUSEFT", "NOVCADMIN", "OPRADMIN", "PASSWORD",
             "PERM SPACE", "PERSISTENCE", "PGUSER", "POLADMIN", "RENAME TO",
             "REPLICATION", "RESET", "RESOURCE POOL", "SET", "SPILL SPACE",
-            "SUPERUSER", "SYSADMIN", "TEMP SPACE", "UNENCRYPTED", "USEFT",
+            "SYSADMIN", "TEMP SPACE", "UNENCRYPTED", "USEFT",
             "USER GROUP", "VALID", "VCADMIN", "WITH", NULL
         };
 
@@ -1292,11 +1309,11 @@ static char** PsqlCompletion(const char *text, int start, int end)
             "INDEPENDENT", "INHERIT", "LOGIN", "MONADMIN", "NOAUDITADMIN",
             "NOCREATEDB", "NOCREATEROLE", "NOCREATEUSER", "NODE GROUP",
             "NOINDEPENDENT", "NOINHERIT", "NOLOGIN", "NOMONADMIN", "NOOPRADMIN",
-            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSUPERUSER",
+            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION",
             "NOSYSADMIN", "NOUSEFT", "NOVCADMIN", "OPRADMIN", "PASSWORD",
             "PERM SPACE", "PERSISTENCE", "PGUSER", "POLADMIN", "RENAME TO",
             "REPLICATION", "RESET", "RESOURCE POOL", "SET", "SPILL SPACE",
-            "SUPERUSER", "SYSADMIN", "TEMP SPACE", "UNENCRYPTED", "USEFT",
+            "SYSADMIN", "TEMP SPACE", "UNENCRYPTED", "USEFT",
             "USER GROUP", "VALID", "VCADMIN", NULL
         };
 
@@ -1920,8 +1937,14 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_QUERY(Query_for_list_of_available_extensions);
     /* CREATE EXTENSION <name> */
     else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "EXTENSION") == 0) {
-        static const char* const listCreateExtension[] = {"WITH SCHEMA", "VERSION", "FROM", NULL};
+        static const char* const listCreateExtension[] = {"WITH", "SCHEMA", "VERSION", "FROM", NULL};
         COMPLETE_WITH_LIST(listCreateExtension);
+    }
+
+    else if (pg_strcasecmp(PREV4_WD, "CREATE") == 0 && pg_strcasecmp(PREV3_WD, "EXTENSION") == 0 &&
+             pg_strcasecmp(PREV_WD, "WITH") == 0) {
+        static const char* const listCreateExtensionWith[] = {"SCHEMA", "VERSION", "FROM", NULL};
+        COMPLETE_WITH_LIST(listCreateExtensionWith);
     }
 
     /* CREATE FOREIGN */
@@ -2286,10 +2309,10 @@ static char** PsqlCompletion(const char *text, int start, int end)
             "IN GROUP", "IN ROLE", "INDEPENDENT", "INHERIT", "LOGIN", "MONADMIN",
             "NOAUDITADMIN", "NOCREATEDB", "NOCREATEROLE", "NOCREATEUSER", "NODE GROUP",
             "NOINDEPENDENT", "NOINHERIT", "NOLOGIN", "NOMONADMIN", "NOOPRADMIN",
-            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSUPERUSER", "NOSYSADMIN",
+            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSYSADMIN",
             "NOUSEFT", "NOVCADMIN", "OPRADMIN", "PASSWORD", "PERM SPACE", "PERSISTENCE",
             "PGUSER", "POLADMIN", "PROFILE", "PROFILE DEFAULT", "REPLICATION",
-            "RESOURCE POOL", "ROLE", "SPILL SPACE", "SUPERUSER", "SYSADMIN", "SYSID",
+            "RESOURCE POOL", "ROLE", "SPILL SPACE", "SYSADMIN", "SYSID",
             "TEMP SPACE", "UNENCRYPTED", "USEFT", "USER", "USER GROUP", "VALID",
             "VCADMIN", "WITH", NULL
         };
@@ -2319,10 +2342,10 @@ static char** PsqlCompletion(const char *text, int start, int end)
             "IN GROUP", "IN ROLE", "INDEPENDENT", "INHERIT", "LOGIN", "MONADMIN",
             "NOAUDITADMIN", "NOCREATEDB", "NOCREATEROLE", "NOCREATEUSER", "NODE GROUP",
             "NOINDEPENDENT", "NOINHERIT", "NOLOGIN", "NOMONADMIN", "NOOPRADMIN",
-            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSUPERUSER", "NOSYSADMIN",
+            "NOPERSISTENCE", "NOPOLADMIN", "NOREPLICATION", "NOSYSADMIN",
             "NOUSEFT", "NOVCADMIN", "OPRADMIN", "PASSWORD", "PERM SPACE", "PERSISTENCE",
             "PGUSER", "POLADMIN", "PROFILE", "PROFILE DEFAULT", "REPLICATION",
-            "RESOURCE POOL", "ROLE", "SPILL SPACE", "SUPERUSER", "SYSADMIN", "SYSID",
+            "RESOURCE POOL", "ROLE", "SPILL SPACE", "SYSADMIN", "SYSID",
             "TEMP SPACE", "UNENCRYPTED", "USEFT", "USER", "USER GROUP", "VALID",
             "VCADMIN", NULL
         };
@@ -2394,7 +2417,9 @@ static char** PsqlCompletion(const char *text, int start, int end)
 
     /* CURSOR */
     else if (pg_strcasecmp(PREV2_WD, "CURSOR") == 0) {
-        static const char* const listDeclareCursor[] = {"BINARY", "NO SCROLL","WITH HOLD", "WITHOUT HOLD", "FOR", NULL};
+        static const char* const listDeclareCursor[] = {
+            "BINARY", "SCROLL", "NO SCROLL","INSENSITIVE","FOR", NULL
+        };
 
         COMPLETE_WITH_LIST(listDeclareCursor);
     }
@@ -2658,7 +2683,11 @@ static char** PsqlCompletion(const char *text, int start, int end)
             " UNION SELECT 'LARGE OBJECT'"
             " UNION SELECT 'SCHEMA'"
             " UNION SELECT 'TABLESPACE'"
-            " UNION SELECT 'TYPE'");
+            " UNION SELECT 'TYPE'"
+            " UNION SELECT 'TABLE'"
+            " UNION SELECT 'DIRECTORY'"
+            " UNION SELECT 'NODE GROUP'"
+            " UNION SELECT 'DATA SOURCE'");
     else if ((pg_strcasecmp(PREV4_WD, "GRANT") == 0 || pg_strcasecmp(PREV4_WD, "REVOKE") == 0) &&
              pg_strcasecmp(PREV2_WD, "ON") == 0 && pg_strcasecmp(PREV_WD, "FOREIGN") == 0) {
         static const char* const listPrivilegeForeign[] = {"DATA WRAPPER", "SERVER", NULL};
@@ -2683,6 +2712,8 @@ static char** PsqlCompletion(const char *text, int start, int end)
             COMPLETE_WITH_QUERY(Query_for_list_of_tablespaces);
         else if (pg_strcasecmp(PREV_WD, "TYPE") == 0)
             COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_datatypes, NULL);
+        else if (pg_strcasecmp(PREV_WD, "DATA") == 0)
+            COMPLETE_WITH_CONST("SOURCE");
         else if (pg_strcasecmp(PREV4_WD, "GRANT") == 0)
             COMPLETE_WITH_CONST("TO");
         else
@@ -2773,8 +2804,11 @@ static char** PsqlCompletion(const char *text, int start, int end)
 
     /* Complete LOCK [TABLE] <table> with "IN" */
     else if ((pg_strcasecmp(PREV2_WD, "LOCK") == 0 && pg_strcasecmp(PREV_WD, "TABLE") != 0) ||
-             (pg_strcasecmp(PREV2_WD, "TABLE") == 0 && pg_strcasecmp(PREV3_WD, "LOCK") == 0))
-        COMPLETE_WITH_CONST("IN");
+             (pg_strcasecmp(PREV2_WD, "TABLE") == 0 && pg_strcasecmp(PREV3_WD, "LOCK") == 0)) {
+        static const char* const lockTableList[] = {"IN", "NOWAIT", NULL};
+        
+        COMPLETE_WITH_LIST(lockTableList);
+    }
 
     /* Complete LOCK [TABLE] <table> IN with a lock mode */
     else if (pg_strcasecmp(PREV_WD, "IN") == 0 && (pg_strcasecmp(PREV3_WD, "LOCK") == 0 ||
@@ -2788,6 +2822,20 @@ static char** PsqlCompletion(const char *text, int start, int end)
         };
 
         COMPLETE_WITH_LIST(lockModes);
+    }
+
+    else if ((pg_strcasecmp(PREV_WD, "ACCESS") == 0 || pg_strcasecmp(PREV_WD, "ROW") == 0) &&
+             pg_strcasecmp(PREV2_WD, "IN") == 0 && (pg_strcasecmp(PREV4_WD, "LOCK") == 0 ||
+             (pg_strcasecmp(PREV4_WD, "TABLE") == 0 && pg_strcasecmp(PREV5_WD, "LOCK") == 0))) {
+        static const char* const lockModesAccess[] = {"SHARE MODE", "EXCLUSIVE MODE", NULL};
+        COMPLETE_WITH_LIST(lockModesAccess);
+    }
+
+    else if (pg_strcasecmp(PREV_WD, "SHARE") == 0&& pg_strcasecmp(PREV2_WD, "IN") == 0 &&
+             (pg_strcasecmp(PREV4_WD, "LOCK") == 0 || (pg_strcasecmp(PREV4_WD, "TABLE") == 0 &&
+             pg_strcasecmp(PREV5_WD, "LOCK") == 0))) {
+        static const char* const lockModesAccess[] = {"UPDATE EXCLUSIVE MODE", "ROW EXCLUSIVE MODE", "MODE", NULL};
+        COMPLETE_WITH_LIST(lockModesAccess);
     }
 
     /* NOTIFY */
@@ -2838,8 +2886,10 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_QUERY(Query_for_list_of_roles);
 
     /* REFRESH MATERIALIZED VIEW */
-    else if (pg_strcasecmp(PREV_WD, "REFRESH") == 0)
-        COMPLETE_WITH_CONST("MATERIALIZED VIEW");
+    else if (pg_strcasecmp(PREV_WD, "REFRESH") == 0) {
+        static const char* const refreshObject[] = {"MATERIALIZED VIEW", "INCREMENTAL MATERIALIZED VIEW", NULL};
+        COMPLETE_WITH_LIST(refreshObject);
+    }
     else if (pg_strcasecmp(PREV2_WD, "REFRESH") == 0 && pg_strcasecmp(PREV_WD, "MATERIALIZED") == 0)
         COMPLETE_WITH_CONST("VIEW");
     else if (pg_strcasecmp(PREV3_WD, "REFRESH") == 0 && pg_strcasecmp(PREV2_WD, "MATERIALIZED") == 0 &&
@@ -2947,6 +2997,9 @@ static char** PsqlCompletion(const char *text, int start, int end)
         static const char* const myList[] = {"ONLY", "WRITE", NULL};
 
         COMPLETE_WITH_LIST(myList);
+    }
+    else if (pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "CONSTRAINTS") == 0) {
+        COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_constraints_with_schema, " UNION SELECT 'ALL'");
     }
     /* Complete SET CONSTRAINTS <foo> with DEFERRED|IMMEDIATE */
     else if (pg_strcasecmp(PREV3_WD, "SET") == 0 && pg_strcasecmp(PREV2_WD, "CONSTRAINTS") == 0) {
