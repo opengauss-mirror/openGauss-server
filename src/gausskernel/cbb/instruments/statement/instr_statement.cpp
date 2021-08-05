@@ -370,7 +370,9 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
 
     /* is slow sql */
     values[i++] = BoolGetDatum(
-        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold) ? true : false);
+        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
+        statementInfo->slow_query_threshold >= 0) ? true : false);
+        
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
 
