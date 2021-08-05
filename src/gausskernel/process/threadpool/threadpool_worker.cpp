@@ -660,6 +660,9 @@ static void init_session_share_memory()
 
 static bool InitSession(knl_session_context* session)
 {
+    /* non't send ereport to client now */
+    t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+
     /* Switch context to Session context. */
     AutoContextSwitch memSwitch(session->mcxt_group->GetMemCxtGroup(MEMORY_CONTEXT_DEFAULT));
 
@@ -681,6 +684,9 @@ static bool InitSession(knl_session_context* session)
 
     /* Read in remaining GUC variables */
     read_nondefault_variables();
+    
+    /* now safe to ereport to client */
+    t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
 
     /* Init port and connection. */
     if (!InitPort(session->proc_cxt.MyProcPort)) {
