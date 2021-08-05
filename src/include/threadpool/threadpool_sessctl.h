@@ -60,13 +60,13 @@ public:
     void SigHupHandler();
     void HandlePoolerReload();
     void CheckSessionTimeout();
-    void CheckPermissionForSendSignal(knl_session_context* sess);
+    void CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock);
     void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
     knl_session_context* GetSessionByIdx(int idx);
     int FindCtrlIdxBySessId(uint64 id);
     TransactionId ListAllSessionGttFrozenxids(int maxSize, ThreadId *pids, TransactionId *xids, int *n);
     bool IsActiveListEmpty();
-
+    void releaseLockIfNecessary();
     inline int GetActiveSessionCount()
     {
         return m_activeSessionCount;

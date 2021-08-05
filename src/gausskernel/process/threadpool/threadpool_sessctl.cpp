@@ -194,7 +194,7 @@ void ThreadPoolSessControl::MarkAllSessionClose()
     alock.unLock();
 }
 
-void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* sess)
+void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock)
 {
     /* User id is invalid only when sometimes dealing with cancel signal. Because that permission is ensured
       by random cancel key, so we don't have to check the permission again. */
@@ -204,10 +204,23 @@ void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* se
     /* Only superuser , DB owner and user himself have the permission to send singal. */
     if (!superuser() && !pg_database_ownercheck(sess->proc_cxt.MyDatabaseId, u_sess->misc_cxt.CurrentUserId)) {
         if (sess->proc_cxt.MyRoleId != GetUserId()) {
+            *lock = 0;
             ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     (errmsg("must be system admin, db owner or have the same role to terminate other backend"))));
         }
+    }
+}
+
+void ThreadPoolSessControl::releaseLockIfNecessary()
+{
+    if (unlikely(t_thrd.sig_cxt.cur_ctrl_index != 0)) {
+        knl_sess_control* ctrl = &m_base[t_thrd.sig_cxt.cur_ctrl_index - m_maxReserveSessionCount];
+        volatile sig_atomic_t plock = ctrl->lock;
+        if (plock != 0) {
+            plock = 0;
+        }
+        t_thrd.sig_cxt.cur_ctrl_index = 0;
     }
 }
 
@@ -221,6 +234,7 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
     }
 
     knl_sess_control* ctrl = &m_base[ctrl_index - m_maxReserveSessionCount];
+    t_thrd.sig_cxt.cur_ctrl_index = ctrl_index;
     volatile sig_atomic_t* plock = &ctrl->lock;
     sig_atomic_t val;
     do {
@@ -232,13 +246,13 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
                 /* Session may be NULL when the session exits during the clean connection process.
                    We do nothing if the session is NULL */
                 if (sess == NULL) {
-                    /*  restore the value */
+                    /* restore the value */
                     ctrl->lock = 0;
                     status = ESRCH;
                     break;
                 }
                 /* Check user permission, and we dont have user id for cancel request. */
-                CheckPermissionForSendSignal(sess);
+                CheckPermissionForSendSignal(sess, (sig_atomic_t*)plock);
                 if (sess->status == KNL_SESS_ATTACH) {
                     t_thrd.sig_cxt.gs_sigale_check_type = SIGNAL_CHECK_SESS_KEY;
                     t_thrd.sig_cxt.session_id = sess->session_id;
@@ -265,6 +279,7 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
         }
         pg_usleep(100);
     } while (true);
+    t_thrd.sig_cxt.cur_ctrl_index = 0;
 
     return status;
 }
