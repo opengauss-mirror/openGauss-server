@@ -55,6 +55,7 @@ typedef enum ObjectType {
     OBJECT_CONVERSION,
     OBJECT_DATABASE,
     OBJECT_DATA_SOURCE,
+    OBJECT_DB4AI_MODEL,  // DB4AI
     OBJECT_DOMAIN,
     OBJECT_EXTENSION,
     OBJECT_FDW,
@@ -1775,5 +1776,36 @@ typedef struct RenameStmt {
     DropBehavior behavior;   /* RESTRICT or CASCADE behavior */
     bool missing_ok;         /* skip error if missing? */
 } RenameStmt;
+
+
+
+/* ----------------------
+ *		Create Model Statement
+ * ----------------------
+ */
+typedef struct CreateModelStmt{ // DB4AI
+    NodeTag type;
+    char* model;
+    char* architecture;
+    List* hyperparameters;  // List<VariableSetStmt>
+    Node* select_query;     // Query to be executed: SelectStmt -> Query
+    List* model_features;   // FEATURES clause
+    List* model_target;     // TARGET clause
+    // Filled during transform
+    AlgorithmML algorithm;  // Algorithm to be executed
+} CreateModelStmt;
+
+/* ----------------------
+ *		Prediction BY function
+ * ----------------------
+ */
+typedef struct PredictByFunction{ // DB4AI
+    NodeTag type;
+    char* model_name;
+    int model_name_location; // Only for parser
+    List* model_args;
+    int model_args_location; // Only for parser
+} PredictByFunction;
+
 
 #endif /* PARSENODES_COMMONH */

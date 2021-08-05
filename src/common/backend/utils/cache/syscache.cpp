@@ -25,6 +25,7 @@
 #include "access/sysattr.h"
 #include "catalog/gs_obsscaninfo.h"
 #include "catalog/gs_opt_model.h"
+#include "catalog/gs_model.h"
 #include "catalog/gs_policy_label.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_aggregate.h"
@@ -299,6 +300,16 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         32},
+    {ModelRelationId, /* DB4AI_MODELOID */
+        GsModelOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        256},
+    {ModelRelationId, /* DB4AI_MODEL */
+        GsModelNameIndexId,
+        1,
+        {Anum_gs_model_model_name, 0, 0, 0},
+        256},
     {DefaultAclRelationId, /* DEFACLROLENSPOBJ */
         DefaultAclRoleNspObjIndexId,
         3,

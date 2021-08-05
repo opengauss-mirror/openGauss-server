@@ -80,6 +80,10 @@
 #include "instruments/instr_unique_sql.h"
 #include "streaming/init.h"
 
+#include "db4ai/aifuncs.h"
+#include "db4ai/create_model.h"
+#include "db4ai/hyperparameter_validation.h"
+
 #ifndef ENABLE_MULTIPLE_NODES
 #include "optimizer/clauses.h"
 #endif
@@ -274,6 +278,77 @@ Query* transformTopLevelStmt(ParseState* pstate, Node* parseTree, bool isFirstNo
     return transformStmt(pstate, parseTree, isFirstNode, isCreateView);
 }
 
+
+Query* transformCreateModelStmt(ParseState* pstate, CreateModelStmt* stmt)
+{
+    SelectStmt* select_stmt = (SelectStmt*) stmt->select_query;
+
+    stmt->algorithm     = get_algorithm_ml(stmt->architecture);
+    if (stmt->algorithm == INVALID_ALGORITHM_ML) {
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Non recognized ML model architecture definition %s", stmt->architecture)));
+    }
+    if (SearchSysCacheExists1(DB4AI_MODEL, CStringGetDatum(stmt->model))) {
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("The model name \"%s\" already exists in gs_model_warehouse.", stmt->model)));
+    }
+
+    // Create the projection for the AI operator in the query plan
+    // If the algorithm is supervised, the target is always the first element of the list
+    if (is_supervised(stmt->algorithm)) {
+        if (list_length(stmt->model_features) == 0) {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Supervised ML algorithms require FEATURES clause")));
+        }else if (list_length(stmt->model_target) == 0) {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Supervised ML algorithms require TARGET clause")));
+        }else if (list_length(stmt->model_target) > 1) {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Target clause only supports one expression")));
+        }
+    }else{
+        if (list_length(stmt->model_target) > 0) {
+            ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Unsupervised ML algorithms cannot have TARGET clause")));
+        }
+    }
+
+    select_stmt->targetList = NULL;
+    foreach_cell(it, stmt->model_target) {
+        select_stmt->targetList = lappend(select_stmt->targetList, lfirst(it));
+    }
+
+    if (list_length(stmt->model_features) > 0) { // User given projection
+        foreach_cell(it, stmt->model_features) {
+            select_stmt->targetList = lappend(select_stmt->targetList, lfirst(it));
+        }
+
+    } else { // No projection
+        ResTarget *rt = makeNode(ResTarget);
+        ColumnRef *cr = makeNode(ColumnRef);
+
+        cr->fields = list_make1(makeNode(A_Star));
+        cr->location = -1;
+
+        rt->name = NULL;
+        rt->indirection = NIL;
+        rt->val = (Node *)cr;
+        rt->location = -1;
+        select_stmt->targetList = lappend(select_stmt->targetList, rt);
+    }
+
+    // Transform the select query that we prepared for the training operator
+    Query* select_query = transformStmt(pstate, (Node*) select_stmt);
+    stmt->select_query  = (Node*) select_query;
+
+    /* represent the command as a utility Query */
+    Query* result = makeNode(Query);
+    result->commandType = CMD_UTILITY;
+    result->utilityStmt = (Node*)stmt;
+
+    return result;
+}
+
 /*
  * transformStmt -
  *	  recursively transform a Parse tree into a Query tree.
@@ -332,6 +407,11 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
         case T_CreateTableAsStmt:
             result = transformCreateTableAsStmt(pstate, (CreateTableAsStmt*)parseTree);
             break;
+
+        case T_CreateModelStmt:
+            result = transformCreateModelStmt(pstate, (CreateModelStmt*) parseTree);
+            break;
+
 
         default:
 

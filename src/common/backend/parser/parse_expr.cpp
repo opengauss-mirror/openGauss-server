@@ -20,6 +20,7 @@
 #include "catalog/pg_proc.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
+#include "db4ai/predict_by.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -67,6 +68,7 @@ static Node* transformXmlExpr(ParseState* pstate, XmlExpr* x);
 static Node* transformXmlSerialize(ParseState* pstate, XmlSerialize* xs);
 static Node* transformBooleanTest(ParseState* pstate, BooleanTest* b);
 static Node* transformCurrentOfExpr(ParseState* pstate, CurrentOfExpr* cexpr);
+static Node* transformPredictByFunction(ParseState* pstate, PredictByFunction* cexpr);
 static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref);
 static Node* transformWholeRowRef(ParseState* pstate, RangeTblEntry* rte, int location);
 static Node* transformIndirection(ParseState* pstate, Node* basenode, List* indirection);
@@ -284,6 +286,10 @@ Node* transformExpr(ParseState* pstate, Node* expr)
 
         case T_CurrentOfExpr:
             result = transformCurrentOfExpr(pstate, (CurrentOfExpr*)expr);
+            break;
+
+        case T_PredictByFunction:
+            result = transformPredictByFunction(pstate, (PredictByFunction*) expr);
             break;
 
             /*********************************************
@@ -2026,6 +2032,102 @@ static Node* transformCurrentOfExpr(ParseState* pstate, CurrentOfExpr* cexpr)
 
     return (Node*)cexpr;
 }
+
+// Locate in the system catalog the information for a model name
+static char* select_prediction_function(Model* model){
+    
+    char* result;
+    switch(model->return_type){
+        case BOOLOID:
+            result = "db4ai_predict_by_bool";
+            break;
+        case FLOAT4OID:
+            result = "db4ai_predict_by_float4";
+            break;
+        case FLOAT8OID:
+            result = "db4ai_predict_by_float8";
+            break;
+        case INT1OID:
+        case INT2OID:
+        case INT4OID:
+            result = "db4ai_predict_by_int32";
+            break;
+        case INT8OID:
+            result = "db4ai_predict_by_int64";
+            break;
+        case NUMERICOID:
+            result = "db4ai_predict_by_numeric";
+            break;
+        case VARCHAROID:
+        case BPCHAROID:
+        case CHAROID:
+        case TEXTOID:
+            result = "db4ai_predict_by_text";
+            break;
+
+        default:
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Cannot trigger prediction for model with oid %d",  model->return_type)));
+            result = NULL;
+            break;
+    }
+
+    return result;
+}
+
+// Convert the PredictByFunction created during parsing phase into the function
+// call that computes the prediction of the model. We cannot do this during parsing
+// because at that moment we do not know the return type of the model, which is obtained
+// from the catalog
+static Node* transformPredictByFunction(ParseState* pstate, PredictByFunction* p)
+{
+    FuncCall* n = makeNode(FuncCall);
+
+    if (p->model_name == NULL) {
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("Model name for prediction cannot be null")));
+    }
+
+    Model* model = get_model(p->model_name, true);
+    if (model == NULL) {
+        ereport(ERROR, (errmsg(
+            "No model found with name %s", p->model_name)));
+    }
+
+    // Locate the proper function according to the model name
+    char* function_name = select_prediction_function(model);
+    ereport(DEBUG1, (errmsg(
+            "Selecting prediction function %s for model %s",
+            function_name, p->model_name)));
+    n->funcname = list_make1(makeString(function_name));
+    n->colname  = p->model_name;
+
+    // Fill model name parameter
+    A_Const* model_name_aconst      = makeNode(A_Const);
+    model_name_aconst->val.type     = T_String;
+    model_name_aconst->val.val.str  = p->model_name;
+    model_name_aconst->location     = p->model_name_location;
+
+    // Copy other parameters
+    n->args = list_make1(model_name_aconst);
+    if (list_length(p->model_args) > 0) {
+        n->args = lappend3(n->args, p->model_args);
+    }else{
+        ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Innput features for the model not specified")));
+    }
+
+    n->agg_order        = NULL;
+    n->agg_star         = FALSE;
+    n->agg_distinct     = FALSE;
+    n->func_variadic    = FALSE;
+    n->over             = NULL;
+    n->location         = p->model_args_location;
+    n->call_func        = false;
+
+    return  transformExpr(pstate, (Node*)n);
+}
+
 
 /*
  * Construct a whole-row reference to represent the notation "relation.*".

@@ -57,7 +57,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	pg_job.h gs_asp.h pg_job_proc.h pg_extension_data_source.h pg_statistic_ext.h pg_object.h  pg_synonym.h \
 	toasting.h indexing.h gs_obsscaninfo.h pg_directory.h pg_hashbucket.h gs_global_config.h\
 	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
-	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h\
+	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_model.h\
     )
 
 # location of Catalog.pm

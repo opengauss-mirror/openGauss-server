@@ -56,6 +56,7 @@ DECLARE_TOAST(pg_trigger, 2336, 2337);
 DECLARE_TOAST(pg_partition, 5502, 5503);
 DECLARE_TOAST(pgxc_class, 5506, 5507);
 DECLARE_TOAST(pg_hashbucket, 4390, 4391);
+DECLARE_TOAST(gs_model_warehouse, 3995, 3996);
 
 /* shared catalogs */
 DECLARE_TOAST(pg_shdescription, 2846, 2847);

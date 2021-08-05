@@ -570,7 +570,17 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_SkewRelInfo, "SkewRelInfo"},
     {T_SkewColumnInfo, "SkewColumnInfo"},
     {T_SkewValueInfo, "SkewValueInfo"},
-    {T_QualSkewInfo, "QualSkewInfo"}};
+    {T_QualSkewInfo, "QualSkewInfo"},
+    // DB4AI
+    {T_CreateModelStmt, "CreateModelStmt"},
+    {T_PredictByFunction, "PredictByFunction"},
+    {T_GradientDescent, "GradientDescent"},
+    {T_GradientDescentState, "GradientDescentState"},
+    {T_KMeans, "Kmeans"},
+    {T_KMeansState, "KmeansState"},
+    {T_GradientDescentExpr, "GradientDescentExpr"},
+    {T_GradientDescentExprState, "GradientDescentExprState"},
+};
 
 char* nodeTagToString(NodeTag tag)
 {
