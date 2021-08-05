@@ -23,6 +23,7 @@
 #include "catalog/gs_obsscaninfo.h"
 #include "catalog/pg_obsscaninfo.h"
 #include "catalog/pg_type.h"
+#include "db4ai/create_model.h"
 #include "commands/createas.h"
 #include "commands/defrem.h"
 #include "commands/prepare.h"
@@ -87,6 +88,7 @@ THR_LOCAL explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
 
 extern TrackDesc trackdesc[];
 extern sortMessage sortmessage[];
+extern DestReceiver* CreateDestReceiver(CommandDest dest);
 
 /* Array to record plan table column names, type, etc */
 static const PlanTableEntry plan_table_cols[] = {{"id", PLANID, INT4OID, ANAL_OPT},
@@ -652,6 +654,22 @@ static void ExplainOneQuery(
             ExplainOneQuery((Query*)linitial(rewritten), ctas->into, es, queryString, dest, params);
 
             return;
+        }
+        else if (IsA(query->utilityStmt, CreateModelStmt)) {
+            CreateModelStmt* cm = (CreateModelStmt*) query->utilityStmt;
+
+            /*
+             * Create the tuple receiver object and insert hyperp it will need
+             */
+            DestReceiverTrainModel* dest_train_model = NULL;
+            dest_train_model = (DestReceiverTrainModel*) CreateDestReceiver(DestTrainModel);
+            configure_dest_receiver_train_model(dest_train_model, (AlgorithmML) cm->algorithm, cm->model, queryString);
+
+            PlannedStmt* plan = plan_create_model(cm, queryString, params, (DestReceiver*)dest_train_model);
+
+            ExplainOnePlan(plan, into, es, queryString, dest, params);
+            return;
+
         }
 
         ExplainOneUtility(query->utilityStmt, into, es, queryString, params);
@@ -1928,6 +1946,7 @@ static void ExplainNode(
         case T_WorkTableScan:
         case T_ForeignScan:
         case T_VecForeignScan:
+        case T_GradientDescentState:
             ExplainScanTarget((Scan*)plan, es);
             break;
         case T_ExtensiblePlan:

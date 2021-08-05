@@ -92,6 +92,7 @@
 #include "utils/typcache.h"
 #include "utils/xml.h"
 #include "vecexecutor/vecnodes.h"
+#include "db4ai/gd.h"
 
 /* ----------
  * Pretty formatting constants
@@ -9232,6 +9233,11 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
                 get_rule_expr((Node*)lfirst(l), context, showimplicit, no_alias);
                 sep = ", ";
             }
+        } break;
+
+        case T_GradientDescentExpr: {
+            GradientDescentExpr* gdnode = (GradientDescentExpr*)node;
+            appendStringInfo(buf, "GD(%s)", gd_get_expr_name(gdnode->field));
         } break;
 
         default:

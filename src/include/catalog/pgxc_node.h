@@ -24,7 +24,7 @@
 #define PgxcNodeRelationId  9015
 #define PgxcNodeRelation_Rowtype_Id 11649
 
-CATALOG(pgxc_node,9015) BKI_SHARED_RELATION BKI_SCHEMA_MACRO
+CATALOG(pgxc_node,9015) BKI_ROWTYPE_OID(11649) BKI_SHARED_RELATION BKI_SCHEMA_MACRO
 {
 	NameData	node_name;
 

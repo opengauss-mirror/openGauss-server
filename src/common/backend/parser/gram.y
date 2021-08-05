@@ -214,6 +214,7 @@ bool IsValidGroupname(const char *input);
 static bool checkNlssortArgs(const char *argname);
 static void ParseUpdateMultiSet(List *set_target_list, SelectStmt *stmt, core_yyscan_t yyscanner);
 static void parameter_check_execute_direct(const char* query);
+
 %}
 
 %pure-parser
@@ -315,6 +316,13 @@ static void parameter_check_execute_direct(const char* query);
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
 		MergeStmt CreateMatViewStmt RefreshMatViewStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
+
+/* <DB4AI> */
+
+/* TRAIN MODEL */
+%type <node>    CreateModelStmt	hyperparameter_name_value DropModelStmt
+%type <list>	features_clause hyperparameter_name_value_list target_clause with_hyperparameters_clause
+/* </DB4AI> */
 
 %type <node>	select_no_parens select_with_parens select_clause
 				simple_select values_clause
@@ -687,7 +695,7 @@ static void parameter_check_execute_direct(const char* query);
  * DOT_DOT is unused in the core SQL grammar, and so will always provoke
  * parse errors.  It is needed by PL/pgsql.
  */
-%token <str>	IDENT FCONST SCONST BCONST XCONST Op CmpOp COMMENTSTRING
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
 
@@ -701,8 +709,8 @@ static void parameter_check_execute_direct(const char* query);
 /* ordinary key words in alphabetical order */
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER, SLICE, DATANODE */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
-	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP ARRAY AS ASC
-        ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED
+	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP ARCHIVE ARRAY AS ASC
+        ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED AUTOML
 
 	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLOB_P BOGUS
 	BOOLEAN_P BOTH BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
@@ -728,6 +736,7 @@ static void parameter_check_execute_direct(const char* query);
 	EXTENSION EXTERNAL EXTRACT
 
 	FALSE_P FAMILY FAST FENCED FETCH FILEHEADER_P FILL_MISSING_FIELDS FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
+	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
 	GENERATED GLOBAL GLOBAL_FUNCTION GRANT GRANTED GREATEST GROUP_P GROUPING_P
@@ -748,6 +757,7 @@ static void parameter_check_execute_direct(const char* query);
 	LEAST LESS LEFT LEVEL LIKE LIMIT LIST LISTEN LOAD LOCAL LOCALTIME LOCALTIMESTAMP
 	LOCATION LOCK_P LOG_P LOGGING LOGIN_ANY LOGIN_FAILURE LOGIN_SUCCESS LOGOUT LOOP
 	MAPPING MASKING MASTER MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
+	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NLSSORT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR2 NVL
 
@@ -756,24 +766,28 @@ static void parameter_check_execute_direct(const char* query);
 
 	PACKAGE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
 /* PGXC_BEGIN */
-	POOL PRECEDING PRECISION PREFERRED PREFIX PRESERVE PREPARE PREPARED PRIMARY
+	POOL PRECEDING PRECISION
 /* PGXC_END */
-	PRIVATE PRIOR PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE
+	PREDICT  // DB4AI
+/* PGXC_BEGIN */
+	PREFERRED PREFIX PRESERVE PREPARE PREPARED PRIMARY
+/* PGXC_END */
+	PRIVATE PRIOR PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLISH PURGE
 
 	QUERY QUOTE
 
-	RANDOMIZED RANGE RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
+	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
 	ROW ROWNUM ROWS RULE
 
-	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
+	SAMPLE SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHIPPABLE SHOW SHUTDOWN
 	SIMILAR SIMPLE SIZE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START
-	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STREAM STRICT_P STRIP_P SUBSTRING
+	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBSTRING
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR
 
-	TABLE TABLES TABLESAMPLE TABLESPACE TEMP TEMPLATE TEMPORARY TEXT_P THAN THEN TIME TIME_FORMAT_P TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
+	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TEXT_P THAN THEN TIME TIME_FORMAT_P TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
@@ -812,6 +826,7 @@ static void parameter_check_execute_direct(const char* query);
 %nonassoc   PARTIAL_EMPTY_PREC
 %nonassoc   CLUSTER
 %nonassoc	SET				/* see relation_expr_opt_alias */
+%right      FEATURES TARGET   // DB4AI
 %left		UNION EXCEPT MINUS_P
 %left		INTERSECT
 %left		OR
@@ -852,7 +867,7 @@ static void parameter_check_execute_direct(const char* query);
  */
 %nonassoc	UNBOUNDED		/* ideally should have same precedence as IDENT */
 %nonassoc	IDENT GENERATED NULL_P PARTITION RANGE ROWS PRECEDING FOLLOWING CUBE ROLLUP
-%left		Op OPERATOR		/* multi-character ops and user-defined operators */
+%left		Op OPERATOR '@'		/* multi-character ops and user-defined operators */
 %nonassoc	NOTNULL
 %nonassoc	ISNULL
 %nonassoc	IS				/* sets precedence for IS NULL, etc */
@@ -987,6 +1002,7 @@ stmt :
 			| CreateFunctionStmt
 			| CreateGroupStmt
 			| CreateMatViewStmt
+			| CreateModelStmt  // DB4AI
 			| CreateNodeGroupStmt
 			| CreateNodeStmt
 			| CreateOpClassStmt
@@ -1033,6 +1049,7 @@ stmt :
 			| DropFdwStmt
 			| DropForeignServerStmt
 			| DropGroupStmt
+			| DropModelStmt // DB4AI
 			| DropNodeGroupStmt
 			| DropNodeStmt
 			| DropOpClassStmt
@@ -7584,6 +7601,133 @@ AlterUserMappingStmt: ALTER USER MAPPING FOR auth_ident SERVER name alter_generi
 					$$ = (Node *) n;
 				}
 		;
+
+
+/*****************************************************************************
+ *
+ *		QUERY:
+ *				CREATE MODEL <model_name>
+ *
+ *
+ *****************************************************************************/
+
+
+CreateModelStmt:
+		CREATE MODEL ColId
+		USING ColId
+		features_clause
+		target_clause
+		from_clause
+		with_hyperparameters_clause
+	{
+		CreateModelStmt *n = makeNode(CreateModelStmt);
+		n->model 			= pstrdup($3);
+		n->architecture 	= pstrdup($5);
+		n->model_features 	= $6;
+		n->model_target   	= $7;
+
+		// The clause will be constructed in tranform
+		SelectStmt *s = makeNode(SelectStmt);
+		s->fromClause = $8;	
+
+		n->select_query = (Node*) s;
+		n->hyperparameters  = $9;
+
+		$$ = (Node*) n;
+	}
+	;
+
+features_clause:
+	FEATURES target_list{
+		List* result = $2;
+
+		// Verify that target clause is not '*'
+		foreach_cell(it, result){
+			ResTarget* n = (ResTarget*) lfirst(it);
+			ColumnRef* cr = (n->val != NULL && IsA(n->val, ColumnRef)) ? (ColumnRef*)(n->val) : NULL;
+			List* l = (cr != NULL) ? cr->fields : NULL;
+			Node* node = list_length(l) > 0 ? linitial_node(Node, l) : NULL;
+			if (node != NULL && IsA(node, A_Star)){
+				elog(ERROR, "FEATURES clause cannot be *");
+			}		
+		}
+
+		$$ = result;
+	}
+	| {
+		List* result = NULL;
+		$$ = result;
+	}
+
+target_clause:
+	TARGET target_list{
+		List* result = $2;
+
+		// Verify that target clause is not '*'
+		foreach_cell(it, result){
+			ResTarget* n = (ResTarget*) lfirst(it);
+			ColumnRef* cr = (n->val != NULL && IsA(n->val, ColumnRef)) ? (ColumnRef*)(n->val) : NULL;
+			List* l = (cr != NULL) ? cr->fields : NULL;
+			Node* node = list_length(l) > 0 ? linitial_node(Node, l) : NULL;
+			if (node != NULL && IsA(node, A_Star)){
+				elog(ERROR, "TARGET clause cannot be *");
+			}
+		}
+
+		$$ = result;
+	}
+	| {
+		List* result = NULL;
+		$$ = result;
+	}
+
+
+with_hyperparameters_clause:
+	WITH hyperparameter_name_value_list { $$ = $2; }
+	| { $$ = NULL; }
+	;
+
+hyperparameter_name_value_list:
+	hyperparameter_name_value		{ $$ = list_make1($1); }
+	| hyperparameter_name_value_list ',' hyperparameter_name_value
+	{
+		$$ = lappend($1,$3);
+	}
+	;
+
+hyperparameter_name_value:
+	ColLabel '=' var_value
+	{
+		VariableSetStmt *n = makeNode(VariableSetStmt);
+		n->kind = VAR_SET_VALUE;
+		n->name = $1;
+		n->args = list_make1($3);
+		$$ = (Node*) n;
+	}
+	| ColLabel '=' DEFAULT
+	{
+		VariableSetStmt *n = makeNode(VariableSetStmt);
+		n->kind = VAR_SET_DEFAULT;
+		n->name = $1;
+		n->args = NULL;
+		$$ = (Node*) n;
+	}
+	;
+
+DropModelStmt:
+	DROP MODEL ColId opt_drop_behavior
+	{
+		DropStmt *n = makeNode(DropStmt);
+		n->removeType = OBJECT_DB4AI_MODEL;
+		n->objects = list_make1(list_make1(makeString($3)));
+		n->arguments = NULL;
+		n->behavior = $4;
+		n->missing_ok = false;
+		n->concurrent = false;
+		n->isProcedure = false;
+		$$ = (Node *)n;
+	}
+	;
 
 /*****************************************************************************
  *
@@ -14823,6 +14967,7 @@ ExplainableStmt:
 			| MergeStmt
 			| DeclareCursorStmt
 			| CreateAsStmt
+			| CreateModelStmt
 			| ExecuteStmt					/* by default all are $$=$1 */
 		;
 
@@ -17840,6 +17985,15 @@ a_expr:		c_expr									{ $$ = $1; }
 														 list_make1($1), @2),
 											 @2);
 				}
+			| PREDICT BY ColId '(' FEATURES func_arg_list ')'
+				{
+					PredictByFunction * n = makeNode(PredictByFunction);
+					n->model_name = $3;
+					n->model_name_location = @3;
+					n->model_args = $6;	
+					n->model_args_location = @6;
+					$$ = (Node*) n;				
+				}
 		;
 
 /*
@@ -20191,6 +20345,7 @@ unreserved_keyword:
 			| EXTERNAL
 			| FAMILY
 			| FAST
+			| FEATURES 			// DB4AI
 			| FILEHEADER_P
 			| FILL_MISSING_FIELDS
 			| FILTER
@@ -20276,6 +20431,7 @@ unreserved_keyword:
 			| MINUTE_P
 			| MINVALUE
 			| MODE
+			| MODEL      // DB4AI
 			| MONTH_P
 			| MOVE
 			| MOVEMENT
@@ -20321,6 +20477,7 @@ unreserved_keyword:
 			| POLICY
 			| POOL
 			| PRECEDING
+			| PREDICT   // DB4AI
 /* PGXC_BEGIN */
 			| PREFERRED
 /* PGXC_END */
@@ -20338,6 +20495,7 @@ unreserved_keyword:
 			| QUOTE
 			| RANDOMIZED
 			| RANGE
+			| RATIO
 			| RAW  '(' Iconst ')'				{	$$ = "raw";}
 			| RAW  %prec UNION				{	$$ = "raw";}
 			| READ
@@ -20373,6 +20531,7 @@ unreserved_keyword:
 			| ROLLUP
 			| ROWS
 			| RULE
+			| SAMPLE
 			| SAVEPOINT
 			| SCHEMA
 			| SCROLL
@@ -20410,7 +20569,8 @@ unreserved_keyword:
 			| STORAGE
 			| STORE_P
 			| STORED
-            | STREAM
+			| STRATIFY
+                        | STREAM
 			| STRICT_P
 			| STRIP_P
 			| SYNONYM
@@ -20419,6 +20579,7 @@ unreserved_keyword:
 			| SYSTEM_P
 			| TABLES
 			| TABLESPACE
+			| TARGET
 			| TEMP
 			| TEMPLATE
 			| TEMPORARY
@@ -22197,6 +22358,7 @@ static void parameter_check_execute_direct(const char* query)
 			(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 				errmsg("must be system admin or monitor admin to use EXECUTE DIRECT")));
 }
+
 
 /*
  * Must undefine this stuff before including scan.c, since it has different

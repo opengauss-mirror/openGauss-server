@@ -21,12 +21,15 @@
 #include "nodes/params.h"
 #include "nodes/plannodes.h"
 #include "storage/pagecompress.h"
+#include "utils/array.h"
 #include "utils/bloom_filter.h"
 #include "utils/reltrigger.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplesort.h"
 #include "utils/tuplestore.h"
 #include "vecexecutor/vectorbatch.h"
+
+#include "db4ai/matrix.h"
 
 #ifdef ENABLE_MOT
 // forward declaration for MOT JitContext
@@ -2482,6 +2485,134 @@ inline bool BitmapNodeNeedSwitchPartRel(BitmapHeapScanState* node)
 }
 
 extern RangeScanInRedis reset_scan_qual(Relation currHeapRel, ScanState *node);
+
+/*
+ * DB4AI GD node: used for train models using Gradient Descent
+ */
+
+struct GradientDescentAlgorithm;
+struct GradientDescentExpr;
+struct OptimizerGD;
+struct ShuffleGD;
+
+typedef struct GradientDescentState {
+    ScanState               ss;     /* its first field is NodeTag */
+    GradientDescentAlgorithm* algorithm;
+    OptimizerGD*            optimizer;
+    ShuffleGD*              shuffle;
+        
+    // tuple description
+    TupleDesc               tupdesc;
+    int                     n_features; // number of features
+
+    // dependant var binary values
+    int                     num_classes;
+    Datum                   binary_classes[2];
+
+    // training state
+    bool                    done;   // when finished
+    Matrix                  weights;
+    double                  learning_rate;
+    int                     n_iterations;
+    int                     usecs;          // execution time
+    int                     processed;  // tuples
+    int                     discarded;
+    float                   loss;
+    Scores                  scores;
+} GradientDescentState;
+
+
+typedef struct GradientDescentExprState {
+    ExprState               xprstate;
+    PlanState*              ps;
+    GradientDescentExpr*    xpr;
+} GradientDescentExprState;
+
+/*
+ * DB4AI k-means node
+ */
+
+/*
+ * to keep running statistics on each cluster being constructed
+ */
+class IncrementalStatistics {
+    uint64_t population = 0;
+    double max_value = 0.;
+    double min_value = DBL_MAX;
+    double total = 0.;
+    double s = 0;
+
+public:
+    
+    IncrementalStatistics operator+(IncrementalStatistics const& rhs) const;
+    IncrementalStatistics operator-(IncrementalStatistics const& rhs) const;
+    IncrementalStatistics& operator+=(IncrementalStatistics const& rhs);
+    IncrementalStatistics& operator-=(IncrementalStatistics const& rhs);
+    
+    double getMin() const;
+    void setMin(double);
+    double getMax() const;
+    void setMax(double);
+    double getTotal() const;
+    void setTotal(double);
+    uint64_t getPopulation() const;
+    void setPopulation(uint64_t);
+    double getEmpiricalMean() const;
+    double getEmpiricalVariance() const;
+    double getEmpiricalStdDev() const;
+    bool reset();
+};
+
+/*
+ * internal representation of a centroid
+ */
+typedef struct Centroid {
+    IncrementalStatistics statistics;
+    ArrayType* coordinates = nullptr;
+    uint32_t id = 0U;
+} Centroid;
+
+/*
+ * current state of the algorithm
+ */
+typedef struct KMeansStateDescription {
+    Centroid* centroids[2] = {nullptr};
+    ArrayType* bbox_min = nullptr;
+    ArrayType* bbox_max = nullptr;
+    
+    double (* distance)(double const*, double const*, uint32_t const dimension) = nullptr;
+    
+    double execution_time = 0.;
+    double seeding_time = 0.;
+    IncrementalStatistics solution_statistics[2];
+    uint64_t num_good_points = 0UL;
+    uint64_t num_dead_points = 0UL;
+    uint32_t current_iteration = 0U;
+    uint32_t current_centroid = 0U;
+    uint32_t dimension = 0U;
+    uint32_t num_centroids = 0U;
+    uint32_t actual_num_iterations = 0U;
+} KMeansStateDescription;
+
+/*
+ * current state of the k-means node
+ */
+typedef struct KMeansState {
+    ScanState sst;
+    KMeansStateDescription description;
+    bool done = false;
+} KMeansState;
+
+/*
+ * internal representation of a point (not a centroid)
+ */
+typedef struct GSPoint {
+    ArrayType* pg_coordinates = nullptr;
+    uint32_t weight = 1U;
+    uint32_t id = 0ULL;
+    double distance_to_closest_centroid = DBL_MAX;
+    bool should_free = false;
+} GSPoint;
 
 #endif /* EXECNODES_H */
 

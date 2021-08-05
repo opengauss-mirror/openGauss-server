@@ -102,6 +102,7 @@
 #include "gs_policy/gs_policy_audit.h"
 #include "gs_policy/policy_common.h"
 #include "client_logic/client_logic.h"
+#include "db4ai/create_model.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "pgxc/pgFdwRemote.h"
 #include "pgxc/globalStatistic.h"
@@ -6658,6 +6659,13 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 (void)process_column_settings((CreateClientLogicColumn *)parse_tree);
             }
             break;
+
+        case T_CreateModelStmt:{ // DB4AI
+
+            exec_create_model((CreateModelStmt*) parse_tree, query_string, params, completion_tag);
+
+            break;
+        }
         default: {
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -7738,6 +7746,9 @@ const char* CreateCommandTag(Node* parse_tree)
                 case OBJECT_CONVERSION:
                     tag = "DROP CONVERSION";
                     break;
+                case OBJECT_DB4AI_MODEL:
+                    tag = "DROP MODEL";
+                    break;
                 case OBJECT_SCHEMA:
                     tag = "DROP SCHEMA";
                     break;
@@ -8398,6 +8409,9 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
         case T_ShutdownStmt:
             tag = "SHUTDOWN";
+            break;
+        case T_CreateModelStmt:
+            tag = "CREATE MODEL";
             break;
 
         default:
@@ -9143,6 +9157,9 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             lev = LOGSTMT_DDL;
             break;
         case T_ShutdownStmt:
+            lev = LOGSTMT_ALL;
+            break;
+        case T_CreateModelStmt: // DB4AI
             lev = LOGSTMT_ALL;
             break;
 
