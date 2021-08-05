@@ -700,6 +700,8 @@ static void knl_t_sig_init(knl_t_sig_context* sig_cxt)
 {
     sig_cxt->signal_handle_cnt = 0;
     sig_cxt->gs_sigale_check_type = SIGNAL_CHECK_NONE;
+    sig_cxt->session_id = 0;
+    sig_cxt->cur_ctrl_index = 0;
 }
 
 static void knl_t_slot_init(knl_t_slot_context* slot_cxt)
