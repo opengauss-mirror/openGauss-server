@@ -295,18 +295,18 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
         securec_check(rc, "\0", "\0");
         initStringInfo(&(array + i)->column);
         if (!index_list) {
-            appendStringInfo(&(array + i)->column, "");
+            appendStringInfoString(&(array + i)->column, "");
         } else {
             ListCell *cur_index = NULL;
             int j = 0;
             foreach (cur_index, index_list) {
                 if (j > 0) {
-                    appendStringInfo(&(array + i)->column, ",(");
+                    appendStringInfoString(&(array + i)->column, ",(");
                 } else {
-                    appendStringInfo(&(array + i)->column, "(");
+                    appendStringInfoString(&(array + i)->column, "(");
                 }
-                appendStringInfo(&(array + i)->column, (char *)lfirst(cur_index));
-                appendStringInfo(&(array + i)->column, ")");
+                appendStringInfoString(&(array + i)->column, (char *)lfirst(cur_index));
+                appendStringInfoString(&(array + i)->column, ")");
                 j++;
             }
         }
@@ -627,7 +627,7 @@ void extract_stmt_where_clause(Node *item_where)
  */
 void generate_final_index(TableCell *table, Oid table_oid)
 {
-    int suggested_index_len = NAMEDATALEN * table->index->length;
+    Size suggested_index_len = NAMEDATALEN * table->index->length;
     char *suggested_index = (char *)palloc0(suggested_index_len);
     ListCell *index = NULL;
     errno_t rc = EOK;
@@ -636,7 +636,7 @@ void generate_final_index(TableCell *table, Oid table_oid)
     // concatenate the candidate indexes into a string
     foreach (index, table->index) {
         char *index_name = ((IndexCell *)lfirst(index))->index_name;
-        if (strlen(index_name) + strlen(suggested_index) + 1 > suggested_index_len) {
+        if ((strlen(index_name) + strlen(suggested_index) + 1) > suggested_index_len) {
             break;
         }
         if (i == 0) {
@@ -940,7 +940,6 @@ void field_value_trans(_out_ StringInfoData target, A_Const *field_value)
  */
 void parse_field_expr(List *field, List *op, List *lfield_values)
 {
-    errno_t rc = EOK;
     char *table_name = find_table_name(field);
     char *index_name = find_field_name(field);
     if (!table_name || !index_name) {
@@ -969,7 +968,7 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
             continue;
         }
         if (i == 0) {
-            appendStringInfo(&field_value, str.data);
+            appendStringInfoString(&field_value, str.data);
         } else {
             appendStringInfo(&field_value, ",%s", str.data);
         }
@@ -1012,7 +1011,7 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
         index->index_name = index_name;
         index->cardinality = cardinality;
         index->op = op_type;
-        index->field_expr = field_expr.data;
+        index->field_expr = pstrdup(field_expr.data);
         add_index_from_field(table_name, index);
     }
     pfree_ext(field_expr.data);
