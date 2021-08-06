@@ -4712,9 +4712,6 @@ static void ProcessDemoteRequest(void)
             if (g_instance.pid_cxt.DataReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.DataReceiverPID, SIGTERM);
 
-            if (g_instance.pid_cxt.HeartbeatPID != 0)
-                signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
-
             if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
                 signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
 
