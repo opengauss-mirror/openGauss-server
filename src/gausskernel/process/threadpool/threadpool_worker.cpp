@@ -433,6 +433,7 @@ void ThreadPoolWorker::CleanThread()
 
     InterruptPending = false;
     t_thrd.int_cxt.QueryCancelPending = false;
+    t_thrd.int_cxt.PoolValidateCancelPending = false;
     t_thrd.libpq_cxt.PqSendStart = 0;
     t_thrd.libpq_cxt.PqSendPointer = 0;
     t_thrd.libpq_cxt.PqRecvLength = 0;
