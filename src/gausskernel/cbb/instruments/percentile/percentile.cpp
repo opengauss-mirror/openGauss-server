@@ -353,7 +353,7 @@ void PercentileSpace::SubPercentileMain(void)
             t_thrd.percentile_cxt.need_reset_timer = true;
             g_instance.stat_cxt.force_process = false;
         }
-        pg_usleep(SLEEP_INTERVAL);  // CCN check if need force process percentile
+        pg_usleep(SLEEP_INTERVAL * 1000L);  // CCN check if need force process percentile
     }                               /* end of loop */
 }
 
