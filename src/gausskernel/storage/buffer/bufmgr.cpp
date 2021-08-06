@@ -1764,8 +1764,16 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
      * should return that the tuple does not exist without error reporting.
      */
     else if (RecoveryInProgress()) {
-        if (blockNum >= smgrnblocks(smgr, forkNum))
+        BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
+
+        /* Update cached blocks */
+        if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
+            totalBlkNum = smgrnblocks(smgr, forkNum);
+        }
+
+        if (blockNum >= totalBlkNum) {
             return InvalidBuffer;
+        }
     }
 #endif
 

@@ -60,7 +60,7 @@ typedef struct SMgrRelationData {
     BlockNumber smgr_targblock;   /* current insertion target block */
     BlockNumber smgr_fsm_nblocks; /* last known size of fsm fork */
     BlockNumber smgr_vm_nblocks;  /* last known size of vm fork */
-    BlockNumber smgr_cached_nblocks; /* last known size of main fork*/
+    BlockNumber smgr_cached_nblocks; /* last known size of main fork */
 
     int smgr_bcmarry_size;
     BlockNumber* smgr_bcm_nblocks; /* last known size of bcm fork */
