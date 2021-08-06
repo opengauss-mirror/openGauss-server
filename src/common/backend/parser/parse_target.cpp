@@ -1495,6 +1495,14 @@ static int FigureColnameInternal(Node* node, char** name)
                 return 2;
             }
             break;
+        case T_PredictByFunction: {
+            size_t len = strlen(((PredictByFunction*)node)->model_name) + strlen("_pred") + 1;
+            char* colname = (char*)palloc0(len);
+            errno_t rc = snprintf_s(colname, len, len - 1, "%s_pred", ((PredictByFunction*)node)->model_name);
+            securec_check_ss(rc, "\0", "\0");
+            *name = colname;
+            return 1;
+        } break;    
         case T_TypeCast:
             strength = FigureColnameInternal(((TypeCast*)node)->arg, name);
             if (strength <= 1) {

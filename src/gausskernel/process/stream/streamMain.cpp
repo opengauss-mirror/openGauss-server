@@ -86,7 +86,10 @@ int StreamMain()
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-	t_thrd.int_cxt.ignoreBackendSignal = false;
+        t_thrd.int_cxt.ignoreBackendSignal = false;
+        if (g_threadPoolControler) {
+            g_threadPoolControler->GetSessionCtrl()->releaseLockIfNecessary();
+        }
         /* reset STP thread local valueables */
         stp_reset_opt_values();
 

@@ -63,7 +63,7 @@ const char *excludeFiles[] = {
     "postgresql.conf.bak",
     "postgresql.conf.old",
     "pg_ctl.lock",
-    "build_completed.start"
+    "build_completed.start",
     "backup_label",
     "client.crt",
     "client.key",

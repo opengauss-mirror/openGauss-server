@@ -215,7 +215,7 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
 
                 sql_detail['sqlTemplate'] = sql_template
                 sql_detail['sql'] = workload[pos].statement
-                sql_detail['sqlCount'] = sql_count
+                sql_detail['sqlCount'] = int(round(sql_count))
                 if category == 1:
                     sql_optimzed = (workload[pos].cost_list[0] -
                                     workload[pos].cost_list[cost_list_pos]) / \
@@ -275,7 +275,7 @@ def check_useless_index(tables):
           "pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
           "pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN " \
           "pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_namespace n " \
-          "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON i.oid = p.conindid" \
+          "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON i.oid = p.conindid " \
           "WHERE (c.relkind = ANY (ARRAY['r'::\"char\", 'm'::\"char\"])) AND " \
           "(i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) AND " \
           "n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % (SCHEMA, tables_string)
@@ -336,7 +336,7 @@ def check_unused_index_workload(whole_indexes, redundant_indexes, workload_index
                 if 'UNIQUE INDEX' not in index.indexdef:
                     statement = "DROP INDEX %s;" % index.indexname
                     print(statement)
-                    useless_index = {"schemaName": index.schema, "tbName": index.table, "type": 1,
+                    useless_index = {"schemaName": index.schema, "tbName": index.table, "type": 3,
                                      "columns": index.columns, "statement": statement}
                     detail_info['uselessIndexes'].append(useless_index)
     print_header_boundary(" Redundant indexes ")

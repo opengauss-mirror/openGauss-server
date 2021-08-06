@@ -301,7 +301,7 @@ static  bool            last_pragma;
  * Some of these are not directly referenced in this file, but they must be
  * here anyway.
  */
-%token <str>	IDENT FCONST SCONST BCONST XCONST Op CmpOp COMMENTSTRING
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
 

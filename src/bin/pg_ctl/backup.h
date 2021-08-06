@@ -9,6 +9,7 @@ extern int standby_connect_timeout;
 extern int standby_message_timeout;
 
 extern char* conn_str;
+extern bool no_need_fsync;
 extern pid_t process_id;
 extern char* basedir;
 extern int bgpipe[2];

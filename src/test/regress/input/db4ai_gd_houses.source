@@ -1,0 +1,101 @@
+
+CREATE TABLE db4ai_houses (id INT, tax INT, bedroom INT, bath FLOAT, price INT, size INT, lot INT);
+COPY db4ai_houses FROM '@abs_srcdir@/data/houses.txt' DELIMITER '|';
+
+-- normalize min/max
+ALTER TABLE db4ai_houses ADD COLUMN tax_n FLOAT;
+ALTER TABLE db4ai_houses ADD COLUMN bath_n FLOAT;
+ALTER TABLE db4ai_houses ADD COLUMN size_n FLOAT;
+
+UPDATE db4ai_houses
+  SET tax_n = (tax - (SELECT min(tax) FROM db4ai_houses)) / (SELECT max(tax)-min(tax) FROM db4ai_houses),
+      bath_n = (bath - (SELECT min(bath) FROM db4ai_houses)) / (SELECT max(bath)-min(bath) FROM db4ai_houses),
+      size_n = (size - (SELECT min(size) FROM db4ai_houses)) / (SELECT max(size)-min(size) FROM db4ai_houses);
+
+-- logistic regression with data not normalized
+CREATE MODEL houses_logregr_ngd USING logistic_regression
+       FEATURES tax, bath, size TARGET price < 100000
+       FROM db4ai_houses WITH seed = 1, optimizer='ngd', learning_rate=10.0;
+
+-- compute accuracy
+SELECT COUNT(*)/(SELECT COUNT(*) FROM db4ai_houses) AS accuracy
+FROM (
+    SELECT PREDICT BY houses_logregr_ngd (FEATURES tax, bath, size) AS prediction,
+            price < 100000 AS target
+    FROM db4ai_houses
+    WHERE prediction=target
+);
+
+-- logistic regression with normalized data
+CREATE MODEL houses_logregr_gd USING logistic_regression
+       FEATURES tax_n, bath_n, size_n TARGET price < 100000
+       FROM db4ai_houses WITH seed = 2, learning_rate=1.0;
+
+-- just predict again
+SELECT PREDICT BY houses_logregr_gd (FEATURES tax_n, bath_n, size_n) AS prediction,
+        price < 100000 AS target
+FROM db4ai_houses
+ORDER BY id
+LIMIT 5;
+
+-- svm binary classification with data not normalized
+CREATE MODEL houses_svm_ngd USING svm_classification
+       FEATURES tax, bath, size TARGET price < 100000
+       FROM db4ai_houses WITH seed = 10, batch_size=5, optimizer='ngd',
+            learning_rate=10.0, lambda=50;
+
+-- compute accuracy
+SELECT COUNT(*)/(SELECT COUNT(*) FROM db4ai_houses) AS accuracy
+FROM (
+    SELECT PREDICT BY houses_svm_ngd (FEATURES tax, bath, size) AS prediction,
+            price < 100000 AS target
+    FROM db4ai_houses
+    WHERE prediction=target
+);
+
+-- svm binary classification with normalized data
+CREATE MODEL houses_svm_gd USING svm_classification
+       FEATURES tax_n, bath_n, size_n TARGET price < 100000
+       FROM db4ai_houses WITH seed = 10, batch_size=3,
+            learning_rate=1.0, lambda=50;
+
+-- linear regression with data not normalized
+CREATE MODEL houses_linregr_ngd USING linear_regression
+       FEATURES tax, bath, size TARGET price
+       FROM db4ai_houses WITH seed = 1, optimizer='ngd',
+            learning_rate=2.0;
+
+-- linear regression with normalized data, pure stochastic gd 
+CREATE MODEL houses_linregr_gd USING linear_regression
+       FEATURES tax_n, bath_n, size_n TARGET price
+       FROM db4ai_houses WITH seed = 1, batch_size=1, learning_rate=1.0;
+
+-- just dump some residual
+SELECT id, abs(target-prediction) as residual
+FROM (
+    SELECT id, price AS target, PREDICT BY houses_linregr_gd (FEATURES tax_n, bath_n, size_n) AS prediction
+    FROM db4ai_houses
+)
+ORDER BY residual DESC
+LIMIT 3;
+
+-- take a look at the model warehouse (skipping time-dependent columns)
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
+       hyperparametersoids, coefnames, coefvalues, coefoids, trainingscoresname, trainingscoresvalue, modeldescribe
+  FROM gs_model_warehouse;
+
+-- cleanup models in random order
+DROP MODEL houses_svm_gd;
+DROP MODEL houses_linregr_gd;
+DROP MODEL houses_logregr_ngd;
+DROP MODEL houses_svm_ngd;
+DROP MODEL houses_logregr_gd;
+DROP MODEL houses_linregr_ngd;
+
+-- check that all models have been deleted
+SELECT count(*) FROM gs_model_warehouse;
+
+-- cleanup tables
+DROP TABLE IF EXISTS db4ai_houses;
+
+SELECT 'DB4AI GD HOUSES TEST COMPLETED';

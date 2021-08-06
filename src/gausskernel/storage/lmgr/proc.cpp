@@ -1114,7 +1114,9 @@ static void ProcKill(int code, Datum arg)
                         (errcode(ERRCODE_DATA_CORRUPTED), errmsg("there remain unreleased locks when process exists.")));
     }
 #endif
-
+    if (g_threadPoolControler) {
+        g_threadPoolControler->GetSessionCtrl()->releaseLockIfNecessary();
+    }
     /*
      * Release any LW locks I am holding.  There really shouldn't be any, but
      * it's cheap to check again before we cut the knees off the LWLock

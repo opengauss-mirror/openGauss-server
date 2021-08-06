@@ -69,6 +69,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
 #include "commands/trigger.h"
+#include "db4ai/gd.h"
 
 /* static function decls */
 static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -146,6 +147,8 @@ static Datum ExecEvalGroupingFuncExpr(
 static Datum ExecEvalGroupingIdExpr(
     GroupingIdExprState* gstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
+
+extern Datum ExecEvalGradientDescent(GradientDescentExprState* mlstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
@@ -5411,6 +5414,20 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             rnstate->ps = parent;
             state = (ExprState*)rnstate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalRownum;
+        } break;
+        case T_GradientDescentExpr: {
+            GradientDescentExprState* ml_state = (GradientDescentExprState*)makeNode(GradientDescentExprState);
+            ml_state->ps = parent;
+            ml_state->xpr = (GradientDescentExpr*)node;
+            state = (ExprState*)ml_state;
+            if (IsA(parent, GradientDescentState)) {
+                state->evalfunc = (ExprStateEvalFunc)ExecEvalGradientDescent;
+            } else {
+                ereport(ERROR,
+                        (errmodule(MOD_DB4AI),
+                         errcode(ERRCODE_INVALID_OPERATION),
+                         errmsg("unrecognized state %d for GradientDescentExpr", parent->type)));
+            }
         } break;
         default:
             ereport(ERROR,

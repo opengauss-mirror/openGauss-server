@@ -138,6 +138,7 @@
 #include "catalog/pg_streaming_stream.h"
 #include "catalog/pg_streaming_cont_query.h"
 #include "catalog/pg_streaming_reaper_status.h"
+#include "catalog/gs_model.h"
 #include "commands/matview.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablespace.h"
@@ -292,6 +293,7 @@ static const FormData_pg_attribute Desc_gs_client_global_keys[Natts_gs_client_gl
 static const FormData_pg_attribute Desc_gs_client_global_keys_args[Natts_gs_client_global_keys_args] = {Schema_gs_client_global_keys_args};
 
 static const FormData_pg_attribute Desc_gs_opt_model[Natts_gs_opt_model] = {Schema_gs_opt_model};
+static const FormData_pg_attribute Desc_gs_model_warehouse[Natts_gs_model_warehouse] = {Schema_gs_model_warehouse};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -766,6 +768,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_pg_ts_template,
         Desc_pg_ts_template,
+        false,
+        true},
+    {ModelRelationId,
+        "gs_model_warehouse",
+        ModelRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_model_warehouse,
+        Desc_gs_model_warehouse,
         false,
         true},
     {DataSourceRelationId,

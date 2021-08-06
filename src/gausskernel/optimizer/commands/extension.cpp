@@ -2889,3 +2889,25 @@ void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId)
 
     heap_close(rel, NoLock);
 }
+
+/* 
+ * Expand the size of extension_session_vars_array_size by twice the number
+ * of extensions each time if latter is bigger.
+ */
+void RepallocSessionVarsArrayIfNecessary()
+{
+    uint32 currExtensionNum = pg_atomic_read_u32(&g_instance.extensionNum);
+    uint32 currArraySize = u_sess->attr.attr_common.extension_session_vars_array_size;
+    int rc;
+
+    if (currExtensionNum >= currArraySize) {
+        u_sess->attr.attr_common.extension_session_vars_array = (void**)repalloc(
+            u_sess->attr.attr_common.extension_session_vars_array, currExtensionNum * 2 * sizeof(void*));
+
+        rc = memset_s(&u_sess->attr.attr_common.extension_session_vars_array[currArraySize],
+            (currExtensionNum * 2 - currArraySize) * sizeof(void*), 0,
+            (currExtensionNum * 2 - currArraySize) * sizeof(void*));
+        securec_check(rc, "", "");
+        u_sess->attr.attr_common.extension_session_vars_array_size = currExtensionNum * 2;
+    }
+}

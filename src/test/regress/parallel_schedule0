@@ -773,3 +773,11 @@ test: procedure_privilege_test
 test: cstore_unique_index
 
 test: cast_privileges_test
+
+#--------------------------
+## DB4AI
+#--------------------------
+test: db4ai_gd_train_predict
+test: db4ai_gd_houses
+test: db4ai_kmeans_train_predict
+

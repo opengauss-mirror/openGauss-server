@@ -179,6 +179,7 @@ void* internal_load_library(const char* libname)
     DynamicFileList* file_scanner = NULL;
     FileListInit* file_init_scanner = NULL;
     PGModuleMagicFunction magic_func;
+    void (*set_extension_index)(uint32);
     struct stat stat_buf;
     PG_init_t PG_init = NULL;
     char* file = last_dir_separator(libname);
@@ -309,6 +310,13 @@ void* internal_load_library(const char* libname)
                 (errcode(ERRCODE_INVALID_OPERATION),
                     errmsg("incompatible library \"%s\": missing magic block", file),
                     errhint("Extension libraries are required to use the PG_MODULE_MAGIC macro.")));
+        }
+
+        /* Look up the set_extension_index function within extension's so */
+        set_extension_index = (void(*)(uint32))pg_dlsym(file_scanner->handle, "set_extension_index");
+        if (set_extension_index) {
+            uint32 idx = pg_atomic_fetch_add_u32(&g_instance.extensionNum, 1);
+            (*set_extension_index)(idx);
         }
 
         /* OK to link it into list */
