@@ -31,7 +31,9 @@
 
 #include <sys/stat.h>
 
+#include "catalog/pg_database.h"
 #include "gssignal/gs_signal.h"
+#include "libpq/libpq-fe.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "pgstat.h"
@@ -52,13 +54,38 @@
 bool bSyncXactsCallGsclean = false;
 PGPROC* twoPhaseCleanerProc = NULL;
 
+#ifndef ENABLE_MULTIPLE_NODES
+typedef struct DatabaseNames {
+    struct DatabaseNames* next;
+    char* databaseName;
+} DatabaseNames;
+
+typedef struct TempSchemaInfo {
+    struct TempSchemaInfo* next;
+    char* tempSchemaName;
+} TempSchemaInfo;
+
+typedef struct ActiveBackendInfo {
+    struct ActiveBackendInfo* next;
+    int64 sessionID;
+    uint32 tempID;
+    uint32 timeLineID;
+} ActiveBackendInfo;
+#endif
+
 /* Signal handlers */
 static void TwoPCSigHupHandler(SIGNAL_ARGS);
 static void TwoPCShutdownHandler(SIGNAL_ARGS);
+#ifdef ENABLE_MULTIPLE_NODES
 static int get_prog_path(const char* argv0);
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+static bool DropTempNamespace();
+#endif
 
 NON_EXEC_STATIC void TwoPhaseCleanerMain()
 {
+    sigjmp_buf local_sigjmp_buf;
     MemoryContext twopc_context;
     bool clean_successed = false;
     int rc;
@@ -90,6 +117,31 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
     /* We allow SIGQUIT (quickdie) at all times */
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
+
+    /*
+     * If an exception is encountered, processing resumes here.
+     *
+     * See notes in postgres.c about the design of this coding.
+     */
+    int curTryCounter;
+    int* oldTryCounter = NULL;
+    if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        gstrace_tryblock_exit(true, oldTryCounter);
+        /* Prevents interrupts while cleaning up */
+        HOLD_INTERRUPTS();
+
+        /* Report the error to the server log */
+        EmitErrorReport();
+
+        FlushErrorState();
+
+        /* Now we can allow interrupts again */
+        RESUME_INTERRUPTS();
+    }
+    oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
+
+    /* We can now handle ereport(ERROR) */
+    t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -132,12 +184,15 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
         }
 
         /*
-         * Call gs_clean to clean the prepared transaction every
-         * gs_clean_timeout second.
+         * In distributed Gaussdb, we call gs_clean to clean the prepared
+         * transaction every gs_clean_timeout second.
          * Remark: After the process is started, wait 60s to call
          * gs_clean firstly, if successed, then make the clean_successed
          * to true, if failed, wait 60s to recall gs_clean until it
          * success.
+         *
+         * In opengauss, instead of calling gs_clean, we use twophasecleaner
+         * to clean up the temporary table every gs_clean_timeout second.
          */
         if (bSyncXactsCallGsclean ||
             (u_sess->attr.attr_storage.gs_clean_timeout &&
@@ -146,6 +201,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
                     TimestampDifferenceExceeds(gs_clean_start_time,
                         gs_clean_current_time,
                         u_sess->attr.attr_storage.gs_clean_timeout * 1000)))) {
+#ifdef ENABLE_MULTIPLE_NODES
             int status = 0;
             char cmd[MAX_PATH_LEN];
 
@@ -154,7 +210,6 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
                 ereport(DEBUG5, (errmsg("failed to invoke get_prog_path()")));
             } else {
                 /* if we find explicit cn listen address, we use tcp connection instead of unix socket */
-#ifdef ENABLE_MULTIPLE_NODES
 #ifdef USE_ASSERT_CHECKING
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
@@ -170,14 +225,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers);
                 securec_check_ss(rc, "\0", "\0");
-#endif
-#else
-                rc = sprintf_s(cmd,
-                    sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -e -v -r -j %d > /dev/null 2>&1",
-                    g_instance.attr.attr_network.PostPortNumber,
-                    u_sess->attr.attr_storage.twophase_clean_workers);
-                securec_check_ss(rc, "\0", "\0");
+
 #endif
                 socket_close_on_exec();
 
@@ -193,6 +241,16 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
                     ereport(WARNING, (errmsg("clean up 2pc transactions failed")));
                 }
             }
+#else
+            if (DropTempNamespace()) {
+                ereport(DEBUG5, (errmsg("clean up temp schemas succeed")));
+                clean_successed = true;
+                bSyncXactsCallGsclean = false;
+            } else {
+                clean_successed = false;
+                ereport(WARNING, (errmsg("clean up temp schemas failed")));
+            }
+#endif
             gs_clean_start_time = GetCurrentTimestamp();
         }
 
@@ -248,6 +306,7 @@ static void TwoPCShutdownHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
 static int get_prog_path(const char* argv0)
 {
     char* exec_path = NULL;
@@ -318,3 +377,425 @@ static int get_prog_path(const char* argv0)
 
     return 0;
 }
+#endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+static PGconn* LoginDatabase(char* host, int port, char* user, char* password,
+    char* dbname, const char* progname, char* encoding)
+{
+    PGconn* conn = NULL;
+    char portValue[32];
+#define PARAMS_ARRAY_SIZE 10
+    const char* keywords[PARAMS_ARRAY_SIZE];
+    const char* values[PARAMS_ARRAY_SIZE];
+    int count = 0;
+    int retryNum = 10;
+    int rc;
+
+    rc = sprintf_s(portValue, sizeof(portValue), "%d", port);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    keywords[0] = "host";
+    values[0] = host;
+    keywords[1] = "port";
+    values[1] = portValue;
+    keywords[2] = "user";
+    values[2] = user;
+    keywords[3] = "password";
+    values[3] = password;
+    keywords[4] = "dbname";
+    values[4] = dbname;
+    keywords[5] = "fallback_application_name";
+    values[5] = progname;
+    keywords[6] = "client_encoding";
+    values[6] = encoding;
+    keywords[7] = "connect_timeout";
+    values[7] = "5";
+    keywords[8] = "options";
+    /* this mode: remove timeout */
+    values[8] = "-c xc_maintenance_mode=on";
+    keywords[9] = NULL;
+    values[9] = NULL;
+
+retry:
+    /* try to connect to database */
+    conn = PQconnectdbParams(keywords, values, true);
+    if (PQstatus(conn) != CONNECTION_OK) {
+        if (++count < retryNum) {
+            ereport(LOG, (errmsg("Could not connect to the %s, the connection info : %s",
+                                 dbname, PQerrorMessage(conn))));
+            PQfinish(conn);
+            conn = NULL;
+
+            /* sleep 0.1 s */
+            pg_usleep(100000L);
+            goto retry;
+        }
+
+        PQfinish(conn);
+        conn = NULL;
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                       (errmsg("Could not connect to the %s, "
+                               "we have tried %d times, the connection info : %s",
+                               dbname, count, PQerrorMessage(conn)))));
+    }
+
+    return (conn);
+}
+
+static void AddDatabaseInfo(DatabaseNames** dbList, char* dbName)
+{
+    DatabaseNames* tempDatabase = NULL;
+
+    tempDatabase = (DatabaseNames*)palloc(sizeof(DatabaseNames));
+
+    tempDatabase->next = NULL;
+    tempDatabase->databaseName = pstrdup(dbName);
+
+    if (*dbList == NULL) {
+        *dbList = tempDatabase;
+    } else {
+        tempDatabase->next = (*dbList)->next;
+        (*dbList)->next = tempDatabase;
+    }
+}
+
+static void GetDatabaseList(PGconn* conn, DatabaseNames** dbList)
+{
+    int databaseCount;
+    PGresult* res = NULL;
+    char* dbName = NULL;
+
+    /* SQL Statement */
+    static const char* STMT_GET_DATABASE_LIST = "SELECT DATNAME FROM PG_DATABASE;";
+
+    /* Get database list. */
+    res = PQexec(conn, STMT_GET_DATABASE_LIST);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Could not obtain database list : %s",
+                               PQerrorMessage(conn))));
+        return;
+    }
+
+    databaseCount = PQntuples(res);
+    for (int i = 0; i < databaseCount; i++) {
+        dbName = PQgetvalue(res, i, 0);
+        if (strcmp(dbName, "template0") == 0 || strcmp(dbName, "template1") == 0) {
+            /* Skip template0 and template1 database */
+            continue;
+        }
+
+        AddDatabaseInfo(dbList, dbName);
+    }
+
+    PQclear(res);
+}
+
+static void CleanDatabaseList(DatabaseNames** dbList)
+{
+    DatabaseNames* database = *dbList;
+
+    while (database != NULL) {
+        DatabaseNames* savedDatabase = database;
+        database = database->next;
+        pfree_ext(savedDatabase->databaseName);
+        pfree_ext(savedDatabase);
+    }
+
+    *dbList = NULL;
+}
+
+static void AddTempSchemaInfo(TempSchemaInfo** tempSchemaList, char* tempSchemaName)
+{
+    TempSchemaInfo* tempSchema = NULL;
+
+    tempSchema = (TempSchemaInfo*)palloc(sizeof(TempSchemaInfo));
+
+    tempSchema->next = NULL;
+    tempSchema->tempSchemaName = pstrdup(tempSchemaName);
+
+    if (*tempSchemaList == NULL) {
+        *tempSchemaList = tempSchema;
+    } else {
+        tempSchema->next = (*tempSchemaList)->next;
+        (*tempSchemaList)->next = tempSchema;
+    }
+}
+
+static void GetTempSchemaList(PGconn* conn, TempSchemaInfo** tempSchemaList)
+{
+    int tempSchemaCount;
+    PGresult* res = NULL;
+    char* nspname = NULL;
+    int rc;
+
+    /* SQL Statement */
+    char STMT_GET_TEMP_SCHEMA_LIST[NAMEDATALEN + 128] = {0};
+
+    rc = snprintf_s(STMT_GET_TEMP_SCHEMA_LIST,
+        sizeof(STMT_GET_TEMP_SCHEMA_LIST),
+        sizeof(STMT_GET_TEMP_SCHEMA_LIST) - 1,
+        "SELECT NSPNAME FROM PG_NAMESPACE WHERE NSPNAME LIKE 'pg_temp_%%'");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* Get temp schema list. */
+    res = PQexec(conn, STMT_GET_TEMP_SCHEMA_LIST);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Could not obtain temp schema list : %s",
+                               PQerrorMessage(conn))));
+        return;
+    }
+
+    tempSchemaCount = PQntuples(res);
+    for (int i = 0; i < tempSchemaCount; i++) {
+        nspname = PQgetvalue(res, i, 0);
+        if (strchr(&nspname[7], '_') == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Error when parse schema name : %s",
+                               PQerrorMessage(conn))));
+            return;
+        }
+
+        AddTempSchemaInfo(tempSchemaList, nspname);
+    }
+
+    PQclear(res);
+}
+
+static void CleanTempSchemaList(TempSchemaInfo** tempSchemaList)
+{
+    TempSchemaInfo* tempSchema = *tempSchemaList;
+
+    while (tempSchema != NULL) {
+        TempSchemaInfo* savedTempSchema = tempSchema;
+        tempSchema = tempSchema->next;
+        pfree_ext(savedTempSchema->tempSchemaName);
+        pfree_ext(savedTempSchema);
+    }
+
+    *tempSchemaList = NULL;
+}
+
+static void AddActiveBackendInfo(ActiveBackendInfo** activeBackednList,
+    int64 sessionID, uint32 tempID, uint32 timeLineID)
+{
+    ActiveBackendInfo* tempActiveBackend = NULL;
+
+    tempActiveBackend = (ActiveBackendInfo*)palloc(sizeof(ActiveBackendInfo));
+
+    tempActiveBackend->next = NULL;
+    tempActiveBackend->sessionID = sessionID;
+    tempActiveBackend->tempID = tempID;
+    tempActiveBackend->timeLineID = timeLineID;
+
+    if (*activeBackednList == NULL) {
+        *activeBackednList = tempActiveBackend;
+    } else {
+        tempActiveBackend->next = (*activeBackednList)->next;
+        (*activeBackednList)->next = tempActiveBackend;
+    }
+}
+
+static void GetActiveBackendList(PGconn* conn, ActiveBackendInfo** activeBackendList)
+{
+    int activeBackendCount;
+    PGresult* res = NULL;
+    int64 sessionID;
+    uint32 tempID;
+    uint32 timeLineID;
+    int rc;
+
+    /* SQL Statement */
+    char STMT_ACTIVE_BACKEND_LIST[2 * NAMEDATALEN + 128] = {0};
+
+    rc = sprintf_s(STMT_ACTIVE_BACKEND_LIST,
+        sizeof(STMT_ACTIVE_BACKEND_LIST),
+        "SELECT SESSIONID, TEMPID, TIMELINEID FROM PG_DATABASE D, "
+        "PG_STAT_GET_ACTIVITY_FOR_TEMPTABLE() AS S WHERE "
+        "S.DATID = D.OID AND D.DATNAME = '%s'",
+        PQdb(conn));
+    securec_check_ss_c(rc, "\0", "\0");
+
+    /* Get active backend list. */
+    res = PQexec(conn, STMT_ACTIVE_BACKEND_LIST);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Could not obtain active backend list : %s",
+                               PQerrorMessage(conn))));
+        return;
+    }
+
+    activeBackendCount = PQntuples(res);
+    for (int i = 0; i < activeBackendCount; i++) {
+        char* result = PQgetvalue(res, i, 0);
+        sessionID = atoll(result);
+        result = PQgetvalue(res, i, 1);
+        tempID = atoi(result);
+        result = PQgetvalue(res, i, 2);
+        timeLineID = atoi(result);
+
+        AddActiveBackendInfo(activeBackendList, sessionID, tempID, timeLineID);
+    }
+
+    PQclear(res);
+}
+
+static void CleanActiveBackendList(ActiveBackendInfo** activeBackendList)
+{
+    ActiveBackendInfo* activeBackend = *activeBackendList;
+    while (activeBackend != NULL) {
+        ActiveBackendInfo* savedActiveBackend = activeBackend;
+        activeBackend = activeBackend->next;
+        pfree_ext(savedActiveBackend);
+    }
+
+    *activeBackendList = NULL;
+}
+
+static void DropTempSchema(PGconn* conn, char* nspname)
+{
+    PGresult* res = NULL;
+    int rc;
+
+    char toastnspName[NAMEDATALEN] = {0};
+    /* SQL Statement */
+    char STMT_DROP_TEMP_SCHEMA[2 * NAMEDATALEN + 64] = {0};
+
+    rc = snprintf_s(toastnspName, NAMEDATALEN, strlen(nspname) + 7, "pg_toast_temp_%s", nspname + 8);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    rc = snprintf_s(STMT_DROP_TEMP_SCHEMA,
+        sizeof(STMT_DROP_TEMP_SCHEMA),
+        2 * strlen(nspname) + 30,
+        "DROP SCHEMA %s, %s CASCADE;",
+        nspname,
+        toastnspName);
+    securec_check_ss_c(rc, "\0", "\0");
+
+    res = PQexec(conn, STMT_DROP_TEMP_SCHEMA);
+
+    /* If exec is not success, give an log and go on. */
+    if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Could not drop temp schema %s, %s: %s\n",
+                               nspname, toastnspName, PQresultErrorMessage(res))));
+    }
+
+    PQclear(res);
+}
+
+static void DropTempSchemas(PGconn* conn)
+{
+    /* Store temp schema names selected from DN. */
+    TempSchemaInfo* tempSchemaList = NULL;
+    /* Store current active backend pid to decide which temp schema should be dropped. */
+    ActiveBackendInfo* activeBackendList = NULL;
+
+    GetTempSchemaList(conn, &tempSchemaList);
+    GetActiveBackendList(conn, &activeBackendList);
+
+    TempSchemaInfo* tempSchema = tempSchemaList;
+    ActiveBackendInfo* activeBackend = NULL;
+    char tempBuffer[NAMEDATALEN] = {0};
+    char tempBuffer2[NAMEDATALEN] = {0};
+    errno_t rc;
+    if (tempSchemaList == NULL || activeBackendList == NULL)
+        return;
+    while (tempSchema != NULL) {
+        /*
+         * Get sessionID, tempID, timelineID from end to start.
+         * Temp schema name is pg_temp_%s_%u_%u_%lu.
+         * These items are DN'name, timelineID, tempID, sessionID.
+         */
+        const char* lastPos = strrchr(tempSchema->tempSchemaName, '_');
+        if (lastPos == NULL)
+            elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempSchema->tempSchemaName);
+        int64 sessionID = strtoll(lastPos + 1, NULL, 10);
+        rc = strncpy_s(tempBuffer, sizeof(tempBuffer), tempSchema->tempSchemaName,
+                       lastPos - tempSchema->tempSchemaName);
+        securec_check_c(rc, "\0", "\0");
+        const char* secondLastPos = strrchr(tempBuffer, '_');
+        if (secondLastPos == NULL)
+            elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempBuffer);
+        uint32 tempID = strtol(secondLastPos + 1, NULL, 10);
+        rc = strncpy_s(tempBuffer2, sizeof(tempBuffer2), tempBuffer, secondLastPos - tempBuffer);
+        securec_check_c(rc, "\0", "\0");
+        const char* thirdLastPos = strrchr(tempBuffer2, '_');
+        if (thirdLastPos == NULL)
+            elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempBuffer2);
+        uint32 timeLineID = strtol(thirdLastPos + 1, NULL, 10);
+
+        activeBackend = activeBackendList;
+        /*
+         * Thus, We use sessionID, timeLineID and tempID together
+         * to judge which session a temp table belongs to, instead of sessionID only.
+         */
+        while (activeBackend != NULL) {
+            if (sessionID == activeBackend->sessionID && tempID == activeBackend->tempID &&
+                timeLineID == activeBackend->timeLineID)
+                break;
+            activeBackend = activeBackend->next;
+        }
+        if (activeBackend == NULL) {
+            /*
+             * Now it is not an active backend, furthermore, we need to drop it;
+             */
+            DropTempSchema(conn, tempSchema->tempSchemaName);
+        }
+        tempSchema = tempSchema->next;
+    }
+
+    CleanTempSchemaList(&tempSchemaList);
+    CleanActiveBackendList(&activeBackendList);
+}
+
+/*
+ * @Description: Drop inactive temp schemas of each database.
+ * @in: void
+ * @return: the result of cleaning temporary schemas
+ */
+static bool DropTempNamespace()
+{
+    DatabaseNames* dbList = NULL;
+    DatabaseNames* curDatabase = NULL;
+
+    PGconn* conn = NULL;
+    conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+        NULL, NULL, DEFAULT_DATABASE, PGXC_CLEAN, "auto");
+
+    /* Get database list. */
+    GetDatabaseList(conn, &dbList);
+
+    PQfinish(conn);
+    conn = NULL;
+
+    if (dbList != NULL) {
+        for (curDatabase = dbList; curDatabase != NULL; curDatabase = curDatabase->next) {
+            conn = LoginDatabase("localhost", g_instance.attr.attr_network.PostPortNumber,
+                NULL, NULL, curDatabase->databaseName, PGXC_CLEAN, "auto");
+
+            if (conn == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                               (errmsg("Could not connect to the database %s.",
+                                       curDatabase->databaseName))));
+                return false;
+            }
+
+            DropTempSchemas(conn);
+
+            ereport(DEBUG5, (errmsg("Drop temp namespace for database \"%s\" finished.",
+                                    curDatabase->databaseName)));
+            PQfinish(conn);
+            conn = NULL;
+        }
+    }
+
+    CleanDatabaseList(&dbList);
+    return true;
+}
+#endif

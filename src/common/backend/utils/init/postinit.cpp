@@ -1868,6 +1868,18 @@ void PostgresInitializer::InitUser()
     InitializeSessionUserId(m_username);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * In opengauss, we allow twophasecleaner to connect to database as superusers
+     * for cleaning up temporary tables. During the cleanup of temporary tables,
+     * m_username and u_sess->proc_cxt.MyProcPort->user_name point to the same memory
+     * address. We have freed and reinitialized u_sess->proc_cxt.MyProcPort->user_name
+     * in function InitializeSessionUserId, and we need to initialize m_username here.
+     */
+    if (u_sess->proc_cxt.IsInnerMaintenanceTools) {
+        m_username = u_sess->proc_cxt.MyProcPort->user_name;
+    }
+#endif
 }
 
 void PostgresInitializer::CheckConnPermission()
