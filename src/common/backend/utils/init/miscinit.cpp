@@ -802,8 +802,7 @@ void InitializeSessionUserId(const char* rolename)
         char userName[NAMEDATALEN];
         MemoryContext oldcontext = NULL;
         oldcontext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-        if (u_sess->proc_cxt.MyProcPort->user_name)
-            pfree_ext(u_sess->proc_cxt.MyProcPort->user_name);
+        pfree_ext(u_sess->proc_cxt.MyProcPort->user_name);
         u_sess->proc_cxt.MyProcPort->user_name = pstrdup((char*)GetSuperUserName((char*)userName));
         (void)MemoryContextSwitchTo(oldcontext);
         rolename = u_sess->proc_cxt.MyProcPort->user_name;
