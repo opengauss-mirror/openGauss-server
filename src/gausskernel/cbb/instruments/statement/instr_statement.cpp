@@ -129,8 +129,8 @@ bool check_statement_stat_level(char** newval, void** extra, GucSource source)
     List *l = split_levels_into_list(*newval);
 
     if (list_length(l) != STATEMENT_SQL_KIND) {
-        list_free_deep(l);
         GUC_check_errdetail("attr num:%d is error,track_stmt_stat_level attr is 2", l->length);
+        list_free_deep(l);
         return false;
     }
 
@@ -370,7 +370,9 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
 
     /* is slow sql */
     values[i++] = BoolGetDatum(
-        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold) ? true : false);
+        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
+        statementInfo->slow_query_threshold >= 0) ? true : false);
+        
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
 
