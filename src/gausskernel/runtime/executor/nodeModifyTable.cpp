@@ -480,6 +480,7 @@ checktest:
                 errmsg("unexpected self-updated tuple")));
             break;
         case TM_Updated:
+        case TM_Deleted:
             ReleaseBuffer(buffer);
             if (IsolationUsesXactSnapshot()) {
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
