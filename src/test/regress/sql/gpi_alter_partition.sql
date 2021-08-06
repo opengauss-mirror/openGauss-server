@@ -289,6 +289,8 @@ explain (costs off) select count(*) from alter_table where INV_WAREHOUSE_SK < 20
 
 select count(*) from alter_table where INV_WAREHOUSE_SK < 20000;
 
+vacuum freeze pg_partition;
+
 --clean
 drop index if exists local_exchange_table_index1;
 drop table if exists exchange_table;

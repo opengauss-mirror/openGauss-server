@@ -2688,7 +2688,7 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
                 TupleTableSlot* epqslot = NULL;
 
                 epqslot = EvalPlanQual(
-                    estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax);
+                    estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
                 if (!TupIsNull(epqslot)) {
                     *tid = tmfd.ctid;
                     *newSlot = epqslot;

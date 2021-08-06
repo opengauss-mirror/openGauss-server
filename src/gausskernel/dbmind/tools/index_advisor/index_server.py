@@ -170,7 +170,7 @@ class IndexServer:
             self.logger.error(e)
 
     def extract_log(self, start_time):
-        extract_log_cmd = 'python3 %s %s %s --start_time "%s"' % \
+        extract_log_cmd = 'python3 %s %s %s --start_time "%s" --json ' % \
                           (os.path.join(current_dirname, 'extract_log.py'),
                            self._kwargs['pg_log_path'],
                            self._kwargs['output_sql_file'], start_time)

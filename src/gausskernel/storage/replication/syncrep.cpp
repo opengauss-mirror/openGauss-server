@@ -1482,7 +1482,6 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
         SyncRepConfigData *pconf = NULL;
         syncrep_scanner_yyscan_t yyscanner;
         char* data_dir = t_thrd.proc_cxt.DataDir;
-        uint32 idx;
         char* p = NULL;
 
         /* Reset communication variables to ensure a fresh start */

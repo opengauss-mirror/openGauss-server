@@ -4177,9 +4177,7 @@ static void exec_bind_message(StringInfo input_message)
             opFusionObj->clean();
             opFusionObj->updatePreAllocParamter(input_message);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
-            if (portal_name[0] != '\0')
-                opFusionObj->storeFusion(portal_name);
-
+            opFusionObj->storeFusion(portal_name);
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
                 setCachedPlanBucketId(cps->gplan, opFusionObj->m_local.m_params);
@@ -4584,8 +4582,7 @@ static void exec_bind_message(StringInfo input_message)
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
-            if (portal_name[0] != '\0')
-                ((OpFusion *)psrc->opFusionObj)->storeFusion(portal_name);
+            ((OpFusion *)psrc->opFusionObj)->storeFusion(portal_name);
 
             if (snapshot_set)
                 PopActiveSnapshot();
@@ -9887,6 +9884,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             opFusionObj->bindClearPosition();
             opFusionObj->useOuterParameter(params);
             opFusionObj->setCurrentOpFusionObj(opFusionObj);
+            opFusionObj->storeFusion("");
 
             CachedPlanSource* cps = opFusionObj->m_global->m_psrc;
             if (cps != NULL && cps->gplan) {
@@ -9993,6 +9991,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
             ((OpFusion*)psrc->opFusionObj)->useOuterParameter(params);
             ((OpFusion*)psrc->opFusionObj)->setCurrentOpFusionObj((OpFusion*)psrc->opFusionObj);
             ((OpFusion*)psrc->opFusionObj)->CopyFormats(rformats, numRFormats);
+            ((OpFusion*)psrc->opFusionObj)->storeFusion("");
 
             if (OpFusion::process(FUSION_EXECUTE, NULL, completionTag, true, NULL)) {
                 CommandCounterIncrement();
