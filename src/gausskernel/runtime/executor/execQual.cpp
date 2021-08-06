@@ -2213,6 +2213,9 @@ static Datum ExecMakeFunctionResultNoSets(
             pfree_ext(var_dno);
     }
 
+    if(node != NULL)
+        pfree_ext(node);
+
     u_sess->SPI_cxt.is_stp = savedIsSTP;
     u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
     if (needResetErrMsg) {
