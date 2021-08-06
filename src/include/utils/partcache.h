@@ -89,6 +89,7 @@ extern Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable);
 extern void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool enable, bool inplace);
 extern void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace);
 extern bool PartitionInvisibleMetadataKeep(Datum datumRelOptions);
+extern bool PartitionParentOidIsLive(Datum parentDatum);
 extern void PartitionedSetEnabledClean(Oid parentOid);
 extern void PartitionSetEnabledClean(
     Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned);

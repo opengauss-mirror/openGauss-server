@@ -184,6 +184,7 @@ char gaussdb_state_file[MAXPGPATH] = {0};
 
 static char postport_lock_file[MAXPGPATH];
 static PGconn* dbConn = NULL;
+bool no_need_fsync = false;
 pid_t process_id = 0;
 
 const int g_length_stop_char = 2;
@@ -4687,6 +4688,7 @@ int main(int argc, char** argv)
         {"connect-string", required_argument, NULL, 'C'},
         {"remove-backup", no_argument, NULL, 1},
         {"action", required_argument, NULL, 'a'},
+        {"no-fsync", no_argument, NULL, 3},
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -4972,6 +4974,9 @@ int main(int argc, char** argv)
                     break;
                 case 1:
                     clear_backup_dir = true;
+                    break;
+                case 3:
+                    no_need_fsync = true;
                     break;
                 default:
                     /* getopt_long already issued a suitable error message */

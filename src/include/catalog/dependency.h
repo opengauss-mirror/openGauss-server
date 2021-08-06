@@ -204,6 +204,7 @@ typedef enum ObjectClass {
 	OCLASS_DIRECTORY,        /* pg_directory */
 	OCLASS_PG_JOB,           /* pg_job */
 	OCLASS_RLSPOLICY,        /* pg_rlspolicy */
+	OCLASS_DB4AI_MODEL,      /* gs_model_warehouse */
 	MAX_OCLASS               /* MUST BE LAST */
 } ObjectClass;
 

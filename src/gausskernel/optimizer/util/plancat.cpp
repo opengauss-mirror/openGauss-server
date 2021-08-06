@@ -48,6 +48,7 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/lmgr.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
 #include "utils/partcache.h"
@@ -75,6 +76,26 @@ static List* get_relation_constraints(PlannerInfo* root, Oid relationObjectId, R
 List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation);
 static void setRelStoreInfo(RelOptInfo* relOptInfo, Relation relation);
 
+static BlockNumber ComputeTheTotalPages(Relation relation, int nonzeroPartitionNumber, int notAvailPartitionCnt,
+    int totalPartitionNumber, BlockNumber partPages)
+{
+    BlockNumber totalPages = 0;
+
+    if (nonzeroPartitionNumber > 0 && nonzeroPartitionNumber < ESTIMATE_PARTITION_NUMBER) {
+        if (notAvailPartitionCnt != 0) {
+            totalPages = partPages * ((nonzeroPartitionNumber + notAvailPartitionCnt) / nonzeroPartitionNumber);
+        } else {
+            totalPages = partPages;
+        }
+    } else if (nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
+        totalPages = partPages * (totalPartitionNumber / nonzeroPartitionNumber);
+    } else if (nonzeroPartitionNumber == 0) {
+        totalPages = relation->rd_rel->relpages;
+    }
+
+    return totalPages;
+}
+
 static void acquireSamplesForPartitionedRelation(
     Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids)
 {
@@ -94,6 +115,7 @@ static void acquireSamplesForPartitionedRelation(
             BlockNumber partPages = 0;
             BlockNumber currentPartPages = 0;
             Partition part = NULL;
+            int notAvailPartitionCnt = 0;
 
             for (partitionNumber = 0; partitionNumber < totalPartitionNumber; partitionNumber++) {
                 Oid partitionOid = InvalidOid;
@@ -127,6 +149,11 @@ static void acquireSamplesForPartitionedRelation(
                 if (!OidIsValid(partitionOid))
                     continue;
 
+                if (!ConditionalLockPartition(relation->rd_id, partitionOid, lmode, PARTITION_LOCK)) {
+                    notAvailPartitionCnt++;
+                    continue;
+                }
+
                 part = partitionOpen(relation, partitionOid, lmode);
                 currentPartPages = PartitionGetNumberOfBlocks(relation, part);
                 partitionClose(relation, part, lmode);
@@ -143,12 +170,8 @@ static void acquireSamplesForPartitionedRelation(
                 }
             }
 
-            /* compute the total pages */
-            if (nonzeroPartitionNumber >= 0 && nonzeroPartitionNumber < ESTIMATE_PARTITION_NUMBER) {
-                *samplePages = partPages;
-            } else if (nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
-                *samplePages = partPages * (totalPartitionNumber / nonzeroPartitionNumber);
-            }
+            *samplePages = ComputeTheTotalPages(
+                relation, nonzeroPartitionNumber, notAvailPartitionCnt, totalPartitionNumber, partPages);
         }
     }
 }

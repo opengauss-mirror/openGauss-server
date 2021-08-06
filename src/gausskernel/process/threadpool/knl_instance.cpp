@@ -550,6 +550,7 @@ void knl_instance_init()
     g_instance.stat_cxt.track_memory_inited = false;
     g_instance.proc_base = NULL;
     g_instance.proc_array_idx = NULL;
+    pg_atomic_init_u32(&g_instance.extensionNum, 0);
 
     /*
      * Set up the process wise memory context. The memory allocated from this

@@ -72,6 +72,9 @@ CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* p
     if (list_difference_oid(path1->schemas, path2->schemas) != NULL) {
         return false;
     }
+    if (list_difference_oid(path2->schemas, path1->schemas) != NULL) {
+        return false;
+    }
     return true;
 }
 /*

@@ -40,6 +40,7 @@
 #include "access/nbtree.h"
 #include "access/tupconvert.h"
 #include "access/tableam.h"
+#include "catalog/pg_cast.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
 #include "executor/execdebug.h"
@@ -68,6 +69,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
 #include "commands/trigger.h"
+#include "db4ai/gd.h"
 
 /* static function decls */
 static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -145,6 +147,8 @@ static Datum ExecEvalGroupingFuncExpr(
 static Datum ExecEvalGroupingIdExpr(
     GroupingIdExprState* gstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo);
+
+extern Datum ExecEvalGradientDescent(GradientDescentExprState* mlstate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 
 THR_LOCAL PLpgSQL_execstate* plpgsql_estate = NULL;
 
@@ -2717,12 +2721,45 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
 {
     /* This is called only the first time through */
     FuncExpr* func = (FuncExpr*)fcache->xprstate.expr;
+    Oid target_type = InvalidOid;
+    Oid source_type = InvalidOid;
 
     /* Initialize function lookup info */
     init_fcache<false>(func->funcid, func->inputcollid, fcache, econtext->ecxt_per_query_memory, true);
 
     bool has_refcursor = func_has_refcursor_args(func->funcid, &fcache->fcinfo_data);
     int cursor_return_number = fcache->fcinfo_data.refcursor_data.return_number;
+
+    if (func->funcformat == COERCE_EXPLICIT_CAST || func->funcformat == COERCE_IMPLICIT_CAST) {
+        target_type = func->funcresulttype;
+        source_type = fcache->fcinfo_data.argTypes[0];
+
+        HeapTuple proc_tuple = SearchSysCache(PROCOID, ObjectIdGetDatum(func->funcid), 0, 0, 0);
+        if (HeapTupleIsValid(proc_tuple)) {
+            Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tuple);
+            source_type = proc_struct->proargtypes.values[0];
+            ReleaseSysCache(proc_tuple);
+        }
+        HeapTuple cast_tuple = SearchSysCache2(CASTSOURCETARGET, ObjectIdGetDatum(source_type),
+                                                ObjectIdGetDatum(target_type));
+
+        if (HeapTupleIsValid(cast_tuple)) {
+            Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
+            int castowner_Anum = Anum_pg_cast_castowner;
+            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+                bool isnull = true;
+                Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
+                if (!isnull) {
+                    u_sess->exec_cxt.cast_owner = DatumGetObjectId(datum);
+                } else {
+                    u_sess->exec_cxt.cast_owner = InvalidCastOwnerId;
+                }
+            }
+            heap_close(cast_rel, AccessShareLock);
+            ReleaseSysCache(cast_tuple);
+        }
+    }
+
     /*
      * We need to invoke ExecMakeFunctionResult if either the function itself
      * or any of its input expressions can return a set.  Otherwise, invoke
@@ -5377,6 +5414,20 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             rnstate->ps = parent;
             state = (ExprState*)rnstate;
             state->evalfunc = (ExprStateEvalFunc)ExecEvalRownum;
+        } break;
+        case T_GradientDescentExpr: {
+            GradientDescentExprState* ml_state = (GradientDescentExprState*)makeNode(GradientDescentExprState);
+            ml_state->ps = parent;
+            ml_state->xpr = (GradientDescentExpr*)node;
+            state = (ExprState*)ml_state;
+            if (IsA(parent, GradientDescentState)) {
+                state->evalfunc = (ExprStateEvalFunc)ExecEvalGradientDescent;
+            } else {
+                ereport(ERROR,
+                        (errmodule(MOD_DB4AI),
+                         errcode(ERRCODE_INVALID_OPERATION),
+                         errmsg("unrecognized state %d for GradientDescentExpr", parent->type)));
+            }
         } break;
         default:
             ereport(ERROR,

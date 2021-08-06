@@ -3232,13 +3232,15 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
 bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc)
 {
     static KeepInvisbleOpt keepInvisibleArray[] = {
-        {PartitionRelationId, Anum_pg_partition_reloptions, PartitionInvisibleMetadataKeep}};
+        {PartitionRelationId, Anum_pg_partition_reloptions, PartitionInvisibleMetadataKeep},
+        {PartitionRelationId, Anum_pg_partition_parentid, PartitionParentOidIsLive}};
 
+    bool ret = true;
     for (int i = 0; i < (int)lengthof(keepInvisibleArray); i++) {
         bool isNull = false;
         KeepInvisbleOpt keepOpt = keepInvisibleArray[i];
 
-        if (keepOpt.tableOid != tuple->t_tableOid) {
+        if (keepOpt.tableOid != tuple->t_tableOid || !ret) {
             return false;
         }
 
@@ -3248,13 +3250,13 @@ bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTup
         }
 
         if (checkKeepFunc != NULL) {
-            return checkKeepFunc(checkDatum);
+            ret &= checkKeepFunc(checkDatum);
         } else if (keepOpt.checkKeepFunc != NULL) {
-            return keepOpt.checkKeepFunc(checkDatum);
+            ret &= keepOpt.checkKeepFunc(checkDatum);
         } else {
             return false;
         }
     }
 
-    return false;
+    return ret;
 }

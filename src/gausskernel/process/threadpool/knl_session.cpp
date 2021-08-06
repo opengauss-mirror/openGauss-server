@@ -91,6 +91,8 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_sql.under_explain = false;
     attr->attr_resource.enable_auto_explain = false;
     attr->attr_sql.enable_upsert_to_merge = false;
+    attr->attr_common.extension_session_vars_array_size = 0;
+    attr->attr_common.extension_session_vars_array = NULL;
 }
 
 void knl_u_executor_init(knl_u_executor_context* exec_cxt)
@@ -126,6 +128,8 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
 
     exec_cxt->is_exec_trigger_func = false;
     exec_cxt->single_shard_stmt = false;
+
+    exec_cxt->cast_owner = InvalidOid;
 
     exec_cxt->CurrentRouter = NULL;
     exec_cxt->is_dn_enable_router = false;

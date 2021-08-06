@@ -1398,6 +1398,45 @@ typedef struct UpsertExpr {
     List* updateTlist;        /* List of UPDATE TargetEntrys */
     List* exclRelTlist;       /* tlist of the 'EXCLUDED' pseudo relation */
     int exclRelIndex;        /* RT index of 'EXCLUDED' relation */
+    bool partKeyUpsert;      /* we allow upsert index key and partition key in B_FORMAT */
 } UpsertExpr;
+
+/*
+ * DB4AI
+*/
+#define DB4AI_SNAPSHOT_VERSION_DELIMITER 1
+#define DB4AI_SNAPSHOT_VERSION_SEPARATOR 2
+
+typedef enum {
+    LOGISTIC_REGRESSION,
+    SVM_CLASSIFICATION,
+    KMEANS,
+    LINEAR_REGRESSION,
+    INVALID_ALGORITHM_ML,
+} AlgorithmML;
+
+typedef enum GradientDescentExprField {
+    // generic
+    GD_EXPR_ALGORITHM,
+    GD_EXPR_OPTIMIZER,
+    GD_EXPR_RESULT_TYPE,
+    GD_EXPR_NUM_ITERATIONS,
+    GD_EXPR_EXEC_TIME_MSECS,
+    GD_EXPR_PROCESSED_TUPLES,
+   GD_EXPR_DISCARDED_TUPLES,
+    GD_EXPR_WEIGHTS,
+    GD_EXPR_CATEGORIES,
+    // scores
+    GD_EXPR_SCORE = 0x10000, // or-ed with the score id
+} GradientDescentExprField;
+
+#define makeGradientDescentExprFieldScore(_SCORE) (GradientDescentExprField)((int)GD_EXPR_SCORE | _SCORE)
+
+typedef struct GradientDescentExpr {
+    Expr                        xpr;
+    GradientDescentExprField    field;
+    Oid fieldtype;      /* pg_type OID of the datatype */
+} GradientDescentExpr;
+
 
 #endif /* PRIMNODES_H */

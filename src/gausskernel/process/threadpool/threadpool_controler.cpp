@@ -558,11 +558,10 @@ void ThreadPoolControler::ConstrainThreadNum()
 {
     /* Thread pool size should not be larger than max_connections. */
     if (MAX_THREAD_POOL_SIZE > g_instance.attr.attr_network.MaxConnections) {
-        m_maxPoolSize = g_instance.attr.attr_network.MaxConnections;
         ereport(LOG, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
-                      errmsg("Thread pool size %d should not be larger than max_connections %d, "
-                             "so reduce thread pool size to max_connections",
-                      m_threadNum, g_instance.attr.attr_network.MaxConnections)));
+                      errmsg("Max thread pool size %d should not be larger than max_connections %d, "
+                             "so reduce max thread pool size to max_connections",
+                      MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections)));
     }
     
     m_maxPoolSize = Min(MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections);

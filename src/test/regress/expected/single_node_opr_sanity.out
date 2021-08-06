@@ -2831,6 +2831,19 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt
  6323 | gs_encrypt
+ 6555 | array_remove
+ 6556 | array_replace
+ 6558 | first_transition
+ 6559 | last_transition
+ 6560 | first
+ 6561 | last
+ 7101 | db4ai_predict_by_bool
+ 7102 | db4ai_predict_by_int32
+ 7103 | db4ai_predict_by_int64
+ 7105 | db4ai_predict_by_float4
+ 7106 | db4ai_predict_by_float8
+ 7107 | db4ai_predict_by_numeric
+ 7108 | db4ai_predict_by_text
  7777 | sysdate
  7998 | set_working_grand_version_num_manually
  8050 | datalength
@@ -2874,8 +2887,8 @@ FROM pg_cast c
 WHERE castsource = 0 OR casttarget = 0 OR castcontext NOT IN ('e', 'a', 'i')
     OR castmethod NOT IN ('f', 'b' ,'i')
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 -- Check that castfunc is nonzero only for cast methods that need a function,
@@ -2885,8 +2898,8 @@ FROM pg_cast c
 WHERE (castmethod = 'f' AND castfunc = 0)
    OR (castmethod IN ('b', 'i') AND castfunc <> 0)
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 -- Look for casts to/from the same type that aren't length coercion functions.
@@ -2896,16 +2909,16 @@ SELECT *
 FROM pg_cast c
 WHERE castsource = casttarget AND castfunc = 0
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 SELECT c.*
 FROM pg_cast c, pg_proc p
 WHERE c.castfunc = p.oid AND p.pronargs < 2 AND castsource = casttarget
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 -- Look for cast functions that don't have the right signature.  The
@@ -2924,8 +2937,8 @@ WHERE c.castfunc = p.oid AND
                  p.proargtypes[0] = 'text'::regtype))
      OR NOT binary_coercible(p.prorettype, c.casttarget))
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 SELECT c.*
@@ -2934,8 +2947,8 @@ WHERE c.castfunc = p.oid AND
     ((p.pronargs > 1 AND p.proargtypes[1] != 'int4'::regtype) OR
      (p.pronargs > 2 AND p.proargtypes[2] != 'bool'::regtype))
 ORDER by 1, 2, 3;
- castsource | casttarget | castfunc | castcontext | castmethod 
-------------+------------+----------+-------------+------------
+ castsource | casttarget | castfunc | castcontext | castmethod | castowner 
+------------+------------+----------+-------------+------------+-----------
 (0 rows)
 
 -- Look for binary compatible casts that do not have the reverse

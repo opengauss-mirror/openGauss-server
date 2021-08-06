@@ -432,6 +432,7 @@ typedef struct ModifyTable {
     List* updateTlist;			/* List of UPDATE target */
     List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
+    bool partKeyUpsert;
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
 } ModifyTable;
@@ -1397,6 +1398,112 @@ static inline bool IsJoinPlan(Node* node)
     return IsA(node, Join) || IsA(node, NestLoop) || IsA(node, VecNestLoop) || IsA(node, MergeJoin) ||
         IsA(node, VecMergeJoin) || IsA(node, HashJoin) || IsA(node, VecHashJoin);
 }
+
+/*
+ * DB4AI
+ */
+ 
+
+// GD optimizers
+typedef enum {
+    OPTIMIZER_GD,   // simple mini-batch
+    OPTIMIZER_NGD,  // normalized gradient descent
+} OptimizerML;
+
+inline void optimizer_ml_setter(const char* str, void* optimizer_ml){
+    OptimizerML* optimizer = (OptimizerML*) optimizer_ml;
+    if (strcmp(str, "gd") == 0)
+        *optimizer = OPTIMIZER_GD;
+    else if (strcmp(str, "ngd") == 0)
+        *optimizer = OPTIMIZER_NGD;
+    else
+        elog(ERROR, "Invalid optimizer. Current candidates are: gd (default), ngd");
+    return;
+}
+
+// Gradient Descent node
+typedef struct GradientDescent {
+    Plan        plan;
+    AlgorithmML algorithm;
+    int         targetcol;
+    
+    // generic hyperparameters
+    OptimizerML optimizer;      // default GD/mini-batch
+    int         max_seconds;    // 0 to disable
+    bool        verbose;
+    int         max_iterations; // maximum number of iterations
+    int         batch_size;
+    double      learning_rate;
+    double      decay;          // (0:1], learning rate decay
+    double      tolerance;      // [0:1], 0 means to run all iterations
+    int         seed;           // [0:N], random seed
+    
+    // for SVM
+    double      lambda;         // regularization strength
+} GradientDescent;
+
+/*
+ * DB4AI k-means
+ */
+
+/*
+ * current available distance functions
+ */
+typedef enum : uint32_t {
+    KMEANS_L1 = 0U,
+    KMEANS_L2,
+    KMEANS_L2_SQUARED,
+    KMEANS_LINF
+} DistanceFunction;
+
+/*
+ * current available seeding method
+ */
+typedef enum : uint32_t {
+    KMEANS_RANDOM_SEED = 0U,
+    KMEANS_BB
+} SeedingFunction;
+
+/*
+ * Verbosity level
+ */
+typedef enum : uint32_t {
+    NO_OUTPUT = 0U,
+    FASTCHECK_OUTPUT,
+    VERBOSE_OUTPUT
+} Verbosity;
+
+/*
+ * description of the k-means instance
+ */
+struct KMeansDescription {
+    char const* model_name = nullptr;
+    SeedingFunction seeding = KMEANS_RANDOM_SEED;
+    DistanceFunction distance = KMEANS_L2_SQUARED;
+    Verbosity verbosity = NO_OUTPUT;
+    uint32_t n_features = 0U;
+    uint32_t batch_size = 0U;
+};
+
+/*
+ * current hyper-parameters
+ */
+struct KMeansHyperParameters {
+    uint32_t num_centroids = 0U;
+    uint32_t num_iterations = 0U;
+    uint64_t external_seed = 0ULL;
+    double tolerance = 0.00001;
+};
+
+/*
+ * the actual k-means operator
+ */
+typedef struct KMeans {
+    Plan plan;
+    AlgorithmML algorithm;
+    KMeansDescription description;
+    KMeansHyperParameters parameters;
+} KMeans;
 
 #endif /* PLANNODES_H */
 

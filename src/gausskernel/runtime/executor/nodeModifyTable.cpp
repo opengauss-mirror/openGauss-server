@@ -533,7 +533,7 @@ checktest:
 
     *returning = ExecUpdate(conflictTid, oldPartitionOid, bucketid, NULL,
                             upsertState->us_updateproj, planSlot, &mtstate->mt_epqstate,
-                            mtstate, canSetTag, false);
+                            mtstate, canSetTag, ((ModifyTable*)mtstate->ps.plan)->partKeyUpsert);
     ReleaseBuffer(buffer);
     return true;
 }
@@ -1194,7 +1194,8 @@ TupleTableSlot* ExecDelete(ItemPointer tupleid, Oid deletePartitionOid, int2 buc
                         fake_relation,
                         result_rel_info->ri_RangeTableIndex,
                         &tmfd.ctid,
-                        tmfd.xmax);
+                        tmfd.xmax,
+                        false);
                     if (!TupIsNull(epqslot)) {
                         *tupleid = tmfd.ctid;
                         goto ldelete;
@@ -1641,7 +1642,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                             fake_relation,
                             result_rel_info->ri_RangeTableIndex,
                             &tmfd.ctid,
-                            tmfd.xmax);
+                            tmfd.xmax,
+                            false);
                         if (!TupIsNull(epq_slot)) {
                             *tupleid = tmfd.ctid;
 
@@ -1866,7 +1868,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                 fake_relation,
                                 result_rel_info->ri_RangeTableIndex,
                                 &tmfd.ctid,
-                                tmfd.xmax);
+                                tmfd.xmax,
+                                result_relation_desc->rd_rel->relrowmovement);
 
                             if (!TupIsNull(epq_slot)) {
                                 *tupleid = tmfd.ctid;
@@ -2022,7 +2025,8 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
                                     old_fake_relation,
                                     result_rel_info->ri_RangeTableIndex,
                                     &tmfd.ctid,
-                                    tmfd.xmax);
+                                    tmfd.xmax,
+                                    result_relation_desc->rd_rel->relrowmovement);
                                 if (!TupIsNull(epq_slot)) {
                                     *tupleid = tmfd.ctid;
                                     goto ldelete;

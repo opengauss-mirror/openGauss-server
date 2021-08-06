@@ -53,12 +53,11 @@
 
 #define MAX_SAMPLE_ROWS 10000    /* sampling range for executing a query */
 #define CARDINALITY_THRESHOLD 30 /* the threshold of index selection */
-#define MAX_QUERY_LEN 512
-#define MAX_FIELD_LEN 128
+#define MAX_QUERY_LEN 2048  
 
 typedef struct {
     char table[NAMEDATALEN];
-    char column[NAMEDATALEN];
+    StringInfoData column;
 } SuggestedIndex;
 
 typedef struct {
@@ -96,7 +95,6 @@ THR_LOCAL TableCell *g_driver_table = NULL;
 
 static SuggestedIndex *suggest_index(const char *, _out_ int *);
 static StmtResult *execute_stmt(const char *query_string, bool need_result = false);
-static inline void analyze_tables(List *list);
 static List *get_table_indexes(Oid oid);
 static List *get_index_attname(Oid oid);
 static char *search_table_attname(Oid attrelid, int2 attnum);
@@ -110,7 +108,7 @@ static void find_select_stmt(Node *);
 static void extract_stmt_from_clause(List *);
 static void extract_stmt_where_clause(Node *);
 static void parse_where_clause(Node *);
-static void field_value_trans(_out_ char *, A_Const *);
+static void field_value_trans(_out_ StringInfoData, A_Const *);
 static void parse_field_expr(List *, List *, List *);
 static inline uint4 tuple_to_uint(List *);
 static uint4 get_table_count(const char *);
@@ -192,7 +190,7 @@ Datum gs_index_advise(PG_FUNCTION_ARGS)
 
         /* Locking is probably not really necessary */
         values[0] = CStringGetTextDatum(entry->table);
-        values[1] = CStringGetTextDatum(entry->column);
+        values[1] = CStringGetTextDatum(entry->column.data);
 
         tuple = heap_form_tuple(func_ctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(func_ctx, HeapTupleGetDatum(tuple));
@@ -295,26 +293,20 @@ SuggestedIndex *suggest_index(const char *query_string, _out_ int *len)
 
         rc = strcpy_s((array + i)->table, NAMEDATALEN, cur_table->table_name);
         securec_check(rc, "\0", "\0");
+        initStringInfo(&(array + i)->column);
         if (!index_list) {
-            rc = strcpy_s((array + i)->column, NAMEDATALEN, "");
-            securec_check(rc, "\0", "\0");
+            appendStringInfo(&(array + i)->column, "");
         } else {
             ListCell *cur_index = NULL;
             int j = 0;
             foreach (cur_index, index_list) {
-                if (strlen((char *)lfirst(cur_index)) + strlen((array + i)->column) + 3 > NAMEDATALEN) {
-                    continue;
-                }
                 if (j > 0) {
-                    rc = strcat_s((array + i)->column, NAMEDATALEN, ",(");
+                    appendStringInfo(&(array + i)->column, ",(");
                 } else {
-                    rc = strcpy_s((array + i)->column, NAMEDATALEN, "(");
+                    appendStringInfo(&(array + i)->column, "(");
                 }
-                securec_check(rc, "\0", "\0");
-                rc = strcat_s((array + i)->column, NAMEDATALEN, (char *)lfirst(cur_index));
-                securec_check(rc, "\0", "\0");
-                rc = strcat_s((array + i)->column, NAMEDATALEN, ")");
-                securec_check(rc, "\0", "\0");
+                appendStringInfo(&(array + i)->column, (char *)lfirst(cur_index));
+                appendStringInfo(&(array + i)->column, ")");
                 j++;
             }
         }
@@ -340,23 +332,6 @@ void free_global_resource()
     g_stmt_list = NIL;
     g_drived_tables = NIL;
     g_driver_table = NULL;
-}
-
-/* Update table statistics obtained from query tree by executing the 'analyze table' statement. */
-inline void analyze_tables(List *list)
-{
-    ListCell *item = NULL;
-    foreach (item, list) {
-        RangeTblEntry *entry = (RangeTblEntry *)lfirst(item);
-        if (entry != NULL && entry->relname != NULL) {
-            errno_t rc = EOK;
-
-            char stmt[MAX_QUERY_LEN] = {0x00};
-            rc = sprintf_s(stmt, MAX_QUERY_LEN, "analyze %s;", entry->relname);
-            securec_check_ss_c(rc, "\0", "\0");
-            (void)execute_stmt(stmt);
-        }
-    }
 }
 
 /* Search the oid of all indexes created on the table through the oid of the table, 
@@ -652,7 +627,8 @@ void extract_stmt_where_clause(Node *item_where)
  */
 void generate_final_index(TableCell *table, Oid table_oid)
 {
-    char *suggested_index = (char *)palloc0(NAMEDATALEN);
+    int suggested_index_len = NAMEDATALEN * table->index->length;
+    char *suggested_index = (char *)palloc0(suggested_index_len);
     ListCell *index = NULL;
     errno_t rc = EOK;
     int i = 0;
@@ -660,15 +636,15 @@ void generate_final_index(TableCell *table, Oid table_oid)
     // concatenate the candidate indexes into a string
     foreach (index, table->index) {
         char *index_name = ((IndexCell *)lfirst(index))->index_name;
-        if (strlen(index_name) + strlen(suggested_index) + 1 > NAMEDATALEN) {
+        if (strlen(index_name) + strlen(suggested_index) + 1 > suggested_index_len) {
             break;
         }
         if (i == 0) {
-            rc = strcpy_s(suggested_index, NAMEDATALEN, index_name);
+            rc = strcpy_s(suggested_index, suggested_index_len, index_name);
         } else {
-            rc = strcat_s(suggested_index, NAMEDATALEN, ",");
+            rc = strcat_s(suggested_index, suggested_index_len, ",");
             securec_check(rc, "\0", "\0");
-            rc = strcat_s(suggested_index, NAMEDATALEN, index_name);
+            rc = strcat_s(suggested_index, suggested_index_len, index_name);
         }
         securec_check(rc, "\0", "\0");
         i++;
@@ -686,22 +662,22 @@ void generate_final_index(TableCell *table, Oid table_oid)
     }
 
     // check the existed indexes
-    char *existed_index = (char *)palloc0(NAMEDATALEN);
     List *indexes = get_table_indexes(table_oid);
     index = NULL;
 
     foreach (index, indexes) {
         List *attnames = get_index_attname(lfirst_oid(index));
+        char *existed_index = (char *)palloc0(NAMEDATALEN * attnames->length);
         ListCell *item = NULL;
         i = 0;
 
         foreach (item, attnames) {
             if (i == 0) {
-                rc = strcpy_s(existed_index, NAMEDATALEN, (char *)lfirst(item));
+                rc = strcpy_s(existed_index, NAMEDATALEN * attnames->length, (char *)lfirst(item));
             } else {
-                rc = strcat_s(existed_index, NAMEDATALEN, ",");
+                rc = strcat_s(existed_index, NAMEDATALEN * attnames->length, ",");
                 securec_check(rc, "\0", "\0");
-                rc = strcat_s(existed_index, NAMEDATALEN, (char *)lfirst(item));
+                rc = strcat_s(existed_index, NAMEDATALEN * attnames->length, (char *)lfirst(item));
             }
             securec_check(rc, "\0", "\0");
             i++;
@@ -712,9 +688,9 @@ void generate_final_index(TableCell *table, Oid table_oid)
             pfree(existed_index);
             return;
         }
+        pfree(existed_index);
     }
     table->index_print = lappend(table->index_print, suggested_index);
-    pfree(existed_index);
 
     return;
 }
@@ -945,21 +921,16 @@ void parse_join_expr(JoinExpr *join_tree)
 }
 
 // convert field value to string
-void field_value_trans(_out_ char *target, A_Const *field_value)
+void field_value_trans(_out_ StringInfoData target, A_Const *field_value)
 {
     Value value = field_value->val;
 
     if (value.type == T_Integer) {
-        pg_itoa(value.val.ival, target);
+        pg_itoa(value.val.ival, target.data);
     } else if (value.type == T_String) {
-        if (strlen(value.val.str) > MAX_FIELD_LEN) {
-            return;
-        }
-        errno_t rc = sprintf_s(target, MAX_QUERY_LEN, "'%s'", value.val.str);
-        securec_check_ss_c(rc, "\0", "\0");
+        appendStringInfo(&target, "'%s'", value.val.str);
     }
 }
-
 /*
  * parse_field_expr
  *     Parse the field expression and add index.
@@ -977,72 +948,74 @@ void parse_field_expr(List *field, List *op, List *lfield_values)
     }
 
     char *op_type = strVal(linitial(op));
-    char *field_expr = (char *)palloc0(MAX_QUERY_LEN);
-    char *field_value = (char *)palloc0(MAX_QUERY_LEN);
+    StringInfoData field_expr;
+    initStringInfo(&field_expr);
+    StringInfoData field_value;
+    initStringInfo(&field_value);
+
     ListCell *item = NULL;
     int i = 0;
 
     // get field values
     foreach (item, lfield_values) {
-        char *str = (char *)palloc0(MAX_QUERY_LEN);
+        StringInfoData str;
+        initStringInfo(&str);
+        
         if (!IsA(lfirst(item), A_Const)) {
             continue;
         }
         field_value_trans(str, (A_Const *)lfirst(item));
-        if (strlen(str) == 0) {
+        if (strlen(str.data) == 0) {
             continue;
         }
         if (i == 0) {
-            rc = strcpy_s(field_value, MAX_QUERY_LEN, str);
+            appendStringInfo(&field_value, str.data);
         } else {
-            rc = strcat_s(field_value, MAX_QUERY_LEN, ",");
-            securec_check(rc, "\0", "\0");
-            rc = strcat_s(field_value, MAX_QUERY_LEN, str);
+            appendStringInfo(&field_value, ",%s", str.data);
         }
-        securec_check(rc, "\0", "\0");
         i++;
-        pfree(str);
+        pfree_ext(str.data);
     }
 
     if (i == 0) {
-        pfree(field_value);
-        pfree(field_expr);
+        pfree(field_value.data);
+        pfree(field_expr.data);
         return;
     }
 
     // get field expression, e.g., 'id = 100'
     if (strcasecmp(op_type, "~~") == 0) {
         // ...like...
-        if (field_value != NULL && field_value[1] == '%') {
-            pfree(field_value);
-            pfree(field_expr);
+        if (field_value.data != NULL && field_value.data[1] == '%') {
+            pfree_ext(field_value.data);
+            pfree_ext(field_expr.data);
             return;
         } else {
-            rc = sprintf_s(field_expr, MAX_QUERY_LEN, "%s like %s", index_name, field_value);
+            appendStringInfo(&field_expr, "%s like %s", index_name, field_value.data);
         }
     } else if (lfield_values->length > 1) {
         // ...(not)in...
         if (strcasecmp(op_type, "=") == 0) {
-            rc = sprintf_s(field_expr, MAX_QUERY_LEN, "%s in (%s)", index_name, field_value);
+            appendStringInfo(&field_expr, "%s in (%s)", index_name, field_value.data);
         } else {
-            rc = sprintf_s(field_expr, MAX_QUERY_LEN, "%s not in (%s)", index_name, field_value);
+            appendStringInfo(&field_expr, "%s not in (%s)", index_name, field_value.data);
         }
     } else {
         // ...>=<...
-        rc = sprintf_s(field_expr, MAX_QUERY_LEN, "%s %s %s", index_name, op_type, field_value);
+        appendStringInfo(&field_expr, "%s %s %s", index_name, op_type, field_value.data);
     }
-    securec_check_ss_c(rc, "\0", "\0");
-    pfree(field_value);
+    pfree_ext(field_value.data);
 
-    uint4 cardinality = calculate_field_cardinality(table_name, field_expr);
+    uint4 cardinality = calculate_field_cardinality(table_name, field_expr.data);
     if (cardinality > CARDINALITY_THRESHOLD) {
         IndexCell *index = (IndexCell *)palloc0(sizeof(*index));
         index->index_name = index_name;
         index->cardinality = cardinality;
         index->op = op_type;
-        index->field_expr = field_expr;
+        index->field_expr = field_expr.data;
         add_index_from_field(table_name, index);
     }
+    pfree_ext(field_expr.data);
 }
 
 inline uint4 tuple_to_uint(List *tuples)
@@ -1056,7 +1029,7 @@ uint4 get_table_count(const char *table_name)
     char query_string[MAX_QUERY_LEN] = {0x00};
     errno_t rc =
         sprintf_s(query_string, MAX_QUERY_LEN, "select reltuples from pg_class where relname='%s';", table_name);
-    securec_check_ss_c(rc, "\0", "\0");
+    securec_check_ss(rc, "\0", "\0");
 
     StmtResult *result = execute_stmt(query_string, true);
     table_count = tuple_to_uint(result->tuples);
@@ -1072,12 +1045,13 @@ uint4 calculate_field_cardinality(const char *table_name, const char *field_expr
     uint4 cardinality;
     uint4 table_count = get_table_count(table_name);
     uint4 sample_rows = (table_count / sample_factor) > MAX_SAMPLE_ROWS ? MAX_SAMPLE_ROWS : (table_count / sample_factor);
-    char query_string[MAX_QUERY_LEN] = {0x00};
-    errno_t rc = sprintf_s(query_string, MAX_QUERY_LEN, "select count(*) from ( select * from %s limit %d) where %s",
+    StringInfoData query_string;
+    initStringInfo(&query_string);
+    appendStringInfo(&query_string, "select count(*) from ( select * from %s limit %d) where %s", 
         table_name, sample_rows, field_expr);
-    securec_check_ss_c(rc, "\0", "\0");
 
-    StmtResult *result = execute_stmt(query_string, true);
+    StmtResult *result = execute_stmt(query_string.data, true);
+    pfree_ext(query_string.data);
     uint4 row = tuple_to_uint(result->tuples);
     (*result->pub.rDestroy)((DestReceiver *)result);
 
@@ -1143,7 +1117,7 @@ char *find_table_name(List *fields)
         errno_t rc = sprintf_s(query_string, MAX_QUERY_LEN,
             "select count(*) from information_schema.columns where table_name = '%s' and column_name = '%s'",
             table_name, column_name);
-        securec_check_ss_c(rc, "\0", "\0");
+        securec_check_ss(rc, "\0", "\0");
 
         StmtResult *result = execute_stmt(query_string, true);
         if (result) {
@@ -1361,25 +1335,28 @@ void determine_driver_table()
 
 uint4 get_join_table_result_set(const char *table_name, const char *condition)
 {
-    char query_string[MAX_QUERY_LEN] = {0x00};
-    errno_t rc = EOK;
+    StringInfoData query_string;
+    initStringInfo(&query_string);
     if (condition == NULL) {
-        rc = sprintf_s(query_string, MAX_QUERY_LEN, "select * from %s;", table_name);
+        appendStringInfo(&query_string, "select * from %s;", table_name);
     } else {
-        rc = sprintf_s(query_string, MAX_QUERY_LEN, "select * from %s where %s;", table_name, condition);
+        appendStringInfo(&query_string, "select * from %s where %s;", table_name, condition);
     }
-    securec_check_ss_c(rc, "\0", "\0");
 
     /* get query execution plan */
-    List *parsetree_list = pg_parse_query(query_string, NULL);
+    List *parsetree_list = pg_parse_query(query_string.data, NULL);
     ListCell *parsetree_item = list_head(parsetree_list);
     Node *parsetree = (Node *)lfirst(parsetree_item);
-    List *querytree_list = pg_analyze_and_rewrite(parsetree, query_string, NULL, 0);
+    List *querytree_list = pg_analyze_and_rewrite(parsetree, query_string.data, NULL, 0);
     List *plantree_list = pg_plan_queries(querytree_list, 0, NULL);
     PlannedStmt *plan_stmt = (PlannedStmt *)lfirst(list_head(plantree_list));
-
     Scan *scan = (Scan *)(plan_stmt->planTree);
-    return (uint4)scan->plan.plan_rows;
+    uint4 rows = (uint4)scan->plan.plan_rows;
+    pfree_ext(query_string.data);
+    list_free_ext(parsetree_list);
+    list_free_ext(plantree_list);
+    list_free_ext(querytree_list);
+    return rows;
 }
 
 void add_index_from_join(TableCell *table, char *index_name)

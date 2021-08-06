@@ -263,8 +263,7 @@ static bool isNeedGetLCName = true;
 #define PM_POLL_TIMEOUT_SECOND 20
 #define PM_POLL_TIMEOUT_MINUTE 58*SECS_PER_MINUTE*60*1000000L
 #define CHECK_TIMES 10
-#define SIGBUS_MCEERR_AR 4
-#define SIGBUS_MCEERR_AO 5
+
 static char gaussdb_state_file[MAXPGPATH] = {0};
 
 uint32 noProcLogicTid = 0;
@@ -334,7 +333,6 @@ static Port* ConnCreateToRecvGssock(pollfd* ufds, int idx, int* nSockets);
 static Port* ConnCreate(int serverFd);
 static void reset_shared(int port);
 static void SIGHUP_handler(SIGNAL_ARGS);
-void SIGBUS_handler(SIGNAL_ARGS);
 static void pmdie(SIGNAL_ARGS);
 static void startup_alarm(SIGNAL_ARGS);
 static void SetWalsndsNodeState(ClusterNodeState requester, ClusterNodeState others);
@@ -3242,7 +3240,7 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
 #endif
                 }
             } else if (strcmp(nameptr, "replication") == 0) {
-                if (IsLocalPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
+                if (!IsHAPort(u_sess->proc_cxt.MyProcPort) && g_instance.attr.attr_common.enable_thread_pool) {
                     ereport(elevel,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("replication should connect HA port in thread_pool")));
@@ -4258,65 +4256,6 @@ static void SIGHUP_handler(SIGNAL_ARGS)
 
     errno = save_errno;
 }
-/*
- * SIGBUS -- When uce failure occurs in system memory, sigbus_handler will exit according to the region
-   of its logical address.
-   1. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
-   2. For addresses outside the buffer pool range, print the NIC log and exit
-   3. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
-   4. If the page is not dirty, execute pmdie to exit normally and print warning message. If the page is dirty,
-      print the PANIC log and exit
- */
-void SIGBUS_handler(SIGNAL_ARGS)
-{
-    uint64 buffer_size;
-    int buf_id;
-    int si_code = g_instance.sigbus_cxt.sigbus_code;
-    unsigned long long sigbus_addr = (unsigned long long)g_instance.sigbus_cxt.sigbus_addr;
-    if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
-        ereport(PANIC, 
-            (errcode(ERRCODE_UE_COMMON_ERROR),
-                errmsg("errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
-                    ERRCODE_UE_COMMON_ERROR)));
-    }
-#ifdef __aarch64__
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
-#else
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
-#endif
-    unsigned long long startaddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
-    unsigned long long endaddr = startaddr + buffer_size;
-    /* Determine the range of address carried by sigbus, And print the log according to the page state. */
-    if (sigbus_addr >= startaddr && sigbus_addr <= endaddr) {
-        buf_id = floor((sigbus_addr - startaddr) / (Size)BLCKSZ);
-        BufferDesc* buf_desc = GetBufferDescriptor(buf_id);
-        if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED ||
-            buf_desc->state & BM_IO_IN_PROGRESS) {
-            ereport(PANIC,
-                (errcode(ERRCODE_UE_DIRTY_PAGE), 
-                    errmsg("errcode:%u, Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut "
-                           "down immediately.",
-                    ERRCODE_UE_DIRTY_PAGE, sigbus_addr)));
-        } else {
-            ereport(WARNING,
-                (errcode(ERRCODE_UE_CLEAN_PAGE),
-                    errmsg("errcode:%u, Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will "
-                           "shutdown.", 
-                        ERRCODE_UE_CLEAN_PAGE, sigbus_addr)));
-            pmdie(SIGBUS);
-        }
-    } else if (sigbus_addr == 0) {
-        ereport(PANIC, 
-            (errcode(ERRCODE_UE_COMMON_ERROR), 
-                errmsg("errcode:%u, SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately",
-                    ERRCODE_UE_COMMON_ERROR)));
-    } else {
-        ereport(PANIC,
-            (errcode(ERRCODE_UE_COMMON_ERROR), 
-                errmsg("errcode:%u, SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately", 
-                    ERRCODE_UE_COMMON_ERROR, sigbus_addr)));
-    }
-}
 
 void KillGraceThreads(void)
 {
@@ -4357,7 +4296,6 @@ static void pmdie(SIGNAL_ARGS)
     switch (postgres_signal_arg) {
         case SIGTERM:
         case SIGINT:
-        case SIGBUS:
 
             if (STANDBY_MODE == t_thrd.postmaster_cxt.HaShmData->current_mode && !dummyStandbyMode &&
                 SIGTERM == postgres_signal_arg) {
@@ -4773,9 +4711,6 @@ static void ProcessDemoteRequest(void)
 
             if (g_instance.pid_cxt.DataReceiverPID != 0)
                 signal_child(g_instance.pid_cxt.DataReceiverPID, SIGTERM);
-
-            if (g_instance.pid_cxt.HeartbeatPID != 0)
-                signal_child(g_instance.pid_cxt.HeartbeatPID, SIGTERM);
 
             if (g_instance.pid_cxt.TwoPhaseCleanerPID != 0)
                 signal_child(g_instance.pid_cxt.TwoPhaseCleanerPID, SIGTERM);
@@ -10074,6 +10009,20 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     /* Do this sooner rather than later... */
     IsUnderPostmaster = true; /* we are a postmaster subprocess now */
     Assert(thread_role == arg->role);
+    /*
+     * We should set bn at the beginning of this function, cause if we meet some error before set bn, then we
+     * can't set t_thrd.bn->dead_end to true(check gs_thread_exit), which will lead CleanupBackend failed.
+     * The logic of get child slot refer to PortInitialize -> read_backend_variables -> restore_backend_variables
+     */
+    int childSlot = 0;
+    if (arg != NULL) {
+        if (arg->role == RPC_WORKER) {
+            childSlot = backend_save_para.MyPMChildSlot;
+        } else {
+            childSlot = ((BackendParameters*)arg->save_para)->MyPMChildSlot;
+        }
+    }
+    t_thrd.bn = GetBackend(childSlot);
     /* Check this thread will use reserved memory or not */
     is_memory_backend_reserved(arg);
     /* Initialize the Memory Protection at the thread level */
@@ -10129,8 +10078,6 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
 
     PortInitialize(&port, arg);
-
-    t_thrd.bn = GetBackend(t_thrd.proc_cxt.MyPMChildSlot);
 
     /* We don't need read GUC variables */
     if (!FencedUDFMasterMode) {

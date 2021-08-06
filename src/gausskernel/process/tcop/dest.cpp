@@ -33,6 +33,7 @@
 #include "access/xact.h"
 #include "commands/copy.h"
 #include "commands/createas.h"
+#include "db4ai/create_model.h"
 #include "commands/matview.h"
 #include "executor/functions.h"
 #include "executor/spi.h"
@@ -150,6 +151,10 @@ DestReceiver* CreateDestReceiver(CommandDest dest)
         case DestBatchLocalRoundRobin:
         case DestBatchHybrid:
             return createStreamDestReceiver(dest);
+
+        case DestTrainModel:
+            return CreateTrainModelDestReceiver();
+
         default:
             break;
     }
@@ -188,6 +193,7 @@ void EndCommand(const char* commandTag, CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
+        case DestTrainModel:
         default:
             break;
     }
@@ -218,6 +224,7 @@ void EndCommand_noblock(const char* commandTag, CommandDest dest)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTrainModel:
         default:
             break;
     }
@@ -265,6 +272,7 @@ void NullCommand(CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
+        case DestTrainModel:
         default:
             break;
     }
@@ -321,6 +329,7 @@ void ReadyForQuery(CommandDest dest)
         case DestCopyOut:
         case DestSQLFunction:
         case DestTransientRel:
+        case DestTrainModel:
         default:
             break;
     }
@@ -355,6 +364,7 @@ void ReadyForQuery_noblock(CommandDest dest, int timeout)
         case DestIntoRel:
         case DestCopyOut:
         case DestSQLFunction:
+        case DestTrainModel:
         default:
             break;
     }

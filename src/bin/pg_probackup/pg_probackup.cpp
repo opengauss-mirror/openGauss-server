@@ -804,6 +804,8 @@ int main(int argc, char *argv[])
      */
     parse_backup_option_to_params(command, command_name);
 
+    pfree(command_name);
+
     compress_init();
 
     /* do actual operation */

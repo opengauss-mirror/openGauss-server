@@ -20755,7 +20755,7 @@ static void checkValidationForExchangeTable(Relation partTableRel, Relation ordT
     tupleDesc = ordTableRel->rd_att;
 
     if (exchangeVerbose) {
-        indexList = RelationGetIndexList(partTableRel);
+        indexList = RelationGetSpecificKindIndexList(partTableRel, false);
 
         foreach (cell, indexList) {
             Oid indexOid = lfirst_oid(cell);

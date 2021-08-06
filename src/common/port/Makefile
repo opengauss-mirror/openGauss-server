@@ -32,8 +32,8 @@ VERSION = 1
 override CPPFLAGS := -I$(top_builddir)/src/common/port -DFRONTEND $(CPPFLAGS) $(CFLAGS_SSE42)
 LIBS += $(PTHREAD_LIBS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC 
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector-all
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector-all
 
 override CPPSources=$(shell find -name "*.cpp" ! -name "path.cpp" | sort)
 ifneq "$(MAKECMDGOALS)" "clean"

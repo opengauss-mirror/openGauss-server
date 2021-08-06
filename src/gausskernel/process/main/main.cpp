@@ -114,6 +114,7 @@ int main(int argc, char* argv[])
     PmTopMemoryContext = t_thrd.top_mem_cxt;
 
     knl_thread_init(MASTER_THREAD);
+    t_thrd.bn = NULL;
 
     t_thrd.fake_session = create_session_context(t_thrd.top_mem_cxt, 0);
     t_thrd.fake_session->status = KNL_SESS_FAKE;

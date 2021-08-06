@@ -309,6 +309,7 @@ static ModifyTable* _copyModifyTable(const ModifyTable* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelRTIndex);
+    COPY_SCALAR_FIELD(partKeyUpsert);
 
     return newnode;
 }
@@ -3489,7 +3490,7 @@ static UpsertExpr* _copyUpsertExpr(const UpsertExpr* from)
     COPY_NODE_FIELD(updateTlist);
     COPY_NODE_FIELD(exclRelTlist);
     COPY_SCALAR_FIELD(exclRelIndex);
-
+    COPY_SCALAR_FIELD(partKeyUpsert);
     return newnode;
 }
 static CommonTableExpr* _copyCommonTableExpr(const CommonTableExpr* from)
@@ -5775,6 +5776,20 @@ static DropSynonymStmt* _copyDropSynonymStmt(const DropSynonymStmt* from)
     return newnode;
 }
 
+// DB4AI
+static CreateModelStmt* _copyCreateModelStmt(const CreateModelStmt* from){
+    CreateModelStmt* newnode = makeNode(CreateModelStmt);
+    COPY_STRING_FIELD(model);
+    COPY_STRING_FIELD(architecture);
+    COPY_NODE_FIELD(hyperparameters);
+    COPY_NODE_FIELD(select_query);
+    COPY_NODE_FIELD(model_features);
+    COPY_NODE_FIELD(model_target);
+    COPY_SCALAR_FIELD(algorithm);
+
+    return newnode;
+}
+
 /* ****************************************************************
  *					pg_list.h copy functions
  * ****************************************************************
@@ -7077,6 +7092,9 @@ void* copyObject(const void* from)
             break;
         case T_DropSynonymStmt:
             retval = _copyDropSynonymStmt((DropSynonymStmt*)from);
+            break;
+        case T_CreateModelStmt: // DB4AI
+            retval = _copyCreateModelStmt((CreateModelStmt*) from);
             break;
         case T_A_Expr:
             retval = _copyAExpr((A_Expr*)from);

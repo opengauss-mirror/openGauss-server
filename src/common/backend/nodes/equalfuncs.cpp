@@ -694,7 +694,7 @@ static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
     COMPARE_NODE_FIELD(updateTlist);
     COMPARE_NODE_FIELD(exclRelTlist);
     COMPARE_SCALAR_FIELD(exclRelIndex);
-
+    COMPARE_SCALAR_FIELD(partKeyUpsert);
     return true;
 }
 /*

@@ -477,6 +477,12 @@ void GetPlanNodePlainText(
             *pname = "Vector Merge";
             *sname = *pt_operation = "Vector Merge Join";
             break;
+        case T_GradientDescent:
+            *pname = *sname = *pt_options = "Gradient Descent";
+            break;
+        case T_KMeans:
+            *pname = *sname = *pt_options = "K-Means";
+            break;
         default:
             *pname = *sname = *pt_operation = "?\?\?";
             break;

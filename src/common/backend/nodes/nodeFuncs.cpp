@@ -231,6 +231,9 @@ Oid exprType(const Node* expr)
         case T_Rownum:
             type = INT8OID;
             break;
+        case T_GradientDescentExpr:
+            type = ((const GradientDescentExpr*)expr)->fieldtype;
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(expr))));
@@ -839,6 +842,9 @@ Oid exprCollation(const Node* expr)
             break;
         case T_PlaceHolderVar:
             coll = exprCollation((Node*)((const PlaceHolderVar*)expr)->phexpr);
+            break;
+        case T_GradientDescentExpr:
+            coll = InvalidOid;
             break;
         default:
             ereport(
@@ -1549,6 +1555,7 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
         case T_Null:
         case T_PgFdwRemoteInfo:
         case T_Rownum:
+        case T_GradientDescentExpr:
             /* primitive node types with no expression subnodes */
             break;
         case T_Aggref: {

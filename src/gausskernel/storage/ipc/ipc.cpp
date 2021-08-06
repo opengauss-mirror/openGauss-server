@@ -666,6 +666,7 @@ void PreventInterrupt()
     InterruptPending = false;
     t_thrd.int_cxt.ProcDiePending = false;
     t_thrd.int_cxt.QueryCancelPending = false;
+    t_thrd.int_cxt.PoolValidateCancelPending = false;
     /* And le's just make *sure* we'tre  not interrupted ... */
     t_thrd.int_cxt.ImmediateInterruptOK = false;
     t_thrd.int_cxt.CritSectionCount = 0;
