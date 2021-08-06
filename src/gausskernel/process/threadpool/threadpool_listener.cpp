@@ -231,6 +231,14 @@ void ThreadPoolListener::ReaperAllSession()
                         " encounter FATAL problems before session close.")));
             abort();
         }
+        /* m_sessionCount should be sum of the list length of m_idleSessionList and m_readySessionList
+           and worker's attached session */
+        pg_memory_barrier();
+        if (m_idleSessionList->IsEmpty() && m_readySessionList->IsEmpty() &&
+            m_group->m_workerNum - m_group->m_idleWorkerNum == 0) {
+            ereport(WARNING, (errmsg("SessionCount should be zero when no session in this group.")));
+            m_group->m_sessionCount = 0;
+        }
 
         elem = m_idleSessionList->RemoveHead();
         while (elem != NULL) {

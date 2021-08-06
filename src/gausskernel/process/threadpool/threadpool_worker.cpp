@@ -396,6 +396,13 @@ void ThreadPoolWorker::ShutDownIfNecessary()
         RestoreThreadVariable();
         proc_exit(0);
     }
+    /* there is time window which the cancle signal has arrived but ignored by prevent signal called before,
+     * so we rebuild the signal status here in case that happens. */
+    if (unlikely(m_currentSession != NULL && m_currentSession->status == KNL_SESS_CLOSE)) {
+        ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                      errmsg("Cancle signal has arrived but ignored by prevent signal called before, rebuild it.")));
+        t_thrd.int_cxt.ClientConnectionLost = true;
+    }
 }
 
 void ThreadPoolWorker::CleanThread()
@@ -496,8 +503,16 @@ bool ThreadPoolWorker::AttachSessionToThread()
      * Since thread pool worker may start earlier than startup finishing recovery,
      * init xlog access if necessary.
      */
-    (void)RecoveryInProgress();
-
+    PG_TRY();
+    {
+        (void)RecoveryInProgress();
+    }
+    PG_CATCH();
+    {
+        /* if init xlog has error, should throw fatal this thread */
+        ereport(FATAL, (errmsg("init xlog failed, throw fatal for this thread")));
+    }
+    PG_END_TRY();
 #ifdef ENABLE_QUNIT
     set_qunit_case_number_hook(u_sess->utils_cxt.qunit_case_number, NULL);
 #endif
@@ -664,7 +679,6 @@ static bool InitSession(knl_session_context* session)
 {
     /* non't send ereport to client now */
     t_thrd.postgres_cxt.whereToSendOutput = DestNone;
-
     /* Switch context to Session context. */
     AutoContextSwitch memSwitch(session->mcxt_group->GetMemCxtGroup(MEMORY_CONTEXT_DEFAULT));
 

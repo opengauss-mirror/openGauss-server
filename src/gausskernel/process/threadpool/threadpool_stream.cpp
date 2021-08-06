@@ -130,6 +130,8 @@ void ThreadPoolStream::InitStream()
     SetStreamWorkerInfo(m_producer);
     ExtractProduerInfo();
 
+    SetProcessingMode(InitProcessing);
+
     /* Init GUC option for this session. */
     InitializeGUCOptions();
     /* Read in remaining GUC variables */
@@ -142,7 +144,9 @@ void ThreadPoolStream::InitStream()
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(
         u_sess->stream_cxt.producer_obj->getDbName(), InvalidOid, u_sess->stream_cxt.producer_obj->getUserName());
     t_thrd.proc_cxt.PostInit->InitStreamSession();
-    
+
+    SetProcessingMode(NormalProcessing);
+
     repair_guc_variables();
     RestoreStreamSyncParam(&m_producer->m_syncParam);
 

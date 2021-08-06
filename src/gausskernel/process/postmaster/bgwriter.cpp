@@ -1117,7 +1117,9 @@ static void candidate_buf_push(int buf_id, int thread_id)
     uint32 list_size = bgwriter->cand_list_size;
     uint32 tail_loc;
 
+    pg_memory_barrier();
     volatile uint64 head = pg_atomic_read_u64(&bgwriter->head);
+    pg_memory_barrier();
     volatile uint64 tail = pg_atomic_read_u64(&bgwriter->tail);
 
     if (unlikely(tail - head >= list_size)) {
@@ -1126,8 +1128,8 @@ static void candidate_buf_push(int buf_id, int thread_id)
     }
     tail_loc = tail % list_size;
     bgwriter->cand_buf_list[tail_loc] = buf_id;
-    pg_write_barrier();
     (void)pg_atomic_fetch_add_u64(&bgwriter->tail, 1);
+    pg_memory_barrier();
 }
 
 /**
@@ -1142,17 +1144,19 @@ bool candidate_buf_pop(int *buf_id, int thread_id)
     uint32 head_loc;
 
     while (true) {
+        pg_memory_barrier();
         uint64 head = pg_atomic_read_u64(&bgwriter->head);
+        pg_memory_barrier();
         volatile uint64 tail = pg_atomic_read_u64(&bgwriter->tail);
 
         if (unlikely(head >= tail)) {
             return false;       /* candidate list is empty */
         }
 
-        pg_write_barrier();
         head_loc = head % list_size;
         *buf_id = bgwriter->cand_buf_list[head_loc];
         if (pg_atomic_compare_exchange_u64(&bgwriter->head, &head, head + 1)) {
+            pg_memory_barrier();
             return true;
         }
     }
@@ -1162,6 +1166,7 @@ static int64 get_thread_candidate_nums(int thread_id)
 {
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
     volatile uint64 head = pg_atomic_read_u64(&bgwriter->head);
+    pg_memory_barrier();
     volatile uint64 tail = pg_atomic_read_u64(&bgwriter->tail);
     int64 curr_cand_num = tail - head;
     Assert(curr_cand_num >= 0);
