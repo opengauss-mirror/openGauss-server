@@ -1016,6 +1016,16 @@ static List* build_paths_for_OR(
         }
 
         /*
+         * Build paths with global indexes only for un-bounded partition tables.
+         * The partition bounded tables should be handled by partition iterator
+         * or local indexes.
+         */
+        RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
+        if (index->isGlobal && rte && OidIsValid(rte->partitionOid)) {
+            continue;
+        }
+
+        /*
          * Ignore partial indexes that do not match the query.	If a partial
          * index is marked predOK then we know it's OK.  Otherwise, we have to
          * test whether the added clauses are sufficient to imply the
