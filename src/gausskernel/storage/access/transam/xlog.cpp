@@ -539,6 +539,7 @@ static bool XLogArchiveIsBusy(const char *xlog);
 static bool XLogArchiveIsReady(const char *xlog);
 static void XLogArchiveCleanup(const char *xlog);
 static void readRecoveryCommandFile(void);
+static XLogSegNo GetOldestXLOGSegNo(const char *workingPath);
 static void exitArchiveRecovery(TimeLineID endTLI, XLogSegNo endSegNo);
 static bool recoveryStopsHere(XLogReaderState *record, bool *includeThis);
 static void recoveryPausesHere(void);
@@ -4875,11 +4876,11 @@ void CheckXLogRemoved(XLogSegNo segno, TimeLineID tli)
  * NB: the result can be out of date arbitrarily fast, the caller has to deal
  * with that.
  */
-XLogRecPtr XLogGetLastRemovedSegno(void)
+XLogSegNo XLogGetLastRemovedSegno(void)
 {
     /* use volatile pointer to prevent code rearrangement */
     volatile XLogCtlData *xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
-    XLogRecPtr lastRemovedSegNo;
+    XLogSegNo lastRemovedSegNo;
 
     SpinLockAcquire(&xlogctl->info_lck);
     lastRemovedSegNo = xlogctl->lastRemovedSegNo;
@@ -6784,10 +6785,7 @@ void XLOGShmemInit(void)
      */
     allocptr = (char *)TYPEALIGN(XLOG_BLCKSZ, allocptr);
     t_thrd.shemem_ptr_cxt.XLogCtl->pages = allocptr;
-    errorno = memset_s(t_thrd.shemem_ptr_cxt.XLogCtl->pages,
-                       (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers, 0,
-                       (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
-    securec_check(errorno, "", "");
+    MemsetHugeMem(t_thrd.shemem_ptr_cxt.XLogCtl->pages, (Size)XLOG_BLCKSZ * g_instance.attr.attr_storage.XLOGbuffers);
 
     if (BBOX_BLACKLIST_XLOG_BUFFER) {
         bbox_blacklist_add(XLOG_BUFFER, t_thrd.shemem_ptr_cxt.XLogCtl->pages,
@@ -6803,6 +6801,9 @@ void XLOGShmemInit(void)
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->SharedHotStandbyActive = false;
     t_thrd.shemem_ptr_cxt.XLogCtl->WalWriterSleeping = false;
+    if (!IsInitdb) {
+        t_thrd.shemem_ptr_cxt.XLogCtl->lastRemovedSegNo = GetOldestXLOGSegNo(t_thrd.proc_cxt.DataDir);
+    }
 
 #if (!defined __x86_64__) && (!defined __aarch64__)
     SpinLockInit(&t_thrd.shemem_ptr_cxt.XLogCtl->Insert.insertpos_lck);
@@ -6819,6 +6820,46 @@ void XLOGShmemInit(void)
     if (!IsBootstrapProcessingMode()) {
         ReadControlFile();
     }
+}
+
+static XLogSegNo GetOldestXLOGSegNo(const char *workingPath)
+{
+#define XLOGFILENAMELEN 24
+    DIR *xlogDir = NULL;
+    struct dirent *dirEnt = NULL;
+    char xlogDirStr[MAXPGPATH] = {0};
+    char oldestXLogFileName[MAXPGPATH] = {0};
+    TimeLineID tli = 0;
+    uint32 xlogReadLogid = -1;
+    uint32 xlogReadLogSeg = -1;
+    XLogSegNo segno;
+    errno_t rc = EOK;
+
+    rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", workingPath, XLOGDIR);
+    securec_check_ss(rc, "", "");
+    xlogDir = opendir(xlogDirStr);
+    if (!xlogDir) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("could not open xlog dir in GetOldestXLOGSegNo.")));
+    }
+    while ((dirEnt = readdir(xlogDir)) != NULL) {
+        if (strlen(dirEnt->d_name) == XLOGFILENAMELEN &&
+                strspn(dirEnt->d_name, "0123456789ABCDEF") == XLOGFILENAMELEN) {
+            if (strlen(oldestXLogFileName) == 0 || strcmp(dirEnt->d_name, oldestXLogFileName) < 0) {
+                rc = strncpy_s(oldestXLogFileName, MAXPGPATH - 1, dirEnt->d_name, strlen(dirEnt->d_name) + 1);
+                securec_check_ss(rc, "", "");
+                oldestXLogFileName[strlen(dirEnt->d_name)] = '\0';
+            }
+        }
+    }
+
+    (void)closedir(xlogDir);
+
+    if (sscanf_s(oldestXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
+        ereport(ERROR, (errcode_for_file_access(), errmsg("failed to translate name to xlog in GetOldestXLOGSegNo.")));
+    }
+    segno = (uint64)xlogReadLogid * XLogSegmentsPerXLogId + xlogReadLogSeg - 1;
+
+    return segno;
 }
 
 static uint64 GetMACAddr(void)
@@ -10895,7 +10936,7 @@ void CreateCheckPoint(int flags)
          */
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = curInsert;
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
         }
@@ -11496,7 +11537,7 @@ void wait_all_dirty_page_flush(int flags, XLogRecPtr redo)
     if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
             ereport(LOG, (errmsg("CreateRestartPoint, need flush %ld pages.", get_dirty_page_num())));
@@ -11765,7 +11806,7 @@ bool CreateRestartPoint(int flags)
     if (ENABLE_INCRE_CKPT && doFullCkpt) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_dirty_page_queue_tail();
-        pg_write_barrier();
+        pg_memory_barrier();
         if (get_dirty_page_num() > 0) {
             g_instance.ckpt_cxt_ctl->flush_all_dirty_page = true;
         }
@@ -11773,9 +11814,9 @@ bool CreateRestartPoint(int flags)
     } else if (ENABLE_INCRE_CKPT) {
         g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr = lastCheckPoint.redo;
         (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
-        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPoint.redo);
+        g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc = get_loc_for_lsn(lastCheckPointRecPtr);
+        pg_memory_barrier();
         LWLockRelease(g_instance.ckpt_cxt_ctl->prune_queue_lock);
-        pg_write_barrier();
 
         uint64 head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
         int64 need_flush_num = g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc > head ?
@@ -11800,11 +11841,11 @@ bool CreateRestartPoint(int flags)
     XLByteToSeg(t_thrd.shemem_ptr_cxt.ControlFile->checkPointCopy.redo, _logSegNo);
     if (ENABLE_INCRE_CKPT) {
         XLogRecPtr MinRecLSN = ckpt_get_min_rec_lsn();
-        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, lastCheckPoint.redo)) {
+        if (!XLogRecPtrIsInvalid(MinRecLSN) && XLByteLT(MinRecLSN, lastCheckPointRecPtr)) {
             ereport(WARNING, (errmsg("current dirty page list head recLSN %08X/%08X smaller than redo lsn %08X/%08X",
                                    (uint32)(MinRecLSN >> XLOG_LSN_SWAP), (uint32)MinRecLSN,
-                                   (uint32)(lastCheckPoint.redo >> XLOG_LSN_SWAP),
-                                   (uint32)lastCheckPoint.redo)));
+                                   (uint32)(lastCheckPointRecPtr >> XLOG_LSN_SWAP),
+                                   (uint32)lastCheckPointRecPtr)));
             LWLockRelease(CheckpointLock);
             smgrsync_with_absorption();
             gstrace_exit(GS_TRC_ID_CreateRestartPoint);

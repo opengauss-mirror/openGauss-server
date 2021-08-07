@@ -338,7 +338,7 @@ bool push_pending_flush_queue(Buffer buffer)
     actual_loc = new_tail_loc % g_instance.ckpt_cxt_ctl->dirty_page_queue_size;
     buf_desc->dirty_queue_loc = actual_loc;
     g_instance.ckpt_cxt_ctl->dirty_page_queue[actual_loc].buffer = buffer;
-    pg_write_barrier();
+    pg_memory_barrier();
     pg_atomic_write_u32(&g_instance.ckpt_cxt_ctl->dirty_page_queue[actual_loc].slot_state, (SLOT_VALID));
     (void)pg_atomic_fetch_add_u32(&g_instance.ckpt_cxt_ctl->actual_dirty_page_num, 1);
     return true;
@@ -463,7 +463,7 @@ try_get_buf:
         if (!(pg_atomic_read_u32(&slot->slot_state) & SLOT_VALID)) {
             break;
         }
-        pg_read_barrier();
+        pg_memory_barrier();
         buffer = slot->buffer;
         /* slot state is valid, buffer is invalid, the slot buffer set 0 when BufferAlloc or InvalidateBuffer */
         if (BufferIsInvalid(buffer)) {
@@ -1344,6 +1344,7 @@ static void ckpt_try_prune_dirty_page_queue()
          * the redo point will be wrong, because some page not flush to disk.
          */
         (void)LWLockAcquire(g_instance.ckpt_cxt_ctl->prune_queue_lock, LW_EXCLUSIVE);
+        pg_memory_barrier();
         if (last_invalid_slot > pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc)) {
             pg_atomic_write_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc, (last_invalid_slot + 1));
         }

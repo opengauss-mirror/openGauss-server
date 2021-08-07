@@ -613,6 +613,7 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     const char **values;
     errno_t rc = EOK;
     char rwtimeoutStr[12] = {0};
+    const char *malloc_port = NULL;
 
     if (interrupted && !in_cleanup)
         elog(ERROR, "interrupted");
@@ -659,6 +660,7 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
     {
         keywords[i] = "port";
         values[i] = inc_dbport(port);
+        malloc_port = values[i];
         i++;
     }
 
@@ -683,6 +685,10 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
         {
             free(values);
             free(keywords);
+            if (malloc_port)
+            {
+                free((void *)malloc_port);
+            }
             return tmpconn;
         }
 
@@ -700,6 +706,10 @@ PGconn* pgut_connect_replication(const char *host, const char *port,
         PQfinish(tmpconn);
         free(values);
         free(keywords);
+        if (malloc_port)
+        {
+            free((void *)malloc_port);
+        }
         return NULL;
     }
 }

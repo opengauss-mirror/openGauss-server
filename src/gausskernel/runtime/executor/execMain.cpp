@@ -170,31 +170,16 @@ static void report_iud_time(QueryDesc *query)
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
             continue;
         }
-        MemoryContext current_ctx = CurrentMemoryContext;
+
         Relation rel = NULL;
-        PG_TRY();
-        {
-            rel = heap_open(rid, AccessShareLock);
-            if (rel->rd_rel->relkind == RELKIND_RELATION) {
-                if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                    rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                    pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
-                }
-            }
-            heap_close(rel, AccessShareLock);
-        }
-        PG_CATCH();
-        {
-            (void)MemoryContextSwitchTo(current_ctx);
-            ErrorData *edata = CopyErrorData();
-            ereport(DEBUG1, (errmsg("Failed to send data changed time, cause: %s", edata->message)));
-            FlushErrorState();
-            FreeErrorData(edata);
-            if (rel != NULL) {
-                heap_close(rel, AccessShareLock);
+        rel = heap_open(rid, AccessShareLock);
+        if (rel->rd_rel->relkind == RELKIND_RELATION) {
+            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
             }
         }
-        PG_END_TRY();
+        heap_close(rel, AccessShareLock);
     }
 }
 

@@ -940,8 +940,7 @@ void CheckpointerShmemInit(void)
          * requests array; this is so that CompactCheckpointerRequestQueue
          * can assume that any pad bytes in the request structs are zeroes.
          */
-        errno_t ret = memset_s(t_thrd.checkpoint_cxt.CheckpointerShmem, size, 0, size);
-        securec_check(ret, "\0", "\0");
+        MemsetHugeMem((char*)t_thrd.checkpoint_cxt.CheckpointerShmem, size);
         SpinLockInit(&t_thrd.checkpoint_cxt.CheckpointerShmem->ckpt_lck);
         t_thrd.checkpoint_cxt.CheckpointerShmem->max_requests = g_instance.attr.attr_storage.NBuffers;
     }

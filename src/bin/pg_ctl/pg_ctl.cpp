@@ -184,6 +184,7 @@ char gaussdb_state_file[MAXPGPATH] = {0};
 
 static char postport_lock_file[MAXPGPATH];
 static PGconn* dbConn = NULL;
+bool no_need_fsync = false;
 pid_t process_id = 0;
 
 const int g_length_stop_char = 2;
@@ -3980,7 +3981,7 @@ static void do_incremental_build(uint32 term)
     /* Concate connection str to primary host for performing rewind. */
     errorno = sprintf_s(connstrSource,
         sizeof(connstrSource),
-        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5",
+        "host=%s port=%s dbname=postgres application_name=gs_rewind connect_timeout=5  rw_timeout=600",
         (streamConn->pghost != NULL) ? streamConn->pghost : streamConn->pghostaddr,
         streamConn->pgport);
     securec_check_ss_c(errorno, "\0", "\0");
@@ -4637,6 +4638,7 @@ int main(int argc, char** argv)
         {"connect-string", required_argument, NULL, 'C'},
         {"remove-backup", no_argument, NULL, 1},
         {"action", required_argument, NULL, 'a'},
+        {"no-fsync", no_argument, NULL, 3},
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -4922,6 +4924,9 @@ int main(int argc, char** argv)
                     break;
                 case 1:
                     clear_backup_dir = true;
+                    break;
+                case 3:
+                    no_need_fsync = true;
                     break;
                 default:
                     /* getopt_long already issued a suitable error message */

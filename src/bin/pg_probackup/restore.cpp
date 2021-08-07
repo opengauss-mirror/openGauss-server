@@ -19,6 +19,8 @@
 #include "thread.h"
 #include "common/fe_memutils.h"
 
+#define RESTORE_ARRAY_LEN 100
+
 typedef struct
 {
     parray       *pgdata_files;
@@ -1379,7 +1381,15 @@ create_recovery_conf(time_t backup_id,
     /* construct restore_command */
     if (pitr_requested)
     {
+        char *timestamp = NULL;
+        const char *oldtime = NULL;
+        timestamp = (char *)pg_malloc(RESTORE_ARRAY_LEN);
+        time2iso(timestamp, RESTORE_ARRAY_LEN, backup->end_time);
+        oldtime = rt->time_string;
+        rt->time_string = timestamp;
         construct_restore_cmd(fp, rt, restore_command_provided, target_immediate);
+        rt->time_string = oldtime;
+        free(timestamp);
     }
 
     if (fio_fflush(fp) != 0 ||
