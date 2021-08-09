@@ -32,6 +32,7 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "catalog/pg_user_mapping.h"
 
 /*
  * Describes the valid options for objects that use this wrapper.
@@ -172,6 +173,11 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
     List* other_options = NIL;
     ListCell* cell = NULL;
 
+    if (catalog == UserMappingRelationId) {
+        ereport(
+            ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("file_fdw doesn't support in USER MAPPING.")));
+    }
+
     /*
      * Only superusers are allowed to set options of a file_fdw foreign table.
      * This is because the filename is one of those options, and we don't want
@@ -185,6 +191,10 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
      * options level other than foreign table --- otherwise there'd still be a
      * security hole.
      */
+    if (catalog == ForeignTableRelationId && !superuser())
+            ereport(ERROR,
+                            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                             errmsg("only superuser can change options of a file_fdw foreign table")));
 
     /*
      * Check that only options supported by file_fdw, and allowed for the
@@ -229,6 +239,11 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
             force_not_null = def;
             /* Don't care what the value is, as long as it's a legal boolean */
             (void)defGetBoolean(def);
+        } else if (strcmp(def->defname, "format") == 0) {
+            char* fmt = defGetString(def);
+            if (strcasecmp(fmt, "fixed") == 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("file_fdw doesn't support fixed option in format")));
+            }
         } else
             other_options = lappend(other_options, def);
     }
