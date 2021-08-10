@@ -9454,30 +9454,6 @@ bool IsVariableinBlackList(const char* name)
 }
 
 /*
- * return true if the extension can be uninstall
- */
-bool DropExtensionIsSupported(const char* query_string)
-{
-    char* lower_string = lowerstr(query_string);
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") ||
-        strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw") ||
-        strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink") ||
-        strstr(lower_string, "db_b_parser") || strstr(lower_string, "db_a_parser") ||
-        strstr(lower_string, "db_c_parser") || strstr(lower_string, "db_pg_parser"))) {
-#else
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
-#endif
-        pfree_ext(lower_string);
-        return true;
-    } else {
-        pfree_ext(lower_string);
-        return false;
-    }
-}
-
-/*
  * Check if the object is in blacklist, if true, ALTER/DROP operation of the object is disabled.
  * Note that only prescribed extensions are able droppable.
  */
@@ -9488,12 +9464,8 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
 
     switch (obj_type) {
         case OBJECT_EXTENSION:
-            tag = "EXTENSION";
-            /* Check if the extension is provided officially */
-            if (DropExtensionIsSupported(query_string))
-                return;
-            else
-                break;
+            /* Check black list in RemoveObjects */
+            return;
 #ifdef ENABLE_MULTIPLE_NODES
         case OBJECT_AGGREGATE:
             tag = "AGGREGATE";

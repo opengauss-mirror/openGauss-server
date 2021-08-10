@@ -55,6 +55,35 @@ static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
     }
     return (aclresult == ACLCHECK_OK) ? true : false;
 }
+
+static void DropExtensionIsSupported(List* objname)
+{
+    static const char *supportList[] = {
+        "postgis",
+        "packages",
+#ifndef ENABLE_MULTIPLE_NODES
+        "mysql_fdw",
+        "oracle_fdw",
+        "postgres_fdw",
+        "dblink",
+        "db_a_parser",
+        "db_b_parser",
+        "db_c_parser",
+        "db_pg_parser",
+#endif
+    };
+    int len = lengthof(supportList);
+    const char* name = strVal(linitial(objname));
+
+    for (int i = 0; i < len; i++) {
+        if (pg_strcasecmp(name, supportList[i]) == 0) {
+            return;
+        }
+    }
+
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("EXTENSION is not yet supported.")));
+}
+
 /*
  * @Description: drop one or more objects.
  *               We don't currently handle all object types here.  Relations, for example,
@@ -97,6 +126,8 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                 missing_ok = stmt->missing_ok;
             does_not_exist_skipping(stmt->removeType, objname, objargs, missing_ok);
             continue;
+        } else if (stmt->removeType == OBJECT_EXTENSION) {
+            DropExtensionIsSupported(objname);
         }
 
         /*

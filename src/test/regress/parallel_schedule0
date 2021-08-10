@@ -485,7 +485,8 @@ test: copyselect copy_error_log
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-#test: constraints drop_if_exists
+test: drop_if_exists
+#test: constraints
 
 #test: errors subplan_base
 test: subplan_new
