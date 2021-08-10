@@ -472,6 +472,8 @@ static void GetDatabaseList(PGconn* conn, DatabaseNames** dbList)
     res = PQexec(conn, STMT_GET_DATABASE_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Could not obtain database list : %s",
                                PQerrorMessage(conn))));
@@ -543,6 +545,8 @@ static void GetTempSchemaList(PGconn* conn, TempSchemaInfo** tempSchemaList)
     res = PQexec(conn, STMT_GET_TEMP_SCHEMA_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Could not obtain temp schema list : %s",
                                PQerrorMessage(conn))));
@@ -553,6 +557,9 @@ static void GetTempSchemaList(PGconn* conn, TempSchemaInfo** tempSchemaList)
     for (int i = 0; i < tempSchemaCount; i++) {
         nspname = PQgetvalue(res, i, 0);
         if (strchr(&nspname[7], '_') == NULL) {
+            PQclear(res);
+            PQfinish(conn);
+            conn = NULL;
             ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Error when parse schema name : %s",
                                PQerrorMessage(conn))));
@@ -623,6 +630,8 @@ static void GetActiveBackendList(PGconn* conn, ActiveBackendInfo** activeBackend
     res = PQexec(conn, STMT_ACTIVE_BACKEND_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Could not obtain active backend list : %s",
                                PQerrorMessage(conn))));
@@ -680,6 +689,9 @@ static void DropTempSchema(PGconn* conn, char* nspname)
 
     /* If exec is not success, give an log and go on. */
     if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        PQclear(res);
+        PQfinish(conn);
+        conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("Could not drop temp schema %s, %s: %s\n",
                                nspname, toastnspName, PQresultErrorMessage(res))));
@@ -712,21 +724,30 @@ static void DropTempSchemas(PGconn* conn)
          * These items are DN'name, timelineID, tempID, sessionID.
          */
         const char* lastPos = strrchr(tempSchema->tempSchemaName, '_');
-        if (lastPos == NULL)
+        if (lastPos == NULL) {
+            PQfinish(conn);
+            conn = NULL;
             elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempSchema->tempSchemaName);
+        }
         int64 sessionID = strtoll(lastPos + 1, NULL, 10);
         rc = strncpy_s(tempBuffer, sizeof(tempBuffer), tempSchema->tempSchemaName,
                        lastPos - tempSchema->tempSchemaName);
         securec_check_c(rc, "\0", "\0");
         const char* secondLastPos = strrchr(tempBuffer, '_');
-        if (secondLastPos == NULL)
+        if (secondLastPos == NULL) {
+            PQfinish(conn);
+            conn = NULL;
             elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempBuffer);
+        }
         uint32 tempID = strtol(secondLastPos + 1, NULL, 10);
         rc = strncpy_s(tempBuffer2, sizeof(tempBuffer2), tempBuffer, secondLastPos - tempBuffer);
         securec_check_c(rc, "\0", "\0");
         const char* thirdLastPos = strrchr(tempBuffer2, '_');
-        if (thirdLastPos == NULL)
+        if (thirdLastPos == NULL) {
+            PQfinish(conn);
+            conn = NULL;
             elog(ERROR, "strrchr failed, can't find '%c' in '%s'\n", '_', tempBuffer2);
+        }
         uint32 timeLineID = strtol(thirdLastPos + 1, NULL, 10);
 
         activeBackend = activeBackendList;
@@ -779,6 +800,8 @@ static bool DropTempNamespace()
                 NULL, NULL, curDatabase->databaseName, PGXC_CLEAN, "auto");
 
             if (conn == NULL) {
+                PQfinish(conn);
+                conn = NULL;
                 ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
                                (errmsg("Could not connect to the database %s.",
                                        curDatabase->databaseName))));
