@@ -1815,7 +1815,7 @@ bool dw_single_file_recycle(bool trunc_file)
 
 bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
 {
-    if (item->data_page_idx == 0 || item->dwn != dwn) {
+    if (item->dwn != dwn) {
         return false;
     }
     if (item->buf_tag.forkNum == InvalidForkNumber || item->buf_tag.blockNum == InvalidBlockNumber ||

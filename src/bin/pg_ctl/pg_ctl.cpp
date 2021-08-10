@@ -3946,6 +3946,54 @@ static void CheckBuildParameter()
     }
 }
 
+static void find_nested_pgconf(const char** optlines, char* opt_name)
+{
+    const char* p = NULL;
+    int i = 0;
+    size_t paramlen = 0;
+    paramlen = (size_t)strnlen(opt_name, MAX_PARAM_LEN);
+    for (i = 0; optlines[i] != NULL; i++) {
+        p = optlines[i];
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (pg_strncasecmp(p, opt_name, paramlen) != 0) {
+            continue;
+        }
+        while (isspace((unsigned char)*p)) {
+            p++;
+        }
+        pg_fatal(
+            _("There is nested config file in postgresql.conf: %sWhich is not supported by full build. "
+              "Please move out the nested config files from %s and comment the 'include' config in postgresql.conf.\n"
+              "You can add option '-q' to disable autostart during full build and restore the change manually "
+              "before starting gaussdb."), 
+              p, 
+              pg_data);
+        exit(1);
+    }
+}
+
+static void check_nested_pgconf(void)
+{
+    char config_file[MAXPGPATH] = {0};
+    char** optlines = NULL;
+    int ret = EOK;
+    static char* optname[] = {"include ", "include_if_exists "};
+
+    ret = snprintf_s(config_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    config_file[MAXPGPATH - 1] = '\0';
+    optlines = readfile(config_file);
+
+    for (int i = 0; i < (int)lengthof(optname); i++) {
+        find_nested_pgconf((const char**)optlines, optname[i]);
+    }
+
+    freefile(optlines);
+    optlines = NULL;
+}
+
 /*
  * build_mode:
  *		AUTO_BUILD: do gs_rewind first, after failed 3 times, do full
@@ -3964,6 +4012,7 @@ static void do_incremental_build(uint32 term)
 
     CheckBuildParameter();
 
+    check_nested_pgconf();
     set_build_pid(getpid());
 
     /* 
@@ -4147,6 +4196,7 @@ static void do_actual_build(uint32 term)
     }
     pg_log(PG_WARNING, _("current workdir is (%s).\n"), cwd);
 
+    check_nested_pgconf();
     set_build_pid(getpid());
 
     replconn_num = get_replconn_number(pg_conf_file);
