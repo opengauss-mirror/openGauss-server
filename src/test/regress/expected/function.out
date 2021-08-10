@@ -1491,3 +1491,121 @@ drop cascades to function sche1.subpro()
 drop cascades to function sche1.pro()
 -- clear option
 reset search_path;
+CREATE OR REPLACE FUNCTION func_increment_sql_1(i int, out result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    result_1 = i + 1;
+    result_2 = i * 10;
+    raise notice '%', result_1;
+    raise notice '%', result_2;
+return next;
+end;
+$$language plpgsql;
+SELECT func_increment_sql_1(1);
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_1
+NOTICE:  10
+CONTEXT:  referenced column: func_increment_sql_1
+ func_increment_sql_1 
+----------------------
+ (2,10)
+(1 row)
+
+CREATE OR REPLACE FUNCTION func_increment_sql_2(i int, inout result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    raise notice '%', result_1;
+    result_1 = i + 1;
+    result_2 = i * 10;
+    raise notice '%', result_1;
+    raise notice '%', result_2;
+return next;
+end;
+$$language plpgsql;
+--error
+SELECT func_increment_sql_2(1);
+ERROR:  function func_increment_sql_2(integer) does not exist
+LINE 1: SELECT func_increment_sql_2(1);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: func_increment_sql_2
+--success
+SELECT func_increment_sql_2(1,2);
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_2
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_2
+NOTICE:  10
+CONTEXT:  referenced column: func_increment_sql_2
+ func_increment_sql_2 
+----------------------
+ (2,10)
+(1 row)
+
+CREATE OR REPLACE FUNCTION fun_test_1(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_1(i);
+end;
+$$language plpgsql;
+select fun_test_1(1);
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_1
+SQL statement "SELECT func_increment_sql_1(i)"
+PL/pgSQL function fun_test_1(integer) line 3 at PERFORM
+referenced column: fun_test_1
+NOTICE:  10
+CONTEXT:  referenced column: func_increment_sql_1
+SQL statement "SELECT func_increment_sql_1(i)"
+PL/pgSQL function fun_test_1(integer) line 3 at PERFORM
+referenced column: fun_test_1
+ fun_test_1 
+------------
+ 
+(1 row)
+
+--error
+CREATE OR REPLACE FUNCTION fun_test_2(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_2(i);
+end;
+$$language plpgsql;
+ERROR:  function func_increment_sql_2 has no enough parameters
+CONTEXT:  compilation of PL/pgSQL function "fun_test_2" near line 1
+CREATE OR REPLACE FUNCTION fun_test_2(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_2(i,i+1);
+end;
+$$language plpgsql;
+select fun_test_2(1);
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_2
+SQL statement "SELECT func_increment_sql_2(i,i+1)"
+PL/pgSQL function fun_test_2(integer) line 3 at PERFORM
+referenced column: fun_test_2
+NOTICE:  2
+CONTEXT:  referenced column: func_increment_sql_2
+SQL statement "SELECT func_increment_sql_2(i,i+1)"
+PL/pgSQL function fun_test_2(integer) line 3 at PERFORM
+referenced column: fun_test_2
+NOTICE:  10
+CONTEXT:  referenced column: func_increment_sql_2
+SQL statement "SELECT func_increment_sql_2(i,i+1)"
+PL/pgSQL function fun_test_2(integer) line 3 at PERFORM
+referenced column: fun_test_2
+ fun_test_2 
+------------
+ 
+(1 row)
+
+DROP FUNCTION func_increment_sql_1;
+DROP FUNCTION func_increment_sql_2;
+DROP FUNCTION fun_test_1;
+DROP FUNCTION fun_test_2;
