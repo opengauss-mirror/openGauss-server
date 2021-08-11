@@ -1467,6 +1467,27 @@ char *parse_group_clause(List *group_clause, List *target_list)
     return NULL;
 }
 
+
+bool has_star(List *targetList)
+{
+    ListCell* target_cell = NULL;
+    foreach (target_cell, targetList) {
+        ResTarget* restarget = (ResTarget *)lfirst(target_cell);
+        if (nodeTag((Node *)restarget->val) == T_ColumnRef) {
+            ColumnRef* cref = NULL;
+            cref = (ColumnRef *)restarget->val;
+            ListCell* field = NULL;
+            foreach (field, cref->fields) {
+                if (nodeTag((Node *)lfirst(field)) == T_A_Star) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+
 char *parse_order_clause(List *order_clause, List *target_list)
 {
     if (order_clause == NULL)
@@ -1482,6 +1503,9 @@ char *parse_order_clause(List *order_clause, List *target_list)
         SortByDir dir = ((SortBy *)(lfirst(order_item)))->sortby_dir;
 
         if (nodeTag(node) == T_A_Const) {
+            if (has_star(target_list)) {
+                return NULL;
+            }
             node = transform_group_order_node(node, target_list);
         }
         if (nodeTag(node) != T_ColumnRef)
