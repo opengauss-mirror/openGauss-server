@@ -50,8 +50,8 @@ CATALOG(gs_model_warehouse,3991) BKI_ROWTYPE_OID(3994) BKI_SCHEMA_MACRO
     timestamp   createtime;     /* Model storage time */
     int4        processedtuples;
     int4        discardedtuples;
-    float4      pre_process_time;
-    float4      exec_time;
+    float4      preprocesstime;
+    float4      exectime;
     int4        iterations;
     Oid         outputtype;
 #ifdef CATALOG_VARLEN /* variable-length fields start here */
