@@ -2048,6 +2048,20 @@ static int GsBaseBackup(int argc, char** argv)
                 break;
         }
     }
+    
+    /* If port is not specified by using -p, obtain the port through environment variables */
+    if (dbport == NULL) {
+        char *value = NULL;
+        value = gs_getenv_r("PGPORT");
+        if (value != NULL) {
+            check_env_value_c(value);
+            dbport = inc_dbport(value);
+        } else {
+            fprintf(stderr, _("%s:The specified port is missing, it can be specified by -p parameter "
+                   "or import environment variables PGPORT.\n"), progname);
+            exit(1); 
+        }
+     }
 
     /*
      * Any non-option arguments?
