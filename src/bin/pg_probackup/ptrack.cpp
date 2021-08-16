@@ -54,6 +54,9 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 {
 	PGresult   *res;
 	char		start_lsn[17 + 1];
+	uint32      lsn_hi;
+	uint32      lsn_lo;
+	XLogRecPtr  cur_track_lsn;
 	char	   *params[2];
 	char       *saved        = NULL;
 	char       *blocknum_str = NULL;
@@ -63,23 +66,37 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 	int			blkcnt	= 0;
 	BlockNumber	blknum	= 0;
 	datapagemap_t pagemap;
+	int segno = -1;
+	char relpath[MAXPGPATH] = {0};
+	page_map_entry **segarrary = (page_map_entry **)pgut_malloc(sizeof(page_map_entry *) * 32000);
+	page_map_entry *pm_entry_seg = NULL;
 
 	errno_t rc = snprintf_s(start_lsn, sizeof(start_lsn), sizeof(start_lsn) - 1, "%X/%X",
                             (uint32) (lsn >> 32), (uint32) lsn);
-    securec_check_ss_c(rc, "\0", "\0");
+	securec_check_ss_c(rc, "\0", "\0");
 	params[0] = gs_pstrdup(start_lsn);
+	elog(INFO, "change bitmap start lsn location is %s", params[0]);
 
-    if (!current.from_replica) {
-        res = pgut_execute(backup_conn, "CHECKPOINT;", 0, NULL);
-        PQclear(res);
-    }
-
-	res = pgut_execute(backup_conn, "SELECT pg_cbm_tracked_location()", 0, NULL);
-	if (PQnfields(res) != 1) {
-		elog(ERROR, "cannot get cbm tracked lsn location");
+	for (;;) {
+		char *temp_lsn = NULL;	    
+		res = pgut_execute(backup_conn, "SELECT pg_cbm_tracked_location()", 0, NULL);
+		if (PQnfields(res) != 1) {
+		    elog(ERROR, "cannot get cbm tracked lsn location");
+		}
+		temp_lsn = pg_strdup(PQgetvalue(res, 0, 0));
+		ret = sscanf_s(temp_lsn, "%X/%X", &lsn_hi, &lsn_lo);
+		securec_check_for_sscanf_s(ret, 2, "\0", "\0");
+		pfree(temp_lsn);
+		cur_track_lsn = ((uint64) lsn_hi) << 32 | lsn_lo;
+		if (cur_track_lsn >= current.start_lsn) {
+		    break;
+		}
+		sleep(1);
+		PQclear(res);
 	}
 	params[1] = gs_pstrdup(PQgetvalue(res, 0, 0));
 	PQclear(res);
+	elog(INFO, "change bitmap end lsn location is %s", params[1]);
 
 	res = pgut_execute(backup_conn,
 					   "SELECT path,changed_block_number,changed_block_list "
@@ -92,45 +109,74 @@ pg_ptrack_get_pagemapset(PGconn *backup_conn, XLogRecPtr lsn)
 		elog(ERROR, "cannot get ptrack pagemapset");
 
 	/* Initialize bitmap */
-	pagemap.bitmap = NULL;
-	pagemap.bitmapsize = 0;
 
 	/* Construct database map */
 	for (i = 0; i < PQntuples(res); i++) {
-		page_map_entry *pm_entry = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
-
 		/* get path */
-		pm_entry->path = pgut_strdup(PQgetvalue(res, i, 0));
-
 		ret = sscanf_s(PQgetvalue(res, i, 1), "%d", &blkcnt);
 		securec_check_for_sscanf_s(ret, 1, "\0", "\0");
 
 		if (blkcnt == 1) {
+			pagemap.bitmap = NULL;
+			pagemap.bitmapsize = 0;
+			page_map_entry *pm_entry = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
 			ret = sscanf_s(PQgetvalue(res, i, 2), "%u", &blknum);
 			securec_check_for_sscanf_s(ret, 1, "\0", "\0");
 			datapagemap_add(&pagemap, blknum % ((BlockNumber) RELSEG_SIZE));
-		} else {
+			pm_entry->pagemap = (char *)pagemap.bitmap;
+			pm_entry->pagemapsize = pagemap.bitmapsize;
+			segno = blknum / ((BlockNumber) RELSEG_SIZE);
+			if (segno > 0 ) {
+				ret = snprintf_s(relpath, MAXPGPATH, MAXPGPATH - 1, "%s.%u",
+							     PQgetvalue(res, i, 0), segno);
+				securec_check_ss_c(ret, "\0", "\0");
+				pm_entry->path = pgut_strdup(relpath);
+			} else {
+				pm_entry->path = pgut_strdup(PQgetvalue(res, i, 0));
+			}
+			if (pagemapset == NULL) {
+				pagemapset = parray_new();
+			}
+			parray_append(pagemapset, pm_entry);
+		} else if (blkcnt > 1) {
+			if (pagemapset == NULL) {
+				pagemapset = parray_new();
+			}
+			rc = memset_s(segarrary, sizeof(page_map_entry *) * 32000, 0, sizeof(page_map_entry *) * 32000);
+			securec_check(rc, "\0", "\0");
 			blocknum_str = strtok_r(PQgetvalue(res, i, 2), ", ", &saved);
 			while (blocknum_str != NULL) {
 				ret = sscanf_s(blocknum_str, "%u", &blknum);
 				securec_check_for_sscanf_s(ret, 1, "\0", "\0");
+				segno = blknum / ((BlockNumber) RELSEG_SIZE);
+				if (segarrary[segno] == NULL) {
+					pm_entry_seg = (page_map_entry *) pgut_malloc(sizeof(page_map_entry));
+					segarrary[segno] = pm_entry_seg;
+					pagemap.bitmap = NULL;
+					pagemap.bitmapsize = 0;
+					if (segno > 0 ) {
+						ret = snprintf_s(relpath, MAXPGPATH, MAXPGPATH - 1, "%s.%u",
+										PQgetvalue(res, i, 0), segno);
+						securec_check_ss_c(ret, "\0", "\0");
+						pm_entry_seg->path = pgut_strdup(relpath);
+					} else {
+						pm_entry_seg->path = pgut_strdup(PQgetvalue(res, i, 0));
+					}
+					parray_append(pagemapset, pm_entry_seg);
+				} else {
+					pm_entry_seg = segarrary[segno];
+					pagemap.bitmap = (unsigned char*)pm_entry_seg->pagemap;
+					pagemap.bitmapsize = pm_entry_seg->pagemapsize;
+				}
 				datapagemap_add(&pagemap, blknum % ((BlockNumber) RELSEG_SIZE));
+				pm_entry_seg->pagemap = (char *)pagemap.bitmap;
+				pm_entry_seg->pagemapsize = pagemap.bitmapsize;
 				blocknum_str = strtok_r(NULL, ", ", &saved);
 			}
 		}
-
-		pm_entry->pagemap = (char *)pagemap.bitmap;
-		pm_entry->pagemapsize = pagemap.bitmapsize;
-
-		pagemap.bitmap = NULL;
-		pagemap.bitmapsize = 0;
-
-		if (pagemapset == NULL)
-			pagemapset = parray_new();
-
-		parray_append(pagemapset, pm_entry);
 	}
 
+	free(segarrary);
 	PQclear(res);
 
 	return pagemapset;
