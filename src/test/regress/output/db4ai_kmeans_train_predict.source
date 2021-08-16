@@ -1,0 +1,900 @@
+-- Setting parameters
+SET statement_timeout = 0;
+SET xmloption = content;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET search_path = public;
+SET default_tablespace = '';
+SET default_with_oids = false;
+-- Creating data tables
+CREATE TABLE multivariate_7_1000_10 (
+    id INTEGER NOT NULL,
+    "position" DOUBLE PRECISION[] NOT NULL,
+    closest_centroid INTEGER NOT NULL,
+    l1_distance DOUBLE PRECISION NOT NULL,
+    l2_distance DOUBLE PRECISION NOT NULL,
+    l2_squared_distance DOUBLE PRECISION NOT NULL,
+    linf_distance DOUBLE PRECISION NOT NULL
+)
+WITH (orientation=row, compression=no);
+CREATE TABLE multivariate_7_1000_10_real_centroids (
+    id INTEGER,
+    "position" DOUBLE PRECISION[],
+    closest_centroid INTEGER,
+    l1_distance DOUBLE PRECISION,
+    l2_distance DOUBLE PRECISION,
+    l2_squared_distance DOUBLE PRECISION,
+    linf_distance DOUBLE PRECISION
+)
+WITH (orientation=row, compression=no);
+-- Filling out data tables
+COPY multivariate_7_1000_10 (id, "position", closest_centroid, l1_distance, l2_distance, l2_squared_distance, linf_distance) FROM stdin;
+;
+COPY multivariate_7_1000_10_real_centroids (id, "position", closest_centroid, l1_distance, l2_distance, l2_squared_distance, linf_distance) FROM stdin;
+;
+-- Running the tests
+-- Random++
+CREATE MODEL my_kmeans_pp_l1 USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L1', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L1
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 40
+NOTICE:  *** k-means++ begin: consolidating 87 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 5529.024537
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l1_distance) FROM multivariate_7_1000_10 AS l1_approx;
+       sum       
+-----------------
+ 5554.1547546754
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           6
+  8 |           5
+  2 |           1
+ 10 |           2
+  5 |           3
+  3 |           9
+  4 |           7
+  1 |           4
+  9 |           8
+  7 |          10
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM (SELECT -67.9280164728999978::DOUBLE PRECISION AS position);
+ERROR:  k-means predict: only double precision array of coordinates is accepted
+CONTEXT:  referenced column: centroid_id
+SELECT PREDICT BY my_kmeans_pp_l1(features position_1, position_2) AS centroid_id FROM (SELECT ARRAY[135.529122074100002,1.38508608310000003,75.1363695022999991,-157.490917820600004,-23.7378253056999995,33.6490592628000016,-7.9599672791999998]::DOUBLE PRECISION[] AS position_1, ARRAY[-73.1345967305999949,-62.9817681270000023,207.069457080299998,-90.3006007433999969,173.55455376110001,138.308886012699986,-37.5366639877000026]::DOUBLE PRECISION[] AS position_2);
+ERROR:  k-means predict: only a single attribute containing the coordinates is accepted
+CONTEXT:  referenced column: centroid_id
+SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM (SELECT NULL::DOUBLE PRECISION[] AS position);
+ERROR:  k-means predict: array of coordinates cannot be null
+CONTEXT:  referenced column: centroid_id
+CREATE MODEL my_kmeans_pp_l2 USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 40
+NOTICE:  *** k-means++ begin: consolidating 87 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 2531.128891
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l2_distance) FROM multivariate_7_1000_10 AS l2_approx;
+       sum       
+-----------------
+ 2547.1388079034
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           6
+  8 |           5
+  2 |           1
+ 10 |           2
+  5 |           3
+  3 |           9
+  4 |           7
+  1 |           4
+  9 |           8
+  7 |          10
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+CREATE MODEL my_kmeans_pp_l2_sqr USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 40
+NOTICE:  *** k-means++ begin: consolidating 87 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 6862.937872
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l2_squared_distance) FROM multivariate_7_1000_10 AS l2_squared_approx;
+       sum        
+------------------
+ 6939.87196307609
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           6
+  8 |           5
+  2 |           1
+ 10 |           2
+  5 |           3
+  3 |           9
+  4 |           7
+  1 |           4
+  9 |           8
+  7 |          10
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+CREATE MODEL my_kmeans_pp_linf USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'Linf', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value Linf
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 40
+NOTICE:  *** k-means++ begin: consolidating 87 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 1715.267442
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(linf_distance) FROM multivariate_7_1000_10 AS linf_approx;
+       sum       
+-----------------
+ 1466.8539598348
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           6
+  8 |           5
+  2 |           1
+ 10 |           2
+  5 |           3
+  3 |           9
+  4 |           7
+  1 |           4
+  9 |           8
+  7 |          10
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+DROP MODEL my_kmeans_pp_l1;
+DROP MODEL my_kmeans_pp_l2;
+DROP MODEL my_kmeans_pp_l2_sqr;
+DROP MODEL my_kmeans_pp_linf;
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_pp_l1".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_pp_l2".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_pp_l2_sqr".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_pp_linf".
+CONTEXT:  referenced column: centroid_id
+-- K-Means||
+CREATE MODEL my_kmeans_bb_l1 USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L1', seeding_function = 'KMeans||', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L1
+NOTICE:  Hyperparameter seeding_function takes value KMeans||
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** k-means|| oversampling factor: 4.000000, expected number of candidates per round: 40
+NOTICE:  *** k-means++ begin: consolidating 270 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 5529.024537
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l1_distance) FROM multivariate_7_1000_10 AS l1_approx;
+       sum       
+-----------------
+ 5554.1547546754
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           4
+  8 |           1
+  2 |           2
+ 10 |           6
+  5 |           8
+  3 |           5
+  4 |           7
+  1 |          10
+  9 |           3
+  7 |           9
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM (SELECT -67.9280164728999978::DOUBLE PRECISION AS position);
+ERROR:  k-means predict: only double precision array of coordinates is accepted
+CONTEXT:  referenced column: centroid_id
+SELECT PREDICT BY my_kmeans_bb_l1(features position_1, position_2) AS centroid_id FROM (SELECT ARRAY[135.529122074100002,1.38508608310000003,75.1363695022999991,-157.490917820600004,-23.7378253056999995,33.6490592628000016,-7.9599672791999998]::DOUBLE PRECISION[] AS position_1, ARRAY[-73.1345967305999949,-62.9817681270000023,207.069457080299998,-90.3006007433999969,173.55455376110001,138.308886012699986,-37.5366639877000026]::DOUBLE PRECISION[] AS position_2);
+ERROR:  k-means predict: only a single attribute containing the coordinates is accepted
+CONTEXT:  referenced column: centroid_id
+SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM (SELECT NULL::DOUBLE PRECISION[] AS position);
+ERROR:  k-means predict: array of coordinates cannot be null
+CONTEXT:  referenced column: centroid_id
+CREATE MODEL my_kmeans_bb_l2 USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2', seeding_function = 'KMeans||', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2
+NOTICE:  Hyperparameter seeding_function takes value KMeans||
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** k-means|| oversampling factor: 4.000000, expected number of candidates per round: 40
+NOTICE:  *** k-means++ begin: consolidating 270 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 2531.128891
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l2_distance) FROM multivariate_7_1000_10 AS l2_approx;
+       sum       
+-----------------
+ 2547.1388079034
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           4
+  8 |           1
+  2 |           2
+ 10 |           6
+  5 |           8
+  3 |           5
+  4 |           7
+  1 |          10
+  9 |           3
+  7 |           9
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+CREATE MODEL my_kmeans_bb_l2_sqr USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'KMeans||', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value KMeans||
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** k-means|| oversampling factor: 4.000000, expected number of candidates per round: 40
+NOTICE:  *** k-means++ begin: consolidating 270 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 6862.937872
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(l2_squared_distance) FROM multivariate_7_1000_10 AS l2_squared_approx;
+       sum        
+------------------
+ 6939.87196307609
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           4
+  8 |           1
+  2 |           2
+ 10 |           6
+  5 |           8
+  3 |           5
+  4 |           7
+  1 |          10
+  9 |           3
+  7 |           9
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+CREATE MODEL my_kmeans_bb_linf USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'Linf', seeding_function = 'KMeans||', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value Linf
+NOTICE:  Hyperparameter seeding_function takes value KMeans||
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** k-means|| oversampling factor: 4.000000, expected number of candidates per round: 40
+NOTICE:  *** k-means++ begin: consolidating 270 candidates to 10 centroid(s)
+NOTICE:  *** Number of centroids constructed:    10
+NOTICE:  *** Value of global objective function: 1715.267442
+NOTICE:  *** Seed:                               1255025990
+SELECT SUM(linf_distance) FROM multivariate_7_1000_10 AS linf_approx;
+       sum       
+-----------------
+ 1466.8539598348
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |           4
+  8 |           1
+  2 |           2
+ 10 |           6
+  5 |           8
+  3 |           5
+  4 |           7
+  1 |          10
+  9 |           3
+  7 |           9
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+DROP MODEL my_kmeans_bb_l1;
+DROP MODEL my_kmeans_bb_l2;
+DROP MODEL my_kmeans_bb_l2_sqr;
+DROP MODEL my_kmeans_bb_linf;
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l1(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_bb_l1".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_bb_l2".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_l2_sqr(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_bb_l2_sqr".
+CONTEXT:  referenced column: centroid_id
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_bb_linf(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ERROR:  There is no model called "my_kmeans_bb_linf".
+CONTEXT:  referenced column: centroid_id
+-- Wrong parameters
+-- Number of iterations
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 0, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 0
+ERROR:  max_iterations must be in [1, 2147483647]
+-- Number of centroids
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 0, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 0
+ERROR:  num_centroids must be in [1, 1000000]
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 1000001, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 1000001
+ERROR:  num_centroids must be in [1, 1000000]
+-- Tolerance
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = -0.1, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value -0.100000
+ERROR:  tolerance must be in (0, 1.0]
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 1.1, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 1.100000
+ERROR:  tolerance must be in (0, 1.0]
+-- Batch size
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 0, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 0
+ERROR:  batch_size must be in [1, 1000000]
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000001, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000001
+ERROR:  batch_size must be in [1, 1000000]
+-- Num of features (not matching the data)
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 9, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 9
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 0
+NOTICE:  *** Number of dead points:  1005
+ERROR:  k-means exec: no valid point found (no input array seems to be a one-dimensional array, or no point seems to be fully dimensional (perhaps all points have a null dimension?))
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 5, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 5
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 0
+NOTICE:  *** Number of dead points:  1005
+ERROR:  k-means exec: no valid point found (no input array seems to be a one-dimensional array, or no point seems to be fully dimensional (perhaps all points have a null dimension?))
+-- Distance function
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'X', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value X
+ERROR:  No known distance function chosen. Current candidates are: L1, L2, L2_Squared (default), Linf
+-- Seeding function
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'X', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value X
+ERROR:  No known seeding function chosen. Current candidates are: Random++ (default), KMeans||
+-- Verbosity
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = -1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value -1
+ERROR:  Verbosity level must be between 0 (no output), 1 (less output), or 2 (full output)
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 3, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 3
+ERROR:  Verbosity level must be between 0 (no output), 1 (less output), or 2 (full output)
+-- Seed
+CREATE MODEL my_kmeans_pp_empty USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = -1;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value -1
+ERROR:  seed must be in [0, 2147483647]
+-- As many centroids as data (and more)
+CREATE MODEL my_kmeans_pp_all_centroids_1kc USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 1000, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 1000
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 4000
+NOTICE:  *** k-means++ begin: consolidating 1000 candidates to 1000 centroid(s)
+NOTICE:  *** Number of centroids constructed:    1000
+NOTICE:  *** Value of global objective function: 0.000000
+NOTICE:  *** Seed:                               1255025990
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_1kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_1kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_1kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_all_centroids_1kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |         415
+  8 |         655
+  2 |         843
+ 10 |         274
+  5 |         760
+  3 |         271
+  4 |         615
+  1 |         975
+  9 |         945
+  7 |         826
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_all_centroids_1kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+CREATE MODEL my_kmeans_pp_all_centroids_10kc USING kmeans FROM (SELECT position FROM multivariate_7_1000_10) WITH max_iterations = 50, num_centroids = 10000, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L2_Squared', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10000
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L2_Squared
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+NOTICE:  *** Initial statistics gathered:
+NOTICE:  *** Number of valid points: 1000
+NOTICE:  *** Number of dead points:  5
+NOTICE:  *** random++ oversampling factor: 4.000000, expected number of candidates: 40000
+NOTICE:  *** k-means++ begin: consolidating 1000 candidates to 1000 centroid(s)
+NOTICE:  *** Number of centroids constructed:    1000
+NOTICE:  *** Value of global objective function: 0.000000
+NOTICE:  *** Seed:                               1255025990
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_10kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids);
+ count 
+-------
+    11
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_10kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0);
+ count 
+-------
+    10
+(1 row)
+
+SELECT COUNT(DISTINCT(centroid_id)) FROM (SELECT PREDICT BY my_kmeans_pp_all_centroids_10kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0);
+ count 
+-------
+     1
+(1 row)
+
+SELECT id, PREDICT BY my_kmeans_pp_all_centroids_10kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id > 0;
+ id | centroid_id 
+----+-------------
+  6 |         415
+  8 |         655
+  2 |         843
+ 10 |         274
+  5 |         760
+  3 |         271
+  4 |         615
+  1 |         975
+  9 |         945
+  7 |         826
+(10 rows)
+
+SELECT id, PREDICT BY my_kmeans_pp_all_centroids_10kc(features position) AS centroid_id FROM multivariate_7_1000_10_real_centroids where centroid_id <= 0;
+ id | centroid_id 
+----+-------------
+ 11 |          -1
+ 12 |          -1
+ 13 |          -1
+ 14 |          -1
+ 15 |          -1
+(5 rows)
+
+DROP MODEL my_kmeans_pp_all_centroids_1kc;
+DROP MODEL my_kmeans_pp_all_centroids_10kc;
+-- Wrong input format
+CREATE MODEL my_kmeans_pp_no_array USING kmeans FROM (SELECT -67.9280164728999978,-3.90913184339999997,89.3555545521000028,-1.76477945900000011,-129.65569087770001,-66.7980506008999981,18.1708778307999985) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L1', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L1
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+ERROR:  k-means exec: data is not of type float8 (double precision) array
+CREATE MODEL my_kmeans_pp_more_attr USING kmeans FROM (SELECT ARRAY[135.529122074100002,1.38508608310000003,75.1363695022999991,-157.490917820600004,-23.7378253056999995,33.6490592628000016,-7.9599672791999998]::DOUBLE PRECISION[], ARRAY[-73.1345967305999949,-62.9817681270000023,207.069457080299998,-90.3006007433999969,173.55455376110001,138.308886012699986,-37.5366639877000026]::DOUBLE PRECISION[]) WITH max_iterations = 50, num_centroids = 10, tolerance = 0.00001, batch_size = 1000, num_features = 7, distance_function = 'L1', seeding_function = 'Random++', verbose = 1, seed = 1255025990;
+NOTICE:  Hyperparameter max_iterations takes value 50
+NOTICE:  Hyperparameter num_centroids takes value 10
+NOTICE:  Hyperparameter tolerance takes value 0.000010
+NOTICE:  Hyperparameter batch_size takes value 1000
+NOTICE:  Hyperparameter num_features takes value 7
+NOTICE:  Hyperparameter distance_function takes value L1
+NOTICE:  Hyperparameter seeding_function takes value Random++
+NOTICE:  Hyperparameter verbose takes value 1
+NOTICE:  Hyperparameter seed takes value 1255025990
+ERROR:  k-means exec: relation should contain only a single attribute (point coordinates in a double precision array)
+-- Cleanup
+DROP TABLE IF EXISTS multivariate_7_1000_10;
+DROP TABLE IF EXISTS multivariate_7_1000_10_real_centroids;
+SELECT 'DB4AI KMEANS TEST COMPLETED';
+          ?column?           
+-----------------------------
+ DB4AI KMEANS TEST COMPLETED
+(1 row)
+

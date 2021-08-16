@@ -21,6 +21,7 @@
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_matview.h"
+#include "catalog/gs_model.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
@@ -1421,7 +1422,9 @@ static void doDeletion(const ObjectAddress* object, int flags)
         case OCLASS_SYNONYM:
             RemoveSynonymById(object->objectId);
             break;
-
+        case OCLASS_DB4AI_MODEL:
+            remove_model_by_oid(object->objectId);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized object class: %u", object->classId)));
@@ -2371,6 +2374,8 @@ ObjectClass getObjectClass(const ObjectAddress* object)
             return OCLASS_GLOBAL_SETTING_ARGS;
         case ClientLogicColumnSettingsArgsId:
             return OCLASS_COLUMN_SETTING_ARGS;
+        case ModelRelationId:
+            return OCLASS_DB4AI_MODEL;
         default:
             break;
     }

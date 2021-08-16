@@ -397,7 +397,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
 
                 PLy_input_tuple_funcs(&args, tuptable->tupdesc);
                 for (i = 0; i < rows; i++) {
-                    PyObject* row = PLyDict_FromTuple(&args, tuptable->vals[i], tuptable->tupdesc);
+                    PyObject *row = PLyDict_FromTuple(&args, tuptable->vals[i], tuptable->tupdesc, true);
 
                     PyList_SetItem(result->rows, i, row);
                 }

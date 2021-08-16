@@ -735,6 +735,8 @@ function install_gaussdb()
             ./configure $shared_opt CFLAGS="-O2 -g3 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         elif [ "$version_mode"x == "fiudebug"x ]; then
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert --disable-jemalloc CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
+        elif [ "$version_mode"x == "mini"x ]; then
+            ./configure $shared_opt CFLAGS="-O2 ${GAUSSDB_EXTRA_FLAGS}" --disable-llvm CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         else
             ./configure $shared_opt CFLAGS="-O0 ${GAUSSDB_EXTRA_FLAGS}" --enable-mot --enable-debug --enable-cassert CC=g++ $extra_config_opt >> "$LOG_FILE" 2>&1
         fi
@@ -748,6 +750,7 @@ function install_gaussdb()
     echo "Begin make install MPPDB server" >> "$LOG_FILE" 2>&1
     make clean >> "$LOG_FILE" 2>&1
 
+    echo "[makemppdb] $(date +%y-%m-%d' '%T): Begin to make compile."
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
     make -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
@@ -761,6 +764,7 @@ function install_gaussdb()
             fi
         fi
     fi
+    echo "[makemppdb] $(date +%y-%m-%d' '%T): Make compile successfully."
 
     cd "$ROOT_DIR/contrib/pg_upgrade_support"
     make clean >> "$LOG_FILE" 2>&1

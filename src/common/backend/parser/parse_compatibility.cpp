@@ -143,7 +143,7 @@ static void insert_jointerm(OperatorPlusProcessContext* ctx, Expr* expr, RangeTb
     ListCell* lc = NULL;
     JoinTerm* jterm = NULL;
 
-    Assert(IsA(expr, A_Expr));
+    Assert(IsA(expr, A_Expr) || IsA(expr, NullTest));
 
     /* lrte is the RTE with operator "(+)", it couldn't be NULL */
     Assert(lrte != NULL);
@@ -567,8 +567,8 @@ bool plus_outerjoin_precheck(const OperatorPlusProcessContext* ctx, Node* expr, 
         return false;
     }
 
-    /* Only support A_Expr with "(+)" for now */
-    if (list_length(lhasplus) && !IsA(expr, A_Expr)) {
+    /* Only support A_Expr and NullTest with "(+)" for now */
+    if (list_length(lhasplus) && !IsA(expr, A_Expr) && !IsA(expr, NullTest)) {
         ereport(
             ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Operator \"(+)\" can only be used in common expression.")));
     }

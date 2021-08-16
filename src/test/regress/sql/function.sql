@@ -864,3 +864,65 @@ drop schema sche1 cascade;
 
 -- clear option
 reset search_path;
+
+CREATE OR REPLACE FUNCTION func_increment_sql_1(i int, out result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    result_1 = i + 1;
+    result_2 = i * 10;
+    raise notice '%', result_1;
+    raise notice '%', result_2;
+return next;
+end;
+$$language plpgsql;
+SELECT func_increment_sql_1(1);
+
+CREATE OR REPLACE FUNCTION func_increment_sql_2(i int, inout result_1 bigint, out result_2 bigint)
+returns SETOF RECORD
+as $$
+begin
+    raise notice '%', result_1;
+    result_1 = i + 1;
+    result_2 = i * 10;
+    raise notice '%', result_1;
+    raise notice '%', result_2;
+return next;
+end;
+$$language plpgsql;
+--error
+SELECT func_increment_sql_2(1);
+--success
+SELECT func_increment_sql_2(1,2);
+
+CREATE OR REPLACE FUNCTION fun_test_1(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_1(i);
+end;
+$$language plpgsql;
+select fun_test_1(1);
+
+--error
+CREATE OR REPLACE FUNCTION fun_test_2(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_2(i);
+end;
+$$language plpgsql;
+
+CREATE OR REPLACE FUNCTION fun_test_2(i int)
+RETURNS void 
+as $$
+begin
+   PERFORM func_increment_sql_2(i,i+1);
+end;
+$$language plpgsql;
+select fun_test_2(1);
+
+DROP FUNCTION func_increment_sql_1;
+DROP FUNCTION func_increment_sql_2;
+DROP FUNCTION fun_test_1;
+DROP FUNCTION fun_test_2;

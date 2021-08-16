@@ -940,6 +940,7 @@ void CodeGenProcessInitialize()
     }
 }
 
+
 /**
  * @Description : Clean up LLVM enviroment resource
  *				  before exit postmaster.

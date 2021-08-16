@@ -19,6 +19,7 @@
 #include "access/sysattr.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
+#include "catalog/gs_model.h"
 #include "catalog/objectaddress.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_cast.h"
@@ -113,6 +114,7 @@ static THR_LOCAL const ObjectPropertyType ObjectProperty[] = {{CastRelationId, C
         CLAOID,
         Anum_pg_opclass_opcnamespace,
     },
+    {ModelRelationId, GsModelOidIndexId, DB4AI_MODEL, InvalidAttrNumber},
     {OperatorRelationId, OperatorOidIndexId, OPEROID, Anum_pg_operator_oprnamespace},
     {OperatorFamilyRelationId, OpfamilyOidIndexId, OPFAMILYOID, Anum_pg_opfamily_opfnamespace},
     {AuthIdRelationId, AuthIdOidIndexId, AUTHOID, InvalidAttrNumber},
@@ -204,6 +206,7 @@ ObjectAddress get_object_address(
                 address = get_object_address_relobject(objtype, objname, &relation, missing_ok);
                 break;
             case OBJECT_DATABASE:
+            case OBJECT_DB4AI_MODEL:
             case OBJECT_EXTENSION:
             case OBJECT_TABLESPACE:
             case OBJECT_ROLE:
@@ -394,6 +397,9 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
             case OBJECT_DATABASE:
                 msg = gettext_noop("database name cannot be qualified");
                 break;
+            case OBJECT_DB4AI_MODEL:
+                msg = gettext_noop("model name cannot be qualified");
+                break;
             case OBJECT_EXTENSION:
                 msg = gettext_noop("extension name cannot be qualified");
                 break;
@@ -438,6 +444,11 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
         case OBJECT_DATABASE:
             address.classId = DatabaseRelationId;
             address.objectId = get_database_oid(name, missing_ok);
+            address.objectSubId = 0;
+            break;
+        case OBJECT_DB4AI_MODEL:
+            address.classId = ModelRelationId;
+            address.objectId = get_model_oid(name, missing_ok);
             address.objectSubId = 0;
             break;
         case OBJECT_EXTENSION:
@@ -816,6 +827,7 @@ void check_object_ownership(
             if (!pg_type_ownercheck(address.objectId, roleid))
                 aclcheck_error_type(ACLCHECK_NO_PRIV, address.objectId);
             break;
+        case OBJECT_DB4AI_MODEL:
         case OBJECT_DOMAIN:
         case OBJECT_ATTRIBUTE:
             if (!pg_type_ownercheck(address.objectId, roleid))

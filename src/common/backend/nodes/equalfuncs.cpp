@@ -694,7 +694,7 @@ static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
     COMPARE_NODE_FIELD(updateTlist);
     COMPARE_NODE_FIELD(exclRelTlist);
     COMPARE_SCALAR_FIELD(exclRelIndex);
-
+    COMPARE_SCALAR_FIELD(partKeyUpsert);
     return true;
 }
 /*
@@ -2428,6 +2428,7 @@ static bool _equalColumnDef(const ColumnDef* a, const ColumnDef* b)
     COMPARE_SCALAR_FIELD(cmprs_mode);
     COMPARE_NODE_FIELD(raw_default);
     COMPARE_NODE_FIELD(cooked_default);
+    COMPARE_SCALAR_FIELD(generatedCol);
     COMPARE_NODE_FIELD(collClause);
     COMPARE_NODE_FIELD(clientLogicColumnRef);
     COMPARE_SCALAR_FIELD(collOid);
@@ -2527,6 +2528,7 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_BITMAPSET_FIELD(selectedCols);
     COMPARE_BITMAPSET_FIELD(insertedCols);
     COMPARE_BITMAPSET_FIELD(updatedCols);
+    COMPARE_BITMAPSET_FIELD(extraUpdatedCols);
     COMPARE_SCALAR_FIELD(orientation);
     COMPARE_NODE_FIELD(securityQuals);
     COMPARE_SCALAR_FIELD(subquery_pull_up);

@@ -55,6 +55,7 @@
 #include "optimizer/prep.h"
 #include "optimizer/var.h"
 #include "rewrite/rewriteDefine.h"
+#include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
 #include "catalog/storage.h"
@@ -1824,6 +1825,28 @@ bool PartitionInvisibleMetadataKeep(Datum datumRelOptions)
     }
 
     return ret;
+}
+
+/* Check whether a partition is properly used. */
+bool PartitionParentOidIsLive(Datum parentDatum)
+{
+    Oid parentid = InvalidOid;
+    HeapTuple partTuple = NULL;
+
+    if (!PointerIsValid(parentDatum)) {
+        return false;
+    }
+
+    parentid = DatumGetObjectId(parentDatum);
+
+    /* Get table information from syscache */
+    partTuple = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(parentid), LOG);
+    if (HeapTupleIsValid(partTuple)) {
+        ReleaseSysCache(partTuple);
+        return true;
+    }
+
+    return false;
 }
 
 /*

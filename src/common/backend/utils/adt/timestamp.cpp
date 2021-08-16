@@ -5777,8 +5777,14 @@ void timestamp_CalculateFields(TimestampTz* dt1, TimestampTz* dt2, fsec_t* fsec,
 void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo, TimestampTz nowtime,
     TimestampTz timeout, TimestampTz lastTimestamp, TimestampTz heartbeat)
 {
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, nowtime);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->timeoutStamp, MAXTIMESTAMPLEN + 1, timeout);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, lastTimestamp);
-    COPY_AND_CHECK_TIMESTAMP(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, heartbeat);
+    // timestamptz_to_str returns char[MAXTIMESTAMPLEN + 1]
+    errno_t rc;
+    rc = memcpy_s(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(nowtime), MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");    
+    rc = memcpy_s(timeStampInfo->timeoutStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(timeout), MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");    
+    rc = memcpy_s(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(lastTimestamp), MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");    
+    rc = memcpy_s(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(heartbeat), MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");    
 }

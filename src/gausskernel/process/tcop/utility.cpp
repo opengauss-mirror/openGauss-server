@@ -102,6 +102,7 @@
 #include "gs_policy/gs_policy_audit.h"
 #include "gs_policy/policy_common.h"
 #include "client_logic/client_logic.h"
+#include "db4ai/create_model.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "pgxc/pgFdwRemote.h"
 #include "pgxc/globalStatistic.h"
@@ -6163,9 +6164,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6222,9 +6220,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_AlterResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-            DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6245,9 +6240,6 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_DropResourcePoolStmt:
-#ifndef ENABLE_MULTIPLE_NODES
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6658,6 +6650,13 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 (void)process_column_settings((CreateClientLogicColumn *)parse_tree);
             }
             break;
+
+        case T_CreateModelStmt:{ // DB4AI
+
+            exec_create_model((CreateModelStmt*) parse_tree, query_string, params, completion_tag);
+
+            break;
+        }
         default: {
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -7738,6 +7737,9 @@ const char* CreateCommandTag(Node* parse_tree)
                 case OBJECT_CONVERSION:
                     tag = "DROP CONVERSION";
                     break;
+                case OBJECT_DB4AI_MODEL:
+                    tag = "DROP MODEL";
+                    break;
                 case OBJECT_SCHEMA:
                     tag = "DROP SCHEMA";
                     break;
@@ -8398,6 +8400,9 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
         case T_ShutdownStmt:
             tag = "SHUTDOWN";
+            break;
+        case T_CreateModelStmt:
+            tag = "CREATE MODEL";
             break;
 
         default:
@@ -9145,6 +9150,9 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_ShutdownStmt:
             lev = LOGSTMT_ALL;
             break;
+        case T_CreateModelStmt: // DB4AI
+            lev = LOGSTMT_ALL;
+            break;
 
         default:
             elog(WARNING, "unrecognized node type: %d", (int)nodeTag(parse_tree));
@@ -9446,30 +9454,6 @@ bool IsVariableinBlackList(const char* name)
 }
 
 /*
- * return true if the extension can be uninstall
- */
-bool DropExtensionIsSupported(const char* query_string)
-{
-    char* lower_string = lowerstr(query_string);
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") ||
-        strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw") ||
-        strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink") ||
-        strstr(lower_string, "db_b_parser") || strstr(lower_string, "db_a_parser") ||
-        strstr(lower_string, "db_c_parser") || strstr(lower_string, "db_pg_parser"))) {
-#else
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
-#endif
-        pfree_ext(lower_string);
-        return true;
-    } else {
-        pfree_ext(lower_string);
-        return false;
-    }
-}
-
-/*
  * Check if the object is in blacklist, if true, ALTER/DROP operation of the object is disabled.
  * Note that only prescribed extensions are able droppable.
  */
@@ -9480,12 +9464,8 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
 
     switch (obj_type) {
         case OBJECT_EXTENSION:
-            tag = "EXTENSION";
-            /* Check if the extension is provided officially */
-            if (DropExtensionIsSupported(query_string))
-                return;
-            else
-                break;
+            /* Check black list in RemoveObjects */
+            return;
 #ifdef ENABLE_MULTIPLE_NODES
         case OBJECT_AGGREGATE:
             tag = "AGGREGATE";

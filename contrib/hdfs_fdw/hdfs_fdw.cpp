@@ -1434,6 +1434,7 @@ static void HdfsEndForeignScan(ForeignScanState* scanState)
         }
     }
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * LLVM optimization information should be shown. We check the query
      * uses LLVM optimization or not.
@@ -1502,6 +1503,7 @@ static void HdfsEndForeignScan(ForeignScanState* scanState)
             }
         }
     }
+#endif
 
     /* clears all file related memory */
     if (NULL != executionState->fileReader) {

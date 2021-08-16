@@ -301,7 +301,7 @@ static  bool            last_pragma;
  * Some of these are not directly referenced in this file, but they must be
  * here anyway.
  */
-%token <str>	IDENT FCONST SCONST BCONST XCONST Op CmpOp COMMENTSTRING
+%token <str>	IDENT FCONST SCONST BCONST VCONST XCONST Op CmpOp COMMENTSTRING
 %token <ival>	ICONST PARAM
 %token			TYPECAST ORA_JOINOP DOT_DOT COLON_EQUALS PARA_EQUALS
 
@@ -3285,6 +3285,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
     int nparams = 0;
     int nfields = 0;
     int narg = 0;
+    int inArgNum = 0;
     int i= 0;
     int tok = 0;
     Oid *p_argtypes = NULL;
@@ -3372,6 +3373,20 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
         }
         /* get the all args informations, only "in" parameters if p_argmodes is null */
         narg = get_func_arg_info(proctup,&p_argtypes, &p_argnames, &p_argmodes);
+        if (p_argmodes)
+        {
+            for (i = 0; i < narg; i++)
+            {
+                if (p_argmodes[i] == 'i' || p_argmodes[i] == 'b')
+                {
+                    inArgNum++;
+                }
+            }
+        }
+        else
+        {
+            inArgNum = narg;
+        }
         procStruct = (Form_pg_proc) GETSTRUCT(proctup);
         ndefaultargs = procStruct->pronargdefaults;
         ReleaseSysCache(proctup);
@@ -3701,7 +3716,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
         }
     }
     
-    if (!multi_func && narg - i >  ndefaultargs)
+    if (!multi_func && inArgNum - i >  ndefaultargs)
         ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                  errmsg("function %s has no enough parameters", sqlstart)));

@@ -1,0 +1,127 @@
+select oid, * from pg_proc where proname in ('first', 'first_transition', 'last', 'last_transition') order by oid;
+ oid  |     proname      | pronamespace | proowner | prolang | procost | prorows | provariadic | protransform | proisagg | proiswindow | prosecdef | proleakproof | proisstrict | proretset | provolatile | pronargs | pronargdefaults | prorettype | proargtypes | proallargtypes | proargmodes | proargnames | proargdefaults |      prosrc      | probin | proconfig | proacl | prodefaultargpos | fencedmode | proshippable | propackage | prokind 
+------+------------------+--------------+----------+---------+---------+---------+-------------+--------------+----------+-------------+-----------+--------------+-------------+-----------+-------------+----------+-----------------+------------+-------------+----------------+-------------+-------------+----------------+------------------+--------+-----------+--------+------------------+------------+--------------+------------+---------
+ 6558 | first_transition |           11 |       10 |      12 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | i           |        2 |               0 |       2283 | 2283 2283   |                |             |             |                | first_transition |        |           |        |                  | f          |              | f          | f
+ 6559 | last_transition  |           11 |       10 |      12 |       1 |       0 |           0 | -            | f        | f           | f         | f            | t           | f         | i           |        2 |               0 |       2283 | 2283 2283   |                |             |             |                | last_transition  |        |           |        |                  | f          |              | f          | f
+ 6560 | first            |           11 |       10 |      12 |       1 |       0 |           0 | -            | t        | f           | f         | f            | f           | f         | i           |        1 |               0 |       2283 | 2283        |                |             |             |                | aggregate_dummy  |        |           |        |                  | f          |              | f          | f
+ 6561 | last             |           11 |       10 |      12 |       1 |       0 |           0 | -            | t        | f           | f         | f            | f           | f         | i           |        1 |               0 |       2283 | 2283        |                |             |             |                | aggregate_dummy  |        |           |        |                  | f          |              | f          | f
+(4 rows)
+
+create table first_last_test(a int, b int, c int, d int);
+select first(a ORDER BY a), last(a ORDER BY a) from first_last_test;
+ first | last 
+-------+------
+       |     
+(1 row)
+
+insert into first_last_test values
+(1,    1,    1,    NULL),
+(1,    2,    3,    NULL),
+(1,    4,    2,    NULL),
+(2,    1,    5,    NULL),
+(2,    3,    NULL, NULL),
+(3,    1,    4,    NULL),
+(3,    NULL, 2,    NULL),
+(4,    4,    5,    NULL),
+(4,    3,    1,    NULL),
+(4,    NULL, NULL, NULL),
+(5,    4,    3,    NULL),
+(5,    5,    4,    NULL);
+select first(a ORDER BY a), last(a ORDER BY a) from first_last_test;
+ first | last 
+-------+------
+     1 |    5
+(1 row)
+
+select a, first(b ORDER BY c), last(b ORDER BY c) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    2
+ 2 |     1 |    3
+ 3 |     1 |    1
+ 4 |     3 |    4
+ 5 |     4 |    5
+(5 rows)
+
+select a, first(b ORDER BY c DESC), last(b ORDER BY c DESC) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     2 |    1
+ 2 |     3 |    1
+ 3 |     1 |    1
+ 4 |     4 |    3
+ 5 |     5 |    4
+(5 rows)
+
+select a, first(b ORDER BY c), last(b ORDER BY c) from first_last_test GROUP BY a having first(b ORDER BY c) <= 3 ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    2
+ 2 |     1 |    3
+ 3 |     1 |    1
+ 4 |     3 |    4
+(4 rows)
+
+select a, first(b ORDER BY c NULLS FIRST), last(b ORDER BY c NULLS FIRST) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    2
+ 2 |     3 |    1
+ 3 |     1 |    1
+ 4 |     3 |    4
+ 5 |     4 |    5
+(5 rows)
+
+select a, first(b ORDER BY c NULLS LAST), last(b ORDER BY c NULLS LAST) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    2
+ 2 |     1 |    3
+ 3 |     1 |    1
+ 4 |     3 |    4
+ 5 |     4 |    5
+(5 rows)
+
+select a, first(b ORDER BY c DESC NULLS LAST), last(b ORDER BY c DESC NULLS LAST) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     2 |    1
+ 2 |     1 |    3
+ 3 |     1 |    1
+ 4 |     4 |    3
+ 5 |     5 |    4
+(5 rows)
+
+select a, first(b ORDER BY d), last(b ORDER BY d) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    4
+ 2 |     1 |    3
+ 3 |     1 |    1
+ 4 |     4 |    3
+ 5 |     4 |    5
+(5 rows)
+
+select a, first(d ORDER BY b), last(d ORDER BY c) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |       |     
+ 2 |       |     
+ 3 |       |     
+ 4 |       |     
+ 5 |       |     
+(5 rows)
+
+insert into first_last_test values
+(1,    1,    1,    1);
+select a, first(d ORDER BY b), last(d ORDER BY c) from first_last_test GROUP BY a ORDER BY a;
+ a | first | last 
+---+-------+------
+ 1 |     1 |    1
+ 2 |       |     
+ 3 |       |     
+ 4 |       |     
+ 5 |       |     
+(5 rows)
+
+drop table first_last_test;

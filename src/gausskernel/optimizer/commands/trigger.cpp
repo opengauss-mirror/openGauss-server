@@ -77,8 +77,9 @@
  * they use, so we let them be duplicated.  Be sure to update all if one needs
  * to be changed, however.
  */
-#define GetUpdatedColumns(relinfo, estate) \
-    (rt_fetch((relinfo)->ri_RangeTableIndex, (estate)->es_range_table)->updatedCols)
+#define GET_ALL_UPDATED_COLUMNS(relinfo, estate)                                     \
+    (bms_union(exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->updatedCols, \
+        exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->extraUpdatedCols))
 
 /* Local function prototypes */
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
@@ -368,6 +369,19 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("BEFORE trigger's WHEN condition cannot reference NEW system columns"),
                                 parser_errposition(pstate, var->location)));
+                    if (TRIGGER_FOR_BEFORE(tgtype) && var->varattno == 0 && RelationGetDescr(rel)->constr &&
+                        RelationGetDescr(rel)->constr->has_generated_stored)
+                        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmsg("BEFORE trigger's WHEN condition cannot reference NEW generated columns"),
+                            errdetail("A whole-row reference is used and the table contains generated columns."),
+                            parser_errposition(pstate, var->location)));
+                    if (TRIGGER_FOR_BEFORE(tgtype) && var->varattno > 0 &&
+                        ISGENERATEDCOL(RelationGetDescr(rel), var->varattno - 1))
+                        ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmsg("BEFORE trigger's WHEN condition cannot reference NEW generated columns"),
+                            errdetail("Column \"%s\" is a generated column.",
+                            NameStr(TupleDescAttr(RelationGetDescr(rel), var->varattno - 1)->attname)),
+                            parser_errposition(pstate, var->location)));
                     break;
                 default:
                     /* can't happen without add_missing_from, so just elog */
@@ -2255,7 +2269,7 @@ void ExecBSUpdateTriggers(EState* estate, ResultRelInfo* relinfo)
     if (!trigdesc->trig_update_before_statement)
         return;
 
-    updatedCols = GetUpdatedColumns(relinfo, estate);
+    updatedCols = GET_ALL_UPDATED_COLUMNS(relinfo, estate);
 
     LocTriggerData.type = T_TriggerData;
     LocTriggerData.tg_event = TRIGGER_EVENT_UPDATE | TRIGGER_EVENT_BEFORE;
@@ -2302,7 +2316,7 @@ void ExecASUpdateTriggers(EState* estate, ResultRelInfo* relinfo)
             NULL,
             NULL,
             NIL,
-            GetUpdatedColumns(relinfo, estate));
+            GET_ALL_UPDATED_COLUMNS(relinfo, estate));
 }
 
 TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid oldPartitionOid,
@@ -2376,7 +2390,7 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
     }
 #endif
 
-    updatedCols = GetUpdatedColumns(relinfo, estate);
+    updatedCols = GET_ALL_UPDATED_COLUMNS(relinfo, estate);
 
     LocTriggerData.type = T_TriggerData;
     LocTriggerData.tg_event = TRIGGER_EVENT_UPDATE | TRIGGER_EVENT_ROW | TRIGGER_EVENT_BEFORE;
@@ -2465,7 +2479,7 @@ void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartiti
             trigtuple,
             newtuple,
             recheckIndexes,
-            GetUpdatedColumns(relinfo, estate));
+            GET_ALL_UPDATED_COLUMNS(relinfo, estate));
         tableam_tops_free_tuple(trigtuple);
     }
 }
@@ -2688,7 +2702,7 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
                 TupleTableSlot* epqslot = NULL;
 
                 epqslot = EvalPlanQual(
-                    estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax);
+                    estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
                 if (!TupIsNull(epqslot)) {
                     *tid = tmfd.ctid;
                     *newSlot = epqslot;

@@ -2870,6 +2870,14 @@ if test "${enable_mot+set}" = set; then
           { (exit 1); exit 1; }; }
 
       fi
+
+      if test "$enable_llvm" = no; then
+
+        { { $as_echo "$as_me:$LINENO: error: --enable-mot option is not supported with --disable-llvm option" >&5
+            $as_echo "$as_me: error: --enable-mot option is not supported with --disable-llvm option" >&2;}
+          { (exit 1); exit 1; }; }
+
+      fi
       ;;
     no)
       :
@@ -5774,6 +5782,7 @@ else
 cat >>confdefs.h <<\_ACEOF
 #define ENABLE_LLVM_COMPILE 1
 _ACEOF
+enable_llvm=yes
 
 fi
 

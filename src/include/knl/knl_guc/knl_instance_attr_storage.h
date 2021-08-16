@@ -40,6 +40,15 @@
 
 #include "knl/knl_guc/knl_guc_common.h"
 
+/* order should same as lwlock part num desc, see lwlock.h */
+enum LWLOCK_PARTITION_ID {
+    CLOG_PART = 0,
+    CSNLOG_PART = 1,
+    LOG2_LOCKTABLE_PART = 2,
+    TWOPHASE_PART = 3,
+    LWLOCK_PART_KIND
+};
+
 typedef struct knl_instance_attr_storage {
     bool wal_log_hints;
     bool EnableHotStandby;
@@ -66,6 +75,7 @@ typedef struct knl_instance_attr_storage {
     int wal_writer_cpu;
     int wal_file_init_num;
     int XLOGbuffers;
+    int wal_insert_status_entries;
     int max_wal_senders;
     int max_replication_slots;
     int replication_type;
@@ -95,6 +105,8 @@ typedef struct knl_instance_attr_storage {
     int max_concurrent_autonomous_transactions;
 #endif
     char* available_zone;
+    int num_internal_lock_partitions[LWLOCK_PART_KIND];
+    char* num_internal_lock_partitions_str;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

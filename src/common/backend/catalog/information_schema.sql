@@ -648,7 +648,7 @@ CREATE VIEW columns AS
            CAST(c.relname AS sql_identifier) AS table_name,
            CAST(a.attname AS sql_identifier) AS column_name,
            CAST(a.attnum AS cardinal_number) AS ordinal_position,
-           CAST(pg_get_expr(ad.adbin, ad.adrelid) AS character_data) AS column_default,
+           CAST(CASE WHEN ad.adgencol <> 's' THEN pg_get_expr(ad.adbin, ad.adrelid) END AS character_data) AS column_default,
            CAST(CASE WHEN a.attnotnull OR (t.typtype = 'd' AND t.typnotnull) THEN 'NO' ELSE 'YES' END
              AS yes_or_no)
              AS is_nullable,
@@ -737,8 +737,8 @@ CREATE VIEW columns AS
            CAST(null AS character_data) AS identity_minimum,
            CAST(null AS yes_or_no) AS identity_cycle,
 
-           CAST('NEVER' AS character_data) AS is_generated,
-           CAST(null AS character_data) AS generation_expression,
+           CAST(CASE WHEN ad.adgencol = 's' THEN 'ALWAYS' ELSE 'NEVER' END AS character_data) AS is_generated,
+           CAST(CASE WHEN ad.adgencol = 's' THEN pg_get_expr(ad.adbin, ad.adrelid) END AS character_data) AS generation_expression,
 
            CAST(CASE WHEN c.relkind = 'r'
                           OR (c.relkind = 'v'

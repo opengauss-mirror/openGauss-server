@@ -9,6 +9,7 @@ test: analyze_commands
 test: single_node_ddl
 test: single_node_sqlbypass
 test: median
+test: array_funcs first_last_agg
 
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that
@@ -310,6 +311,7 @@ test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
 test: upsert_trigger_test upsert_explain
+test: upsert_subquery
 test: upsert_clean
 
 # all pass
@@ -483,7 +485,8 @@ test: copyselect copy_error_log
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-#test: constraints drop_if_exists
+test: drop_if_exists
+#test: constraints
 
 #test: errors subplan_base
 test: subplan_new
@@ -761,7 +764,21 @@ test: leaky_function_operator
 #test: gs_guc
 
 test: smp
+
+#generated column test
+test: generated_col
+
 test: sequence_cache_test
 test: procedure_privilege_test
 
 test: cstore_unique_index
+
+test: cast_privileges_test
+
+#--------------------------
+## DB4AI
+#--------------------------
+test: db4ai_gd_train_predict
+test: db4ai_gd_houses
+test: db4ai_kmeans_train_predict
+

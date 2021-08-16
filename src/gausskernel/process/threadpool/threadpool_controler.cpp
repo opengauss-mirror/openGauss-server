@@ -262,7 +262,7 @@ void ThreadPoolControler::ParseBindCpu()
         bindNum = ParseRangeStr(psave, m_cpuInfo.isBindCpuArr, m_cpuInfo.totalCpuNum, "cpubind");
     } else if (strncmp("nodebind", ptoken, strlen("nodebind")) == 0) {
         m_cpuInfo.bindType = NODE_BIND;
-        m_cpuInfo.isBindNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalCpuNum);
+        m_cpuInfo.isBindNumaArr = (bool*)palloc0(sizeof(bool) * m_cpuInfo.totalNumaNum);
         bindNum = ParseRangeStr(psave, m_cpuInfo.isBindNumaArr, m_cpuInfo.totalNumaNum, "nodebind");
     } else {
         INVALID_ATTR_ERROR(errdetail("Only 'nobind', 'allbind', 'cpubind', and 'nodebind' are valid attribute."));
@@ -449,7 +449,7 @@ void ThreadPoolControler::GetCpuAndNumaNum()
 
     FILE* fp = NULL;
 
-    if ((fp = popen("lscpu", "r")) != NULL) {
+    if ((fp = popen("LANG=en_US.UTF-8;lscpu", "r")) != NULL) {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
             if (strncmp("CPU(s)", buf, strlen("CPU(s)")) == 0 &&
                 strncmp("On-line CPU(s) list", buf, strlen("On-line CPU(s) list")) != 0 &&
@@ -558,11 +558,10 @@ void ThreadPoolControler::ConstrainThreadNum()
 {
     /* Thread pool size should not be larger than max_connections. */
     if (MAX_THREAD_POOL_SIZE > g_instance.attr.attr_network.MaxConnections) {
-        m_maxPoolSize = g_instance.attr.attr_network.MaxConnections;
         ereport(LOG, (errcode(ERRCODE_OPERATE_INVALID_PARAM),
-                      errmsg("Thread pool size %d should not be larger than max_connections %d, "
-                             "so reduce thread pool size to max_connections",
-                      m_threadNum, g_instance.attr.attr_network.MaxConnections)));
+                      errmsg("Max thread pool size %d should not be larger than max_connections %d, "
+                             "so reduce max thread pool size to max_connections",
+                      MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections)));
     }
     
     m_maxPoolSize = Min(MAX_THREAD_POOL_SIZE, g_instance.attr.attr_network.MaxConnections);

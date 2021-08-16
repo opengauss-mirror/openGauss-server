@@ -55,6 +55,7 @@ typedef enum ObjectType {
     OBJECT_CONVERSION,
     OBJECT_DATABASE,
     OBJECT_DATA_SOURCE,
+    OBJECT_DB4AI_MODEL,  // DB4AI
     OBJECT_DOMAIN,
     OBJECT_EXTENSION,
     OBJECT_FDW,
@@ -860,6 +861,7 @@ typedef struct ColumnDef {
     ClientLogicColumnRef *clientLogicColumnRef;
     Position *position;
     Form_pg_attribute dropped_attr; /* strcuture for dropped attribute during create table like OE */
+    char generatedCol;         /* generated column setting */
 } ColumnDef;
 
 /*
@@ -1068,7 +1070,8 @@ typedef enum ConstrType { /* types of constraints */
     CONSTR_ATTR_DEFERRABLE, /* attributes for previous constraint node */
     CONSTR_ATTR_NOT_DEFERRABLE,
     CONSTR_ATTR_DEFERRED,
-    CONSTR_ATTR_IMMEDIATE
+    CONSTR_ATTR_IMMEDIATE,
+    CONSTR_GENERATED
 } ConstrType;
 
 typedef struct Constraint {
@@ -1120,6 +1123,8 @@ typedef struct Constraint {
      * Field used for soft constraint, which works on HDFS foreign table.
      */
     InformationalConstraint *inforConstraint;
+    char generated_when; /* ALWAYS or BY DEFAULT */
+    char generated_kind; /* currently always STORED */
 } Constraint;
 
 /*
@@ -1131,7 +1136,7 @@ typedef struct TableLikeClause {
     bits32 options; /* OR of TableLikeOption flags */
 } TableLikeClause;
 
-#define MAX_TABLE_LIKE_OPTIONS (10)
+#define MAX_TABLE_LIKE_OPTIONS (11)
 typedef enum TableLikeOption {
     CREATE_TABLE_LIKE_DEFAULTS = 1 << 0,
     CREATE_TABLE_LIKE_CONSTRAINTS = 1 << 1,
@@ -1143,6 +1148,7 @@ typedef enum TableLikeOption {
     CREATE_TABLE_LIKE_DISTRIBUTION = 1 << 7,
     CREATE_TABLE_LIKE_OIDS = 1 << 8,
     CREATE_TABLE_LIKE_DEFAULTS_SERIAL = 1 << 9, /* Backward compatibility. Inherits serial defaults by default. */
+    CREATE_TABLE_LIKE_GENERATED = 1 << 10,
     CREATE_TABLE_LIKE_ALL = 0x7FFFFFFF
 } TableLikeOption;
 
@@ -1770,5 +1776,36 @@ typedef struct RenameStmt {
     DropBehavior behavior;   /* RESTRICT or CASCADE behavior */
     bool missing_ok;         /* skip error if missing? */
 } RenameStmt;
+
+
+
+/* ----------------------
+ *		Create Model Statement
+ * ----------------------
+ */
+typedef struct CreateModelStmt{ // DB4AI
+    NodeTag type;
+    char* model;
+    char* architecture;
+    List* hyperparameters;  // List<VariableSetStmt>
+    Node* select_query;     // Query to be executed: SelectStmt -> Query
+    List* model_features;   // FEATURES clause
+    List* model_target;     // TARGET clause
+    // Filled during transform
+    AlgorithmML algorithm;  // Algorithm to be executed
+} CreateModelStmt;
+
+/* ----------------------
+ *		Prediction BY function
+ * ----------------------
+ */
+typedef struct PredictByFunction{ // DB4AI
+    NodeTag type;
+    char* model_name;
+    int model_name_location; // Only for parser
+    List* model_args;
+    int model_args_location; // Only for parser
+} PredictByFunction;
+
 
 #endif /* PARSENODES_COMMONH */

@@ -86,6 +86,11 @@
 #include "instruments/percentile.h"
 #include "instruments/instr_workload.h"
 #include "gs_policy/policy_common.h"
+#ifndef WIN32_ONLY_COMPILER
+#include "dynloader.h"
+#else
+#include "port/dynloader/win32.h"
+#endif
 
 #ifdef PGXC
 #include "catalog/pgxc_node.h"
@@ -1737,6 +1742,8 @@ void PostgresInitializer::InitSession()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 
     AuditUserLogin();
@@ -1868,6 +1875,18 @@ void PostgresInitializer::InitUser()
     InitializeSessionUserId(m_username);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * In opengauss, we allow twophasecleaner to connect to database as superusers
+     * for cleaning up temporary tables. During the cleanup of temporary tables,
+     * m_username and u_sess->proc_cxt.MyProcPort->user_name point to the same memory
+     * address. We have freed and reinitialized u_sess->proc_cxt.MyProcPort->user_name
+     * in function InitializeSessionUserId, and we need to initialize m_username here.
+     */
+    if (u_sess->proc_cxt.IsInnerMaintenanceTools) {
+        m_username = u_sess->proc_cxt.MyProcPort->user_name;
+    }
+#endif
 }
 
 void PostgresInitializer::CheckConnPermission()
@@ -2258,6 +2277,28 @@ void PostgresInitializer::InitSettings()
 
     /* initialize client encoding */
     InitializeClientEncoding();
+}
+
+void PostgresInitializer::InitExtensionVariable()
+{
+    int initExtArraySize = 10;
+    void (*init_session_vars)(void);
+
+    /* initialize u_sess->attr.attr_common.extension_session_vars_array */
+    u_sess->attr.attr_common.extension_session_vars_array_size = initExtArraySize;
+    u_sess->attr.attr_common.extension_session_vars_array =
+        (void**)MemoryContextAllocZero(u_sess->self_mem_cxt, (Size)(initExtArraySize * sizeof(void*)));
+
+    DynamicFileList* file_scanner = NULL;
+    for (file_scanner = file_list; file_scanner != NULL; file_scanner = file_scanner->next) {
+        /* 
+        * If the library has a init_session_vars() function, call it for
+        * initializing extension session variables.
+        */
+        init_session_vars = (void(*)(void))pg_dlsym(file_scanner->handle, "init_session_vars");
+        if (init_session_vars != NULL)
+            (*init_session_vars)();
+    }
 }
 
 void PostgresInitializer::FinishInit()

@@ -160,6 +160,8 @@ private:
 
     void InitSettings();
 
+    void InitExtensionVariable();
+
     void FinishInit();
 
     void AuditUserLogin();

@@ -147,6 +147,9 @@ extern bool anls_opt_is_on(AnalysisOpt dfx_opt);
     (rt_fetch((relinfo)->ri_RangeTableIndex, (estate)->es_range_table)->insertedCols)
 #define GetUpdatedColumns(relinfo, estate) \
     (rt_fetch((relinfo)->ri_RangeTableIndex, (estate)->es_range_table)->updatedCols)
+#define GET_ALL_UPDATED_COLUMNS(relinfo, estate)                                     \
+    (bms_union(exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->updatedCols, \
+        exec_rt_fetch((relinfo)->ri_RangeTableIndex, estate)->extraUpdatedCols))
 
 /* ----------------------------------------------------------------
  * report_iud_time
@@ -170,31 +173,16 @@ static void report_iud_time(QueryDesc *query)
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
             continue;
         }
-        MemoryContext current_ctx = CurrentMemoryContext;
+
         Relation rel = NULL;
-        PG_TRY();
-        {
-            rel = heap_open(rid, AccessShareLock);
-            if (rel->rd_rel->relkind == RELKIND_RELATION) {
-                if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
-                    rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
-                    pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
-                }
-            }
-            heap_close(rel, AccessShareLock);
-        }
-        PG_CATCH();
-        {
-            (void)MemoryContextSwitchTo(current_ctx);
-            ErrorData *edata = CopyErrorData();
-            ereport(DEBUG1, (errmsg("Failed to send data changed time, cause: %s", edata->message)));
-            FlushErrorState();
-            FreeErrorData(edata);
-            if (rel != NULL) {
-                heap_close(rel, AccessShareLock);
+        rel = heap_open(rid, AccessShareLock);
+        if (rel->rd_rel->relkind == RELKIND_RELATION) {
+            if (rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT ||
+                rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED) {
+                pgstat_report_data_changed(rid, STATFLG_RELATION, rel->rd_rel->relisshared);
             }
         }
-        PG_END_TRY();
+        heap_close(rel, AccessShareLock);
     }
 }
 
@@ -307,8 +295,10 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
 
+#ifdef ENABLE_LLVM_COMPILE
     /* Initialize the actual CodeGenObj */
     CodeGenThreadRuntimeSetup();
+#endif
 
     /*
      * Fill in external parameters, if any, from queryDesc; and allocate
@@ -550,6 +540,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
      */
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * Generate machine code for this query.
      */
@@ -562,6 +553,7 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
             CodeGenThreadRuntimeCodeGenerate();
         }
     }
+#endif
 
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {
@@ -772,9 +764,11 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_snapshot);
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
+#ifdef ENABLE_LLVM_COMPILE
     if (!t_thrd.codegen_cxt.g_runningInFmgr) {
         CodeGenThreadTearDown();
     }
+#endif
 
     /*
      * Must switch out of context before destroying it
@@ -1717,6 +1711,7 @@ void InitResultRelInfo(ResultRelInfo *resultRelInfo, Relation resultRelationDesc
     }
     resultRelInfo->ri_FdwState = NULL;
     resultRelInfo->ri_ConstraintExprs = NULL;
+    resultRelInfo->ri_GeneratedExprs = NULL;
     resultRelInfo->ri_junkFilter = NULL;
     resultRelInfo->ri_projectReturning = NULL;
     resultRelInfo->ri_mergeTargetRTI = 0;
@@ -2715,7 +2710,7 @@ ExecAuxRowMark *ExecBuildAuxRowMark(ExecRowMark *erm, List *targetlist)
  * NULL if we determine we shouldn't process the row.
  */
 TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relation, Index rti, ItemPointer tid,
-    TransactionId priorXmax)
+    TransactionId priorXmax, bool partRowMoveUpdate)
 {
     TupleTableSlot *slot = NULL;
     HeapTuple copyTuple;
@@ -2729,6 +2724,19 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
         relation, LockTupleExclusive, tid, priorXmax);
 
     if (copyTuple == NULL) {
+        /*
+         * The tuple has been deleted or update in row movement case.
+         */
+        if (partRowMoveUpdate) {
+            /*
+             * the may be a row movement update action which delete tuple from original
+             * partition and insert tuple to new partition or we can add lock on the tuple
+             * to be delete or updated to avoid throw exception.
+             */
+            ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                errmsg("partition table update conflict"),
+                errdetail("disable row movement of table can avoid this conflict")));
+        }
         return NULL;
     }
 

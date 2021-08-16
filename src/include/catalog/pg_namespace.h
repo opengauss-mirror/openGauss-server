@@ -98,6 +98,9 @@ DATA(insert OID = 4989 ( "snapshot" PGUID 0 _null_ n));
 DESCR("snapshot schema");
 #define PG_SNAPSHOT_NAMESPACE 4989
 
+DATA(insert OID = 4991 ( "db4ai" PGUID 0 _null_ n));
+DESCR("db4ai schema");
+#define PG_DB4AI_NAMESPACE 4991
 /*
  * prototypes for functions in pg_namespace.c
  */

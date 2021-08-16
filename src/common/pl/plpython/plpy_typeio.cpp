@@ -274,7 +274,7 @@ void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc)
 /*
  * Transform a tuple into a Python dict object.
  */
-PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc)
+PyObject *PLyDict_FromTuple(PLyTypeInfo *info, HeapTuple tuple, TupleDesc desc, bool include_generated)
 {
     PyObject* volatile dict = NULL;
     PLyExecutionContext* exec_ctx = PLy_current_execution_context();
@@ -305,6 +305,12 @@ PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc)
 
             if (desc->attrs[i]->attisdropped) {
                 continue;
+            }
+
+            if (ISGENERATEDCOL(desc, i)) {
+                /* don't include unless requested */
+                if (!include_generated)
+                    continue;
             }
 
             key = NameStr(desc->attrs[i]->attname);

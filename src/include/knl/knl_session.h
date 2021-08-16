@@ -160,6 +160,9 @@ typedef struct knl_u_executor_context {
 
     bool is_exec_trigger_func;
 
+    /* the owner of cast */
+    Oid cast_owner;
+
     bool single_shard_stmt;
     struct SendRouter* CurrentRouter;
     bool is_dn_enable_router;

@@ -20,4 +20,5 @@ extern List* expandTargetTL(List* te_list, Query* parsetree);
 extern List* expandActionTL(List* te_list, Query* parsetree);
 extern List* expandQualTL(List* te_list, Query* parsetree);
 extern bool check_unique_constraint(List*& index_list);
+extern void setExtraUpdatedCols(ParseState* pstate);
 #endif

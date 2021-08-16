@@ -316,6 +316,7 @@ extern bool check_asp_flush_mode(char** newval, void** extra, GucSource source);
 
 /* in access/transam/xlog.c */
 extern bool check_wal_buffers(int* newval, void** extra, GucSource source);
+extern bool check_wal_insert_status_entries(int* newval, void** extra, GucSource source);
 extern void assign_xlog_sync_method(int new_sync_method, void* extra);
 
 /* in tcop/stmt_retry.cpp */
@@ -432,5 +433,6 @@ extern void set_qunit_case_number_hook(int newval, void* extra);
 #endif
 
 extern GucContext get_guc_context();
+extern void InitializeNumLwLockPartitions(void);
 
 #endif /* GUC_H */

@@ -547,6 +547,11 @@ DECLARE_UNIQUE_INDEX(gs_matviewdep_oid_index, 9992, on gs_matview_dependency usi
 DECLARE_UNIQUE_INDEX(gs_opt_model_name_index, 9997, on gs_opt_model using btree(model_name name_ops));
 #define GsOPTModelNameIndexId	9997
 
+DECLARE_UNIQUE_INDEX(gs_model_oid_index, 3992, on gs_model_warehouse using btree(oid oid_ops));
+#define GsModelOidIndexId    3992
+DECLARE_UNIQUE_INDEX(gs_model_name_index, 3993, on gs_model_warehouse using btree(modelname name_ops));
+#define GsModelNameIndexId   3993
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 

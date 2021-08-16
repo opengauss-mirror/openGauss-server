@@ -229,7 +229,15 @@ void ThreadPoolListener::ReaperAllSession()
                 (errmsg("No thread pool worker left while waiting for session close. "
                         "This is a very rare case when all thread pool workers happen to"
                         " encounter FATAL problems before session close.")));
-            ExitPostmaster(1);
+            abort();
+        }
+        /* m_sessionCount should be sum of the list length of m_idleSessionList and m_readySessionList
+           and worker's attached session */
+        pg_memory_barrier();
+        if (m_idleSessionList->IsEmpty() && m_readySessionList->IsEmpty() &&
+            m_group->m_workerNum - m_group->m_idleWorkerNum == 0) {
+            ereport(WARNING, (errmsg("SessionCount should be zero when no session in this group.")));
+            m_group->m_sessionCount = 0;
         }
 
         elem = m_idleSessionList->RemoveHead();

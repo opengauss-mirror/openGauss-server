@@ -143,6 +143,9 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
     /* switch to next partition until we get a unempty tuple */
     for (;;) {
+        /* minus wrong rownum */
+        node->ps.lefttree->ps_rownum--;
+
         if (node->currentItr + 1 >= partitionScan) /* have scanned all partitions */
             return NULL;
 

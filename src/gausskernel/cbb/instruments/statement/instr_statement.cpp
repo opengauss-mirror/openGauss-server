@@ -129,8 +129,8 @@ bool check_statement_stat_level(char** newval, void** extra, GucSource source)
     List *l = split_levels_into_list(*newval);
 
     if (list_length(l) != STATEMENT_SQL_KIND) {
-        list_free_deep(l);
         GUC_check_errdetail("attr num:%d is error,track_stmt_stat_level attr is 2", l->length);
+        list_free_deep(l);
         return false;
     }
 
@@ -370,7 +370,9 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
 
     /* is slow sql */
     values[i++] = BoolGetDatum(
-        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold) ? true : false);
+        (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
+        statementInfo->slow_query_threshold >= 0) ? true : false);
+        
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
 
@@ -383,24 +385,6 @@ static RangeVar* InitStatementRel()
     relrv->relpersistence = RELPERSISTENCE_UNLOGGED;
     return relrv;
 }
-
-static bool StrToInt32(const char* s, int *val)
-{
-    int base = 10;
-    const char* ptr = s;
-    /* process digits */
-    while (*ptr != '\0') {
-        if (isdigit((unsigned char)*ptr) == 0)
-            return false;
-        int8 digit = (*ptr++ - '0');
-        *val = *val * base + digit;
-        if (*val > PG_INT32_MAX || *val < PG_INT32_MIN) { 
-            return false;
-        }
-    }
-    return true;
-}
-
 
 bool check_statement_retention_time(char** newval, void** extra, GucSource source)
 {

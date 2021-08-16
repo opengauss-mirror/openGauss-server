@@ -61,4 +61,7 @@ ExecHBucketInsertT(ModifyTableState* state, TupleTableSlot *slot,
 
 extern void ExecCheckPlanOutput(Relation resultRel, List* targetList);
 
+extern void ExecComputeStoredGenerated(ResultRelInfo *resultRelInfo, EState *estate, TupleTableSlot *slot,
+    HeapTuple oldtuple, CmdType cmdtype);
+
 #endif /* NODEMODIFYTABLE_H */

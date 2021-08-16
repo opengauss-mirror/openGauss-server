@@ -351,6 +351,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
     cxt.bucketOid = InvalidOid;
     cxt.relnodelist = NULL;
     cxt.toastnodelist = NULL;
+    cxt.ofType = (stmt->ofTypename != NULL);
 
     /* We have gen uuids, so use it */
     if (stmt->uuids != NIL)
@@ -772,6 +773,7 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
     bool is_serial = false;
     bool saw_nullable = false;
     bool saw_default = false;
+    bool saw_generated = false;
     Constraint* constraint = NULL;
     ListCell* clist = NULL;
     ClientLogicColumnRef* clientLogicColumnRef = NULL;
@@ -888,6 +890,23 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
                 saw_default = true;
                 break;
 
+            case CONSTR_GENERATED:
+                if (cxt->ofType) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("generated columns are not supported on typed tables")));
+                }
+                if (saw_generated) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("multiple generation clauses specified for column \"%s\" of table \"%s\"",
+                        column->colname, cxt->relation->relname),
+                        parser_errposition(cxt->pstate, constraint->location)));
+                }
+                column->generatedCol = ATTRIBUTE_GENERATED_STORED;
+                column->raw_default = constraint->raw_expr;
+                Assert(constraint->cooked_expr == NULL);
+                saw_generated = true;
+                break;
+
             case CONSTR_CHECK:
                 cxt->ckconstraints = lappend(cxt->ckconstraints, constraint);
                 break;
@@ -946,6 +965,15 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
             transformColumnType(cxt, column);
         }
     }
+
+    if (saw_default && saw_generated)
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                     errmsg("both default and generation expression specified for column \"%s\" of table \"%s\"",
+                            column->colname, cxt->relation->relname),
+                     parser_errposition(cxt->pstate,
+                                        constraint->location)));
+
     /*
      * Generate ALTER FOREIGN TABLE ALTER COLUMN statement which adds
      * per-column foreign data wrapper options for this column.
@@ -999,6 +1027,7 @@ static void transformTableConstraint(CreateStmtContext* cxt, Constraint* constra
         case CONSTR_NULL:
         case CONSTR_NOTNULL:
         case CONSTR_DEFAULT:
+        case CONSTR_GENERATED:
         case CONSTR_ATTR_DEFERRABLE:
         case CONSTR_ATTR_NOT_DEFERRABLE:
         case CONSTR_ATTR_DEFERRED:
@@ -1366,6 +1395,15 @@ static void transformTableLikeClause(
             def->storage = 0;
             /* copy compression mode from source table */
             def->cmprs_mode = attribute->attcmprmode;
+            /*
+             * When analyzing a column-oriented table with default_statistics_target < 0, we will create a row-oriented
+             * temp table. In this case, ignore the compression flag.
+             */
+            if (u_sess->analyze_cxt.is_under_analyze) {
+                if (def->cmprs_mode != ATT_CMPR_UNDEFINED) {
+                    def->cmprs_mode = ATT_CMPR_NOCOMPRESS;
+                }
+            }
             def->raw_default = NULL;
             def->cooked_default = NULL;
             def->collClause = NULL;
@@ -1417,12 +1455,26 @@ static void transformTableLikeClause(
                 }
             }
 
-            if (!def->is_serial && (table_like_clause->options & CREATE_TABLE_LIKE_DEFAULTS)) {
+            if (!def->is_serial && (table_like_clause->options & CREATE_TABLE_LIKE_DEFAULTS) &&
+                !GetGeneratedCol(tupleDesc, parent_attno - 1)) {
                 /*
                  * If default expr could contain any vars, we'd need to fix 'em,
                  * but it can't; so default is ready to apply to child.
                  */
                 def->cooked_default = this_default;
+            } else if (!def->is_serial && (table_like_clause->options & CREATE_TABLE_LIKE_GENERATED) &&
+                GetGeneratedCol(tupleDesc, parent_attno - 1)) {
+                bool found_whole_row = false;
+                def->cooked_default =
+                    map_variable_attnos(this_default, 1, 0, attmap, tupleDesc->natts, &found_whole_row);
+                if (found_whole_row) {
+                    ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot convert whole-row table reference"),
+                        errdetail(
+                        "Generation expression for column \"%s\" contains a whole-row reference to table \"%s\".",
+                        attributeName, RelationGetRelationName(relation))));
+                }
+                def->generatedCol = GetGeneratedCol(tupleDesc, parent_attno - 1);
             }
         }
 
@@ -2026,6 +2078,7 @@ static void transformOfType(CreateStmtContext* cxt, TypeName* ofTypename)
         n->colname = pstrdup(NameStr(attr->attname));
         n->typname = makeTypeNameFromOid(attr->atttypid, attr->atttypmod);
         n->kvtype = ATT_KV_UNDEFINED;
+        n->generatedCol = '\0';
         n->inhcount = 0;
         n->is_local = true;
         n->is_not_null = false;
@@ -3782,6 +3835,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
     cxt.bucketOid = InvalidOid;
     cxt.relnodelist = NULL;
     cxt.toastnodelist = NULL;
+    cxt.ofType = false;
 
     if (RelationIsForeignTable(rel) || RelationIsStream(rel)) {
         cxt.canInfomationalConstraint = CAN_BUILD_INFORMATIONAL_CONSTRAINT_BY_RELID(RelationGetRelid(rel));
@@ -3910,6 +3964,16 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                 break;
 
             case AT_SplitPartition:
+                if (!RELATION_IS_PARTITIONED(rel))
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmodule(MOD_OPT),
+                            errmsg("can not split partition against NON-PARTITIONED table")));
+                if (rel->partMap->type == PART_TYPE_LIST || rel->partMap->type == PART_TYPE_HASH) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split LIST/HASH partition table")));
+                }
+
                 /* transform the boundary of range partition: from A_Const into Const */
                 splitDefState = (SplitPartitionState*)cmd->def;
                 if (!PointerIsValid(splitDefState->split_point)) {
@@ -3929,12 +3993,6 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     Const* lowBound = NULL;
                     Const* upBound = NULL;
                     Oid srcPartOid = InvalidOid;
-
-                    if (!RELATION_IS_PARTITIONED(rel))
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                                errmodule(MOD_OPT),
-                                errmsg("can not split partition against NON-PARTITIONED table")));
 
                     /* get partition number */
                     partNum = getNumberOfPartitions(rel);
@@ -5369,6 +5427,7 @@ static void get_src_partition_bound(Relation partTableRel, Oid srcPartOid, Const
                 errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("CAN NOT get detail info from a partitioned relation WITHOUT specified partition.")));
 
+    Assert(partTableRel->partMap->type == PART_TYPE_RANGE || partTableRel->partMap->type == PART_TYPE_INTERVAL);
     partMap = (RangePartitionMap*)partTableRel->partMap;
 
     srcPartSeq = partOidGetPartSequence(partTableRel, srcPartOid) - 1;

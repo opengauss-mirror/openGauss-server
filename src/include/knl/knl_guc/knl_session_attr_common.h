@@ -208,6 +208,8 @@ typedef struct knl_session_attr_common {
     char* router_att;
     bool enable_router;
     int gpc_clean_timeout;
+    uint32 extension_session_vars_array_size;
+    void** extension_session_vars_array;
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

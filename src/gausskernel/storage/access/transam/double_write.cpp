@@ -841,7 +841,7 @@ static void dw_free_resource(knl_g_dw_context *cxt)
     cxt->closed = 1;
 }
 
-void dw_file_check_and_rebuild()
+bool dw_file_check_and_rebuild()
 {
     if (file_exists(DW_BUILD_FILE_NAME)) {
         ereport(LOG, (errmodule(MOD_DW), errmsg("Double write initializing after build")));
@@ -873,7 +873,9 @@ void dw_file_check_and_rebuild()
         }
 
         /* Create the DW file. */
-        dw_bootstrap();
+        if (dw_enabled()) {
+            dw_bootstrap();
+        }
 
         /* Remove the DW build file. */
         if (unlink(DW_BUILD_FILE_NAME) != 0) {
@@ -882,26 +884,28 @@ void dw_file_check_and_rebuild()
         }
     }
 
-    if (!file_exists(DW_FILE_NAME)) {
-        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("batch flush DW file does not exist")));
+    if (!file_exists(DW_FILE_NAME) && dw_enabled()) {
+        /* Create the batch file. */
+        dw_generate_batch_file();
     }
 
     if (t_thrd.proc->workingVersionNum >= DW_SUPPORT_SINGLE_FLUSH_VERSION) {
-        if (!file_exists(SINGLE_DW_FILE_NAME)) {
-            ereport(PANIC, (errcode_for_file_access(), 
-                errmodule(MOD_DW), errmsg("single flush DW file does not exist")));
+        if (!file_exists(SINGLE_DW_FILE_NAME) && dw_enabled()) {
+            /* Create the single file. */
+            dw_generate_single_file();
         }
     } else {
         if (!file_exists(SINGLE_DW_FILE_NAME)) {
             ereport(LOG, (errmodule(MOD_DW), 
                 errmsg("first upgrade to DW_SUPPORT_SINGLE_FLUSH_VERSION, need init the single file")));
-            dw_generate_single_file();
         } else {
             (void)unlink(SINGLE_DW_FILE_NAME);
-            dw_generate_single_file();
         }
+        /* Create the single file if need.*/
+        if (dw_enabled())
+            dw_generate_single_file();
     }
-
+    return file_exists(DW_FILE_NAME) && file_exists(SINGLE_DW_FILE_NAME);
 }
 
 const void init_dw_single_flush_map()
@@ -1014,38 +1018,46 @@ void dw_init(bool shut_down)
 
     old_mem_cxt = MemoryContextSwitchTo(mem_cxt);
 
-    dw_file_check_and_rebuild();
+    bool do_recovery = dw_file_check_and_rebuild();
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double Write init")));
 
-    dw_cxt_init_batch();
-    dw_cxt_init_single();
+    if (do_recovery) {
+        dw_cxt_init_batch();
+        dw_cxt_init_single();
 
-    /* recovery batch flush dw file */
-    (void)LWLockAcquire(batch_cxt->flush_lock, LW_EXCLUSIVE);
-    dw_recover_file_head(batch_cxt, false);
+        /* recovery batch flush dw file */
+        (void)LWLockAcquire(batch_cxt->flush_lock, LW_EXCLUSIVE);
+        dw_recover_file_head(batch_cxt, false);
 
-    dw_recover_partial_write(batch_cxt);
-    LWLockRelease(batch_cxt->flush_lock);
+        dw_recover_partial_write(batch_cxt);
+        LWLockRelease(batch_cxt->flush_lock);
 
-    /* recovery single flush dw file */
-    (void)LWLockAcquire(single_cxt->flush_lock, LW_EXCLUSIVE);
-    dw_recover_file_head(single_cxt, true);
-    if (!shut_down) {
-        dw_recovery_partial_write_single();
+        /* recovery single flush dw file */
+        (void)LWLockAcquire(single_cxt->flush_lock, LW_EXCLUSIVE);
+        dw_recover_file_head(single_cxt, true);
+        if (!shut_down) {
+            dw_recovery_partial_write_single();
+        }
+        /* reset the file after the recovery is complete */
+        dw_force_reset_single_file();
+        LWLockRelease(single_cxt->flush_lock);
     }
-    /* reset the file after the recovery is complete */
-    dw_force_reset_single_file();
-    LWLockRelease(single_cxt->flush_lock);
 
     /*
      * After recovering partially written pages (if any), we will un-initialize, if the double write is disabled.
      */
     if (!dw_enabled()) {
-        dw_free_resource(batch_cxt);
-        dw_free_resource(single_cxt);
+        if (do_recovery) {
+            dw_free_resource(batch_cxt);
+            dw_free_resource(single_cxt);
+        }
         (void)MemoryContextSwitchTo(old_mem_cxt);
         MemoryContextDelete(g_instance.dw_batch_cxt.mem_cxt);
         ereport(LOG, (errmodule(MOD_DW), errmsg("Double write exit after recovering partial write")));
+
+        /* remove double file if not needed */
+        (void)unlink(DW_FILE_NAME);
+        (void)unlink(SINGLE_DW_FILE_NAME);
     } else {
         (void)MemoryContextSwitchTo(old_mem_cxt);
     }
@@ -1803,7 +1815,16 @@ bool dw_single_file_recycle(bool trunc_file)
 
 bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
 {
-    if (item->data_page_idx == 0 || item->dwn != dwn) {
+    if (item->dwn != dwn) {
+        return false;
+    }
+    if (item->buf_tag.forkNum == InvalidForkNumber || item->buf_tag.blockNum == InvalidBlockNumber ||
+        item->buf_tag.rnode.relNode == InvalidOid) {
+        ereport(WARNING,
+            (errmsg("dw recovery, find invalid item [page_idx %hu dwn %hu] skip this item,"
+            "buf_tag[rel %u/%u/%u blk %u fork %d]", item->data_page_idx, item->dwn,
+            item->buf_tag.rnode.spcNode, item->buf_tag.rnode.dbNode, item->buf_tag.rnode.relNode,
+            item->buf_tag.blockNum, item->buf_tag.forkNum)));
         return false;
     }
     pg_crc32c crc;

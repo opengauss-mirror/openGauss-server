@@ -274,6 +274,7 @@ typedef struct _attrDefInfo {
     int adnum;
     char* adef_expr; /* decompiled DEFAULT expression */
     bool separate;   /* TRUE if must dump as separate item */
+    char generatedCol;
 } AttrDefInfo;
 
 typedef struct _tableDataInfo {

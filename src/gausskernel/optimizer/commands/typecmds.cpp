@@ -854,7 +854,7 @@ void DefineDomain(CreateDomainStmt* stmt)
                      * Cook the constr->raw_expr into an expression. Note:
                      * name is strictly for error message
                      */
-                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod, domainName);
+                    defaultExpr = cookDefault(pstate, constr->raw_expr, basetypeoid, basetypeMod, domainName, 0);
 
                     /*
                      * If the expression is just a NULL constant, we treat it
@@ -2015,8 +2015,8 @@ void AlterDomainDefault(List* names, Node* defaultRaw)
          * Cook the colDef->raw_expr into an expression. Note: Name is
          * strictly for error message
          */
-        defaultExpr = cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod, NameStr(typTup->typname));
-
+        defaultExpr =
+            cookDefault(pstate, defaultRaw, typTup->typbasetype, typTup->typtypmod, NameStr(typTup->typname), 0);
         /*
          * If the expression is just a NULL constant, we treat the command
          * like ALTER ... DROP DEFAULT.  (But see note for same test in

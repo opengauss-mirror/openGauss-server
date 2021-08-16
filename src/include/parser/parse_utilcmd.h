@@ -53,6 +53,7 @@ typedef struct {
     Oid  bucketOid;     /* bucket oid of the resizing table */
     List *relnodelist;  /* filenode of the resizing table */
     List *toastnodelist; /* toast node of the resizing table */
+    bool ofType;         /* true if statement contains OF typename */
 } CreateStmtContext;
 
 extern void checkPartitionSynax(CreateStmt *stmt);

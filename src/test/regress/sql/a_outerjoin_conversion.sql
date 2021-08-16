@@ -4,12 +4,16 @@ create table t11(c1 int, c2 int, c3 int);
 create table t12(c1 int, c2 int, c3 int);
 create table t13(c1 int, c2 int, c3 int);
 create table t14(A4 int, B4 int, c4 int);
+create table t_a (id int, name varchar(10), code int);
+create table t_b (id int, name varchar(10), code int);
 
 -- insert base
 insert into t11 select v,v,v from generate_series(1,10) as v;
 insert into t12 select * from t11;
 insert into t13 select * from t11;
 insert into t14 select v,v,v from generate_series(1,30) as v;
+insert into t_a values (1, 'tom', 3);
+insert into t_b values (1, 'bat', 6);
 
 -- insert t11 t12, t13's not match values
 insert into t11 select v,v,v from generate_series(11,15) as v;
@@ -357,6 +361,7 @@ select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t1
 -------used (+) with un common expression, like is null, is not null--------
 select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t11.c3 = t13.c1(+) and t13.c2(+) is not null;
 select t11.c1, t12.c2, t13.c2 from t11, t12, t13 where t11.c2 = t12.c3(+) and t11.c3 = t13.c1(+) and (t13.c2(+) > t12.c1)::bool;
+select * from t_a a,t_b b where b.id=a.id(+) and a.code(+) + 1 * 2 + a.code(+) IS NOT NULL ;
 
 drop view plus_v;
 drop function plus_join_test_1();
@@ -367,4 +372,6 @@ drop table t12;
 drop table t13;
 drop table t14;
 drop table t15;
+drop table t_a;
+drop table t_b;
 drop schema plus_outerjoin;

@@ -3816,6 +3816,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
         }
     }
 
+#ifdef ENABLE_LLVM_COMPILE
     /*
      * @llvm
      * when the query is abnormal exited, the (GsCodeGen *)t_thrd.codegen_cxt.thr_codegen_obj->codeGenState
@@ -3824,6 +3825,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
      * function.
      */
     CodeGenThreadTearDown();
+#endif
 
     CancelAutoAnalyze();
     lightProxy::setCurrentProxy(NULL);
@@ -6438,8 +6440,10 @@ void AbortSubTransaction(bool STP_rollback)
     delete_ec_ctrl();
 #endif
 
+#ifdef ENABLE_LLVM_COMPILE
     /* reset machine code */
     CodeGenThreadReset();
+#endif
 
     /* Reset the compatible illegal chars import flag */
     u_sess->mb_cxt.insertValuesBind_compatible_illegal_chars = false;

@@ -108,6 +108,8 @@ typedef enum {
     DestBatchLocalRedistribute, /* results send to consumer thread in a local redistribute way */
     DestBatchLocalRoundRobin,   /* results send to consumer thread in a local roundrobin way */
 
+    DestTrainModel,             /* results send to DB4AI model warehouse */
+
     DestBatchHybrid,
     DestTransientRel            /* results sent to transient relation */
 

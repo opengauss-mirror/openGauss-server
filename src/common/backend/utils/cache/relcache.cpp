@@ -138,6 +138,7 @@
 #include "catalog/pg_streaming_stream.h"
 #include "catalog/pg_streaming_cont_query.h"
 #include "catalog/pg_streaming_reaper_status.h"
+#include "catalog/gs_model.h"
 #include "commands/matview.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablespace.h"
@@ -292,6 +293,7 @@ static const FormData_pg_attribute Desc_gs_client_global_keys[Natts_gs_client_gl
 static const FormData_pg_attribute Desc_gs_client_global_keys_args[Natts_gs_client_global_keys_args] = {Schema_gs_client_global_keys_args};
 
 static const FormData_pg_attribute Desc_gs_opt_model[Natts_gs_opt_model] = {Schema_gs_opt_model};
+static const FormData_pg_attribute Desc_gs_model_warehouse[Natts_gs_model_warehouse] = {Schema_gs_model_warehouse};
 
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
@@ -766,6 +768,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         true,
         Natts_pg_ts_template,
         Desc_pg_ts_template,
+        false,
+        true},
+    {ModelRelationId,
+        "gs_model_warehouse",
+        ModelRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_model_warehouse,
+        Desc_gs_model_warehouse,
         false,
         true},
     {DataSourceRelationId,
@@ -1381,6 +1392,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
 
         constr = (TupleConstr*)MemoryContextAllocZero(u_sess->cache_mem_cxt, sizeof(TupleConstr));
         constr->has_not_null = false;
+        constr->has_generated_stored = false;
     }
 
     /*
@@ -1572,10 +1584,13 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
             else
                 constr->defval = attrdef;
             constr->num_defval = ndef;
+            constr->generatedCols = (char *)MemoryContextAllocZero(u_sess->cache_mem_cxt,
+                RelationGetNumberOfAttributes(relation) * sizeof(char));
             AttrDefaultFetch(relation);
         } else {
             constr->num_defval = 0;
             constr->defval = NULL;
+            constr->generatedCols = NULL;
         }
 
         if (relation->rd_rel->relchecks > 0) /* CHECKs */
@@ -5018,27 +5033,45 @@ TupleDesc GetDefaultPgIndexDesc(void)
 }
 
 /*
+ * Load generated column attribute value definitions for the relation.
+ */
+static void GeneratedColFetch(TupleConstr *constr, HeapTuple htup, Relation adrel, int attrdefIndex)
+{
+    char *genCols = constr->generatedCols;
+    AttrDefault *attrdef = constr->defval;
+    char generatedCol = '\0';
+    if (HeapTupleHeaderGetNatts(htup->t_data, adrel->rd_att) >= Anum_pg_attrdef_adgencol) {
+        bool isnull = false;
+        Datum val = fastgetattr(htup, Anum_pg_attrdef_adgencol, adrel->rd_att, &isnull);
+        if (!isnull) {
+            generatedCol = DatumGetChar(val);
+        }
+    }
+    attrdef[attrdefIndex].generatedCol = generatedCol;
+    genCols[attrdef[attrdefIndex].adnum - 1] = generatedCol;
+    if (generatedCol == ATTRIBUTE_GENERATED_STORED) {
+        constr->has_generated_stored = true;
+    }
+}
+
+/*
  * Load any default attribute value definitions for the relation.
  */
 static void AttrDefaultFetch(Relation relation)
 {
-    AttrDefault* attrdef = relation->rd_att->constr->defval;
+    AttrDefault *attrdef = relation->rd_att->constr->defval;
     int ndef = relation->rd_att->constr->num_defval;
-    Relation adrel;
-    SysScanDesc adscan;
     ScanKeyData skey;
     HeapTuple htup;
     Datum val;
     bool isnull = false;
-    int found;
     int i;
+    int found = 0;
 
-    ScanKeyInit(
-        &skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(RelationGetRelid(relation)));
-
-    adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
-    adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
-    found = 0;
+    ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ,
+        ObjectIdGetDatum(RelationGetRelid(relation)));
+    Relation adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
+    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, SnapshotNow, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
         Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
@@ -5046,30 +5079,30 @@ static void AttrDefaultFetch(Relation relation)
         for (i = 0; i < ndef; i++) {
             if (adform->adnum != attrdef[i].adnum)
                 continue;
+
             if (attrdef[i].adbin != NULL)
-                ereport(WARNING,
-                    (errmsg("multiple attrdef records found for attr %s of rel %s",
-                        NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname),
-                        RelationGetRelationName(relation))));
+                ereport(WARNING, (errmsg("multiple attrdef records found for attr %s of rel %s",
+                    NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
             else
                 found++;
 
+            if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+                GeneratedColFetch(relation->rd_att->constr, htup, adrel, i);
+            }
+
             val = fastgetattr(htup, Anum_pg_attrdef_adbin, adrel->rd_att, &isnull);
             if (isnull)
-                ereport(WARNING,
-                    (errmsg("null adbin for attr %s of rel %s",
-                        NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname),
-                        RelationGetRelationName(relation))));
+                ereport(WARNING, (errmsg("null adbin for attr %s of rel %s",
+                    NameStr(relation->rd_att->attrs[adform->adnum - 1]->attname), RelationGetRelationName(relation))));
             else
                 attrdef[i].adbin = MemoryContextStrdup(u_sess->cache_mem_cxt, TextDatumGetCString(val));
             break;
         }
 
-        if (i >= ndef)
-            ereport(WARNING,
-                (errmsg("unexpected attrdef record found for attr %d of rel %s",
-                    adform->adnum,
-                    RelationGetRelationName(relation))));
+        if (i >= ndef) {
+            ereport(WARNING, (errmsg("unexpected attrdef record found for attr %d of rel %s", adform->adnum,
+                RelationGetRelationName(relation))));
+        }
     }
 
     systable_endscan(adscan);

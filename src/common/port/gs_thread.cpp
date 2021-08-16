@@ -471,8 +471,10 @@ void gs_thread_exit(int code)
     /* free the locale cache */
     freeLocaleCache(true);
 
+#ifdef ENABLE_LLVM_COMPILE
     /* release llvm context memory */
     CodeGenThreadTearDown();
+#endif
 
     CancelAutoAnalyze();
 

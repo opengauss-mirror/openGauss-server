@@ -58,5 +58,7 @@ extern "C" Datum dblink_build_sql_delete(PG_FUNCTION_ARGS);
 extern "C" Datum dblink_build_sql_update(PG_FUNCTION_ARGS);
 extern "C" Datum dblink_current_query(PG_FUNCTION_ARGS);
 extern "C" Datum dblink_get_notify(PG_FUNCTION_ARGS);
+extern "C" void set_extension_index(uint32 index);
+extern "C" void init_session_vars(void);
 
 #endif /* DBLINK_H */

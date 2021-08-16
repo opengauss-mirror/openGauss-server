@@ -2821,6 +2821,11 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_BOOL_FIELD(sublink_pull_up);
     }
 
+    IF_EXIST(extraUpdatedCols)
+    {
+        READ_BITMAPSET_FIELD(extraUpdatedCols);
+    }
+
     READ_DONE();
 }
 
@@ -3677,7 +3682,7 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(exclRelRTIndex) {
         READ_INT_FIELD(exclRelRTIndex);
     }
-
+    READ_BOOL_FIELD(partKeyUpsert);
     READ_DONE();
 }
 
@@ -3689,7 +3694,7 @@ static UpsertExpr* _readUpsertExpr(void)
     READ_NODE_FIELD(updateTlist);
     READ_NODE_FIELD(exclRelTlist);
     READ_INT_FIELD(exclRelIndex);
-
+    READ_BOOL_FIELD(partKeyUpsert);
     READ_DONE();
 }
 
@@ -4821,6 +4826,10 @@ static ColumnDef* _readColumnDef()
     READ_NODE_FIELD(clientLogicColumnRef);
     if (local_node->storage == '0') {
         local_node->storage = 0;
+    }
+
+    IF_EXIST(generatedCol) {
+        READ_CHAR_FIELD(generatedCol);
     }
 
     READ_DONE();

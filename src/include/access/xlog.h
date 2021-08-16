@@ -151,7 +151,7 @@ typedef struct {
     PGSemaphoreData	sem;
 } WALBufferInitWaitLock;
 
-#define WAL_INSERT_STATUS_ENTRIES 4194304
+#define WAL_INSERT_STATUS_ENTRIES g_instance.attr.attr_storage.wal_insert_status_entries
 #define WAL_NOT_COPIED 0
 #define WAL_COPIED 1
 #define WAL_COPY_SUSPEND (-1)
@@ -326,7 +326,7 @@ extern void XLogSetReplicationSlotMaximumLSN(XLogRecPtr lsn);
 extern XLogRecPtr XLogGetReplicationSlotMaximumLSN(void);
 extern XLogRecPtr XLogGetReplicationSlotMinimumLSNByOther(void);
 
-extern XLogRecPtr XLogGetLastRemovedSegno(void);
+extern XLogSegNo XLogGetLastRemovedSegno(void);
 extern void xlog_redo(XLogReaderState* record);
 extern void xlog_desc(StringInfo buf, XLogReaderState* record);
 

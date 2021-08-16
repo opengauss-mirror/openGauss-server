@@ -92,6 +92,8 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_HOTKEY, "HOTKEY"},
     {MOD_THREAD_POOL, "THREAD_POOL"},
     {MOD_OPT_AI, "OPT_AI"},
+    {MOD_GEN_COL, "GEN_COL"},
+    {MOD_DB4AI, "DB4AI"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};

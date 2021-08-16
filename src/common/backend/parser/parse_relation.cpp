@@ -90,6 +90,7 @@ static void set_rte_flags(RangeTblEntry* rte, bool inh, bool inFromCl, int perm)
     rte->selectedCols = NULL;
     rte->insertedCols = NULL;
     rte->updatedCols = NULL;
+    rte->extraUpdatedCols = NULL;
 }
 
 /*
@@ -566,6 +567,15 @@ Node* scanRTEForColumn(ParseState* pstate, RangeTblEntry* rte, char* colname, in
     if (rte->rtekind == RTE_RELATION && rte->relkind != RELKIND_FOREIGN_TABLE && rte->relkind != RELKIND_STREAM) {
         /* quick check to see if name could be a system column */
         attnum = specialAttNum(colname);
+
+        /*
+         * In generated column, no system column is allowed except tableOid.
+         */
+        if (pstate->p_expr_kind == EXPR_KIND_GENERATED_COLUMN && attnum < InvalidAttrNumber) {
+            ereport(ERROR, (errmodule(MOD_GEN_COL), errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                errmsg("cannot use system column \"%s\" in column generation expression", colname),
+                parser_errposition(pstate, location)));
+        }
         if (attnum != InvalidAttrNumber) {
             /*
              * Now check to see if column actually is defined.  Because of
@@ -1735,6 +1745,7 @@ RangeTblEntry* addRangeTableEntryForCTE(
     rte->selectedCols = NULL;
     rte->insertedCols = NULL;
     rte->updatedCols = NULL;
+    rte->extraUpdatedCols = NULL;
     rte->orientation = REL_ORIENT_UNKNOWN;
 
     /*
@@ -1791,6 +1802,7 @@ RangeTblEntry* getRangeTableEntryByRelation(Relation rel)
     rte->insertedCols = NULL;
     rte->updatedCols = NULL;
     rte->lateral = false;
+    rte->extraUpdatedCols = NULL;
 
     setRteOrientation(rel, rte);
 

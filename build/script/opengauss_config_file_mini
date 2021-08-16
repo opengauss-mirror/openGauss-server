@@ -1,0 +1,11 @@
+wal_buffers = -1			# min 32kB
+cstore_buffers = 16MB         #min 16MB
+max_locks_per_transaction = 10		# min 10
+shared_buffers = 2MB			# min 128kB
+data_replicate_buffer_size = 4096	# data replication buffer size
+max_connections = 16			# (change requires restart)
+asp_sample_num = 10000
+enable_double_write = off
+enable_incremental_checkpoint = off	# enable incremental checkpoint
+num_internal_lock_partitions = 'CLOG_PART=1,CSNLOG_PART=1'
+wal_insert_status_entries = 524288

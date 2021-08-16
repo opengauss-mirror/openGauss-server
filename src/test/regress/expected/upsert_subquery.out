@@ -1,0 +1,1102 @@
+---------------------------
+-- prepare data
+---------------------------
+create schema upserttest;
+set current_schema to upserttest;
+create table data1(a int);
+create table data2(a int, b int);
+create table aa (a1 int primary key, a2 int, a3 int not NULL, a4 int unique);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "aa_pkey" for table "aa"
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "aa_a4_key" for table "aa"
+create table ff (f1 int primary key, f2 int references aa, f3 int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ff_pkey" for table "ff"
+create table gg (g1 int primary key, g2 int, g3 int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gg_pkey" for table "gg"
+create table hh (h1 int primary key, h2 int, h3 int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "hh_pkey" for table "hh"
+insert into data1 values(1),(2),(3),(4),(1),(2),(3),(4),(5);
+insert into data2 values(1,2),(2,3),(3,4),(4,5),(1,1),(2,2),(3,3),(4,4),(5,5),(6,6);
+insert into aa values (1,1,1,1),(2,2,2,2),(3,3,3,3),(4,4,4,4);
+insert into ff values (1,1),(2,2),(3,3),(4,4);
+insert into gg values (1,1,1),(2,2,2),(3,3,3),(4,4,4),(5,5,5);
+insert into hh select generate_series(1,100000), generate_series(2,100001), generate_series(3,100002);
+insert into hh select h1 + 100000, h2, h3 from hh;
+analyze data1;
+analyze data2;
+analyze aa;
+analyze ff;
+analyze gg;
+analyze hh;
+---------------------------
+-- basic test
+---------------------------
+insert into aa values(1,1,1,1) on duplicate key update a2 = (select a from data1 where a > 2 limit 1);   -- suc
+explain (costs off, verbose) insert into aa values(1,1) on duplicate key update a2 = (select a from data1 where a > 2 limit 1);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: data1.a
+           ->  Seq Scan on upserttest.data1
+                 Output: data1.a
+                 Filter: (data1.a > 2)
+   ->  Result
+         Output: 1, 1, NULL::integer, NULL::integer
+(11 rows)
+
+insert into aa values(2,2,2,2) on duplicate key update a2 = (select * from data1 order by a ASC limit 1) + (select * from data1 order by a DESC limit 1); -- suc
+explain (costs off, verbose) insert into aa values(2,2) on duplicate key update a2 = (select * from data1 order by a ASC limit 1) + (select * from data1 order by a DESC limit 1);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: upserttest.data1.a
+           ->  Sort
+                 Output: upserttest.data1.a
+                 Sort Key: upserttest.data1.a
+                 ->  Seq Scan on upserttest.data1
+                       Output: upserttest.data1.a
+   InitPlan 2 (returns $1)
+     ->  Limit
+           Output: upserttest.data1.a
+           ->  Sort
+                 Output: upserttest.data1.a
+                 Sort Key: upserttest.data1.a DESC
+                 ->  Seq Scan on upserttest.data1
+                       Output: upserttest.data1.a
+   ->  Result
+         Output: 2, 2, NULL::integer, NULL::integer
+(21 rows)
+
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data1);                        -- err, muilt row
+ERROR:  more than one row returned by a subquery used as an expression
+CONTEXT:  referenced column: a2
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data2 limit 1);                -- err, muilt column
+ERROR:  subquery must return only one column
+LINE 1: ...o aa values(3,3,3,3) on duplicate key update a2 = (select * ...
+                                                             ^
+CONTEXT:  referenced column: a2
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data2 limit 1).b;              -- err, not support, reference follow
+ERROR:  subquery must return only one column
+LINE 1: ...o aa values(3,3,3,3) on duplicate key update a2 = (select * ...
+                                                             ^
+CONTEXT:  referenced column: a2
+update aa set a2 = ((select * from data2 limit 1).b) where a1 = 1;                                        -- err
+ERROR:  subquery must return only one column
+LINE 1: update aa set a2 = ((select * from data2 limit 1).b) where a...
+                            ^
+CONTEXT:  referenced column: a2
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data1 where a > 5);            -- suc, 0 row means NULL
+explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data1 where a > 5);
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on upserttest.data1
+           Output: data1.a
+           Filter: (data1.a > 5)
+   ->  Result
+         Output: 3, 3, 3, 3
+(9 rows)
+
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select * from data2 where a > 5);            -- err, muilt column, even 0 row
+ERROR:  subquery must return only one column
+LINE 1: ...o aa values(3,3,3,3) on duplicate key update a2 = (select * ...
+                                                             ^
+CONTEXT:  referenced column: a2
+insert into aa values(4,4,4,4) on duplicate key update a2 = (select * from data1 where a > 5) + 1;        -- suc, 0 row + 1 means NULL
+select * from aa order by a1;
+ a1 | a2 | a3 | a4 
+----+----+----+----
+  1 |  3 |  1 |  1
+  2 |  6 |  2 |  2
+  3 |    |  3 |  3
+  4 |    |  4 |  4
+(4 rows)
+
+insert into ff values(1,1,1) on duplicate key update f2 = (select a + 10 from data1 where a > 2 limit 1); -- err, invalid fk
+ERROR:  insert or update on table "ff" violates foreign key constraint "ff_f2_fkey"
+DETAIL:  Key (f2)=(13) is not present in table "aa".
+insert into aa values(1,1,1,1) on duplicate key update a3 = (select a from data1 where a > 10 limit 1);   -- err, a3 is not null
+ERROR:  null value in column "a3" violates not-null constraint
+DETAIL:  Failing row contains (1, 3, null, 1).
+insert into aa values(1,1,1,1) on duplicate key update a4 = (select a from data1 where a = 3 limit 1);    -- err, a4 is unique key
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+select * from ff order by f1;
+ f1 | f2 | f3 
+----+----+----
+  1 |  1 |   
+  2 |  2 |   
+  3 |  3 |   
+  4 |  4 |   
+(4 rows)
+
+select * from aa order by a1;
+ a1 | a2 | a3 | a4 
+----+----+----+----
+  1 |  3 |  1 |  1
+  2 |  6 |  2 |  2
+  3 |    |  3 |  3
+  4 |    |  4 |  4
+(4 rows)
+
+---------------------------
+-- muilt-set
+---------------------------
+insert into gg values(1,1,1) on duplicate key update (g2, g3) = select * from data2 where a = 5;           -- err, invalid syntax
+ERROR:  syntax error at or near "select"
+LINE 1: ... values(1,1,1) on duplicate key update (g2, g3) = select * f...
+                                                             ^
+insert into gg values(1,1,1) on duplicate key update (g2, g3) = (select * from data2 where a = 5 limit 1); -- err, there is some syntax limitations for muilt-set, limit is not allowed;
+ERROR:  syntax error at or near "limit"
+LINE 1: ...update (g2, g3) = (select * from data2 where a = 5 limit 1);
+                                                              ^
+insert into gg values(1,1,1) on duplicate key update (g2, g3) = (with tmptb(c1, c2) as (select * from data2) select * from tmptb limit 1); -- err, there is some syntax limitations;
+ERROR:  syntax error at or near "with tmptb"
+LINE 1: ...values(1,1,1) on duplicate key update (g2, g3) = (with tmptb...
+                                                             ^
+insert into gg values(2,2,2) on duplicate key update (g2, g3) = (select a, b from data2 where a = 5);      -- suc
+explain (costs off, verbose) insert into gg values(2,2,2) on duplicate key update (g2, g3) = (select a, b from data2 where a = 5);
+                 QUERY PLAN                 
+--------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on upserttest.data2
+           Output: upserttest.data2.a
+           Filter: (upserttest.data2.a = 5)
+   InitPlan 2 (returns $1)
+     ->  Seq Scan on upserttest.data2
+           Output: upserttest.data2.b
+           Filter: (upserttest.data2.a = 5)
+   ->  Result
+         Output: 2, 2, 2
+(13 rows)
+
+insert into gg values(3,3,3) on duplicate key update (g2, g3) = (select a, a, b from data2 where a = 5);   -- err, columns not match
+ERROR:  number of columns does not match number of values
+update gg set (g2) = (select * from data2 where a = 5) where g1 = 3;                                       -- suc, maybe, it could be a bug, we only update one column, and * means two.
+insert into gg values(4,4,4) on duplicate key update (g2) = (select * from data2 where a = 5);             -- suc, only g2 be updated
+insert into gg values(5,5,5) on duplicate key update (g2) = (select * from data2 where a = 7);             -- suc, only g2 be updated to NULL
+explain (costs off, verbose) insert into gg values(5,5,5) on duplicate key update (g2) = (select * from data2 where a = 7);
+              QUERY PLAN              
+--------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on upserttest.data2
+           Output: data2.a
+           Filter: (data2.a = 7)
+   ->  Result
+         Output: 5, 5, 5
+(9 rows)
+
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  1 |  1
+  2 |  5 |  5
+  3 |  5 |  3
+  4 |  5 |  4
+  5 |    |  5
+(5 rows)
+
+---------------------------
+-- complex subquery
+---------------------------
+insert into aa values(1,1,1,1) on duplicate key update a2 = (select max(a) from data1);                            -- suc
+insert into aa values(2,2,2,2) on duplicate key update a2 = (select max(b) from data2 group by a limit 1);         -- suc
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select a from data2 except select a from data2) + 5;  -- suc
+insert into aa values(4,4,4,4) on duplicate key update a2 = (with tmptb(c1) as (select * from data1) select data2.b from data2 where data2.a not in (select c1 from tmptb));  -- suc
+explain (costs off, verbose) insert into aa values(1,1,1,1) on duplicate key update a2 = (select max(a) from data1);
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: max(data1.a)
+           ->  Seq Scan on upserttest.data1
+                 Output: data1.a
+   ->  Result
+         Output: 1, 1, 1, 1
+(10 rows)
+
+explain (costs off, verbose) insert into aa values(2,2,2,2) on duplicate key update a2 = (select max(b) from data2 group by a limit 1);
+                    QUERY PLAN                    
+--------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Limit
+           Output: (max(data2.b)), data2.a
+           ->  HashAggregate
+                 Output: max(data2.b), data2.a
+                 Group By Key: data2.a
+                 ->  Seq Scan on upserttest.data2
+                       Output: data2.a, data2.b
+   ->  Result
+         Output: 2, 2, 2, 2
+(13 rows)
+
+explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select a from data2 except select a from data1) + 5;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  HashSetOp Except
+           Output: "*SELECT* 1".a, (0)
+           ->  Append
+                 ->  Subquery Scan on "*SELECT* 1"
+                       Output: "*SELECT* 1".a, 0
+                       ->  Seq Scan on upserttest.data2
+                             Output: data2.a
+                 ->  Subquery Scan on "*SELECT* 2"
+                       Output: "*SELECT* 2".a, 1
+                       ->  Seq Scan on upserttest.data1
+                             Output: data1.a
+   ->  Result
+         Output: 3, 3, 3, 3
+(17 rows)
+
+explain (costs off, verbose) insert into aa values(4,4,4,4) on duplicate key update a2 = (with tmptb(c1) as (select * from data1) select data2.b from data2 where data2.a not in (select c1 from tmptb));
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 2 (returns $1)
+     ->  Nested Loop Anti Join
+           Output: data2.b
+           Join Filter: ((data2.a = tmptb.c1) OR (data2.a IS NULL) OR (tmptb.c1 IS NULL))
+           CTE tmptb
+             ->  Seq Scan on upserttest.data1
+                   Output: data1.a
+           ->  Seq Scan on upserttest.data2
+                 Output: data2.a, data2.b
+           ->  CTE Scan on tmptb
+                 Output: tmptb.c1
+   ->  Result
+         Output: 4, 4, 4, 4
+(16 rows)
+
+select * from aa order by a1;
+ a1 | a2 | a3 | a4 
+----+----+----+----
+  1 |  5 |  1 |  1
+  2 |  2 |  2 |  2
+  3 |    |  3 |  3
+  4 |  6 |  4 |  4
+(4 rows)
+
+insert into aa values(1,1,1,1) on duplicate key update a2 = (1 in (1,2,3));                                  -- suc, true means 1
+insert into aa values(2,2,2,2) on duplicate key update a2 = (5 not in (select * from data1));                -- suc, false means 0
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select a from data1 except select a1 from aa);  -- suc, only one row
+insert into aa values(4,4,4,4) on duplicate key update a2 = (select min (data2.a) from data1 left join data2 on data1.a = data2.a - 1 where data1.a in (select a1 from aa));  -- suc
+explain (costs off, verbose) insert into aa values(1,1,1,1) on duplicate key update a2 = (1 not in (1,2,3));
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   ->  Result
+         Output: 1, 1, 1, 1
+(5 rows)
+
+explain (costs off, verbose) insert into aa values(2,2,2,2) on duplicate key update a2 = (5 not in (select * from data1));
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   ->  Result
+         Output: 2, 2, 2, 2
+   SubPlan 1
+     ->  Seq Scan on upserttest.data1
+           Output: data1.a
+(8 rows)
+
+explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select a from data1 except select a1 from aa);
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  HashSetOp Except
+           Output: "*SELECT* 1".a, (0)
+           ->  Append
+                 ->  Subquery Scan on "*SELECT* 1"
+                       Output: "*SELECT* 1".a, 0
+                       ->  Seq Scan on upserttest.data1
+                             Output: data1.a
+                 ->  Subquery Scan on "*SELECT* 2"
+                       Output: "*SELECT* 2".a1, 1
+                       ->  Seq Scan on upserttest.aa
+                             Output: upserttest.aa.a1
+   ->  Result
+         Output: 3, 3, 3, 3
+(17 rows)
+
+explain (costs off, verbose) insert into aa values(4,4,4,4) on duplicate key update a2 = (select min (data2.a) from data1 left join data2 on data1.a = data2.a - 1 where data1.a in (select a1 from aa));
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: min(data2.a)
+           ->  Hash Right Join
+                 Output: data2.a
+                 Hash Cond: ((data2.a - 1) = data1.a)
+                 ->  Seq Scan on upserttest.data2
+                       Output: data2.a, data2.b
+                 ->  Hash
+                       Output: data1.a
+                       ->  Hash Join
+                             Output: data1.a
+                             Hash Cond: (data1.a = upserttest.aa.a1)
+                             ->  Seq Scan on upserttest.data1
+                                   Output: data1.a
+                             ->  Hash
+                                   Output: upserttest.aa.a1
+                                   ->  Seq Scan on upserttest.aa
+                                         Output: upserttest.aa.a1
+   ->  Result
+         Output: 4, 4, 4, 4
+(24 rows)
+
+select * from aa order by a1;
+ a1 | a2 | a3 | a4 
+----+----+----+----
+  1 |  1 |  1 |  1
+  2 |  0 |  2 |  2
+  3 |  5 |  3 |  3
+  4 |  2 |  4 |  4
+(4 rows)
+
+------------------------------
+-- pbe
+------------------------------
+prepare sub1 as select a from data1 where a = $1 limit 1;
+insert into aa values(1,3,3,3) on duplicate key update a2 = (select sub(3));   -- err, invalid syntax
+ERROR:  function sub(integer) does not exist
+LINE 1: ...alues(1,3,3,3) on duplicate key update a2 = (select sub(3));
+                                                               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+CONTEXT:  referenced column: sub
+referenced column: a2
+insert into aa values(1,3,3,3) on duplicate key update a2 = (execute sub(3));  -- err, invalid syntax
+ERROR:  syntax error at or near "sub"
+LINE 1: ...lues(1,3,3,3) on duplicate key update a2 = (execute sub(3));
+                                                               ^
+prepare sub2 as insert into aa values(1,1,1,1) on duplicate key update a2 =(select max(a) from data1);
+execute sub2;                                                                  -- suc
+explain (costs off, verbose) execute sub2;
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: max(data1.a)
+           ->  Seq Scan on upserttest.data1
+                 Output: data1.a
+   ->  Result
+         Output: 1, 1, 1, 1
+(10 rows)
+
+prepare sub3 as insert into aa values($1,0,0,0) on duplicate key update a2 =( select count(*)+ excluded.a1 from hh);
+execute sub3(2);                                                               -- suc
+explain (costs off, verbose) execute sub3(2);
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   ->  Result
+         Output: $1, 0, 0, 0
+   SubPlan 1
+     ->  Aggregate
+           Output: (count(*) + "excluded".a1)
+           ->  Seq Scan on upserttest.hh
+                 Output: hh.h1, hh.h2, hh.h3
+(10 rows)
+
+select * from aa order by a1;
+ a1 |   a2   | a3 | a4 
+----+--------+----+----
+  1 |      5 |  1 |  1
+  2 | 200002 |  2 |  2
+  3 |      5 |  3 |  3
+  4 |      2 |  4 |  4
+(4 rows)
+
+------------------------------
+-- hint
+------------------------------
+explain select /*+tablescan(hh) */ h1 from hh where h1 = 2000;                                                                       -- should be a seqscan plan
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Seq Scan on hh  (cost=0.00..3582.00 rows=1 width=4)
+   Filter: (h1 = 2000)
+(2 rows)
+
+insert into aa values(1,3,3,3) on duplicate key update a2 = (select /*+tablescan(hh) */ h1 from hh where h1 = 2000);                 -- suc
+explain (costs off, verbose) insert into aa values(1,3,3,3) on duplicate key update a2 = (select /*+tablescan(hh) */ h1 from hh where h1 = 2000);
+                   QUERY PLAN                   
+------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on upserttest.hh
+           Output: hh.h1
+           Filter: (hh.h1 = 2000)
+   ->  Result
+         Output: 1, 3, 3, 3
+(9 rows)
+
+explain (costs off, verbose) insert into aa values(1,3,3,3) on duplicate key update a2 = (select  h1 from hh where h1 = 2000);
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Index Only Scan using hh_pkey on upserttest.hh
+           Output: hh.h1
+           Index Cond: (hh.h1 = 2000)
+   ->  Result
+         Output: 1, 3, 3, 3
+(9 rows)
+
+select * from aa order by a1;
+ a1 |   a2   | a3 | a4 
+----+--------+----+----
+  1 |   2000 |  1 |  1
+  2 | 200002 |  2 |  2
+  3 |      5 |  3 |  3
+  4 |      2 |  4 |  4
+(4 rows)
+
+------------------------------
+-- bypass and smp
+------------------------------
+explain (costs off, verbose) select h1 from hh where h1 = 20;                                                                        -- should be a bypass query
+                   QUERY PLAN                   
+------------------------------------------------
+ [Bypass]
+ Index Only Scan using hh_pkey on upserttest.hh
+   Output: h1
+   Index Cond: (hh.h1 = 20)
+(4 rows)
+
+insert into aa values(2,2,2,2) on duplicate key update a2 = (select h1 from hh where h1 = 20);                                       -- suc
+explain (costs off, verbose) insert into aa values(2,3,3,3) on duplicate key update a2 = (select h1 from hh where h1 = 20);          -- upsert not support bypass, so subquery is not a bypass, too.
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Index Only Scan using hh_pkey on upserttest.hh
+           Output: hh.h1
+           Index Cond: (hh.h1 = 20)
+   ->  Result
+         Output: 2, 3, 3, 3
+(9 rows)
+
+set query_dop = 2;
+explain (costs off, verbose) select count(*) from hh;                                                                                -- should be a smp query
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   Output: pg_catalog.count(*)
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (count(*))
+         ->  Aggregate
+               Output: count(*)
+               ->  Seq Scan on upserttest.hh
+                     Output: h1, h2, h3
+(8 rows)
+
+insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                                               -- suc
+explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                  -- subquery is not execute by smp, but there still is a two-level agg.
+                    QUERY PLAN                     
+---------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: pg_catalog.count(*)
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on upserttest.hh
+                       Output: hh.h1, hh.h2, hh.h3
+   ->  Result
+         Output: 3, 3, 3, 3
+(12 rows)
+
+explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should be a smp query
+                  QUERY PLAN                  
+----------------------------------------------
+ Aggregate
+   Output: (4), pg_catalog.count(*), (4), (4)
+   ->  Streaming(type: LOCAL GATHER dop: 1/2)
+         Output: (4), (count(*))
+         ->  Aggregate
+               Output: 4, count(*)
+               ->  Seq Scan on upserttest.hh
+                     Output: h1, h2, h3
+(8 rows)
+
+insert into aa select 4,count(*), 4, 4 from hh on duplicate key update a2 = (select count(*) from hh);                               -- suc
+explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on duplicate key update a2 = (select count(*) from hh);  -- insert-part is a smp plan, but update-part not
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: pg_catalog.count(*)
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on upserttest.hh
+                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+   ->  Subquery Scan on "*SELECT*"
+         Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         ->  Aggregate
+               Output: (4), pg_catalog.count(*), (4), (4)
+               ->  Streaming(type: BROADCAST dop: 1/2)
+                     Output: (4), (count(*))
+                     ->  Aggregate
+                           Output: 4, count(*)
+                           ->  Seq Scan on upserttest.hh
+                                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(20 rows)
+
+prepare sub4 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) + $1 from hh);
+execute sub4(1);                                                                                                                     -- suc
+explain (costs off, verbose) execute sub4(1);                                                                                        -- insert-part is a smp plan, but update-part not
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: (pg_catalog.count(*) + 1)
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on upserttest.hh
+                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+   ->  Subquery Scan on "*SELECT*"
+         Output: 1, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         ->  Aggregate
+               Output: (1), pg_catalog.count(*), (4), (4)
+               ->  Streaming(type: BROADCAST dop: 1/2)
+                     Output: (1), (count(*)), (4)
+                     ->  Aggregate
+                           Output: 1, count(*), 4
+                           ->  Seq Scan on upserttest.hh
+                                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(20 rows)
+
+set query_dop = 1;
+select * from aa order by a1;
+ a1 |   a2   | a3 | a4 
+----+--------+----+----
+  1 | 200001 |  1 |  1
+  2 |     20 |  2 |  2
+  3 | 200000 |  3 |  3
+  4 | 200000 |  4 |  4
+(4 rows)
+
+execute sub4(2);                                                                                                                     -- suc
+explain (costs off, verbose) execute sub4(2);                                                                                        -- the plan was rebuilt, not a smp any more.
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   InitPlan 1 (returns $0)
+     ->  Aggregate
+           Output: (count(*) + 2)
+           ->  Seq Scan on upserttest.hh
+                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+   ->  Subquery Scan on "*SELECT*"
+         Output: 2, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         ->  Aggregate
+               Output: 2, count(*), 4, 4
+               ->  Seq Scan on upserttest.hh
+                     Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(14 rows)
+
+select * from aa order by a1;
+ a1 |   a2   | a3 | a4 
+----+--------+----+----
+  1 | 200001 |  1 |  1
+  2 | 200002 |  2 |  2
+  3 | 200000 |  3 |  3
+  4 | 200000 |  4 |  4
+(4 rows)
+
+------------------------------
+-- subquery has excluded
+------------------------------
+insert into gg values(1,1) on duplicate key update g2 = (select max(a) from data1 where a > excluded.g2);                  -- suc
+insert into gg values(2,2) on duplicate key update g2 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2); -- suc
+insert into gg values(4,3,1) on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));  -- suc
+explain (costs off, verbose) insert into gg values(1,1) on duplicate key update g2 = (select max(a) from data1 where a > excluded.g2); 
+                    QUERY PLAN                     
+---------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 1, 1, NULL::integer
+   SubPlan 1
+     ->  Aggregate
+           Output: max(data1.a)
+           ->  Seq Scan on upserttest.data1
+                 Output: data1.a
+                 Filter: (data1.a > "excluded".g2)
+(11 rows)
+
+explain (costs off, verbose) insert into gg values(2,2) on duplicate key update g2 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2);
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 2, 2, NULL::integer
+   SubPlan 1
+     ->  Aggregate
+           Output: max(data2.b)
+           ->  Hash Right Join
+                 Output: data2.b
+                 Hash Cond: ((data2.a - "excluded".g2) = data1.a)
+                 ->  Seq Scan on upserttest.data2
+                       Output: data2.a, data2.b
+                 ->  Hash
+                       Output: data1.a
+                       ->  Seq Scan on upserttest.data1
+                             Output: data1.a
+(17 rows)
+
+explain (costs off, verbose) insert into gg values(4,3,1) on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 4, 3, 1
+   SubPlan 1
+     ->  Subquery Scan on "S"
+           Output: "S".s1
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+   SubPlan 2
+     ->  Subquery Scan on "S"
+           Output: "S".s2
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+(35 rows)
+
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  5 |  1
+  2 |  6 |  5
+  3 |  5 |  3
+  4 |  4 |  4
+  5 |    |  5
+(5 rows)
+
+insert into gg select *,1 from data2 on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1)); -- suc
+explain (costs off, verbose) insert into gg select *,1 from data2 on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Seq Scan on upserttest.data2
+         Output: upserttest.data2.a, upserttest.data2.b, 1
+   SubPlan 1
+     ->  Subquery Scan on "S"
+           Output: "S".s1
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+   SubPlan 2
+     ->  Subquery Scan on "S"
+           Output: "S".s2
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+(35 rows)
+
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  2 |  3
+  2 |  3 |  4
+  3 |  4 |  5
+  4 |  5 |  5
+  5 |  6 |  5
+  6 |  6 |  1
+(6 rows)
+
+insert into gg select * from data2 on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));  -- suc
+explain (costs off, verbose) insert into gg select * from data2 on duplicate key update (g2,g3) = (select min (data2.a), max(data2.b) - excluded.g3 from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Seq Scan on upserttest.data2
+         Output: upserttest.data2.a, upserttest.data2.b, NULL::integer
+   SubPlan 1
+     ->  Subquery Scan on "S"
+           Output: "S".s1
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+   SubPlan 2
+     ->  Subquery Scan on "S"
+           Output: "S".s2
+           ->  Aggregate
+                 Output: min(upserttest.data2.a), (max(upserttest.data2.b) - "excluded".g3)
+                 ->  Hash Right Join
+                       Output: upserttest.data2.a, upserttest.data2.b
+                       Hash Cond: ((upserttest.data2.a - "excluded".g2) = upserttest.data1.a)
+                       ->  Seq Scan on upserttest.data2
+                             Output: upserttest.data2.a, upserttest.data2.b
+                       ->  Hash
+                             Output: upserttest.data1.a
+                             ->  Seq Scan on upserttest.data1
+                                   Output: upserttest.data1.a
+                                   Filter: (upserttest.data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+(35 rows)
+
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  2 |   
+  2 |  3 |   
+  3 |  4 |   
+  4 |  5 |   
+  5 |  6 |   
+  6 |    |   
+(6 rows)
+
+insert into gg values(2,2) on duplicate key update g2 = (excluded.g2 not in (select * from data1)); -- suc
+explain (costs off, verbose) insert into gg values(2,2) on duplicate key update g2 = (excluded.g2 not in (select * from data1));
+              QUERY PLAN              
+--------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 2, 2, NULL::integer
+   SubPlan 1
+     ->  Seq Scan on upserttest.data1
+           Output: data1.a
+(8 rows)
+
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  2 |   
+  2 |  0 |   
+  3 |  4 |   
+  4 |  5 |   
+  5 |  6 |   
+  6 |    |   
+(6 rows)
+
+set query_dop = 2;
+prepare sub5 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) * excluded.a1 + $1 from hh);
+execute sub5(1);                                                                                                                     -- suc
+explain (costs off, verbose) execute sub5(1);                                                                                        -- insert-part is a smp plan, but update-part not
+                                          QUERY PLAN                                          
+----------------------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   ->  Subquery Scan on "*SELECT*"
+         Output: 1, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         ->  Aggregate
+               Output: (1), pg_catalog.count(*), (4), (4)
+               ->  Streaming(type: BROADCAST dop: 1/2)
+                     Output: (1), (count(*)), (4)
+                     ->  Aggregate
+                           Output: 1, count(*), 4
+                           ->  Seq Scan on upserttest.hh
+                                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+   SubPlan 1
+     ->  Aggregate
+           Output: ((pg_catalog.count(*) * "excluded".a1) + 1)
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on upserttest.hh
+                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(20 rows)
+
+set query_dop = 1;
+execute sub5(2);                                                                                                                     -- suc
+explain (costs off, verbose) execute sub5(2);                                                                                        -- the plan was rebuilt, not a smp any more.
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Insert on upserttest.aa
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: aa_pkey, aa_a4_key
+   ->  Subquery Scan on "*SELECT*"
+         Output: 2, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         ->  Aggregate
+               Output: 2, count(*), 4, 4
+               ->  Seq Scan on upserttest.hh
+                     Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+   SubPlan 1
+     ->  Aggregate
+           Output: ((count(*) * "excluded".a1) + 2)
+           ->  Seq Scan on upserttest.hh
+                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(14 rows)
+
+select * from aa order by a1;
+ a1 |   a2   | a3 | a4 
+----+--------+----+----
+  1 | 200001 |  1 |  1
+  2 | 400002 |  2 |  2
+  3 | 200000 |  3 |  3
+  4 | 200000 |  4 |  4
+(4 rows)
+
+------------------------------
+-- column-table, partition table, mtview
+------------------------------
+create table bb (b1 int primary key, b2 int) with (orientation=column);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "bb_pkey" for table "bb"
+insert into bb values(1,1),(2,2),(3,3),(4,4);
+insert into bb values(1,1),(2,2) on duplicate key update b2 = (select max(a) from data1 where a > excluded.g2);
+ERROR:  INSERT ON DUPLICATE KEY UPDATE is not supported on column orientated table.
+create table dd (d1 int primary key, d2 int, d3 int) partition by range(d1) (partition dd1 values less than (10), partition dd2 values less than (20),partition dd3 values less than (maxvalue));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "dd_pkey" for table "dd"
+insert into dd values (1,1),(2,2),(3,3),(4,4),(11,11),(12,12),(13,13),(14,14),(21,21),(22,22),(33,33),(44,44);
+insert into dd values(1,1) on duplicate key update d2 = (select max(a) from data1 where a > excluded.g2);
+ERROR:  column excluded.g2 does not exist
+LINE 1: ...pdate d2 = (select max(a) from data1 where a > excluded.g2);
+                                                                  ^
+CONTEXT:  referenced column: d2
+explain (costs off, verbose) insert into gg values(1,1) on duplicate key update g2 = (select max(a) from data1 where a > excluded.g2);
+                    QUERY PLAN                     
+---------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 1, 1, NULL::integer
+   SubPlan 1
+     ->  Aggregate
+           Output: max(data1.a)
+           ->  Seq Scan on upserttest.data1
+                 Output: data1.a
+                 Filter: (data1.a > "excluded".g2)
+(11 rows)
+
+insert into dd values(2,2) on duplicate key update d3 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2);
+ERROR:  column excluded.g2 does not exist
+LINE 1: ...m data1 left join data2 on data1.a = data2.a - excluded.g2);
+                                                                  ^
+CONTEXT:  referenced column: d3
+explain (costs off, verbose) insert into gg values(2,2) on duplicate key update g2 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2); 
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 2, 2, NULL::integer
+   SubPlan 1
+     ->  Aggregate
+           Output: max(data2.b)
+           ->  Hash Right Join
+                 Output: data2.b
+                 Hash Cond: ((data2.a - "excluded".g2) = data1.a)
+                 ->  Seq Scan on upserttest.data2
+                       Output: data2.a, data2.b
+                 ->  Hash
+                       Output: data1.a
+                       ->  Seq Scan on upserttest.data1
+                             Output: data1.a
+(17 rows)
+
+insert into dd values(3,3) on duplicate key update d3 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));
+ERROR:  column excluded.g2 does not exist
+LINE 1: ...a1 left join data2 on data1.a = data2.a - excluded.g2 where ...
+                                                             ^
+CONTEXT:  referenced column: d3
+explain (costs off, verbose) insert into gg values(3,3) on duplicate key update g2 = (select max(data2.b) from data1 left join data2 on data1.a = data2.a - excluded.g2 where data1.a in (1,2, excluded.g1));
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Insert on upserttest.gg
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: gg_pkey
+   ->  Result
+         Output: 3, 3, NULL::integer
+   SubPlan 1
+     ->  Aggregate
+           Output: max(data2.b)
+           ->  Hash Right Join
+                 Output: data2.b
+                 Hash Cond: ((data2.a - "excluded".g2) = data1.a)
+                 ->  Seq Scan on upserttest.data2
+                       Output: data2.a, data2.b
+                 ->  Hash
+                       Output: data1.a
+                       ->  Seq Scan on upserttest.data1
+                             Output: data1.a
+                             Filter: (data1.a = ANY (ARRAY[1, 2, "excluded".g1]))
+(18 rows)
+
+select * from dd;
+ d1 | d2 | d3 
+----+----+----
+  1 |  1 |   
+  2 |  2 |   
+  3 |  3 |   
+  4 |  4 |   
+ 11 | 11 |   
+ 12 | 12 |   
+ 13 | 13 |   
+ 14 | 14 |   
+ 21 | 21 |   
+ 22 | 22 |   
+ 33 | 33 |   
+ 44 | 44 |   
+(12 rows)
+
+------------------------------
+-- transaction
+------------------------------
+begin;
+insert into gg values(1,1) on duplicate key update g2 = (select max(a) + 1 from data1 where a > excluded.g2);
+rollback;
+select * from gg order by g1;
+ g1 | g2 | g3 
+----+----+----
+  1 |  2 |   
+  2 |  0 |   
+  3 |  4 |   
+  4 |  5 |   
+  5 |  6 |   
+  6 |    |   
+(6 rows)
+
+------------------------------
+-- priviliege
+------------------------------
+CREATE USER upsert_subquery_tester PASSWORD '123456@cc';
+SET SESSION SESSION AUTHORIZATION upsert_subquery_tester PASSWORD '123456@cc';
+select * from data1;                                                                                        -- must have no permission
+ERROR:  relation "data1" does not exist on datanode1
+LINE 1: select * from data1;
+                      ^
+create table gg (g1 int primary key, g2 int, g3 int);
+ERROR:  permission denied for schema upserttest
+insert into gg values (1,1),(2,2),(3,3),(4,4);
+ERROR:  relation "gg" does not exist on datanode1
+LINE 1: insert into gg values (1,1),(2,2),(3,3),(4,4);
+                    ^
+insert into gg values(1,1) on duplicate key update g2 = (select max(a) from data1 where a > excluded.g2);   -- err
+ERROR:  relation "gg" does not exist on datanode1
+LINE 1: insert into gg values(1,1) on duplicate key update g2 = (sel...
+                    ^
+insert into gg values(1,1) on duplicate key update g2 = (select 1 from data1 limit 1);                      -- err
+ERROR:  relation "gg" does not exist on datanode1
+LINE 1: insert into gg values(1,1) on duplicate key update g2 = (sel...
+                    ^
+------------------------------
+-- clean up
+------------------------------
+\c
+drop user upsert_subquery_tester cascade;
+drop schema upserttest cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table upserttest.data1
+drop cascades to table upserttest.data2
+drop cascades to table upserttest.aa
+drop cascades to table upserttest.ff
+drop cascades to table upserttest.gg
+drop cascades to table upserttest.hh
+drop cascades to table upserttest.bb
+drop cascades to table upserttest.dd

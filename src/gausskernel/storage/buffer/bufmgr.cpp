@@ -1764,8 +1764,16 @@ Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersistence, Fo
      * should return that the tuple does not exist without error reporting.
      */
     else if (RecoveryInProgress()) {
-        if (blockNum >= smgrnblocks(smgr, forkNum))
+        BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
+
+        /* Update cached blocks */
+        if (totalBlkNum == InvalidBlockNumber || blockNum >= totalBlkNum) {
+            totalBlkNum = smgrnblocks(smgr, forkNum);
+        }
+
+        if (blockNum >= totalBlkNum) {
             return InvalidBuffer;
+        }
     }
 #endif
 
@@ -3882,6 +3890,7 @@ void CheckPointBuffers(int flags, bool doFullCheckpoint)
          * dirty page num.
          */
         for (;;) {
+            pg_memory_barrier();
             if ((pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head) >=
                  pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->full_ckpt_expected_flush_loc)) ||
                 get_dirty_page_num() == 0) {

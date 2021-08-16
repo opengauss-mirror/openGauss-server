@@ -43,6 +43,7 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
 #include "commands/async.h"
+#include "commands/copy.h"
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
 #include "commands/variable.h"
@@ -4363,6 +4364,20 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
         {{
+            "parctl_min_cost",
+            PGC_SIGHUP,
+            RESOURCES_WORKLOAD,
+            gettext_noop("Sets the minimum cost to do parallel control."),
+            gettext_noop("This value is set to 1000000 as default. "),
+            },
+            &u_sess->attr.attr_resource.parctl_min_cost,
+            100000,
+            -1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{
              "io_control_unit",
              PGC_SIGHUP,
              RESOURCES_WORKLOAD,
@@ -4977,6 +4992,20 @@ static void InitConfigureNamesInt()
             -1,
             (INT_MAX / XLOG_BLCKSZ)+1,
             check_wal_buffers,
+            NULL,
+            NULL},
+
+        {{"wal_insert_status_entries",
+             PGC_POSTMASTER,
+             WAL_SETTINGS,
+             gettext_noop("Sets the size of wal insert status array for WAL."),
+             NULL,
+            },
+            &g_instance.attr.attr_storage.wal_insert_status_entries,
+            4194304,
+            131072,
+            4194304,
+            check_wal_insert_status_entries,
             NULL,
             NULL},
 
@@ -6946,6 +6975,20 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+        {{"gs_clean_timeout",
+            PGC_SIGHUP,
+            STATS_MONITORING,
+            gettext_noop("Sets the timeout to call gs_clean."),
+            gettext_noop("A value of 0 turns off the timeout."),
+            GUC_UNIT_S},
+            &u_sess->attr.attr_storage.gs_clean_timeout,
+            60,
+            0,
+            INT_MAX / 1000,
+            NULL,
+            NULL,
+            NULL},
+
         /* End-of-list marker */
         {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
 
@@ -8560,6 +8603,19 @@ static void InitConfigureNamesString()
                 check_inplace_upgrade_next_oids,
                 NULL,
                 NULL},
+
+           {{"num_internal_lock_partitions",
+                PGC_POSTMASTER,
+                LOCK_MANAGEMENT,
+                gettext_noop("num of csnlog clog and locktable lwlock partitions."),
+                NULL,
+                GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+                &g_instance.attr.attr_storage.num_internal_lock_partitions_str,
+                "CLOG_PART=256,CSNLOG_PART=512,LOG2_LOCKTABLE_PART=4,TWOPHASE_PART=1",
+                NULL,
+                NULL,
+                NULL}, 
+
             /* analysis options for dfx */
             {{"analysis_options",
                  PGC_USERSET,
@@ -9576,7 +9632,6 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_common.max_datanode_for_plan = 0;
     u_sess->attr.attr_common.transaction_sync_naptime = 30;
     u_sess->attr.attr_common.transaction_sync_timeout = 600;
-    u_sess->attr.attr_storage.gs_clean_timeout = 300;
     u_sess->attr.attr_storage.twophase_clean_workers = 3;
     /* for Double Guc Variables */
     u_sess->attr.attr_sql.stream_multiple = DEFAULT_STREAM_MULTIPLE;
@@ -16893,7 +16948,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 
     p = *newval;
 
-    if (StringIsValid(p) && IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry &&
+    if (StringIsValid(p) && IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry &&
         (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
         if (0 == g_instance.wlm_cxt->gscgroup_init_done)
             ereport(ERROR,
@@ -16922,7 +16977,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 static void assign_cgroup_name(const char* newval, void* extra)
 {
     /* set "control_group" global variable */
-    if (IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
+    if (IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
         if (g_instance.wlm_cxt->gscgroup_init_done == 0)
             return;
 
@@ -19874,6 +19929,33 @@ bool check_numa_distribute_mode(char** newval, void** extra, GucSource source)
         return true;
     }
     return false;
+}
+
+/* Initialize storage critical lwlock partition num */
+void InitializeNumLwLockPartitions(void)
+{
+    /* set default values */
+    SetLWLockPartDefaultNum();
+    /* Do str copy and remove space. */
+    char* attr = TrimStr(g_instance.attr.attr_storage.num_internal_lock_partitions_str);
+    if (attr == NULL || attr[0] == '\0') { /* use default values */
+        return;
+    }
+    const char* pdelimiter = ",";
+    List *res = NULL;
+    char* nextToken = NULL;
+    char* token = strtok_s(attr, pdelimiter, &nextToken);
+    while (token != NULL) {
+        res = lappend(res, TrimStr(token));
+        token = strtok_s(NULL, pdelimiter, &nextToken);
+    }
+    pfree(attr);
+    /* check input string and set lwlock num */
+    CheckAndSetLWLockPartInfo(res);
+    /* check range */
+    CheckLWLockPartNumRange();
+
+    list_free_deep(res);
 }
 
 #include "guc-file.inc"

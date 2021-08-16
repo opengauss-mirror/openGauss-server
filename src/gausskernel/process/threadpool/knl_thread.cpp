@@ -223,8 +223,8 @@ static void knl_t_shemem_ptr_init(knl_t_shemem_ptr_context* shemem_ptr_cxt)
     shemem_ptr_cxt->MultiXactState = NULL;
     shemem_ptr_cxt->OldestMemberMXactId = NULL;
     shemem_ptr_cxt->OldestVisibleMXactId = NULL;
-    shemem_ptr_cxt->ClogCtl = (SlruCtlData*)palloc0(NUM_CLOG_PARTITIONS * sizeof(SlruCtlData));
-    shemem_ptr_cxt->CsnlogCtlPtr = (SlruCtlData*)palloc0(NUM_CSNLOG_PARTITIONS * sizeof(SlruCtlData));
+    shemem_ptr_cxt->ClogCtl = (SlruCtlData*)palloc0(MAX_NUM_CLOG_PARTITIONS * sizeof(SlruCtlData));
+    shemem_ptr_cxt->CsnlogCtlPtr = (SlruCtlData*)palloc0(MAX_NUM_CSNLOG_PARTITIONS * sizeof(SlruCtlData));
     shemem_ptr_cxt->XLogCtl = NULL;
     shemem_ptr_cxt->GlobalWALInsertLocks = NULL;
     shemem_ptr_cxt->LocalGroupWALInsertLocks = NULL;
@@ -700,6 +700,8 @@ static void knl_t_sig_init(knl_t_sig_context* sig_cxt)
 {
     sig_cxt->signal_handle_cnt = 0;
     sig_cxt->gs_sigale_check_type = SIGNAL_CHECK_NONE;
+    sig_cxt->session_id = 0;
+    sig_cxt->cur_ctrl_index = 0;
 }
 
 static void knl_t_slot_init(knl_t_slot_context* slot_cxt)
@@ -1478,11 +1480,11 @@ void knl_thread_mot_init()
 
 void knl_thread_init(knl_thread_role role)
 {
+    /* doesn't init t_thrd.bn, check GaussDbThreadMain for detail */
     t_thrd.role = role;
     t_thrd.subrole = NO_SUBROLE;
     t_thrd.proc = NULL;
     t_thrd.pgxact = NULL;
-    t_thrd.bn = NULL;
     t_thrd.myLogicTid = 10000;
     t_thrd.fake_session = NULL;
     t_thrd.threadpool_cxt.reaper_dead_session = false;

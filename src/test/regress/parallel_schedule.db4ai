@@ -1,0 +1,17 @@
+# ----------
+# src/test/regress/parallel_schedule
+#
+# By convention, we put no more than twenty tests in any one parallel group;
+# this limits the number of connections needed to run the tests.
+# ----------
+
+#--------------------------
+## DB4AI
+#--------------------------
+test: single_node_opr_sanity
+test: db4ai_snapshots
+test: db4ai_gd_train_predict
+test: db4ai_gd_houses
+test: db4ai_gd_snapshots
+test: db4ai_kmeans_train_predict
+

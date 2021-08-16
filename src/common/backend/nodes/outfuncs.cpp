@@ -48,6 +48,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/pgFdwRemote.h"
 #endif
+#include "db4ai/gd.h"
 
 /*
  * Macros to simplify output of different kinds of fields.	Use these
@@ -757,12 +758,14 @@ static void _outModifyTable(StringInfo str, ModifyTable* node)
         WRITE_NODE_FIELD(updateTlist);
         WRITE_NODE_FIELD(exclRelTlist);
         WRITE_INT_FIELD(exclRelRTIndex);
+        WRITE_BOOL_FIELD(partKeyUpsert);
     }
 #else
     WRITE_ENUM_FIELD(upsertAction, UpsertAction);
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelRTIndex);
+    WRITE_BOOL_FIELD(partKeyUpsert);
 #endif		
 }
 
@@ -782,6 +785,7 @@ static void _outUpsertExpr(StringInfo str, const UpsertExpr* node)
     WRITE_NODE_FIELD(updateTlist);
     WRITE_NODE_FIELD(exclRelTlist);
     WRITE_INT_FIELD(exclRelIndex);
+    WRITE_BOOL_FIELD(partKeyUpsert);
 }
 static void _outMergeWhenClause(StringInfo str, const MergeWhenClause* node)
 {
@@ -3637,6 +3641,10 @@ static void _outColumnDef(StringInfo str, ColumnDef* node)
     WRITE_NODE_FIELD(constraints);
     WRITE_NODE_FIELD(fdwoptions);
     WRITE_NODE_FIELD(clientLogicColumnRef);
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        if (node->generatedCol)
+            WRITE_CHAR_FIELD(generatedCol);
+    }
 }
 
 static void _outTypeName(StringInfo str, TypeName* node)
@@ -4172,6 +4180,52 @@ static void _outSetOperationStmt(StringInfo str, SetOperationStmt* node)
     WRITE_TYPEINFO_LIST(colTypes);
 }
 
+static void _outRteRelation(StringInfo str, const RangeTblEntry *node)
+{
+    WRITE_OID_FIELD(relid);
+    WRITE_CHAR_FIELD(relkind);
+    if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isResultRel);
+    }
+    WRITE_NODE_FIELD(tablesample);
+    WRITE_OID_FIELD(partitionOid);
+    WRITE_BOOL_FIELD(isContainPartition);
+    if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
+        WRITE_OID_FIELD(refSynOid);
+    }
+    WRITE_BOOL_FIELD(ispartrel);
+    WRITE_BOOL_FIELD(ignoreResetRelid);
+    WRITE_NODE_FIELD(pname);
+    WRITE_NODE_FIELD(partid_list);
+    WRITE_NODE_FIELD(plist);
+    if (node->relid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->relid) &&
+        node->mainRelName == NULL) {
+        /*
+         * For inherit table, the relname will be different
+         */
+        // shipping out for dn, relid will be different on dn, so relname and relnamespace string will be must.
+
+        char *rteRelname = NULL;
+        char *rteRelnamespace = NULL;
+
+        getNameById(node->relid, "RTE", &rteRelnamespace, &rteRelname);
+
+        appendStringInfo(str, " :relname ");
+        _outToken(str, rteRelname);
+        appendStringInfo(str, " :relnamespace ");
+        _outToken(str, rteRelnamespace);
+
+        /*
+         * Same reason as above,
+         * we need to serialize the namespace and synonym name instead of refSynOid
+         * when relation name is referenced from one synonym,
+         */
+        if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
+            WRITE_SYNINFO_FIELD(refSynOid);
+        }
+    }
+}
+
 static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 {
     WRITE_NODE_TYPE("RTE");
@@ -4192,48 +4246,7 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
 
     switch (node->rtekind) {
         case RTE_RELATION:
-            WRITE_OID_FIELD(relid);
-            WRITE_CHAR_FIELD(relkind);
-            if (t_thrd.proc->workingVersionNum >= MATVIEW_VERSION_NUM) {
-                WRITE_BOOL_FIELD(isResultRel);
-            }
-            WRITE_NODE_FIELD(tablesample);
-            WRITE_OID_FIELD(partitionOid);
-            WRITE_BOOL_FIELD(isContainPartition);
-            if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
-                WRITE_OID_FIELD(refSynOid);
-            }
-            WRITE_BOOL_FIELD(ispartrel);
-            WRITE_BOOL_FIELD(ignoreResetRelid);
-            WRITE_NODE_FIELD(pname);
-            WRITE_NODE_FIELD(partid_list);
-            WRITE_NODE_FIELD(plist);
-            if (node->relid >= FirstBootstrapObjectId && IsStatisfyUpdateCompatibility(node->relid) &&
-                node->mainRelName == NULL) {
-                /*
-                 * For inherit table, the relname will be different
-                 */
-                // shipping out for dn, relid will be different on dn, so relname and relnamespace string will be must.
-
-                char* rte_relname = NULL;
-                char* rte_relnamespace = NULL;
-
-                getNameById(node->relid, "RTE", &rte_relnamespace, &rte_relname);
-
-                appendStringInfo(str, " :relname ");
-                _outToken(str, rte_relname);
-                appendStringInfo(str, " :relnamespace ");
-                _outToken(str, rte_relnamespace);
-
-                /*
-                 * Same reason as above,
-                 * we need to serialize the namespace and synonym name instead of refSynOid
-                 * when relation name is referenced from one synonym,
-                 */
-                if (t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
-                    WRITE_SYNINFO_FIELD(refSynOid);
-                }
-            }
+            _outRteRelation(str, node);
             break;
         case RTE_SUBQUERY:
             WRITE_NODE_FIELD(subquery);
@@ -4301,6 +4314,10 @@ static void _outRangeTblEntry(StringInfo str, RangeTblEntry* node)
     }
     if (t_thrd.proc->workingVersionNum >= SUBLINKPULLUP_VERSION_NUM) {
         WRITE_BOOL_FIELD(sublink_pull_up);
+    }
+
+    if (t_thrd.proc->workingVersionNum >= GENERATED_COL_VERSION_NUM) {
+        WRITE_BITMAPSET_FIELD(extraUpdatedCols);
     }
 }
 
@@ -5111,6 +5128,33 @@ static void _outIndexVar(StringInfo str, IndexVar* node)
     WRITE_BOOL_FIELD(indexcol);
     WRITE_NODE_FIELD(indexoids);
     WRITE_BOOL_FIELD(indexpath);
+}
+
+static void _outGradientDescent(StringInfo str, GradientDescent* node)
+{
+    WRITE_NODE_TYPE("SGD");
+    _outPlanInfo(str, (Plan*)node);
+    appendStringInfoString(str, " :algorithm ");
+    appendStringInfoString(str, gd_get_algorithm(node->algorithm)->name);
+    appendStringInfoString(str, " :optimizer ");
+    appendStringInfoString(str, gd_get_optimizer_name(node->optimizer));
+    WRITE_INT_FIELD(targetcol);
+    WRITE_INT_FIELD(max_iterations);
+    WRITE_INT_FIELD(max_seconds);
+    WRITE_INT_FIELD(batch_size);
+    WRITE_BOOL_FIELD(verbose);
+    WRITE_FLOAT_FIELD(learning_rate, "%.16g");
+    WRITE_FLOAT_FIELD(decay, "%.16g");
+    WRITE_FLOAT_FIELD(tolerance, "%.16g");
+    WRITE_INT_FIELD(seed);
+    WRITE_FLOAT_FIELD(lambda, "%.16g");
+}
+
+static void _outGradientDescentExpr(StringInfo str, GradientDescentExpr* node)
+{
+    WRITE_NODE_TYPE("GradientDescentExpr");
+    WRITE_UINT_FIELD(field);
+    WRITE_OID_FIELD(fieldtype);
 }
 
 /*
@@ -5929,6 +5973,11 @@ static void _outNode(StringInfo str, const void* obj)
                 break;
             case T_RewriteHint:
                 _outRewriteHint(str, (RewriteHint *)obj);
+            case T_GradientDescent:
+                _outGradientDescent(str, (GradientDescent*)obj);
+                break;
+            case T_GradientDescentExpr:
+                _outGradientDescentExpr(str, (GradientDescentExpr*)obj);
                 break;
             default:
 

@@ -722,23 +722,10 @@ static bool DispatchRelMapRecord(XLogReaderState *record, List *expectedTLIs, Ti
 static bool DispatchXactRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     if (XactWillRemoveRelFiles(record)) {
-        /* for parallel performance */
-        if (SUPPORT_FPAGE_DISPATCH) {
-            int nrels = 0;
-            ColFileNodeRel *xnodes = NULL;
-            XactGetRelFiles(record, &xnodes, &nrels);
-            for (int i = 0; ((i < nrels) && (xnodes != NULL)); ++i) {
-                ColFileNode node;
-                ColFileNodeRel *nodeRel = xnodes + i;
-                ColFileNodeCopy(&node, nodeRel);
-                uint32 id = GetWorkerId(node.filenode, 0, 0);
-                AddWorkerToSet(id);
-            }
-        } else {
-            for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
-                AddWorkerToSet(i);
-            }
+        for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+            AddWorkerToSet(i);
         }
+
         /* sync with trxn thread */
         /* trx execute drop action, pageworker forger invalid page,
          * pageworker first exe and update lastcomplateLSN

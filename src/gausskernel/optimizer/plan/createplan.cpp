@@ -8760,6 +8760,7 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         node->updateTlist = upsertClause->updateTlist;
         node->exclRelTlist = upsertClause->exclRelTlist;
         node->exclRelRTIndex = upsertClause->exclRelIndex;
+        node->partKeyUpsert = upsertClause->partKeyUpsert;
     } else {
         node->upsertAction = UPSERT_NONE;
         node->updateTlist = NIL;
@@ -9035,7 +9036,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
-            upsertClause
+            upsertClause,
             isDfsStore);
         return pgxc_make_modifytable(root, (Plan*)mtplan);
 #endif

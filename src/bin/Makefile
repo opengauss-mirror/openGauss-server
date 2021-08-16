@@ -52,11 +52,11 @@ SUBDIRS = \
 	pg_controldata \
 	pg_resetxlog \
 	gs_guc \
-	pgxc_clean \
+	gs_cgroup \
 	gsqlerr \
 	pg_basebackup \
 	pg_probackup
-
+	
 endif
 
 $(recurse)

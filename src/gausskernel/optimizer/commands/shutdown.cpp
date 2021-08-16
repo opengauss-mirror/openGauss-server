@@ -29,6 +29,10 @@
 
 void DoShutdown(ShutdownStmt* stmt)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("SHUTDOWN is not supported in distributed mode.")));
+#endif
+
     if (!superuser()) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("Only system admin can shutdown database."))));

@@ -35,6 +35,7 @@
 #include "catalog/heap.h"
 #include "commands/copy.h"
 #include "executor/nodeIndexscan.h"
+#include "executor/nodeModifyTable.h"
 #include "gstrace/executer_gstrace.h"
 #include "instruments/instr_unique_sql.h"
 #include "libpq/pqformat.h"
@@ -1102,6 +1103,10 @@ void OpFusion::clean()
 
 void OpFusion::storeFusion(const char *portalname)
 {
+    if (portalname == NULL || portalname[0] == '\0') {
+        pfree_ext(m_local.m_portalName);
+        return;
+    }
     pnFusionObj *entry = NULL;
     if (!u_sess->pcache_cxt.pn_fusion_htab)
         initFusionHtab();
@@ -1257,6 +1262,11 @@ bool SelectFusion::execute(long max_rows, char* completionTag)
     } else {
         m_local.m_isCompleted = true;
     }
+    /* for unnamed portal, should no need to wait for next E msg */
+    if (m_local.m_portalName == NULL || m_local.m_portalName[0] == '\0') {
+        m_local.m_isCompleted = true;
+    }
+
     success = true;
 
     /****************
@@ -1592,6 +1602,18 @@ bool InsertFusion::execute(long max_rows, char* completionTag)
     }
 
     (void)ExecStoreTuple(tuple, m_local.m_reslot, InvalidBuffer, false);
+
+    /*
+     * Compute stored generated columns
+     */
+    if (result_rel_info->ri_RelationDesc->rd_att->constr &&
+        result_rel_info->ri_RelationDesc->rd_att->constr->has_generated_stored) {
+        ExecComputeStoredGenerated(result_rel_info, m_c_local.m_estate, m_local.m_reslot, tuple, CMD_INSERT);
+        if (tuple != (HeapTuple)m_local.m_reslot->tts_tuple) {
+            tableam_tops_free_tuple(tuple);
+            tuple = (HeapTuple)m_local.m_reslot->tts_tuple;
+        }
+    }
 
     if (rel->rd_att->constr) {
         ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
@@ -1996,6 +2018,16 @@ bool UpdateFusion::execute(long max_rows, char* completionTag)
         }
 
         (void)ExecStoreTuple(tup, m_local.m_reslot, InvalidBuffer, false);
+
+        if (result_rel_info->ri_RelationDesc->rd_att->constr &&
+            result_rel_info->ri_RelationDesc->rd_att->constr->has_generated_stored) {
+            ExecComputeStoredGenerated(result_rel_info, m_c_local.m_estate, m_local.m_reslot, tup, CMD_UPDATE);
+            if (tup != (HeapTuple)m_local.m_reslot->tts_tuple) {
+                tableam_tops_free_tuple(tup);
+                tup = (HeapTuple)m_local.m_reslot->tts_tuple;
+            }
+        }
+
         if (rel->rd_att->constr)
             ExecConstraints(result_rel_info, m_local.m_reslot, m_c_local.m_estate);
 
@@ -2613,6 +2645,10 @@ bool SelectForUpdateFusion::execute(long max_rows, char* completionTag)
         }
         m_local.m_position += nprocessed;
     } else {
+        m_local.m_isCompleted = true;
+    }
+    /* for unnamed portal, should no need to wait for next E msg */
+    if (m_local.m_portalName == NULL || m_local.m_portalName[0] == '\0') {
         m_local.m_isCompleted = true;
     }
 
