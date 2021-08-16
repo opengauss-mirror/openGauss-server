@@ -75,6 +75,7 @@
 #include "parser/parse_oper.h"
 #include "catalog/pg_proc.h"
 #endif
+#include "executor/nodeExtensible.h"
 
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
@@ -9104,6 +9105,8 @@ bool is_projection_capable_plan(Plan* plan)
                 default:
                     return false;
             }
+        case T_ExtensiblePlan:
+            return ((ExtensiblePlan *)plan)->flags & EXTENSIBLEPATH_SUPPORT_PROJECTION;
         default:
             break;
     }

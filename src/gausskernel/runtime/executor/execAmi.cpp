@@ -454,9 +454,9 @@ void ExecRestrPos(PlanState* node)
  * capable of generating ordered output.  So the seqscan, tidscan,
  * and valuesscan support is actually useless code at present.)
  */
-bool ExecSupportsMarkRestore(NodeTag plantype)
+bool ExecSupportsMarkRestore(Path *pathnode)
 {
-    switch (plantype) {
+    switch (pathnode->pathtype) {
         case T_SeqScan:
         case T_IndexScan:
         case T_IndexOnlyScan:
@@ -476,6 +476,9 @@ bool ExecSupportsMarkRestore(NodeTag plantype)
              * gating Result plans, only base-case Results.
              */
             return false;
+
+        case T_ExtensiblePlan:
+            return castNode(ExtensiblePath, pathnode)->flags & EXTENSIBLEPATH_SUPPORT_MARK_RESTORE;
 
         default:
             break;
@@ -540,6 +543,9 @@ bool ExecSupportsBackwardScan(Plan* node)
         case T_SubqueryScan:
             return ExecSupportsBackwardScan(((SubqueryScan*)node)->subplan) &&
                    target_list_supports_backward_scan(node->targetlist);
+
+        case T_ExtensiblePlan:
+            return ((ExtensiblePlan *)node)->flags & EXTENSIBLEPATH_SUPPORT_BACKWARD_SCAN;
 
         case T_Material:
         case T_Sort:

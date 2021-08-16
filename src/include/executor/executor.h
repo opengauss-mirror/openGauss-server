@@ -157,7 +157,7 @@ extern THR_LOCAL PGDLLIMPORT ExecutorCheckPerms_hook_type ExecutorCheckPerms_hoo
 extern void ExecReScan(PlanState* node);
 extern void ExecMarkPos(PlanState* node);
 extern void ExecRestrPos(PlanState* node);
-extern bool ExecSupportsMarkRestore(NodeTag plantype);
+extern bool ExecSupportsMarkRestore(Path *pathnode);
 extern bool ExecSupportsBackwardScan(Plan* node);
 extern bool ExecMaterializesOutput(NodeTag plantype);
 

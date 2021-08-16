@@ -2716,6 +2716,9 @@ static void ExplainNode(
                     break;
             }
             break;
+        case T_ExtensiblePlan:
+            show_pushdown_qual(planstate, ancestors, es, PUSHDOWN_PREDICATE_FLAG);
+            break;
         case T_RecursiveUnion:
             show_recursive_info((RecursiveUnionState*)planstate, es);
             break;

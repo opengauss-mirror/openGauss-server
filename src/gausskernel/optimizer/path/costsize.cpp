@@ -3361,7 +3361,7 @@ void final_cost_mergejoin(
      * materialization is required for correctness in this case, and turning
      * it off does not entitle us to deliver an invalid plan.
      */
-    else if (innersortkeys == NIL && !ExecSupportsMarkRestore(inner_path->pathtype))
+    else if (innersortkeys == NIL && !ExecSupportsMarkRestore(inner_path))
         path->materialize_inner = true;
 
     /*
