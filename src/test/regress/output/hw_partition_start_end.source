@@ -1,27 +1,3 @@
--- verify if the partitioned table reluples are set to zero in pg_class after truncate operation
-drop schema if exists PART_TRUN_TEST;
-NOTICE:  schema "part_trun_test" does not exist, skipping
-create schema PART_TRUN_TEST;
-drop table if exists col_hash_emp_tb;
-NOTICE:  table "col_hash_emp_tb" does not exist, skipping
-create table col_hash_emp_tb(a bool, b real, c timestamp with time zone, d decimal) partition by range(b) (partition p1 start(1) end (223.237198) every(111));
-insert into col_hash_emp_tb (b) values(generate_series(1,100));
-analyze col_hash_emp_tb;
-select reltuples from pg_class where relname='col_hash_emp_tb';
- reltuples 
------------
-       100
-(1 row)
-
-truncate col_hash_emp_tb;
-select reltuples from pg_class where relname='col_hash_emp_tb';
- reltuples 
------------
-         0
-(1 row)
-
-drop table col_hash_emp_tb;
-drop schema PART_TRUN_TEST;
 ---
 -- test range partition with START/END syntax. 2018/5/11
 --
@@ -46,50 +22,84 @@ set time zone 'PRC';
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (''));
 ERROR:  Partition key value can not be null
 DETAIL:  partition bound element must be one of: string, datetime or interval literal, number, or MAXVALUE, and not null
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (0), partition p2 start(''));
 ERROR:  Partition key value can not be null
 DETAIL:  partition bound element must be one of: string, datetime or interval literal, number, or MAXVALUE, and not null
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (''));
 ERROR:  Partition key value can not be null
 DETAIL:  partition bound element must be one of: string, datetime or interval literal, number, or MAXVALUE, and not null
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start(0) end (10) every(''));
 ERROR:  Partition key value can not be null
 DETAIL:  partition bound element must be one of: string, datetime or interval literal, number, or MAXVALUE, and not null
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start(0) end ('') every(1));
 ERROR:  Partition key value can not be null
 DETAIL:  partition bound element must be one of: string, datetime or interval literal, number, or MAXVALUE, and not null
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 varchar(20)) partition by range(c2) (partition p1 start('a') end ('b'));
 ERROR:  datatype of column "c2" is unsupported for partition key in start/end clause.
 HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (MINVALUE) end (MAXVALUE));
 ERROR:  column "minvalue" does not exist
 LINE 1: ... int) partition by range(c1) (partition p1 start (MINVALUE) ...
                                                              ^
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-100) every (30));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (-30));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (101));
 ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p1 end (MAXVALUE));
 ERROR:  duplicate partition name: "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p1_1 end (500));
 ERROR:  duplicate partition name: "p1_1".
 HINT:  partitions defined by (START, END, EVERY) are named as "partitionName_x" where x is an integer and starts from 0 or 1.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-100));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (100), partition p2 start(20));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 end (100), partition p2 end(20));
 ERROR:  end value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 int) partition by range (c1, c2) (partition p1 start(1));
 ERROR:  partitioned table has too many partition keys.
 HINT:  start/end syntax requires a partitioned table with only one partition key.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 int) partition by range (c1) (partition p1 start(1, 2));
 ERROR:  too many partition keys for partition "p1".
 HINT:  only one partition key is allowed in start/end clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range (c1) (partition p1 start(1));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -99,7 +109,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range (c1) (partition p1 end(1));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -108,7 +118,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (2 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range (c1) (partition p1 end(MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -117,7 +127,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (2 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -130,13 +140,17 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (6 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (40));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (200));
 ERROR:  start value of partition "p2" is too high.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (100));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -150,10 +164,12 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 end (20));
 ERROR:  end value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 end (200));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -167,13 +183,17 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (40) end (200));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (200) end (400));
 ERROR:  start value of partition "p2" is too high.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100) every (30), partition p2 start (100) end (200));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -187,15 +207,21 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (100), partition p2 start (40));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1), partition p2 start (200), partition p3 start(100));
 ERROR:  start value of partition "p3" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (MAXVALUE), partition p2 start (100));
 ERROR:  start value can not be MAXVALUE for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1), partition p2 start (100), partition p3 start(200));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -207,15 +233,21 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (100), partition p2 start (100), partition p3 end (200));
 ERROR:  partition "p3" is an invalid definition clause.
 HINT:  Do not use a single END after a single START.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (200), partition p2 end(100));
 ERROR:  end value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (MAXVALUE) end (200), partition p2 end(300));
 ERROR:  start value can not be MAXVALUE for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (200), partition p2 end(300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -226,9 +258,11 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (4 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (MAXVALUE), partition p3 end(200));
 ERROR:  partition "p3" is not allowed behind MAXVALUE.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 end (1), partition p2 end (100), partition p3 end(200));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -264,9 +298,13 @@ drop table t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(100) end (1000), partition p3 start(1000) end (2000));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(400) end (1000), partition p3 start(1000) end (2000));
 ERROR:  start value of partition "p2" is too high.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start(1) end (200) every (50), partition p2 start(200) end (1000), partition p3 start(1000) end (2000));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -287,31 +325,51 @@ drop table t1;
 -- smallint-failure
 create table t1 (c1 smallint) partition by range(c1) (partition p1 end (-32769), partition p2 end (MAXVALUE));
 ERROR:  smallint out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32767) every (-1), partition p2 end (MAXVALUE));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (65535), partition p2 end (MAXVALUE));
 ERROR:  smallint out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32766) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0) end (32765) every (1), partition p2 start(32765), partition p3 start(32766));
 ERROR:  too many partitions after split partition "p3".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-32768) end (32767) every (32767), partition p2 end (MAXVALUE));
-ERROR:  smallint out of range
+drop table if exists t1;
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (32761) end (32767) every (4), partition p2 end (MAXVALUE));
-ERROR:  smallint out of range
+drop table if exists t1;
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- smallint-success
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -324,7 +382,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 smallint) partition by range(c1) (partition p1 start (32761) end (32767) every (3), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -336,7 +394,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 smallint) partition by range(c1) (
 	partition p1 end (-32768), 
 	partition p2 end (0), 
@@ -365,34 +423,52 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- int: [-2147483648, 2147483647]
 -- start, end, every value must be a int; every value must be positive; partition number must be no more than 32767
 -- int-failure
 create table t1 (c1 int) partition by range(c1) (partition p1 end (-2147483649), partition p2 end (MAXVALUE));
 ERROR:  integer out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (0) end (2147483647) every (-1), partition p2 end (MAXVALUE));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (4294967295), partition p2 end (MAXVALUE));
 ERROR:  integer out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (2147450881) end (2147483647) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (-2147483648) end (2147483647) every (2147483647), partition p2 end (MAXVALUE));
-ERROR:  integer out of range
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (2147483641) end (2147483647) every (4), partition p2 end (MAXVALUE));
-ERROR:  integer out of range
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- int-success
 create table t1 (c1 int) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -405,7 +481,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 start (2147483641) end (2147483647) every (3), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |  boundaries  
@@ -417,7 +493,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (
 	partition p1 end (-2147483648), 
 	partition p2 end (0), 
@@ -446,34 +522,52 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- bigint: [-9223372036854775808, 9223372036854775807]
 -- start, end, every value must be a bigint; every value must be positive; partition number must be no more than 32767
 -- bigint-failure
 create table t1 (c1 bigint) partition by range(c1) (partition p1 end (-9223372036854775809), partition p2 end (MAXVALUE));
 ERROR:  bigint out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (0) end (9223372036854775807) every (-1), partition p2 end (MAXVALUE));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (1) end (-1) every (1), partition p2 end (MAXVALUE));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (18446744073709551615), partition p2 end (MAXVALUE));
 ERROR:  bigint out of range
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854743041) end (9223372036854775807) every (1), partition p2 end (MAXVALUE));
 ERROR:  too many partitions after split partition "p1".
 HINT:  number of partitions can not be more than 32767, MINVALUE will be auto-included if not assigned.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-9223372036854775808) end (9223372036854775807) every (9223372036854775807), partition p2 end (MAXVALUE));
-ERROR:  bigint out of range
+drop table if exists t1;
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854775801) end (9223372036854775807) every (4), partition p2 end (MAXVALUE));
-ERROR:  bigint out of range
+drop table if exists t1;
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (0.5) end (10) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (1) end (10.1) every(5));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-1) end (10) every(5.01));
 ERROR:  start/end/every value must be an const-integer for partition "p1"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- bigint-success
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (-1.0) end (10) every(5.0));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -486,7 +580,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 bigint) partition by range(c1) (partition p1 start (9223372036854775801) end (9223372036854775807) every (3), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |      boundaries       
@@ -498,7 +592,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 bigint) partition by range(c1) (
 	partition p1 end (-9223372036854775808), 
 	partition p2 end (0), 
@@ -527,35 +621,55 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-2: test float(float4, float8) and numeric
 ---
 -- float4-failure
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1e39));
 ERROR:  value out of range: overflow
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 end(1e39));
 ERROR:  value out of range: overflow
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (1) every(1e39));
 ERROR:  value out of range: overflow
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (10.001) every(-1));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (2e38) every(1e38));
 ERROR:  ambiguous partition rule is raised by EVERY parameter in partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end ('infinity') every(1));  -- not allowed
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (3.14) every('infinity'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start('infinity'), partition p2 start (0) end (3.14) every(1));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(-1), partition p2 start (0) end (3.14) every(1), partition p3 end ('infinity'), partition p4 end (20.01));
 ERROR:  end value of partition "p4" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1) end (1.00007) every(0.00001));  -- cast(0.00001 as float4) inaccurate, report ambiguous
 ERROR:  ambiguous partition rule is raised by EVERY parameter in partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- float4-success
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start('infinity'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -566,7 +680,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 end ('infinity'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -576,7 +690,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(0) end (3.14) every(1), partition p2 end ('infinity')); -- it's ok
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -590,7 +704,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float4) partition by range(c2) (partition p1 start(1.00001) end (10.00001) every(1)); -- cast(10.00001 as float4) == 10
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -608,7 +722,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (11 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float4) partition by range(c2) (
 	partition p1 start(1.00001) end (5.00007) every(1),
 	partition p2 end (8.1),
@@ -632,34 +746,54 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- float8-failure
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1e309));
 ERROR:  "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 end(1e309));
 ERROR:  "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(1e309));
 ERROR:  "1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(1e39));
 ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1) every(0));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1e308) every(9e307));
-ERROR:  value out of range: overflow
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end ('infinity') every(1));  -- not allowed
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (3.14) every('infinity'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start('infinity'), partition p2 start (0) end (3.14) every(1));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(-1), partition p2 start (0) end (3.14) every(1), partition p3 end ('infinity'), partition p4 end (20.01));
 ERROR:  end value of partition "p4" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.000000000000007) every(0.000000000000001));  -- report ambiguous
 ERROR:  ambiguous partition rule is raised by EVERY parameter in partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- float8-success
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start('infinity'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -670,7 +804,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 end ('infinity'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -680,7 +814,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (3.14) every(1), partition p2 end ('infinity')); -- it's ok
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -694,7 +828,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.00000000000007) every(0.00000000000001));  -- ok, just do it
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |     boundaries     
@@ -710,7 +844,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1) end (1.00007) every(0.00001));  -- cast(0.00001 as float8) == 0.000010000000000
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -726,7 +860,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(1.00001) end (10.00001) every(1)); -- cast(10.00001 as float8) == 10.000010000000000
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -744,7 +878,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (11 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (partition p1 start(0) end (1e308) every(6e307));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -755,7 +889,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (4 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 float8) partition by range(c2) (
 	partition p1 start(1.00001) end (5.00007) every(1),
 	partition p2 end (8.1),
@@ -779,38 +913,62 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- numeric-failure
 create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start('nan') end (123.456) every (2.11));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(123.456) end ('nan') every (2.11));
 ERROR:  partition "p1" is invalid.
 HINT:  NaN can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(123.456) end (345.1) every ('nan'));
 ERROR:  partition "p1" is invalid.
 HINT:  NaN can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start('nan') end (123.456) every (2.11));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start(123.456) end ('nan') every (2.11));
 ERROR:  partition "p1" is invalid.
 HINT:  NaN can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (partition p1 start(123.456) end (345.1) every ('nan'));
 ERROR:  partition "p1" is invalid.
 HINT:  NaN can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(1.00000000000000000000000000000000000000001) end (1.00000000000000000000000000000000000000007) every (0.00000000000000000000000000000000000000007));
 ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.00001) end (10000000000.00003)); -- 10000000000.00003::numeric(15,4) == 10000000000.0000
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.00001) end (10000000000.00007) every (0.00001)); -- ambiguous partition rule
 ERROR:  ambiguous partition rule is raised by EVERY parameter in partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0007) every (0.00001)); 
 ERROR:  ambiguous partition rule is raised by EVERY parameter in partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (100000000000.0001) end (10000000000.0006) every (0.0002));
 ERROR:  numeric field overflow
 DETAIL:  A field with precision 15, scale 4 must round to an absolute value less than 10^11.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0006) every (100000000000.0001));
 ERROR:  numeric field overflow
 DETAIL:  A field with precision 15, scale 4 must round to an absolute value less than 10^11.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 -- numeric-success
 create table t1 (c1 int, c2 numeric) partition by range(c2) (partition p1 start(1.00000000000000000000000000000000000000001) end (1.00000000000000000000000000000000000000007) every (0.00000000000000000000000000000000000000001));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -826,7 +984,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (8 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (10000000000.0001) end (10000000000.0007) every (0.0001));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |     boundaries     
@@ -841,7 +999,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (8 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 numeric(15,4)) partition by range (c2) (partition p1 start (99999999993.0001) end (99999999999.0006) every (3.0002));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |     boundaries     
@@ -853,7 +1011,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 numeric) partition by range(c2) (
 	partition p1 start(1.00001) end (5.00007) every(1),
 	partition p2 end (8.1),
@@ -877,7 +1035,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 numeric(15,4)) partition by range(c2) (
 	partition p1 start(1.00001) end (5.00007) every(1),
 	partition p2 end (8.1),
@@ -901,16 +1059,22 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-3: test date and timestamp(6) without time zone, NOTE: date == timestamp(0) without time zone 
 ---
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('3 year'));
 ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2015') end ('12-01-2014') every ('1 year'));
 ERROR:  start value must be less than end value for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('0 year'));
 ERROR:  partition step is too small for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2014') every ('1 year'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -921,10 +1085,12 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (4 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2019'), partition p2 start('12-01-2012') end ('12-01-2014') every ('1 year'), partition p3 end (MAXVALUE));
 ERROR:  start value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2009'), partition p2 start('12-01-2012') end ('12-01-2014') every ('1 year'), partition p3 end ('12-01-2013'));
 ERROR:  end value of partition "p3" is too low.
 HINT:  partition gap or overlapping is not allowed.
@@ -939,7 +1105,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-01-2013') every ('1 month'), partition p3 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -961,7 +1127,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (15 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('12-01-2012') end ('12-05-2012') every ('1 day'), partition p3 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -975,7 +1141,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 16:13:14') every ('1 hour'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -989,7 +1155,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:15:15') every ('1 minute'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1002,7 +1168,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (6 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:13:18') every ('1 second'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1016,7 +1182,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:13:18') every ('1.599999 second'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1028,7 +1194,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to hour
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12' day to hour), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1041,7 +1207,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1053,7 +1219,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to minute
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12:12' day to minute), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1066,7 +1232,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:12'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1078,7 +1244,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to second
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every (interval '1 12:12' day to second), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1091,7 +1257,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-03-2012 12:13:18') every ('1 12:12:12'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1103,7 +1269,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval hour to minute
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every (interval '1:12' hour to minute), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1120,7 +1286,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every ('1:12'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1136,7 +1302,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval hour to minute
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every (interval '1:12:12' hour to second), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1152,7 +1318,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (8 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 18:13:18') every ('1:12:12'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1167,7 +1333,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (8 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval minute to second
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:23:18') every (interval '1:12' minute to second), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1187,7 +1353,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14') end ('12-01-2012 12:23:18') every ('0:1:12'), partition p2 end (MAXVALUE));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |       boundaries        
@@ -1206,7 +1372,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- general
 create table t1 (c1 int, c2 timestamp(6)) 
 partition by range (c2) (
@@ -1220,6 +1386,8 @@ partition by range (c2) (
 );
 ERROR:  start value of partition "p5" is too high.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) 
 partition by range (c2) (
 	partition p1 start ('12-01-2012 12:13:14.999999') end ('12-01-2012 12:23:15.888888') every ('0:01:14.333333'), 
@@ -1274,7 +1442,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (39 rows)
 
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-4: test timestamp(6) with time zone, NOTE: BJ-Time=GMT+8, PST=UTC-8, GMT=UTC (roughly), so input: xx PST <==> in-gaussdb: xx + 16 GMT+8
 ---
@@ -1293,7 +1461,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-02-2013 12:13:15.888888 pst') every ('1 month'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1315,7 +1483,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (15 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 day'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1332,7 +1500,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (10 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to hour
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12' day to hour));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1347,7 +1515,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1361,7 +1529,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to minute
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12:13' day to minute));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1376,7 +1544,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:13'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1390,7 +1558,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval day to second
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '1 12:13:14.333333' day to second));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1405,7 +1573,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('1 12:13:14.333333'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1419,7 +1587,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval hour to minute
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '12:13' hour to minute));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1443,7 +1611,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (16 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('12:13'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1466,7 +1634,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (16 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval hour to second
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every (interval '12:13:14.333333' hour to second));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1490,7 +1658,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (16 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-08-2012 12:13:15.888888 pst') every ('12:13:14.333333'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1513,7 +1681,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (16 rows)
 
-drop table t1;
+drop table if exists t1;
 -- interval minute to second 
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every (interval '1:14.333333' minute to second));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1532,7 +1700,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (11 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every ('0:01:14.333333'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |            boundaries             
@@ -1550,7 +1718,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (11 rows)
 
-drop table t1;
+drop table if exists t1;
 -- general
 create table t1 (c1 int, c2 timestamp(6) with time zone) 
 partition by range (c2) (
@@ -1561,6 +1729,8 @@ partition by range (c2) (
 );
 ERROR:  end value of partition "p2" is too low.
 HINT:  partition gap or overlapping is not allowed.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6) with time zone) 
 partition by range (c2) (
 	partition p1 start ('12-01-2012 12:13:14.999999 pst') end ('12-01-2012 12:23:15.888888 pst') every ('0:01:14.333333'), 
@@ -1599,38 +1769,62 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (26 rows)
 
-drop table t1;
+drop table if exists t1;
 -- out of range
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 date) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
 ERROR:  invalid input syntax for type interval: "infinity"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
 ERROR:  invalid input syntax for type interval: "infinity"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('now') end ('infinity') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('-infinity') end ('now') every ('1 year'));
 ERROR:  partition "p1" is invalid.
 HINT:  INF can not appear in a (START, END, EVERY) clause.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6) with time zone) partition by range (c2) (partition p1 start('now') end ('tomorrow') every ('infinity'));
 ERROR:  invalid input syntax for type interval: "infinity"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('700 year')); 
 ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294400-12-01 12:13:14') every ('1000 year'));
 ERROR:  timestamp out of range: "294400-12-01 12:13:14"
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('1000 year'));
-ERROR:  timestamp out of range
+ERROR:  partition step is too big for partition "p1".
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 int, c2 timestamp(6)) partition by range (c2) (partition p1 start('293400-12-01 12:13:14') end ('294000-12-01 12:13:14') every ('600 year'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy |        boundaries         
@@ -1640,7 +1834,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-5: test add partition with start/end
 ---
@@ -1698,7 +1892,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -1773,7 +1967,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (9 rows)
 
-drop table t1;
+drop table if exists t1;
 -- too many partition keys
 create table t1 (c1 int, c2 timestamp) partition by range(c1, c2) (partition p1 values less than (1, '2012-12-01 12:13:14.11111'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1789,7 +1983,7 @@ HINT:  start/end syntax requires a partitioned table with only one partition key
 alter table t1 add partition p2 start(1, '2012-12-01 12:13:14.11111') end (100, maxvalue);
 ERROR:  partitioned table has too many partition keys.
 HINT:  start/end syntax requires a partitioned table with only one partition key.
-drop table t1;
+drop table if exists t1;
 -- other datatype
 create table t1 (c1 int, c2 timestamp) partition by range(c2) (partition p1 values less than ('2012-12-01 12:13:14.11111'));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1858,7 +2052,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (12 rows)
 
-drop table t1;
+drop table if exists t1;
 -- many times partition operation-success
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -1960,7 +2154,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (25 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -1979,7 +2173,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -1998,7 +2192,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 -- many times partition operation-failure
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -2011,7 +2205,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
 
 alter table t1 add partition p3 start(300)end(400)every(10),add partition p4 start(450)end(500)every(10);
 ERROR:  start value of partition "p4" NOT EQUAL up-boundary of last partition.
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2023,7 +2217,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
 
 alter table t1 add partition p3 start(300)end(600),add partition p4 start(700)end(800);
 ERROR:  start value of partition "p4" NOT EQUAL up-boundary of last partition.
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2043,7 +2237,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2063,7 +2257,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p1 values less than (100), partition p2 values less than (300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2083,7 +2277,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (3 rows)
 
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-6: test split partition with start/end
 ---
@@ -2333,7 +2527,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
 
 truncate table t1;
 -- drop table
-drop table t1;
+drop table if exists t1;
 ---
 -- Part-7: start/end vs less/than
 ---
@@ -2392,8 +2586,8 @@ select count(*) from pg_partition a1 where a1.parentid='schema_start_end_s.t1'::
      9
 (1 row)
 
-drop table t1;
-drop table t2;
+drop table if exists t1;
+drop table if exists t2;
 ---
 -- Part-8: test other cases(col-table, tablespace, etc.)
 ---
@@ -2407,7 +2601,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1                                                              | r        | r            | 
 (2 rows)
 
-drop table t1;
+drop table if exists t1;
 create table t1 (c1 int) partition by range(c1) (partition p12345678901234567890123456789012345678901234567890123456789012345 start(1) end (100) every(20));
 NOTICE:  identifier "p12345678901234567890123456789012345678901234567890123456789012345" will be truncated to "p12345678901234567890123456789012345678901234567890123456789012"
 NOTICE:  Partition name's prefix "p12345678901234567890123456789012345678901234567890123456789012" will be truncated to "p12345678901234567890123456789012345678901234567890123456"
@@ -2423,7 +2617,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1                                                          | r        | r            | 
 (7 rows)
 
-drop table t1;
+drop table if exists t1;
 -- col-table
 create table t1 (c1 int) with (orientation=column) partition by range(c1) (partition p1 start(1), partition p2 start(100) end(300), partition p3 start(300));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t1'::regclass order by relname;
@@ -2460,7 +2654,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t1      | r        | r            | 
 (5 rows)
 
-drop table t1;
+drop table if exists t1;
 -- tablespace
 create tablespace tblspc_se_x001 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_1';
 create tablespace tblspc_se_x002 location '@abs_srcdir@/tmp_check/schema_start_end_s_tbs_2';
@@ -2503,7 +2697,7 @@ where parentid='schema_start_end_s.t1'::regclass order by relname;
  q3      | p        | r            | {600}      | tblspc_se_x006
 (17 rows)
 
-drop table t1;
+drop table if exists t1;
 drop tablespace tblspc_se_x001;
 drop tablespace tblspc_se_x002;
 drop tablespace tblspc_se_x003;
@@ -2515,6 +2709,8 @@ create table t1 (c1 int);
 create table t2 (c2 int) partition by range (c2) (partition p1 start (1) end (100) every (30));
 create table t3 (like t1 including partition, c3 text);
 ERROR:  could not specify "INCLUDING PARTITION" for non-partitioned-table relation:"t1"
+drop table if exists t3;
+NOTICE:  table "t3" does not exist, skipping
 create table t3 (like t1, c3 text) partition by range (c1) (partition q1 start (20) end (80) every(40));
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t3'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2525,10 +2721,12 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t3      | r        | r            | 
 (4 rows)
 
-drop table t3;
+drop table if exists t3;
 create table t3 (like t2 including partition, c3 text) partition by range (c1) (partition q1 start (20) end (80) every(40));
 ERROR:  unsupport "like clause including partition" for partitioned table
 DETAIL:  use either "like clause including partition" or "partition by" clause
+drop table if exists t3;
+NOTICE:  table "t3" does not exist, skipping
 create table t3 (like t2 including partition, c3 text);
 select relname, parttype, partstrategy, boundaries from pg_partition where parentid='schema_start_end_s.t3'::regclass order by relname;
  relname | parttype | partstrategy | boundaries 
@@ -2541,130 +2739,33 @@ select relname, parttype, partstrategy, boundaries from pg_partition where paren
  t3      | r        | r            | 
 (6 rows)
 
-drop table t3;
-drop table t1;
-drop table t2;
+drop table if exists t3;
+drop table if exists t1;
+drop table if exists t2;
 -- test unsupported datatype
 create table t1 (c1 smalldatetime) partition by range (c1) (partition p1 end (maxvalue));
 ERROR:  datatype of column "c1" is unsupported for partition key in start/end clause.
 HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 time) partition by range (c1) (partition p1 end (maxvalue));
 ERROR:  datatype of column "c1" is unsupported for partition key in start/end clause.
 HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 tinyint) partition by range (c1) (partition p1 end (maxvalue));
 ERROR:  datatype of column "c1" is unsupported for partition key in start/end clause.
 HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 create table t1 (c1 interval day to minute) partition by range (c1) (partition p1 end (maxvalue));
 ERROR:  datatype of column "c1" is unsupported for partition key in start/end clause.
 HINT:  Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date and timestamp [with time zone].
--- test help
-\h create table partition
-Command:     CREATE TABLE PARTITION
-Description: define a new table partition
-Syntax:
-CREATE TABLE [ IF NOT EXISTS ] partition_table_name 
-( [
-  { column_name data_type [ COLLATE collation ] [ column_constraint [ ... ] ]
-    | table_constraint 
-    | LIKE source_table [ like_option [...] ] }
-    [, ... ]
-] )
-[ WITH ( {storage_parameter = value} [, ... ] ) ]
-[ COMPRESS | NOCOMPRESS ]
-[ TABLESPACE tablespace_name ]
-[ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
-[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
-PARTITION BY { 
-	{VALUES (partition_key)} | 
-	{RANGE (partition_key) ( partition_less_than_item [, ... ] )} |
-	{RANGE (partition_key) ( partition_start_end_item [, ... ] )}
-} [ { ENABLE | DISABLE } ROW MOVEMENT ];
-
-where column_constraint can be:
-[ CONSTRAINT constraint_name ]
-{ NOT NULL |
-  NULL |
-  CHECK ( expression ) |
-  DEFAULT default_expr |
-  UNIQUE index_parameters |
-  PRIMARY KEY index_parameters |
-  REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
-    [ ON DELETE action ] [ ON UPDATE action ] }
-[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
-where table_constraint can be:
-[ CONSTRAINT constraint_name ]
-{ CHECK ( expression ) |
-  UNIQUE ( column_name [, ... ] ) index_parameters |
-  PRIMARY KEY ( column_name [, ... ] ) index_parameters}
-[ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
-where index_parameters can be:
-[ WITH ( {storage_parameter = value} [, ... ] ) ]
-[ USING INDEX TABLESPACE tablespace_name ]
-where like_option can be:
-{ INCLUDING | EXCLUDING } { DEFAULTS | CONSTRAINTS | INDEXES | STORAGE | COMMENTS | RELOPTIONS | DISTRIBUTION | ALL }
-where partition_less_than_item can be:
-PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE } ) [TABLESPACE tablespace_name]
-where partition_start_end_item can be:
-PARTITION partition_name {
-	{START(partition_value) END (partition_value) EVERY (interval_value)} |
-	{START(partition_value) END ({partition_value | MAXVALUE})} |
-	{START(partition_value)} |
-	{END({partition_value | MAXVALUE})}
-} [TABLESPACE tablespace_name]
-
-\h alter table partition
-Command:     ALTER TABLE PARTITION
-Description: change the definition of a partition
-Syntax:
-ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
-    action [, ... ];
-ALTER TABLE [ IF EXISTS ] { table_name [*] | ONLY table_name | ONLY ( table_name  )}
-    RENAME PARTITION { partion_name | FOR ( partition_value [, ...] ) } TO partition_new_name;
-
-where action can be:
-move_clause  |
-    exchange_clause  |
-    row_clause  |
-    merge_clause  |
-    modify_clause  |
-    split_clause  |
-    add_clause  |
-    drop_clause
-where move_clause can be:
-MOVE PARTITION { partion_name | FOR ( partition_value [, ...] ) } TABLESPACE tablespacename
-where exchange_clause can be:
-EXCHANGE PARTITION { ( partition_name ) | FOR ( partition_value [, ...] ) } 
-    WITH TABLE {[ ONLY ] ordinary_table_name | ordinary_table_name * | ONLY ( ordinary_table_name )} 
-    [ { WITH | WITHOUT } VALIDATION ] [ VERBOSE ]
-where row_clause can be:
-{ ENABLE | DISABLE } ROW MOVEMENT
-where merge_clause can be:
-MERGE PARTITIONS { partition_name } [, ...] INTO PARTITION partition_name
-    [ TABLESPACE tablespacename ]
-where modify_clause can be:
-MODIFY PARTITION partition_name { UNUSABLE LOCAL INDEXES | REBUILD UNUSABLE LOCAL INDEXES }
-where split_clause can be:
-SPLIT PARTITION { partition_name | FOR ( partition_value [, ...] ) } { split_point_clause | no_split_point_clause }
-where split_point_clause can be:
-AT ( partition_value ) INTO ( PARTITION partition_name [ TABLESPACE tablespacename ] , PARTITION partition_name [ TABLESPACE tablespacename ] )
-where no_split_point_clause can be:
-INTO {(partition_less_than_item [, ...] ) | (partition_start_end_item [, ...] )}
-where add_clause can be:
-ADD {partition_less_than_item | partition_start_end_item}
-where partition_less_than_item can be:
-PARTITION partition_name VALUES LESS THAN ( { partition_value | MAXVALUE }	[, ...] ) [ TABLESPACE tablespacename ]
-where partition_start_end_item can be:
-PARTITION partition_name {
-	{START(partition_value) END (partition_value) EVERY (interval_value)} |
-	{START(partition_value) END ({partition_value | MAXVALUE})} |
-	{START(partition_value)} |
-	{END({partition_value | MAXVALUE})}
-} [TABLESPACE tablespace_name]
-where drop_clause can be:
-DROP PARTITION  { partition_name  | FOR (  partition_value [, ...] )  }
-
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
 ---
 -- end test START/END
 ---
 reset datestyle;
 drop schema schema_start_end_s cascade;
+reset current_schema;

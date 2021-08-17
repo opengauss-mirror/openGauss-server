@@ -219,6 +219,8 @@ static void get_rel_partition_info(Relation partTableRel, List** pos, Const** up
 static void get_src_partition_bound(Relation partTableRel, Oid srcPartOid, Const** lowBound, Const** upBound);
 static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* splitState);
 static List* add_range_partition_def_state(List* xL, List* boundary, const char* partName, const char* tblSpaceName);
+static bool CheckStepInRange(ParseState *pstate, Const *startVal, Const *endVal, Const *everyVal,
+    Form_pg_attribute attr);
 static List* divide_start_end_every_internal(ParseState* pstate, char* partName, Form_pg_attribute attr,
     Const* startVal, Const* endVal, Node* everyExpr, int* numPart,
     int maxNum, bool isinterval, bool needCheck, bool isPartition);
@@ -5741,6 +5743,63 @@ static Oid choose_coerce_type(Oid leftid, Oid rightid)
         return InvalidOid; /* let make_op decide */
 }
 
+/* check if everyVal <= endVal - startVal, but think of overflow, we should be careful */
+static bool CheckStepInRange(ParseState *pstate, Const *startVal, Const *endVal, Const *everyVal,
+    Form_pg_attribute attr)
+{
+    List *opr_mi = list_make1(makeString("-"));
+    List *opr_lt = list_make1(makeString("<"));
+    List *opr_le = list_make1(makeString("<="));
+
+    Datum res;
+    Oid targetType = attr->atttypid;
+    Oid targetCollation = attr->attcollation;
+    int16 targetLen = attr->attlen;
+    bool targetByval = attr->attbyval;
+    bool targetIsVarlena = (!targetByval) && (targetLen == -1);
+    int32 targetTypmod;
+    if (targetType == DATEOID || targetType == TIMESTAMPOID || targetType == TIMESTAMPTZOID) {
+        targetTypmod = -1; /* avoid accuracy-problem of date */
+    } else {
+        targetTypmod = attr->atttypmod;
+    }
+
+    Const *zeroVal = NULL;
+    if (targetType == NUMERICOID) {
+        zeroVal = makeConst(NUMERICOID, targetTypmod, targetCollation, targetLen,
+            (Datum)DirectFunctionCall3(numeric_in, CStringGetDatum("0.0"), ObjectIdGetDatum(0), Int32GetDatum(-1)),
+            false, targetByval);
+    } else if (targetIsVarlena) {
+        zeroVal = makeConst(UNKNOWNOID, targetTypmod, targetCollation, targetLen,
+            (Datum)DirectFunctionCall1(byteain, CStringGetDatum("")), false, targetByval);
+    } else {
+        zeroVal = makeConst(targetType, targetTypmod, targetCollation, targetLen, (Datum)0, false, targetByval);
+    }
+
+    res = evaluate_opexpr(pstate, opr_lt, (Node *)startVal, (Node *)zeroVal, NULL, -1);
+    bool flag1 = DatumGetBool(res); /* whether startVal < 0 */
+    res = evaluate_opexpr(pstate, opr_lt, (Node *)endVal, (Node *)zeroVal, NULL, -1);
+    bool flag2 = DatumGetBool(res); /* whether endVal < 0 */
+
+    /* we've checked startVal < endVal, so if startVal >= 0, make sure endVal >= 0 too,
+     * (!flag1 && flage) can never happen */
+    Assert(flag1 || !flag2);
+
+    if (flag1 && !flag2) { /* startVal < 0 && endVal >= 0 */
+        /* check if startVal <= endVal - everyVal */
+        res = evaluate_opexpr(pstate, opr_mi, (Node *)endVal, (Node *)everyVal, &targetType, -1);
+        Const *secheck = makeConst(targetType, targetTypmod, targetCollation, targetLen, res, false, targetByval);
+        res = evaluate_opexpr(pstate, opr_le, (Node *)startVal, (Node *)secheck, NULL, -1);
+    } else { /* startVal < 0 && endVal < 0, or startVal >= 0 && endVal >= 0 */
+        /* check if everyVal <= endVal - startVal */
+        res = evaluate_opexpr(pstate, opr_mi, (Node *)endVal, (Node *)startVal, &everyVal->consttype, -1);
+        Const *secheck =
+            makeConst(everyVal->consttype, targetTypmod, targetCollation, targetLen, res, false, targetByval);
+        res = evaluate_opexpr(pstate, opr_le, (Node *)everyVal, (Node *)secheck, NULL, -1);
+    }
+    return DatumGetBool(res);
+}
+
 /*
  * divide_start_end_every_internal
  * 	internal implementaion for dividing an interval indicated by any-datatype
@@ -5770,6 +5829,7 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
 {
     List* result = NIL;
     List* opr_pl = NIL;
+    List* opr_mi = NIL;
     List* opr_lt = NIL;
     List* opr_le = NIL;
     List* opr_mul = NIL;
@@ -5779,7 +5839,6 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
     Oid restypid;
     Const* curpnt = NULL;
     int32 nPart;
-    bool isEnd = false;
     Const* everyVal = NULL;
     Oid targetType;
     bool targetByval = false;
@@ -5791,10 +5850,22 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
     Assert(maxNum > 0 && maxNum <= MAX_PARTITION_NUM);
 
     opr_pl = list_make1(makeString("+"));
+    opr_mi = list_make1(makeString("-"));
     opr_lt = list_make1(makeString("<"));
     opr_le = list_make1(makeString("<="));
     opr_mul = list_make1(makeString("*"));
     opr_eq = list_make1(makeString("="));
+
+    /* get target type info */
+    targetType = attr->atttypid;
+    targetByval = attr->attbyval;
+    targetCollation = attr->attcollation;
+    if (targetType == DATEOID || targetType == TIMESTAMPOID || targetType == TIMESTAMPTZOID) {
+        targetTypmod = -1; /* avoid accuracy-problem of date */
+    } else {
+        targetTypmod = attr->atttypmod;
+    }
+    targetLen = attr->attlen;
 
     /*
      * cast everyExpr to targetType
@@ -5804,31 +5875,43 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
 
     /* first compare start/end value */
     res = evaluate_opexpr(pstate, opr_le, (Node*)endVal, (Node*)startVal, NULL, -1);
-    if (DatumGetBool(res))
+    if (DatumGetBool(res)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("start value must be less than end value for %s \"%s\".",
                     partTypeName, partName)));
+    }
 
-    /* get target type info */
-    targetType = attr->atttypid;
-    targetByval = attr->attbyval;
-    targetCollation = attr->attcollation;
-    if (targetType == DATEOID || targetType == TIMESTAMPOID || targetType == TIMESTAMPTZOID)
-        targetTypmod = -1; /* avoid accuracy-problem of date */
-    else
-        targetTypmod = attr->atttypmod;
-    targetLen = attr->attlen;
+    /* second, we should make sure that everyVal <= endVal - startVal */
+    if (!CheckStepInRange(pstate, startVal, endVal, everyVal, attr)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("%s step is too big for %s \"%s\".", partTypeName, partTypeName, partName)));
+    }
 
     /* build result */
     curpnt = startVal;
     nPart = 0;
-    isEnd = false;
-    while (nPart < maxNum) {
-        /* compute currentPnt + everyval */
-        res = evaluate_opexpr(pstate, opr_pl, (Node*)curpnt, (Node*)everyVal, &targetType, -1);
-        pnt = makeConst(targetType, targetTypmod, targetCollation, targetLen, res, false, targetByval);
-        pnt = (Const*)GetTargetValue(attr, (Const*)pnt, false);
+    while (true) {
+        /* if too many partitions, report error */
+        if (nPart >= maxNum) {
+            pfree_ext(pnt);
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("too many %ss after split %s \"%s\".", partTypeName, partTypeName, partName),
+                    errhint("number of %ss can not be more than %d, MINVALUE will be auto-included if not assigned.",
+                        partTypeName, MAX_PARTITION_NUM)));
+        }
+
+        /* compute curpnt + everyval, but if curpnt + everyVal > endVal, we use endVal instead, 
+         * so we can make sure that pnt <= endVal */
+        if (!CheckStepInRange(pstate, curpnt, endVal, everyVal, attr)) {
+            pnt = (Const*)copyObject(endVal);
+        } else {
+            res = evaluate_opexpr(pstate, opr_pl, (Node*)curpnt, (Node*)everyVal, &targetType, -1);
+            pnt = makeConst(targetType, targetTypmod, targetCollation, targetLen, res, false, targetByval);
+            pnt = (Const*)GetTargetValue(attr, (Const*)pnt, false);
+        }
 
         /* necessary check in first pass */
         if (nPart == 0) {
@@ -5879,47 +5962,24 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
                         errmsg("%s step is too small for %s \"%s\".", partTypeName, partTypeName, partName)));
         }
 
+        /* pnt must be less than or equal to endVal */
+        Assert(DatumGetBool(evaluate_opexpr(pstate, opr_le, (Node*)pnt, (Node*)endVal, NULL, -1)));
+        result = lappend(result, pnt);
+        nPart++;
+
         /* check to determine if it is the final partition */
-        res = evaluate_opexpr(pstate, opr_le, (Node*)pnt, (Node*)endVal, NULL, -1);
+        res = evaluate_opexpr(pstate, opr_eq, (Node*)pnt, (Node*)endVal, NULL, -1);
         if (DatumGetBool(res)) {
-            result = lappend(result, pnt);
-            nPart++;
-            res = evaluate_opexpr(pstate, opr_lt, (Node*)pnt, (Node*)endVal, NULL, -1);
-            if (!DatumGetBool(res)) {
-                /* case-1: final partition just matches endVal  */
-                isEnd = true;
-                break;
-            }
-        } else if (nPart == 0) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("%s step is too big for %s \"%s\".", partTypeName, partTypeName, partName)));
-        } else {
-            /* case-2: final partition is smaller than others */
-            pfree_ext(pnt);
-            pnt = (Const*)copyObject(endVal);
-            result = lappend(result, pnt);
-            nPart++;
-            isEnd = true;
             break;
         }
-
         curpnt = pnt;
-    }
-
-    if (!isEnd) {
-        /* too many partitions, report error */
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("too many %ss after split %s \"%s\".", partTypeName, partTypeName, partName),
-                errhint("number of %ss can not be more than %d, MINVALUE will be auto-included if not assigned.",
-                    partTypeName, MAX_PARTITION_NUM)));
     }
 
     /* done */
     Assert(result && result->length == nPart);
-    if (numPart != NULL)
+    if (numPart != NULL) {
         *numPart = nPart;
+    }
 
     return result;
 }
@@ -6621,7 +6681,7 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
                         errmsg("too many %ss after split %s \"%s\".",
-                            partTypeName, defState->partitionName, partTypeName),
+                            partTypeName, partTypeName, defState->partitionName),
                         errhint("number of %ss can not be more than %d, MINVALUE will be auto-included if not "
                                 "assigned.",
                             partTypeName, MAX_PARTITION_NUM)));
