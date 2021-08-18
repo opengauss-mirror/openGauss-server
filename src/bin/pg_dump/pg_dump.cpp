@@ -1999,10 +1999,11 @@ static void selectDumpableNamespace(NamespaceInfo* nsinfo)
         nsinfo->dobj.dump = false;
     else if (schema_include_oids.head != NULL)
         nsinfo->dobj.dump = simple_oid_list_member(&schema_include_oids, nsinfo->dobj.catId.oid);
-    else if (strncmp(nsinfo->dobj.name, "pg_", 3) == 0 || strncmp(nsinfo->dobj.name, "dbe_", 4) == 0 || 
+    else if (strncmp(nsinfo->dobj.name, "pg_", 3) == 0 || strncmp(nsinfo->dobj.name, "dbe_", 4) == 0 ||
              strcmp(nsinfo->dobj.name, "pkg_util") == 0 || strcmp(nsinfo->dobj.name, "sys") == 0 ||
              strcmp(nsinfo->dobj.name, "cstore") == 0 || strcmp(nsinfo->dobj.name, "snapshot") == 0 ||
-             strcmp(nsinfo->dobj.name, "information_schema") == 0 || strcmp(nsinfo->dobj.name, "pkg_service") == 0)
+             strcmp(nsinfo->dobj.name, "information_schema") == 0 || strcmp(nsinfo->dobj.name, "pkg_service") == 0 ||
+             strcmp(nsinfo->dobj.name, "db4ai") == 0)
         nsinfo->dobj.dump = false;
     else
         nsinfo->dobj.dump = true;
