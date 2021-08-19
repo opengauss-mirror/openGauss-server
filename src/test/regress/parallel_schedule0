@@ -155,7 +155,7 @@ test: single_node_sequence
 
 # run and check forbidden functions are still forbidden to use in single node
 test: single_node_forbidden
-test: single_node_mergeinto
+test: single_node_mergeinto merge_1
 
 # Trigger tests
 test: single_node_triggers

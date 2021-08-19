@@ -69,6 +69,13 @@ MERGE INTO products_row p
 USING newproducts_row np
 ON p.product_id = np.product_id
 WHEN MATCHED THEN
+  UPDATE SET product_name = np.product_name, category = np.category, total = np.total where np.product_id = 5;
+
+EXPLAIN (VERBOSE on, COSTS off)
+MERGE INTO products_row p
+USING newproducts_row np
+ON p.product_id = np.product_id
+WHEN MATCHED THEN
   UPDATE SET product_name = np.product_name, category = np.category, total = np.total
 WHEN NOT MATCHED THEN  
   INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
