@@ -110,6 +110,11 @@ const char* ESTIMATION_ITEM = "EstimationItem";
 		||(IsA((plan), CStoreIndexScan) && HDFS_STORE == ((CStoreIndexScan*)(plan)->relStoreLocation) \
 		|| IsA((plan), DfsScan) || IsA((plan), DfsIndexScan))
 
+/* For performance reasons, memory context will be dropped only when the totalSpace larger than 1MB. */
+#define MEMORY_CONTEXT_DELETE_THRESHOLD (1024 * 1024)
+#define IS_NEED_FREE_MEMORY_CONTEXT(MemContext) \
+    ((MemContext) != NULL && ((AllocSetContext*)(MemContext))->totalSpace > MEMORY_CONTEXT_DELETE_THRESHOLD)
+
 const static Oid VectorEngineUnsupportType[] = {
     POINTOID,
     LSEGOID,
@@ -817,16 +822,20 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
         i++;
     }
 
-    top_plan = (Plan*)copyObject(top_plan);
-    glob->finalrtable = (List*)copyObject(glob->finalrtable);
-    glob->resultRelations = (List*)copyObject(glob->resultRelations);
-    glob->subplans = (List*)copyObject(glob->subplans);
-    glob->rewindPlanIDs = bms_copy(glob->rewindPlanIDs);
-    glob->finalrowmarks = (List*)copyObject(glob->finalrowmarks);
-    glob->relationOids = (List*)copyObject(glob->relationOids);
-    glob->invalItems = (List*)copyObject(glob->invalItems);
+    /* Juse copy these fields only when the memory context total size meets the dropping condition. */
+    if (IS_NEED_FREE_MEMORY_CONTEXT(glob->plannerContext->plannerMemContext)) {
+        top_plan = (Plan*)copyObject(top_plan);
+        glob->finalrtable = (List*)copyObject(glob->finalrtable);
+        glob->resultRelations = (List*)copyObject(glob->resultRelations);
+        glob->subplans = (List*)copyObject(glob->subplans);
+        glob->rewindPlanIDs = bms_copy(glob->rewindPlanIDs);
+        glob->finalrowmarks = (List*)copyObject(glob->finalrowmarks);
+        glob->relationOids = (List*)copyObject(glob->relationOids);
+        glob->invalItems = (List*)copyObject(glob->invalItems);
+        init_plan = (List*)copyObject(init_plan);
+    }
+
     glob->hint_warning = list_concat(parse_hint_warning, (List*)copyObject(glob->hint_warning));
-    init_plan = (List*)copyObject(init_plan);
 
     /* build the PlannedStmt result */
     result = makeNode(PlannedStmt);
@@ -12310,8 +12319,7 @@ static void init_optimizer_context(PlannerGlobal* glob)
 
 static void deinit_optimizer_context(PlannerGlobal* glob)
 {
-    /* It will drop sub memory context cascade. */
-    if (glob->plannerContext->plannerMemContext != NULL) {
+    if (IS_NEED_FREE_MEMORY_CONTEXT(glob->plannerContext->plannerMemContext)) {
         MemoryContextDelete(glob->plannerContext->plannerMemContext);
         glob->plannerContext->plannerMemContext = NULL;
         glob->plannerContext->dataSkewMemContext = NULL;
