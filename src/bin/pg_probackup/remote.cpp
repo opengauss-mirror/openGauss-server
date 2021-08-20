@@ -160,11 +160,11 @@ bool launch_agent(void)
     if (instance_config.remote.libpath)
     {
 #ifdef WIN32
-        rc = snprintf_s(libenv, sizeof(libenv), sizeof(cmd) - 1, "set LD_LIBRARY_PATH=%s &&",
+        rc = snprintf_s(libenv, sizeof(libenv), sizeof(libenv) - 1, "set LD_LIBRARY_PATH=%s &&",
                      instance_config.remote.libpath);
         securec_check_ss_c(rc, "\0", "\0");
 #else
-        rc = snprintf_s(libenv, sizeof(libenv), sizeof(cmd) - 1, "export LD_LIBRARY_PATH=%s &&",
+        rc = snprintf_s(libenv, sizeof(libenv), sizeof(libenv) - 1, "export LD_LIBRARY_PATH=%s &&",
                      instance_config.remote.libpath);
         securec_check_ss_c(rc, "\0", "\0");
 #endif
