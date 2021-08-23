@@ -45,6 +45,9 @@ static XLogRecParseState *HashXlogInitMetaPageParseBlock(XLogReaderState *record
 
     *blocknum = 1;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_INIT_META_PAGE_NUM, recordstatehead);
 
     return recordstatehead;
@@ -54,10 +57,16 @@ static XLogRecParseState *HashXlogInitBitmapPageParseBlock(XLogReaderState *reco
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_INIT_BITMAP_PAGE_BITMAP_NUM, recordstatehead);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_INIT_BITMAP_PAGE_META_NUM, blockstate);
 
     *blocknum = 2;
@@ -68,10 +77,16 @@ static XLogRecParseState *HashXlogInsertParseBlock(XLogReaderState *record, uint
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_INSERT_PAGE_NUM, recordstatehead);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_INSERT_META_NUM, blockstate);
 
     *blocknum = 2;
@@ -88,11 +103,17 @@ static XLogRecParseState *HashXlogAddOvflPageParseBlock(XLogReaderState *record,
 
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_ADD_OVFL_PAGE_OVFL_NUM, recordstatehead);
     XLogRecSetAuxiBlkNumState(&recordstatehead->blockparse.extra_rec.blockdatarec, leftblk, InvalidForkNumber);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_ADD_OVFL_PAGE_LEFT_NUM, blockstate);
     XLogRecSetAuxiBlkNumState(&blockstate->blockparse.extra_rec.blockdatarec, rightblk, InvalidForkNumber);
 
@@ -101,17 +122,26 @@ static XLogRecParseState *HashXlogAddOvflPageParseBlock(XLogReaderState *record,
     if (XLogRecHasBlockRef(record, XLOG_HASH_ADD_OVFL_PAGE_MAP_NUM)) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+        if (blockstate == NULL) {
+            return NULL;
+        }
         XLogRecSetBlockDataState(record, XLOG_HASH_ADD_OVFL_PAGE_MAP_NUM, blockstate);
     }
 
     if (XLogRecHasBlockRef(record, XLOG_HASH_ADD_OVFL_PAGE_NEWMAP_NUM)) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+        if (blockstate == NULL) {
+            return NULL;
+        }
         XLogRecSetBlockDataState(record, XLOG_HASH_ADD_OVFL_PAGE_NEWMAP_NUM, blockstate);
     }
 
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_ADD_OVFL_PAGE_META_NUM, blockstate);
 
     return recordstatehead;
@@ -121,13 +151,22 @@ static XLogRecParseState *HashXlogSplitAllocatePageParseBlock(XLogReaderState *r
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_ALLOCATE_PAGE_OBUK_NUM, recordstatehead);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_ALLOCATE_PAGE_NBUK_NUM, blockstate);
 
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_ALLOCATE_PAGE_META_NUM, blockstate);
 
     *blocknum = 3;
@@ -138,6 +177,9 @@ static XLogRecParseState *HashXlogSplitPageParseBlock(XLogReaderState *record, u
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_PAGE_NUM, recordstatehead);
 
     *blocknum = 1;
@@ -148,10 +190,16 @@ static XLogRecParseState *HashXlogSplitCompleteParseBlock(XLogReaderState *recor
 {
     XLogRecParseState *recordstatehead = NULL;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
+    if (recordstatehead == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_COMPLETE_OBUK_NUM, recordstatehead);
 
     XLogRecParseState *blockstate = NULL;
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+    if (blockstate == NULL) {
+        return NULL;
+    }
     XLogRecSetBlockDataState(record, XLOG_HASH_SPLIT_COMPLETE_NBUK_NUM, blockstate);
 
     *blocknum = 2;
@@ -178,7 +226,7 @@ static XLogRecParseState *HashXlogMovePageContentsParseBlock(XLogReaderState *re
         XLogRecSetBlockDataState(record, HASH_MOVE_BUK_BLOCK_NUM, recordstatehead);
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
-             return NULL;
+            return NULL;
         }
 
         XLogRecSetBlockDataState(record, HASH_MOVE_ADD_BLOCK_NUM, blockstate);
@@ -186,6 +234,7 @@ static XLogRecParseState *HashXlogMovePageContentsParseBlock(XLogReaderState *re
     }
 
     XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
+
     if (blockstate == NULL) {
         return NULL;
     }
@@ -250,13 +299,13 @@ static XLogRecParseState *HashXlogSqueezePageParseBlock(XLogReaderState *record,
     }
     XLogRecSetBlockDataState(record, HASH_SQUEEZE_UPDATE_BITMAP_BLOCK_NUM, blockstate);
 
-    if (XLogRecHasBlockRef(record, HASH_SQUEEZE_UPDATE_MATE_BLOCK_NUM)) {
+    if (XLogRecHasBlockRef(record, HASH_SQUEEZE_UPDATE_META_BLOCK_NUM)) {
         (*blocknum)++;
         XLogParseBufferAllocListFunc(record, &blockstate, recordstatehead);
         if (blockstate == NULL) {
             return NULL;
         }
-        XLogRecSetBlockDataState(record, HASH_SQUEEZE_UPDATE_MATE_BLOCK_NUM, blockstate);
+        XLogRecSetBlockDataState(record, HASH_SQUEEZE_UPDATE_META_BLOCK_NUM, blockstate);
     }
 
     return recordstatehead;
@@ -312,7 +361,7 @@ static XLogRecParseState *HashXlogUpdateMetaPageParseBlock(XLogReaderState *reco
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockDataState(record, HASH_UPDATE_MATE_BLOCK_NUM, recordstatehead);
+    XLogRecSetBlockDataState(record, HASH_UPDATE_META_BLOCK_NUM, recordstatehead);
 
     *blocknum = 1;
     return recordstatehead;
@@ -499,8 +548,10 @@ void HashRedoAddOvflPageOperatorMetaPage(RedoBufferInfo *metabuf, void *recordda
     uint32 firstfree_ovflpage;
     BlockNumber *newmapblk = NULL;
     xl_hash_add_ovfl_page *xlrec = (xl_hash_add_ovfl_page *)recorddata;
+    errno_t rc = EOK;
 
-    memcpy(&firstfree_ovflpage, data, sizeof(uint32));
+    rc = memcpy_s(&firstfree_ovflpage, sizeof(uint32), data, sizeof(uint32));
+    securec_check(rc, "", "");
     metap = HashPageGetMeta(metabuf->pageinfo.page);
     metap->hashm_firstfree = firstfree_ovflpage;
 
@@ -546,9 +597,10 @@ void HashRedoSplitAllocatePageOperatorNbukPage(RedoBufferInfo *newbukbuf, void *
     PageSetLSN(newbukbuf->pageinfo.page, newbukbuf->lsn);
 }
 
-void HashRedoSplitAllocatePageOperatorMetaPage(RedoBufferInfo *metabuf, void *recorddata, void *data)
+void HashRedoSplitAllocatePageOperatorMetaPage(RedoBufferInfo *metabuf, void *recorddata, void *blkdata)
 {
     HashMetaPage metap;
+    char *data = (char *)blkdata;
     xl_hash_split_allocate_page *xlrec = (xl_hash_split_allocate_page *)recorddata;
 
     metap = HashPageGetMeta(metabuf->pageinfo.page);
@@ -556,10 +608,12 @@ void HashRedoSplitAllocatePageOperatorMetaPage(RedoBufferInfo *metabuf, void *re
 
     if (xlrec->flags & XLH_SPLIT_META_UPDATE_MASKS) {
         uint32 lowmask;
-        uint32 *highmask;
+        uint32 *highmask = NULL;
+        errno_t rc = EOK;
 
         /* extract low and high masks. */
-        memcpy(&lowmask, data, sizeof(uint32));
+        rc = memcpy_s(&lowmask, sizeof(uint32), data, sizeof(uint32));
+        securec_check(rc, "", "");
         highmask = (uint32 *)((char *)data + sizeof(uint32));
 
         /* update metapage */
@@ -571,10 +625,12 @@ void HashRedoSplitAllocatePageOperatorMetaPage(RedoBufferInfo *metabuf, void *re
 
     if (xlrec->flags & XLH_SPLIT_META_UPDATE_SPLITPOINT) {
         uint32 ovflpoint;
-        uint32 *ovflpages;
+        uint32 *ovflpages = NULL;
+        errno_t rc = EOK;
 
         /* extract information of overflow pages. */
-        memcpy(&ovflpoint, data, sizeof(uint32));
+        rc = memcpy_s(&ovflpoint, sizeof(uint32), data, sizeof(uint32));
+        securec_check(rc, "", "");
         ovflpages = (uint32 *)((char *)data + sizeof(uint32));
 
         /* update metapage */
@@ -626,7 +682,7 @@ void HashXlogMoveAddPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddat
 
         data += sizeof(OffsetNumber) * xldata->ntups;
 
-        while (data - begin < datalen) {
+        while ((Size)(data - begin) < datalen) {
             IndexTuple itup = (IndexTuple) data;
             Size itemsz;
             OffsetNumber l;
@@ -639,7 +695,7 @@ void HashXlogMoveAddPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddat
             l = PageAddItem(writepage, (Item) itup, itemsz, towrite[ninserted], false, false);
             if (l == InvalidOffsetNumber)
                 elog(ERROR, "hash_xlog_move_page_contents: failed to add item to hash index page, size %d bytes",
-                        (int) itemsz);
+                     (int) itemsz);
 
             ninserted++;
         }
@@ -673,7 +729,7 @@ void HashXlogMoveDeleteOvflPageOperatorPage(RedoBufferInfo *redobuffer, void *bl
     PageSetLSN(page, redobuffer->lsn);
 }
 
-/* adding item to overflow buffer(writepage) from free overflowpage*/
+/* adding item to overflow buffer(writepage) from free overflowpage */
 void HashXlogSqueezeAddPageOperatorPage(RedoBufferInfo *redobuffer, void *recorddata, void *blkdata, Size len)
 {
     Page writepage = redobuffer->pageinfo.page;
@@ -689,7 +745,7 @@ void HashXlogSqueezeAddPageOperatorPage(RedoBufferInfo *redobuffer, void *record
 
         data += sizeof(OffsetNumber) * xldata->ntups;
 
-        while (data - begin < datalen) {
+        while ((Size)(data - begin) < datalen) {
             IndexTuple itup = (IndexTuple) data;
             Size itemsz;
             OffsetNumber l;
@@ -726,7 +782,7 @@ void HashXlogSqueezeAddPageOperatorPage(RedoBufferInfo *redobuffer, void *record
     PageSetLSN(writepage, redobuffer->lsn);
 }
 
-/* initializing free overflow page*/
+/* initializing free overflow page */
 void HashXlogSqueezeInitOvflbufOperatorPage(RedoBufferInfo *redobuffer, void *recorddata)
 {
     Page ovflpage;
@@ -906,7 +962,8 @@ void HashXlogVacuumMateOperatorPage(RedoBufferInfo *redobuffer, void *recorddata
     PageSetLSN(metapage, redobuffer->lsn);
 }
 
-static void HashXlogInitMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogInitMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                      RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     if (XLogBlockDataGetBlockId(datadecode) == XLOG_HASH_INIT_META_PAGE_NUM) {
@@ -919,7 +976,8 @@ static void HashXlogInitMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataPar
     }
 }
 
-static void HashXlogInitBitmapPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogInitBitmapPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                        RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     bool modifypage = false;
@@ -942,7 +1000,8 @@ static void HashXlogInitBitmapPageBlock(XLogBlockHead *blockhead, XLogBlockDataP
     }
 }
 
-static void HashXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
 
@@ -963,12 +1022,13 @@ static void HashXlogInsertBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     MakeRedoBufferDirty(bufferinfo);
 }
 
-static void HashXlogAddOvflPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogAddOvflPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                     RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     if (XLogBlockDataGetBlockId(datadecode) == XLOG_HASH_ADD_OVFL_PAGE_OVFL_NUM) {
         Size blkdatalen;
-        char *blkdata;
+        char *blkdata = NULL;
         BlockNumber leftblk;
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
         leftblk = XLogBlockDataGetAuxiBlock1(datadecode);
@@ -1007,7 +1067,8 @@ static void HashXlogAddOvflPageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
     }
 }
 
-static void HashXlogSplitAllocatePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogSplitAllocatePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                           RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     if (XLogBlockDataGetBlockId(datadecode) == XLOG_HASH_SPLIT_ALLOCATE_PAGE_OBUK_NUM) {
@@ -1032,7 +1093,8 @@ static void HashXlogSplitAllocatePageBlock(XLogBlockHead *blockhead, XLogBlockDa
     }
 }
 
-static void HashXlogSplitPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogSplitPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                   RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
 
@@ -1043,7 +1105,8 @@ static void HashXlogSplitPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse 
     MakeRedoBufferDirty(bufferinfo);
 }
 
-static void HashXlogSplitCompleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogSplitCompleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                       RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
 
@@ -1061,7 +1124,8 @@ static void HashXlogSplitCompleteBlock(XLogBlockHead *blockhead, XLogBlockDataPa
     MakeRedoBufferDirty(bufferinfo);
 }
 
-static void HashXlogMovePageContentsBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogMovePageContentsBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                          RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     Size blkdatalen;
@@ -1093,7 +1157,8 @@ static void HashXlogMovePageContentsBlock(XLogBlockHead *blockhead, XLogBlockDat
     }
 }
 
-static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                     RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     Size blkdatalen;
@@ -1152,7 +1217,7 @@ static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
         }
     }
 
-    if (block_id == HASH_SQUEEZE_UPDATE_MATE_BLOCK_NUM) {
+    if (block_id == HASH_SQUEEZE_UPDATE_META_BLOCK_NUM) {
         XLogRedoAction action;
         action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
         if (action == BLK_NEEDS_REDO) {
@@ -1162,7 +1227,8 @@ static void HashXlogSqueezePageBlock(XLogBlockHead *blockhead, XLogBlockDataPars
     }
 }
 
-static void HashXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
@@ -1182,7 +1248,8 @@ static void HashXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     }
 }
 
-static void HashXlogSplitCleanupBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogSplitCleanupBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                      RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
 
@@ -1194,7 +1261,8 @@ static void HashXlogSplitCleanupBlock(XLogBlockHead *blockhead, XLogBlockDataPar
     }
 }
 
-static void HashXlogUpdateMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogUpdateMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                        RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
@@ -1207,7 +1275,8 @@ static void HashXlogUpdateMetaPageBlock(XLogBlockHead *blockhead, XLogBlockDataP
     }
 }
 
-static void HashXlogVacuumOnePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec, RedoBufferInfo *bufferinfo)
+static void HashXlogVacuumOnePageBlock(XLogBlockHead *blockhead, XLogBlockDataParse *blockdatarec,
+                                       RedoBufferInfo *bufferinfo)
 {
     XLogBlockDataParse *datadecode = blockdatarec;
     uint8 block_id = XLogBlockDataGetBlockId(datadecode);

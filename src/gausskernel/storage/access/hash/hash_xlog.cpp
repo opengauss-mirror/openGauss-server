@@ -1,4 +1,4 @@
-/*-------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
  * hash_xlog.cpp
  *    WAL replay logic for hash index.
@@ -10,7 +10,7 @@
  * IDENTIFICATION
  *    src/gausskernel/storage/access/hash/hash_xlog.cpp
  *
- *-------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
  */
 
 #include "access/xlogproc.h"
@@ -139,7 +139,7 @@ static void hash_xlog_add_ovfl_page(XLogReaderState* record)
     RedoBufferInfo metabuf;
     BlockNumber leftblk;
     BlockNumber rightblk;
-    char *data;
+    char *data = NULL;
     Size datalen;
 
     XLogRecGetBlockTag(record, 0, NULL, NULL, &rightblk);
@@ -210,7 +210,7 @@ static void hash_xlog_split_allocate_page(XLogReaderState *record)
     RedoBufferInfo newbuf;
     RedoBufferInfo metabuf;
     Size datalen PG_USED_FOR_ASSERTS_ONLY;
-    char *data;
+    char *data = NULL;
     XLogRedoAction action;
 
     /*
@@ -276,7 +276,8 @@ static void hash_xlog_split_page(XLogReaderState *record)
     if (XLogReadBufferForRedo(record, 0, &buf) != BLK_RESTORED)
         elog(ERROR, "Hash split record did not contain a full-page image");
 
-    UnlockReleaseBuffer(buf.buf);
+    if (BufferIsValid(buf.buf))
+        UnlockReleaseBuffer(buf.buf);
 }
 
 /*
@@ -340,9 +341,9 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
      * of this operation.  If we allow scans during this operation, then they
      * can miss some records or show the same record multiple times.
      */
-    if (xldata->is_prim_bucket_same_wrt)
+    if (xldata->is_prim_bucket_same_wrt) {
         action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &writebuf);
-    else {
+    } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
@@ -356,23 +357,19 @@ static void hash_xlog_move_page_contents(XLogReaderState *record)
 
     /* replay the record for adding entries in overflow buffer */
     if (action == BLK_NEEDS_REDO) {
-        Page writepage;
-        char *begin;
-        char *data;
+        char *data = NULL;
         Size datalen;
-        uint16 ninserted = 0;
 
         data = XLogRecGetBlockData(record, 1, &datalen);
 
         HashXlogMoveAddPageOperatorPage(&writebuf, XLogRecGetData(record), (void *)data, datalen);
 
         MarkBufferDirty(writebuf.buf);
-    } 
+    }
 
     /* replay the record for deleting entries from overflow buffer */
     if (XLogReadBufferForRedo(record, 2, &deletebuf) == BLK_NEEDS_REDO) {
-        Page page;
-        char *ptr;
+        char *ptr = NULL;
         Size len;
 
         ptr = XLogRecGetBlockData(record, 2, &len);
@@ -424,9 +421,9 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
      * of this operation.  If we allow scans during this operation, then they
      * can miss some records or show the same record multiple times.
      */
-    if (xldata->is_prim_bucket_same_wrt)
+    if (xldata->is_prim_bucket_same_wrt) {
         action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &writebuf);
-    else {
+    } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
@@ -440,7 +437,7 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
 
     /* replay the record for adding entries in overflow buffer */
     if (action == BLK_NEEDS_REDO) {
-        char *data;
+        char *data = NULL;
         Size datalen;
 
         data = XLogRecGetBlockData(record, 1, &datalen);
@@ -461,7 +458,7 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
 
     /* replay the record for page previous to the freed overflow page */
     if (!xldata->is_prev_bucket_same_wrt &&
-        XLogReadBufferForRedo(record, 3, &prevbuf) == BLK_NEEDS_REDO) {   
+        XLogReadBufferForRedo(record, 3, &prevbuf) == BLK_NEEDS_REDO) {
         HashXlogSqueezeUpdatePrevPageOperatorPage(&prevbuf, XLogRecGetData(record));
 
         MarkBufferDirty(prevbuf.buf);
@@ -473,7 +470,7 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
     if (XLogRecHasBlockRef(record, 4)) {
         RedoBufferInfo nextbuf;
 
-        if (XLogReadBufferForRedo(record, 4, &nextbuf) == BLK_NEEDS_REDO) {   
+        if (XLogReadBufferForRedo(record, 4, &nextbuf) == BLK_NEEDS_REDO) {
             HashXlogSqueezeUpdateNextPageOperatorPage(&nextbuf, XLogRecGetData(record));
 
             MarkBufferDirty(nextbuf.buf);
@@ -495,8 +492,8 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
      * index updates can be happening concurrently.
      */
     /* replay the record for bitmap page */
-    if (XLogReadBufferForRedo(record, 5, &mapbuf) == BLK_NEEDS_REDO) {   
-        char *data;
+    if (XLogReadBufferForRedo(record, 5, &mapbuf) == BLK_NEEDS_REDO) {
+        char *data = NULL;
         Size datalen;
 
         data = XLogRecGetBlockData(record, 5, &datalen);
@@ -511,8 +508,8 @@ static void hash_xlog_squeeze_page(XLogReaderState *record)
     if (XLogRecHasBlockRef(record, 6)) {
         RedoBufferInfo metabuf;
 
-        if (XLogReadBufferForRedo(record, 6, &metabuf) == BLK_NEEDS_REDO) {   
-            char *data;
+        if (XLogReadBufferForRedo(record, 6, &metabuf) == BLK_NEEDS_REDO) {
+            char *data = NULL;
             Size datalen;
 
             data = XLogRecGetBlockData(record, 6, &datalen);
@@ -545,9 +542,9 @@ static void hash_xlog_delete(XLogReaderState *record)
      * of this operation.  If we allow scans during this operation, then they
      * can miss some records or show the same record multiple times.
      */
-    if (xldata->is_primary_bucket_page)
+    if (xldata->is_primary_bucket_page) {
         action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &deletebuf);
-    else {
+    } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
@@ -561,7 +558,7 @@ static void hash_xlog_delete(XLogReaderState *record)
 
     /* replay the record for deleting entries in bucket page */
     if (action == BLK_NEEDS_REDO) {
-        char *ptr;
+        char *ptr = NULL;
         Size len;
 
         ptr = XLogRecGetBlockData(record, 1, &len);
@@ -584,7 +581,7 @@ static void hash_xlog_split_cleanup(XLogReaderState *record)
 {
     RedoBufferInfo buffer;
 
-    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {   
+    if (XLogReadBufferForRedo(record, 0, &buffer) == BLK_NEEDS_REDO) {
         HashXlogSplitCleanupOperatorPage(&buffer);
 
         MarkBufferDirty(buffer.buf);
@@ -600,9 +597,9 @@ static void hash_xlog_update_meta_page(XLogReaderState *record)
 {
     RedoBufferInfo metabuf;
 
-    if (XLogReadBufferForRedo(record, 0, &metabuf) == BLK_NEEDS_REDO) {   
+    if (XLogReadBufferForRedo(record, 0, &metabuf) == BLK_NEEDS_REDO) {
         HashXlogUpdateMetaOperatorPage(&metabuf, XLogRecGetData(record));
-     
+
         MarkBufferDirty(metabuf.buf);
     }
     if (BufferIsValid(metabuf.buf))
@@ -617,7 +614,7 @@ static void hash_xlog_update_meta_page(XLogReaderState *record)
 static TransactionId hash_xlog_vacuum_get_latestRemovedXid(XLogReaderState *record)
 {
     xl_hash_vacuum_one_page *xlrec;
-    OffsetNumber *unused;
+    OffsetNumber *unused = NULL;
     Buffer ibuffer;
     Buffer hbuffer;
     Page ipage;
@@ -627,7 +624,6 @@ static TransactionId hash_xlog_vacuum_get_latestRemovedXid(XLogReaderState *reco
     ItemId iitemid;
     ItemId hitemid;
     IndexTuple itup;
-    HeapTupleHeader htuphdr;
     BlockNumber hblkno;
     OffsetNumber hoffnum;
     TransactionId latestRemovedXid = InvalidTransactionId;
@@ -783,7 +779,7 @@ static void hash_xlog_vacuum_one_page(XLogReaderState *record)
 
     action = XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &buffer);
 
-    if (action == BLK_NEEDS_REDO) {   
+    if (action == BLK_NEEDS_REDO) {
         Size len;
 
         len = XLogRecGetDataLen(record);

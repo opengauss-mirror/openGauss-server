@@ -44,42 +44,42 @@
 #define XLOG_HASH_UPDATE_META_PAGE    0xB0    /* update meta page after vacuum */
 #define XLOG_HASH_VACUUM_ONE_PAGE     0xC0    /* remove dead tuples from index page */
 
-enum {
+typedef enum {
     XLOG_HASH_INIT_META_PAGE_NUM = 0,
-};
+}XLogHashInitMetaPageEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_INIT_BITMAP_PAGE_BITMAP_NUM = 0,
     XLOG_HASH_INIT_BITMAP_PAGE_META_NUM,
-};
+}XLogHashInitBitmapPageEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_INSERT_PAGE_NUM = 0,
     XLOG_HASH_INSERT_META_NUM,
-};
+}XLogHashInsertEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_ADD_OVFL_PAGE_OVFL_NUM = 0,
     XLOG_HASH_ADD_OVFL_PAGE_LEFT_NUM,
     XLOG_HASH_ADD_OVFL_PAGE_MAP_NUM,
     XLOG_HASH_ADD_OVFL_PAGE_NEWMAP_NUM,
     XLOG_HASH_ADD_OVFL_PAGE_META_NUM,
-};
+}XLogHashAddOvflPageEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_SPLIT_ALLOCATE_PAGE_OBUK_NUM = 0,
     XLOG_HASH_SPLIT_ALLOCATE_PAGE_NBUK_NUM,
     XLOG_HASH_SPLIT_ALLOCATE_PAGE_META_NUM,
-};
+}XLogHashSplitAllocatePageEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_SPLIT_PAGE_NUM = 0,
-};
+}XLogHashSplitPageEnum;
 
-enum {
+typedef enum {
     XLOG_HASH_SPLIT_COMPLETE_OBUK_NUM = 0,
     XLOG_HASH_SPLIT_COMPLETE_NBUK_NUM,
-};
+}XLogHashSplitCompleteEnum;
 
 typedef enum {
     HASH_MOVE_BUK_BLOCK_NUM = 0,
@@ -94,7 +94,7 @@ typedef enum {
     HASH_SQUEEZE_UPDATE_PREV_BLOCK_NUM,
     HASH_SQUEEZE_UPDATE_NEXT_BLOCK_NUM,
     HASH_SQUEEZE_UPDATE_BITMAP_BLOCK_NUM,
-    HASH_SQUEEZE_UPDATE_MATE_BLOCK_NUM,
+    HASH_SQUEEZE_UPDATE_META_BLOCK_NUM,
 }XLogHashSqueezePageEnum;
 
 typedef enum {
@@ -107,7 +107,7 @@ typedef enum {
 }XLogHashSplitCleanupEnum;
 
 typedef enum {
-    HASH_UPDATE_MATE_BLOCK_NUM,
+    HASH_UPDATE_META_BLOCK_NUM,
 } XLogHashUpdateMateEnum;
 
 typedef enum {

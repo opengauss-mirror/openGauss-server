@@ -389,9 +389,6 @@ static void ResourceOwnerReleaseInternal(
             MemoryContextDelete(memContext);
             ResourceOwnerForgetGMemContext(t_thrd.utils_cxt.TopTransactionResourceOwner, memContext);
         }
-
-        /* Clean up index scans too */
-        ReleaseResources_hash();
     }
 
     /* Let add-on modules get a chance too */
