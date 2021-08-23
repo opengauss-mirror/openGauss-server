@@ -79,6 +79,7 @@ const uint32 ML_OPT_MODEL_VERSION_NUM = 92284;
 const uint32 FIX_SQL_ADD_RELATION_REF_COUNT = 92291;
 const uint32 GENERATED_COL_VERSION_NUM = 92303;
 const uint32 ANALYZER_HOOK_VERSION_NUM = 92306;
+const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92304;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;

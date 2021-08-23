@@ -3353,12 +3353,21 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
 
         if (!isColStore && (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIN_INDEX_TYPE)) &&
-            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIST_INDEX_TYPE))) {
-            /* row store only support btree/gin/gist index */
+            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIST_INDEX_TYPE)) &&
+            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE))) {
+            /* row store only support btree/gin/gist/hash index */
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support row store", stmt->accessMethod)));
         }
+
+        if (0 == pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE) && 
+            t_thrd.proc->workingVersionNum < SUPPORT_HASH_XLOG_VERSION_NUM) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("access method \"%s\" does not support row store", stmt->accessMethod)));
+        }
+
         if (isColStore && (!isPsortMothed && !isCBtreeMethod && !isCGinBtreeMethod)) {
             /* column store support psort/cbtree/gin index */
             ereport(ERROR,
