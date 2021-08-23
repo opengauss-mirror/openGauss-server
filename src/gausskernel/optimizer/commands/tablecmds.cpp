@@ -21406,7 +21406,7 @@ static Oid AddTemporaryPartition(Relation partTableRel, RangePartitionDefState* 
         bucketOid,
         partDef,
         partTableRel->rd_rel->relowner,
-        (Datum)0,
+        (Datum)new_reloptions,
         isTimestamptz);
 
     // We must bump the command counter to make the newly-created
@@ -21582,6 +21582,17 @@ static void fastAddPartition(Relation partTableRel, List* destPartDefList, List*
 
     pgPartRel = relation_open(PartitionRelationId, RowExclusiveLock);
 
+    bool isNull = false;
+    HeapTuple tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(partTableRel->rd_id));
+    Datum relOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isNull);
+    List* oldRelOptions = untransformRelOptions(relOptions);
+    Datum newRelOptions = transformRelOptions((Datum)0, oldRelOptions, NULL, NULL, false, false);
+    ReleaseSysCache(tuple);
+
+    if (oldRelOptions != NIL) {
+        list_free_ext(oldRelOptions);
+    }
+
     foreach (cell, destPartDefList) {
         RangePartitionDefState* partDef = (RangePartitionDefState*)lfirst(cell);
 
@@ -21592,7 +21603,7 @@ static void fastAddPartition(Relation partTableRel, List* destPartDefList, List*
             bucketOid,
             partDef,
             partTableRel->rd_rel->relowner,
-            (Datum)0,
+            (Datum)newRelOptions,
             isTimestamptz);
 
         *newPartOidList = lappend_oid(*newPartOidList, newPartOid);
