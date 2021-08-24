@@ -688,7 +688,9 @@ bool memTracker_ReserveMem(int64 requestedBytes, bool needProtect)
                 t_thrd.utils_cxt.trackedMemChunks = newszChunk;
             else
                 u_sess->stat_cxt.trackedMemChunks = newszChunk;
-            gs_atomic_add_32(&dynmicTrackedMemChunks, needChunk);
+            if (needChunk != 0) {
+                gs_atomic_add_32(&dynmicTrackedMemChunks, needChunk);
+            }
 
             t_thrd.utils_cxt.basedBytesInQueryLifeCycle += requestedBytes;
             if(t_thrd.utils_cxt.basedBytesInQueryLifeCycle > t_thrd.utils_cxt.peakedBytesInQueryLifeCycle)
