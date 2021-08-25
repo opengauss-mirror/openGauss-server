@@ -3765,8 +3765,6 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
     PQExpBufferData buf;
     PGresult* res = NULL;
     printQueryOpt myopt = pset.popt;
-    const char* username = session_username();
-    bool havewhere = false;
 
     initPQExpBuffer(&buf);
     printfPQExpBuffer(&buf,
@@ -3786,19 +3784,10 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
 
     if (!showSystem && (pattern == NULL)) {
         appendPQExpBuffer(&buf, "WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'\n");
-        havewhere = true;
     }
 
-    havewhere |= processSQLNamePattern(
-        pset.db, &buf, pattern, havewhere, false, NULL, "n.nspname", NULL, NULL);
-
-    if (!is_superuser()) {
-        if (havewhere) {
-            appendPQExpBuffer(&buf, " AND pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
-        } else {
-            appendPQExpBuffer(&buf, " WHERE pg_catalog.pg_get_userbyid(n.nspowner) = \'%s\' \n", username);
-        }
-    }
+    processSQLNamePattern(
+        pset.db, &buf, pattern, !showSystem && (pattern == NULL), false, NULL, "n.nspname", NULL, NULL);
 
     appendPQExpBuffer(&buf, "ORDER BY 1;");
 
