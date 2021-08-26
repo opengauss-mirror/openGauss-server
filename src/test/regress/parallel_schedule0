@@ -176,6 +176,10 @@ test: single_node_produce_commit_rollback
 test: instr_unique_sql
 test: shutdown
 
+# To check min_max fuc support IP 
+test: min_max_support_IP
+
+
 # interval partition 
 test: hw_partition_interval
 test: hw_partition_interval_exchange

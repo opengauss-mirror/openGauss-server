@@ -166,6 +166,7 @@ DATA(insert ( 2127	timestamptz_larger	timestamptz_larger	-		1324	1184	_null_ _nu
 DATA(insert ( 2128	interval_larger interval_larger -				1334	1186	_null_ _null_ 	n	0));
 DATA(insert ( 2129	text_larger		text_larger		-				666		25		_null_ _null_ 	n	0));
 DATA(insert ( 2130	numeric_larger	numeric_larger	-				1756	1700	_null_ _null_ 	n	0));
+DATA(insert ( 6668	network_larger		network_larger		-		1205	869	   _null_ _null_ 	n	0));
 #define NUMERICLARGERFUNCOID 2130
 DATA(insert ( 2050	array_larger	array_larger	-				1073	2277	_null_ _null_ 	n	0));
 DATA(insert ( 2244	bpchar_larger	bpchar_larger	-				1060	1042	_null_ _null_ 	n	0));
@@ -196,6 +197,7 @@ DATA(insert ( 2143	timestamptz_smaller timestamptz_smaller -		1322	1184	_null_ _
 DATA(insert ( 2144	interval_smaller	interval_smaller	-		1332	1186	_null_ _null_ 	n	0));
 DATA(insert ( 2145	text_smaller	text_smaller	-				664		25		_null_ _null_ 	n	0));
 DATA(insert ( 2146	numeric_smaller numeric_smaller -				1754	1700	_null_ _null_ 	n	0));
+DATA(insert ( 6669	network_smaller		network_smaller		-		1203	869	    _null_ _null_ 	n	0));
 #define NUMERICSMALLERFUNCOID 2146
 DATA(insert ( 2051	array_smaller	array_smaller	-				1072	2277	_null_ _null_ 	n	0));
 DATA(insert ( 2245	bpchar_smaller	bpchar_smaller	-				1058	1042	_null_ _null_ 	n	0));

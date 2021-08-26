@@ -471,7 +471,30 @@ Datum network_ne(PG_FUNCTION_ARGS)
 
     PG_RETURN_BOOL(network_cmp_internal(a1, a2) != 0);
 }
+/*
+ * MIN/MAX support functions.
+ */
+Datum network_smaller(PG_FUNCTION_ARGS)
+{
+    inet *a1 = PG_GETARG_INET_PP(0);
+    inet *a2 = PG_GETARG_INET_PP(1);
 
+    if (network_cmp_internal(a1, a2) < 0)
+        PG_RETURN_INET_P(a1);
+    else
+        PG_RETURN_INET_P(a2);
+}
+
+Datum network_larger(PG_FUNCTION_ARGS)
+{
+    inet *a1 = PG_GETARG_INET_PP(0);
+    inet *a2 = PG_GETARG_INET_PP(1);
+
+    if (network_cmp_internal(a1, a2) > 0)
+        PG_RETURN_INET_P(a1);
+    else
+        PG_RETURN_INET_P(a2);
+}
 /*
  * Support function for hash indexes on inet/cidr.
  */
