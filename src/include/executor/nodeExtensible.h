@@ -41,4 +41,13 @@ extern ExtensiblePlanMethods* GetExtensiblePlanMethods(const char* ExtensibleNam
 extern void InitExtensiblePlanMethodsHashTable();
 #endif
 
+/*
+ * Flags for extensible paths, indicating what capabilities the resulting scan
+ * will have.  The flags fields of ExtensiblePath and ExtensiblePlan nodes are
+ * bitmasks of these flags.
+ */
+#define EXTENSIBLEPATH_SUPPORT_BACKWARD_SCAN 0x0001
+#define EXTENSIBLEPATH_SUPPORT_MARK_RESTORE 0x0002
+#define EXTENSIBLEPATH_SUPPORT_PROJECTION 0x0004
+
 #endif /* NODEEXTENSIBLE_H */
