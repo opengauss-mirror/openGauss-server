@@ -84,6 +84,12 @@ typedef struct OperatorPlusProcessContext {
     bool contain_joinExpr;
 } OperatorPlusProcessContext;
 
+typedef Query* (*transformSelectStmtHook)(ParseState* pstate, SelectStmt* stmt, bool isFirstNode, bool isCreateView);
+
+typedef struct AnalyzerRoutine {
+    transformSelectStmtHook transSelect;
+} AnalyzerRoutine;
+
 extern void transformOperatorPlus(ParseState* pstate, Node** whereClause);
 extern bool IsColumnRefPlusOuterJoin(const ColumnRef* cf);
 extern PlusJoinRTEItem* makePlusJoinRTEItem(RangeTblEntry* rte, bool hasplus);

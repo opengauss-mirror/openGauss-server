@@ -2281,6 +2281,10 @@ typedef struct sess_orient{
 	uint32 cn_nodeid;
 }sess_orient;
 
+typedef struct knl_u_hook_context {
+    void *analyzerRoutineHook;
+} knl_u_hook_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     Dlelem elem;
@@ -2380,6 +2384,8 @@ typedef struct knl_session_context {
     knl_u_streaming_context streaming_cxt;
 
     instr_time last_access_time;
+
+    knl_u_hook_context hook_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {

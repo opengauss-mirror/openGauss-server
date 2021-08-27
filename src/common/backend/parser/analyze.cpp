@@ -356,6 +356,7 @@ Query* transformCreateModelStmt(ParseState* pstate, CreateModelStmt* stmt)
 Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool isCreateView)
 {
     Query* result = NULL;
+    AnalyzerRoutine *analyzerRoutineHook = (AnalyzerRoutine*)u_sess->hook_cxt.analyzerRoutineHook;
 
     switch (nodeTag(parseTree)) {
             /*
@@ -379,12 +380,17 @@ Query* transformStmt(ParseState* pstate, Node* parseTree, bool isFirstNode, bool
 
         case T_SelectStmt: {
             SelectStmt* n = (SelectStmt*)parseTree;
-            if (n->valuesLists)
+            if (n->valuesLists) {
                 result = transformValuesClause(pstate, n);
-            else if (n->op == SETOP_NONE)
-                result = transformSelectStmt(pstate, n, isFirstNode, isCreateView);
-            else
+            } else if (n->op == SETOP_NONE) {
+                if (analyzerRoutineHook == NULL || analyzerRoutineHook->transSelect == NULL) {
+                    result = transformSelectStmt(pstate, n, isFirstNode, isCreateView);
+                } else {
+                    result = analyzerRoutineHook->transSelect(pstate, n, isFirstNode, isCreateView);
+                }
+            } else {
                 result = transformSetOperationStmt(pstate, n);
+            }
         } break;
 
             /*

@@ -319,6 +319,14 @@ void* internal_load_library(const char* libname)
             (*set_extension_index)(idx);
         }
 
+        /* call init_session_vars after set_extension_index */
+        if (IsUnderPostmaster) {
+            void (*init_session_vars)(void) = (void(*)(void))pg_dlsym(file_scanner->handle, "init_session_vars");
+            if (init_session_vars) {
+                (*init_session_vars)();
+            }
+        }
+
         /* OK to link it into list */
         if (file_list == NULL)
             file_list = file_scanner;
