@@ -61,7 +61,6 @@
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
-SnapshotData CatalogSnapshotData = {SNAPSHOT_MVCC};
 
 extern THR_LOCAL bool need_reset_xmin;
 /*
@@ -609,40 +608,6 @@ Snapshot GetCatalogSnapshot()
         return u_sess->utils_cxt.HistoricSnapshot;
 
     return SnapshotNow;
-}
-
-/*
- * GetNonHistoricCatalogSnapshot
- *      Get a snapshot that is sufficiently up-to-date for scan of the system
- *      catalog with the specified OID, even while historic snapshots are set
- *      up.
- */
-Snapshot GetNonHistoricCatalogSnapshot(Oid relid)
-{
-    /*
-     * If the caller is trying to scan a relation that has no syscache,
-     * no catcache invalidations will be sent when it is updated.  For a
-     * a few key relations, snapshot invalidations are sent instead.  If
-     * we're trying to scan a relation for which neither catcache nor
-     * snapshot invalidations are sent, we must refresh the snapshot every
-     * time.
-     */
-    if (!u_sess->utils_cxt.CatalogSnapshotStale && !RelationInvalidatesSnapshotsOnly(relid) &&
-        !RelationHasSysCache(relid))
-        u_sess->utils_cxt.CatalogSnapshotStale = true;
-
-    if (u_sess->utils_cxt.CatalogSnapshotStale) {
-        /* Get new snapshot. */
-        u_sess->utils_cxt.CatalogSnapshot = GetSnapshotData(&CatalogSnapshotData, false);
-
-        /*
-         * Mark new snapshost as valid.  We must do this last, in case an
-         * ERROR occurs inside GetSnapshotData().
-         */
-        u_sess->utils_cxt.CatalogSnapshotStale = false;
-    }
-
-    return u_sess->utils_cxt.CatalogSnapshot;
 }
 
 /*

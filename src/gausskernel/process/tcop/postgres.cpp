@@ -7317,6 +7317,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        t_thrd.int_cxt.ImmediateInterruptOK = false;
         t_thrd.int_cxt.ignoreBackendSignal = false;
         if (g_threadPoolControler) {
             g_threadPoolControler->GetSessionCtrl()->releaseLockIfNecessary();
