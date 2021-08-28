@@ -38,6 +38,31 @@
 
 static Oid lookup_agg_function(List* fnName, int nargs, Oid* input_types, Oid* rettype);
 
+static void InternalAggIsSupported(const char *aggName)
+{
+    static const char *supportList[] = {
+        "listagg",
+        "median",
+        "mode",
+        "json_agg",
+        "json_object_agg",
+        "st_summarystatsagg",
+        "st_union"
+    };
+
+    uint len = lengthof(supportList);
+    for (uint i = 0; i < len; i++) {
+        if (pg_strcasecmp(aggName, supportList[i]) == 0) {
+            return;
+        }
+    }
+
+    ereport(ERROR,
+            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                errmsg("unsafe use of pseudo-type \"internal\""),
+                errdetail("Transition type can not be \"internal\".")));
+}
+
 /*
  * AggregateCreate
  * aggKind, aggregation function kind, 'n' for normal aggregation, 'o' for ordered set aggregation.
@@ -103,15 +128,9 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
                 errmsg("aggregate must have a transition function")));
 
 #ifdef PGXC
-
-    if (aggTransType == INTERNALOID && pg_strcasecmp(aggName, "listagg") != 0 && pg_strcasecmp(aggName, "median") != 0
-        && pg_strcasecmp(aggName, "mode") != 0 && pg_strcasecmp(aggName, "json_agg") != 0
-        && pg_strcasecmp(aggName, "json_object_agg") != 0)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
-                errmsg("unsafe use of pseudo-type \"internal\""),
-                errdetail("Transition type can not be \"internal\".")));
-
+    if (aggTransType == INTERNALOID) {
+        InternalAggIsSupported(aggName);
+    }
 #endif
     /* check for polymorphic and INTERNAL arguments */
     hasPolyArg = false;
