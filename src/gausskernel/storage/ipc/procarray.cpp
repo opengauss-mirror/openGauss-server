@@ -4025,6 +4025,7 @@ static inline snapxid_t* GetNextSnapXid()
     return g_snap_buffer ? (snapxid_t*)g_snap_next : NULL;
 }
 
+const static int SNAP_ERROR_COUNT = 256;
 /*
  * update the current snapshot pointer find the next available slot for the next pointer
  */
@@ -4037,6 +4038,7 @@ static void SetNextSnapXid()
         snapxid_t* ret = (snapxid_t*)g_snap_current;
         size_t idx = SNAPXID_INDEX(ret);
 loop:
+        int nofindCount = 0;
         do {
             ++idx;
             /* if wrap-around, take start from head to find free slot */
@@ -4047,9 +4049,13 @@ loop:
                 g_snap_next = ret;
                 return;
             }
+            nofindCount++;
         } while (ret != g_snap_next);
         /* we alloc sufficient space for local snapshot , overflow should not happen here */
-        ereport(WARNING, (errmsg("snapshot ring buffer overflow.")));
+        ereport(WARNING, (errmsg("snapshot ring buffer overflow")));
+        if (nofindCount >= SNAP_ERROR_COUNT) {
+            ereport(PANIC, (errcode(ERRCODE_LOG), errmsg("count not get an available snapshot slot")));
+        }
         /* try to find available slot */
         goto loop;
     }
@@ -4073,6 +4079,32 @@ static void ReleaseSnapXid(snapxid_t* snapshot)
     DecrRefCount(snapshot);
 }
 
+#ifdef USE_ASSERT_CHECKING
+/* add assert information for refcount of snapshot */
+class AutoSnapId {
+public:
+    AutoSnapId()
+        : m_count(1)
+    {}
+
+    ~AutoSnapId()
+    {
+        if(m_count > 0) {
+            ereport(PANIC, (errcode(ERRCODE_LOG),
+                errmsg("snapshot refcount must be zero")));
+        }
+    }
+
+    void decr()
+    {
+        m_count = 0;
+    }
+
+public:
+    int m_count;
+};
+#endif
+
 Snapshot GetLocalSnapshotData(Snapshot snapshot)
 {
     /* if first here, fallback to original code */
@@ -4081,8 +4113,13 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         return NULL;
     }
     pg_read_barrier();
+    HOLD_INTERRUPTS();
     /* 1. increase ref-count of current snapshot in ring buffer */
     snapxid_t* snapxid = GetCurrentSnapXid();
+#ifdef USE_ASSERT_CHECKING
+    AutoSnapId snapid;
+#endif
+
     /* save use_data for release */
     snapshot->user_data = snapxid;
 
@@ -4132,6 +4169,10 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     snapshot->copied = false;
 
     ReleaseSnapshotData(snapshot);
+#ifdef USE_ASSERT_CHECKING
+    snapid.decr();
+#endif
+    RESUME_INTERRUPTS();
 
     return snapshot;
 }
@@ -4331,6 +4372,10 @@ void ReleaseSnapshotData(Snapshot snapshot)
     if (snapshot && snapshot->user_data) {
         ReleaseSnapXid((snapxid_t*)snapshot->user_data);
         snapshot->user_data = NULL;
+    } else {
+        ereport(PANIC, (errcode(ERRCODE_LOG),
+            errmsg("snapshot or user_data could not be null when release snapshot, snapshot: %p, user_data: %p",
+            snapshot, snapshot ? snapshot->user_data : NULL)));
     }
 }
 

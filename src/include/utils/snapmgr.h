@@ -55,7 +55,6 @@ extern Snapshot GetTransactionSnapshot(bool force_local_snapshot = false);
 extern Snapshot GetLatestSnapshot(void);
 extern Snapshot GetCatalogSnapshot();
 extern void SnapshotSetCommandId(CommandId curcid);
-extern Snapshot GetNonHistoricCatalogSnapshot(Oid relid);
 
 extern void PushActiveSnapshot(Snapshot snapshot);
 extern void PushCopiedSnapshot(Snapshot snapshot);
