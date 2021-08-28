@@ -215,6 +215,11 @@ ConfigOption instance_options[] =
         &instance_config.remote.ssh_config, SOURCE_CMD, (OptionSource)0,
         OPTION_REMOTE_GROUP, 0, option_get_value
     },
+    {
+        's', 231, "remote-libpath",
+        &instance_config.remote.libpath, SOURCE_CMD, (OptionSource)0,
+        OPTION_REMOTE_GROUP, 0, option_get_value
+    },
     { 0 }
 };
 
@@ -504,6 +509,10 @@ readInstanceConfigFile(const char *instance_name)
         },
         {
             's', 230, "ssh-config", &instance->remote.ssh_config, SOURCE_CMD, (OptionSource)0,
+            OPTION_REMOTE_GROUP, 0, option_get_value
+        },
+        {
+            's', 231, "remote-libpath", &instance->remote.libpath, SOURCE_CMD, (OptionSource)0,
             OPTION_REMOTE_GROUP, 0, option_get_value
         },
         { 0 }
