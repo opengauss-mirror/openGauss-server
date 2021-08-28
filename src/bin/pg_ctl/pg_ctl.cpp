@@ -3963,11 +3963,11 @@ static void find_nested_pgconf(const char** optlines, char* opt_name)
         while (isspace((unsigned char)*p)) {
             p++;
         }
-        pg_fatal(
-            _("There is nested config file in postgresql.conf: %sWhich is not supported by full build. "
+        pg_log(PG_WARNING,
+            _("There is nested config file in postgresql.conf: %sWhich is not supported by build. "
               "Please move out the nested config files from %s and comment the 'include' config in postgresql.conf.\n"
-              "You can add option '-q' to disable autostart during full build and restore the change manually "
-              "before starting gaussdb."), 
+              "You can add option '-q' to disable autostart during build and restore the change manually "
+              "before starting gaussdb.\n"),
               p, 
               pg_data);
         exit(1);
@@ -3985,6 +3985,11 @@ static void check_nested_pgconf(void)
     securec_check_ss_c(ret, "\0", "\0");
     config_file[MAXPGPATH - 1] = '\0';
     optlines = readfile(config_file);
+
+    if (optlines == NULL) {
+        pg_log(PG_WARNING, _("%s cannot be opened.\n"), config_file);
+        exit(1);
+    }
 
     for (int i = 0; i < (int)lengthof(optname); i++) {
         find_nested_pgconf((const char**)optlines, optname[i]);
