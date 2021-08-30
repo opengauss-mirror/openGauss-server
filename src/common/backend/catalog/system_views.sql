@@ -1080,7 +1080,7 @@ SELECT
         S.node_group,
         T.top_cpu_dn
 FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_realtime_session_info(NULL) AS T
-WHERE S.pid = T.threadid;
+WHERE S.sessionid = T.threadid;
 
 CREATE VIEW gs_wlm_session_statistics AS
 SELECT
