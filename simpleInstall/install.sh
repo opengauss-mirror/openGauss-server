@@ -156,6 +156,13 @@ function check_os() {
       info "The required value should be greater than ${conn_floor}. You can modify it in file '/etc/sysctl.conf'."
       exit 1
     fi
+    # check cpu instruction
+    CPU_BIT=$(uname -m)
+    if [ X"$CPU_BIT" == X"x86_64" ]; then
+        if [ X"$(cat /proc/cpuinfo | grep rdtscp | uniq)" == X"" ]; then
+            echo "The cpu instruction rdtscp is missing." && exit 1
+        fi
+    fi
 }
 
 function change_gausshome_owner() {
