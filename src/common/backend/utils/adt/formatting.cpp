@@ -5561,7 +5561,7 @@ static void NUM_numpart_from_char(NUMProc* Np, int id, int plen, int& tmp_len)
          * locale sign expected - last read char was NUM_0/9 or NUM_DEC - and
          * next char is not digit
          */
-        if (IS_LSIGN(Np->Num) && isread && (Np->inout_p + 1) <= Np->inout + plen &&
+        if (IS_LSIGN(Np->Num) && isread && (Np->inout_p + 1) < Np->inout + plen &&
             !isdigit((unsigned char)*(Np->inout_p + 1))) {
             int x;
             char* tmp = Np->inout_p++;
