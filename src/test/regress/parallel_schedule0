@@ -10,6 +10,7 @@ test: single_node_ddl
 test: single_node_sqlbypass
 test: median
 test: array_funcs first_last_agg
+test: get_instr_unique_sql
 
 # run tablespace by itself, and first, because it forces a checkpoint;
 # we'd prefer not to have checkpoints later in the tests because that

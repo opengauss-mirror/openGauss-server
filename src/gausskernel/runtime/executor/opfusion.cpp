@@ -3029,7 +3029,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
 {
     max_rows = FETCH_ALL;
     bool success = false;
-
+    TimestampTz startTime = 0;
     TupleTableSlot *reslot = m_local.m_reslot;
     Datum *values = m_local.m_values;
     bool  *isnull = m_local.m_isnull;
@@ -3037,6 +3037,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
         isnull[i] = true;
     }
 
+    UpdateUniqueSQLSortStats(NULL, &startTime);
     /* prepare */
     m_local.m_scan->refreshParameter(m_local.m_outParams == NULL ? m_local.m_params : m_local.m_outParams);
 
@@ -3074,6 +3075,9 @@ bool SortFusion::execute(long max_rows, char *completionTag)
 
     /* sort all data */
     tuplesort_performsort(tuplesortstate);
+
+    /* analyze the tuplesortstate information for update unique sql sort info */
+    UpdateUniqueSQLSortStats(tuplesortstate, &startTime);
 
     /* send sorted data to client */
     slot = MakeSingleTupleTableSlot(m_c_local.m_scanDesc);

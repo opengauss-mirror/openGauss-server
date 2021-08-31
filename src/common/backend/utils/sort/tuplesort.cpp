@@ -4262,7 +4262,8 @@ int64 tuplesort_get_peak_memory(Tuplesortstate* state)
  */
 void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_time)
 {
-    if (!is_unique_sql_enabled()) {
+    /* isUniqueSQLContextInvalid happens when the query is explain xxx */
+    if (!is_unique_sql_enabled() || isUniqueSQLContextInvalid()) {
         return;
     }
     unique_sql_sorthash_instr* instr = u_sess->unique_sql_cxt.unique_sql_sort_instr;
