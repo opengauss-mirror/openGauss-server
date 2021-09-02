@@ -442,7 +442,8 @@ static void UpdateUniqueSQLSortHashInfo(UniqueSQL* unique_sql)
  */
 void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time)
 {
-    if (!is_unique_sql_enabled()) {
+    /* isUniqueSQLContextInvalid happens when the query is explain xxx */
+    if (!is_unique_sql_enabled() || isUniqueSQLContextInvalid()) {
         return;
     }
 
