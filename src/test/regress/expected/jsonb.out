@@ -73,6 +73,12 @@ SELECT '"\u0000"'::jsonb;		-- OK, legal escape
  "\\u0000"
 (1 row)
 
+SELECT '"哈1哈"'::jsonb;		-- OK
+  jsonb  
+---------
+ "哈1哈"
+(1 row)
+
 -- use octet_length here so we don't get an odd unicode char in the
 -- output
 SELECT octet_length('"\uaBcD"'::jsonb::text); -- OK, uppercase and lower case both OK

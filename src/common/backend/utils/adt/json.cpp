@@ -2107,7 +2107,7 @@ void escape_json(StringInfo buf, const char *str)
                     appendStringInfo(buf, "\\u%04x", (int) *p);
                 } else {
                     for (int i = 0; i < charlen; i++) {
-                        appendStringInfoCharMacro(buf, *p);
+                        appendStringInfoCharMacro(buf, *(p + i));
                     }
                 }
                 break;

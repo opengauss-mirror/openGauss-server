@@ -12,6 +12,7 @@ SELECT '"\u00"'::json;			-- ERROR, incomplete escape
 SELECT '"\u000g"'::json;		-- ERROR, g is not a hex digit
 SELECT '"\u0000"'::json;		-- OK, legal escape
 SELECT '"\uaBcD"'::json;		-- OK, uppercase and lower case both OK
+SELECT '"哈1哈"'::jsonb;                -- OK
 
 -- Numbers.
 SELECT '1'::json;				-- OK
