@@ -454,37 +454,32 @@ char* numeric_out_sci(Numeric num, int scale)
  *
  * Output function for numeric data type without trailing zeroes.
  */
-char *
-numeric_normalize(Numeric num)
+char *numeric_normalize(Numeric num)
 {
-   NumericVar  x;
-   char       *str;
-   int         orig, last;
+    NumericVar  x;
+    char       *str = NULL;
+    int         orig, last;
 
-   /*
-    * Handle NaN
-    */
-   if (NUMERIC_IS_NAN(num))
-       return pstrdup("NaN");
+    /*
+     * Handle NaN
+     */
+    if (NUMERIC_IS_NAN(num)) {
+        return pstrdup("NaN");
+    }
+    init_var_from_num(num, &x);
+    str = get_str_from_var(&x);
+    orig = last = strlen(str) - 1;
 
-   init_var_from_num(num, &x);
-
-   str = get_str_from_var(&x);
-
-   orig = last = strlen(str) - 1;
-
-   for (;;)
-   {
-       if (last == 0 || str[last] != '0')
-           break;
-
-       last--;
-   }
-
-   if (last > 0 && last != orig)
-       str[last] = '\0';
-
-   return str;
+    for (;;) {
+        if (last == 0 || str[last] != '0') {
+            break;
+        }
+        last--;
+    }
+    if (last > 0 && last != orig) {
+        str[last] = '\0';
+    }
+    return str;
 }
 
 

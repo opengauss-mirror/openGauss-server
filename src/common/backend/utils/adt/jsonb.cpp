@@ -1,15 +1,15 @@
-/*-------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
- * jsonb.c
+ * jsonb.cpp
  *      I/O routines for jsonb type
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2014, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *    src/backend/utils/adt/jsonb.c
+ *    src/common/backend/utils/adt/jsonb.cpp
  *
- *-------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
  */
 #include "postgres.h"
 
@@ -19,8 +19,7 @@
 #include "utils/jsonapi.h"
 #include "utils/jsonb.h"
 
-typedef struct JsonbInState
-{
+typedef struct JsonbInState {
     JsonbParseState *parseState;
     JsonbValue *res;
 }   JsonbInState;
@@ -32,17 +31,16 @@ static void jsonb_in_object_end(void *pstate);
 static void jsonb_in_array_start(void *pstate);
 static void jsonb_in_array_end(void *pstate);
 static void jsonb_in_object_field_start(void *pstate, char *fname, bool isnull);
-static void jsonb_put_escaped_value(StringInfo out, JsonbValue * scalarVal);
+static void jsonb_put_escaped_value(StringInfo out, JsonbValue *scalarVal);
 static void jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype);
 char *JsonbToCString(StringInfo out, char *in, int estimated_len);
 
 /*
  * jsonb type input function
  */
-Datum
-jsonb_in(PG_FUNCTION_ARGS)
+Datum jsonb_in(PG_FUNCTION_ARGS)
 {
-    char       *json = PG_GETARG_CSTRING(0);
+    char *json = PG_GETARG_CSTRING(0);
     json = json == NULL ? pstrdup("") : json;
 
     return jsonb_from_cstring(json, strlen(json));
@@ -56,8 +54,7 @@ jsonb_in(PG_FUNCTION_ARGS)
  * can change the binary format sent in future if necessary. For now,
  * only version 1 is supported.
  */
-Datum
-jsonb_recv(PG_FUNCTION_ARGS)
+Datum jsonb_recv(PG_FUNCTION_ARGS)
 {
     StringInfo  buf = (StringInfo) PG_GETARG_POINTER(0);
     int         version = pq_getmsgint(buf, 1);
@@ -75,8 +72,7 @@ jsonb_recv(PG_FUNCTION_ARGS)
 /*
  * jsonb type output function
  */
-Datum
-jsonb_out(PG_FUNCTION_ARGS)
+Datum jsonb_out(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     char       *out = NULL;
@@ -91,8 +87,7 @@ jsonb_out(PG_FUNCTION_ARGS)
  *
  * Just send jsonb as a version number, then a string of text
  */
-Datum
-jsonb_send(PG_FUNCTION_ARGS)
+Datum jsonb_send(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     StringInfoData buf;
@@ -116,8 +111,7 @@ jsonb_send(PG_FUNCTION_ARGS)
  * This function is here because the analog json function is in json.c, since
  * it uses the json parser internals not exposed elsewhere.
  */
-Datum
-jsonb_typeof(PG_FUNCTION_ARGS)
+Datum jsonb_typeof(PG_FUNCTION_ARGS)
 {
     Jsonb      *in = PG_GETARG_JSONB(0);
     JsonbIterator *it = NULL;
@@ -130,9 +124,7 @@ jsonb_typeof(PG_FUNCTION_ARGS)
         result = "array";
     } else {
         Assert(JB_ROOT_IS_SCALAR(in));
-
         it = JsonbIteratorInit(VARDATA_ANY(in));
-
         /*
          * A root scalar is stored as an array of one element, so we get the
          * array and then its first (and only) member.
@@ -168,8 +160,7 @@ jsonb_typeof(PG_FUNCTION_ARGS)
  *
  * Uses the json parser (with hooks) to construct a jsonb.
  */
-static inline Datum
-jsonb_from_cstring(char *json, int len)
+static inline Datum jsonb_from_cstring(char *json, int len)
 {
     JsonLexContext *lex = NULL;
     JsonbInState state;
@@ -182,7 +173,6 @@ jsonb_from_cstring(char *json, int len)
     lex = makeJsonLexContextCstringLen(json, len, true);
 
     sem.semstate = (void *) &state;
-
     sem.object_start = jsonb_in_object_start;
     sem.array_start = jsonb_in_array_start;
     sem.object_end = jsonb_in_object_end;
@@ -196,8 +186,7 @@ jsonb_from_cstring(char *json, int len)
     PG_RETURN_POINTER(JsonbValueToJsonb(state.res));
 }
 
-static size_t
-checkStringLen(size_t len)
+static size_t checkStringLen(size_t len)
 {
     if (len > JENTRY_POSMASK) {
         ereport(ERROR,
@@ -210,40 +199,31 @@ checkStringLen(size_t len)
     return len;
 }
 
-static void
-jsonb_in_object_start(void *pstate)
+static void jsonb_in_object_start(void *pstate)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
-
     _state->res = pushJsonbValue(&_state->parseState, WJB_BEGIN_OBJECT, NULL);
 }
 
-static void
-jsonb_in_object_end(void *pstate)
+static void jsonb_in_object_end(void *pstate)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
-
     _state->res = pushJsonbValue(&_state->parseState, WJB_END_OBJECT, NULL);
 }
 
-static void
-jsonb_in_array_start(void *pstate)
+static void jsonb_in_array_start(void *pstate)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
-
     _state->res = pushJsonbValue(&_state->parseState, WJB_BEGIN_ARRAY, NULL);
 }
 
-static void
-jsonb_in_array_end(void *pstate)
+static void jsonb_in_array_end(void *pstate)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
-
     _state->res = pushJsonbValue(&_state->parseState, WJB_END_ARRAY, NULL);
 }
 
-static void
-jsonb_in_object_field_start(void *pstate, char *fname, bool isnull)
+static void jsonb_in_object_field_start(void *pstate, char *fname, bool isnull)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
     JsonbValue  v;
@@ -257,8 +237,7 @@ jsonb_in_object_field_start(void *pstate, char *fname, bool isnull)
     _state->res = pushJsonbValue(&_state->parseState, WJB_KEY, &v);
 }
 
-static void
-jsonb_put_escaped_value(StringInfo out, JsonbValue * scalarVal)
+static void jsonb_put_escaped_value(StringInfo out, JsonbValue * scalarVal)
 {
     switch (scalarVal->type) {
         case jbvNull:
@@ -286,16 +265,13 @@ jsonb_put_escaped_value(StringInfo out, JsonbValue * scalarVal)
 /*
  * For jsonb we always want the de-escaped value - that's what's in token
  */
-static void
-jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype)
+static void jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype)
 {
     JsonbInState *_state = (JsonbInState *) pstate;
     JsonbValue  v;
 
     v.estSize = sizeof(JEntry);
-
     switch (tokentype) {
-
         case JSON_TOKEN_STRING:
             Assert (token != NULL);
             v.type = jbvString;
@@ -311,7 +287,7 @@ jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype)
             Assert (token != NULL);
             v.type = jbvNumeric;
             v.numeric = DatumGetNumeric(DirectFunctionCall3(numeric_in, CStringGetDatum(token), 0, -1));
-            v.estSize += VARSIZE_ANY(v.numeric) + sizeof(JEntry) /* alignment */ ;
+            v.estSize += VARSIZE_ANY(v.numeric) + sizeof(JEntry);  /* alignment */
             break;
         case JSON_TOKEN_TRUE:
             v.type = jbvBool;
@@ -343,7 +319,6 @@ jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype)
         _state->res = pushJsonbValue(&_state->parseState, WJB_END_ARRAY, NULL);
     } else {
         JsonbValue *o = &_state->parseState->contVal;
-
         switch (o->type) {
             case jbvArray:
                 _state->res = pushJsonbValue(&_state->parseState, WJB_ELEM, &v);
@@ -368,8 +343,7 @@ jsonb_in_scalar(void *pstate, char *token, JsonTokenType tokentype)
  * caller wants access to the len attribute without having to call strlen, e.g.
  * if they are converting it to a text* object.
  */
-char *
-JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
+char *JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
 {
     bool        first = true;
     JsonbIterator *it = NULL;
@@ -382,11 +356,9 @@ JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
         out = makeStringInfo();
 
     enlargeStringInfo(out, (estimated_len >= 0) ? estimated_len : 64);
-
     it = JsonbIteratorInit(in);
 
-    while (redo_switch ||
-           ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)) {
+    while (redo_switch || ((type = JsonbIteratorNext(&it, &v, false)) != WJB_DONE)) {
         redo_switch = false;
         switch (type) {
             case WJB_BEGIN_ARRAY:
@@ -421,7 +393,6 @@ JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
                     jsonb_put_escaped_value(out, &v);
                 } else {
                     Assert(type == WJB_BEGIN_OBJECT || type == WJB_BEGIN_ARRAY);
-
                     /*
                      * We need to rerun the current switch() since we need to
                      * output the object which we just got from the iterator
@@ -435,7 +406,6 @@ JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
                     appendBinaryStringInfo(out, ", ", 2);
                 else
                     first = false;
-
                 jsonb_put_escaped_value(out, &v);
                 break;
             case WJB_END_ARRAY:
@@ -453,8 +423,6 @@ JsonbToCString(StringInfo out, JsonbSuperHeader in, int estimated_len)
                 elog(ERROR, "unknown flag of jsonb iterator");
         }
     }
-
     Assert(level == 0);
-
     return out->data;
 }
