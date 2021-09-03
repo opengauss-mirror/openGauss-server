@@ -244,8 +244,10 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
             if (strcasecmp(fmt, "fixed") == 0) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("file_fdw doesn't support fixed option in format")));
             }
-        } else
             other_options = lappend(other_options, def);
+        } else {
+            other_options = lappend(other_options, def);
+        }
     }
 
     /*
