@@ -2837,6 +2837,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6559 | last_transition
  6560 | first
  6561 | last
+ 6666 | network_larger
+ 6667 | network_smaller
+ 6668 | max
+ 6669 | min
  7101 | db4ai_predict_by_bool
  7102 | db4ai_predict_by_int32
  7103 | db4ai_predict_by_int64

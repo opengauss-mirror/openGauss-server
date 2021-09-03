@@ -1,0 +1,144 @@
+--To test that the min and max functions support IP address type parameters
+
+--Test whether the function is normal when inet type data is input: support, and the result is in line with expectations
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr inet,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values('192.168.1.0','taishan00');
+insert into row_tab01 values('192.168.1.1','taishan01');
+insert into row_tab01 values('192.168.1.2','taishan02');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+
+--Create a column table space
+drop tablespace if exists column_tabspace01;
+create tablespace column_tabspace01 relative location 'tablespace/column_space01';
+--Create table
+drop table if exists column_tab01;
+create table column_tab01(ip_addr inet,ip_name char(9)) with(orientation=column);
+--Insert data
+insert into column_tab01 values('192.168.1.0','taishan00');
+insert into column_tab01 values('192.168.1.1','taishan01');
+insert into column_tab01 values('192.168.1.2','taishan02');
+--function test
+select min(ip_addr) as min_ip_addr from column_tab01;
+select max(ip_addr) as max_ip_addr from column_tab01;
+--Delete table
+drop table column_tab01 cascade;
+drop tablespace column_tabspace01;
+
+--Test whether the function is normal when cidr type data is input: support, and the result is in line with expectations
+---When the mask is all 1, the IP address is unique, and the comparison result does not display the mask
+--IPV4 test
+--Test mask comparison function
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('192.168.1.8/32','taishan00');
+insert into row_tab01 values ('192.168.1.8/31','taishan00');
+insert into row_tab01 values ('192.168.1.8/30','taishan00');
+insert into row_tab01 values ('192.168.1.8/29','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+--IPV4 test
+--Test the IP address comparison function
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('10.1.2.8/29','taishan00');
+insert into row_tab01 values ('10.1.2.16/29','taishan00');
+insert into row_tab01 values ('10.1.2.32/29','taishan00');
+insert into row_tab01 values ('10.1.2.48/29','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+--IPV6 test
+--Test mask comparison function
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1f0/127','taishan00');
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1f0/128','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+--IPV6 test
+--Test the IP address comparison function
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1e0/127','taishan00');
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1f0/127','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+--when insert IP address type different
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('10.1.2.48/29','taishan00');
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1f0/127','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+--when insert IP address type different
+--Create a table space
+drop tablespace if exists row_tabspace01;
+create tablespace row_tabspace01 relative location 'tablespace/row_space01';
+--Create table
+drop table if exists row_tab01;
+create table row_tab01(ip_addr cidr,ip_name char(9)) with(orientation=row);
+--Insert data
+insert into row_tab01 values ('taishan00');
+insert into row_tab01 values ('2001:4f8:3:ba:2e0:81ff:fe22:d1f0/127','taishan00');
+insert into row_tab01 values ('0','taishan00');
+--function test
+select min(ip_addr) as min_ip_addr from row_tab01;
+select max(ip_addr) as max_ip_addr from row_tab01;
+--Delete table
+drop table row_tab01 cascade;
+drop tablespace row_tabspace01;
+
