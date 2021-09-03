@@ -57,6 +57,7 @@
 #include "postmaster/postmaster.h"
 #include "postmaster/pagewriter.h"
 #include "replication/catchup.h"
+#include "replication/walsender.h"
 #include "storage/backendid.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
@@ -2202,10 +2203,17 @@ void AtEOXact_PgStat(bool isCommit)
      * Count transaction commit or abort.  (We use counters, not just bools,
      * in case the reporting message isn't sent right away.)
      */
-    if (isCommit)
+    if (isCommit) {
         u_sess->stat_cxt.pgStatXactCommit++;
-    else
+    } else if (!AM_WAL_DB_SENDER) {
+        /*
+         * Walsender for logical decoding will not count rollback transaction
+         * any more. Logicaling decoding frequently starts and rollback transactions
+         * to access system tables and syscache, see RecorderBufferCommit()
+         * for more details.
+         */
         u_sess->stat_cxt.pgStatXactRollback++;
+    }
 
     pgstatCountTransactionCommit4SessionLevel(isCommit);
 
