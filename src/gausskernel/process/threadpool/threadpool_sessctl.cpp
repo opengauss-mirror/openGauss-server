@@ -550,6 +550,39 @@ void ThreadPoolSessControl::getSessionMemoryDetail(Tuplestorestate* tupStore,
     PG_END_TRY();
 }
 
+SessMemoryUsage* ThreadPoolSessControl::getSessionMemoryUsage(int* num)
+{
+    AutoMutexLock alock(&m_sessCtrlock);
+    knl_sess_control* ctrl = NULL;
+    Dlelem* elem = NULL;
+
+    HOLD_INTERRUPTS();
+    alock.lock();
+
+    SessMemoryUsage* result = (SessMemoryUsage*)malloc(m_activeSessionCount * sizeof(SessMemoryUsage));
+    int index = 0;
+
+    elem = DLGetHead(&m_activelist);
+    while (elem != NULL) {
+        ctrl = (knl_sess_control*)DLE_VAL(elem);
+        knl_session_context* sess = ctrl->sess;
+        if (sess) {
+            result[index].sessid = sess->session_id;
+            result[index].usedSize = sess->stat_cxt.trackedBytes;
+            result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[sess->session_ctr_index].st_state;
+            index++;
+        }
+        elem = DLGetSucc(elem);
+    }
+
+    alock.unLock();
+    RESUME_INTERRUPTS();
+
+    *num = index;
+    return result;
+}
+
+
 knl_session_context* ThreadPoolSessControl::GetSessionByIdx(int idx)
 {
     if (IsValidCtrlIndex(idx)) {

@@ -182,6 +182,7 @@ struct PGPROC {
     char myProgName[64];
     pg_time_t myStartTime;
     syscalllock deleMemContextMutex;
+    int64* usedMemory;
 
     /*
      * All PROCLOCK objects for locks held or awaited by this backend are

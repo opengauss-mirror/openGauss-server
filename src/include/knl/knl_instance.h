@@ -590,6 +590,8 @@ typedef struct knl_g_comm_context {
 
     HTAB* usedDnSpace;
     uint32 current_gsrewind_count;
+
+    bool rejectRequest;
 } knl_g_comm_context;
 
 typedef struct knl_g_libpq_context {
@@ -626,6 +628,8 @@ typedef struct knl_g_executor_context {
 #ifndef ENABLE_MULTIPLE_NODES
     char* nodeName;
 #endif
+    volatile uint32 oomTimes;
+    TimestampTz firstTime;
 } knl_g_executor_context;
 
 typedef struct knl_g_xlog_context {

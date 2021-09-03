@@ -3706,6 +3706,11 @@ CAC_state canAcceptConnections(bool isSession)
             return CAC_RECOVERY; /* else must be crash recovery */
     }
 
+    if (g_instance.comm_cxt.rejectRequest) {
+        result = CAC_OOM;
+    }
+
+
     if (isSession)
         return result;
 
@@ -6499,11 +6504,15 @@ static int BackendStartup(Port* port, bool isConnectHaPort)
     port->canAcceptConnections = canAcceptConnections(false);
     if (port->canAcceptConnections != CAC_OK && port->canAcceptConnections != CAC_WAITBACKUP) {
         (void)ReleasePostmasterChildSlot(childSlot);
-        if (port->canAcceptConnections == CAC_TOOMANY)
+        if (port->canAcceptConnections == CAC_TOOMANY) {
             ereport(WARNING, (errmsg("could not fork new process for connection due to too many connections")));
-        else
+        } else if (port->canAcceptConnections == CAC_OOM) {
+            ereport(
+                WARNING, (errmsg("The server is cleaning connection to reduce memory usage, please retry later")));
+        } else {
             ereport(
                 WARNING, (errmsg("could not fork new process for connection due to PMstate %s", GetPMState(pmState))));
+        }
 
         return STATUS_ERROR;
     }

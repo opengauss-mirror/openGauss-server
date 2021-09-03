@@ -2009,6 +2009,7 @@ extern void DumpMemoryContext(DUMP_TYPE type);
 
 extern void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32* procIdx);
 extern void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc);
+extern SessMemoryUsage* getThreadMemoryUsage(int* num);
 
 typedef enum TimeInfoType {
     DB_TIME = 0, /*total elapsed time while dealing user command.*/

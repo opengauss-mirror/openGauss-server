@@ -8370,6 +8370,37 @@ void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32*
     PG_END_TRY();
 }
 
+SessMemoryUsage* getThreadMemoryUsage(int* num)
+{
+    uint32 max_thread_count = g_instance.proc_base->allProcCount - g_instance.attr.attr_storage.max_prepared_xacts;
+    volatile PGPROC* proc = NULL;
+    uint32 idx = 0;
+
+    HOLD_INTERRUPTS();
+
+    SessMemoryUsage* result = (SessMemoryUsage*)malloc(max_thread_count * sizeof(SessMemoryUsage));
+    int index = 0;
+
+    for (idx = 0; idx < max_thread_count; idx++) {
+        proc = g_instance.proc_base_all_procs[idx];
+
+        /* lock this proc's delete MemoryContext action */
+        (void)syscalllockAcquire(&((PGPROC*)proc)->deleMemContextMutex);
+        if (proc->usedMemory != NULL) {
+            result[index].sessid = proc->pid;
+            result[index].usedSize = *proc->usedMemory;
+            result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1].st_state;
+            index++;
+        }
+        (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);
+    }
+
+    RESUME_INTERRUPTS();
+
+    *num = index;
+    return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef MEMORY_CONTEXT_CHECKING
 

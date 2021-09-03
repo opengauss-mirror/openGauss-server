@@ -103,4 +103,6 @@ extern void gs_memprot_reset_beyondchunk(void);
 
 extern int getSessionMemoryUsageMB();
 
+extern void CleanConnectionByMemory(int targetMemory);
+
 #endif
