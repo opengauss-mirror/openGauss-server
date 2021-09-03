@@ -4037,8 +4037,8 @@ static void SetNextSnapXid()
         g_snap_assigned = true;
         snapxid_t* ret = (snapxid_t*)g_snap_current;
         size_t idx = SNAPXID_INDEX(ret);
-loop:
         int nofindCount = 0;
+loop:
         do {
             ++idx;
             /* if wrap-around, take start from head to find free slot */
