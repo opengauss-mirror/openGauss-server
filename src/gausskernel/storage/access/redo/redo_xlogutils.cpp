@@ -843,6 +843,9 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
         case RM_BTREE_ID:
             BtreeRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
+        case RM_HASH_ID:
+            HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
+            break;
         case RM_XLOG_ID:
             xlog_redo_data_block(blockhead, blockdatarec, bufferinfo);
             break;

@@ -14,8 +14,8 @@
  * plenty of locality of access.
  *
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -37,15 +37,23 @@
 struct HSpool {
     Tuplesortstate *sortstate; /* state data for tuplesort.c */
     Relation index;
+    /*
+     * We sort the hash keys based on the buckets they belong to. Below masks
+     * are used in _hash_hashkey2bucket to determine the bucket of given hash
+     * key.
+     */
+    uint32 high_mask;
+    uint32 low_mask;
+    uint32 max_buckets;
 };
+
 
 /*
  * create and initialize a spool structure
  */
-HSpool *_h_spoolinit(Relation index, uint32 num_buckets, void *meminfo)
+HSpool *_h_spoolinit(Relation heap, Relation index, uint32 num_buckets, void *meminfo)
 {
     HSpool *hspool = (HSpool *)palloc0(sizeof(HSpool));
-    uint32 hash_mask;
     UtilityDesc *desc = (UtilityDesc *)meminfo;
     int work_mem = (desc->query_mem[0] > 0) ? desc->query_mem[0] : u_sess->attr.attr_memory.maintenance_work_mem;
     int max_mem = (desc->query_mem[1] > 0) ? desc->query_mem[1] : 0;
@@ -57,18 +65,26 @@ HSpool *_h_spoolinit(Relation index, uint32 num_buckets, void *meminfo)
      * num_buckets buckets in the index, the appropriate mask can be computed
      * as follows.
      *
-     * Note: at present, the passed-in num_buckets is always a power of 2, so
-     * we could just compute num_buckets - 1.  We prefer not to assume that
-     * here, though.
+     * NOTE : This hash mask calculation should be in sync with similar
+     * calculation in _hash_init_metabuffer.
      */
-    hash_mask = (((uint32)1) << _hash_log2(num_buckets)) - 1;
+    hspool->high_mask = (((uint32) 1) << _hash_log2(num_buckets + 1)) - 1;
+    hspool->low_mask = (hspool->high_mask >> 1);
+    hspool->max_buckets = num_buckets - 1;
 
     /*
      * We size the sort area as maintenance_work_mem rather than work_mem to
      * speed index creation.  This should be OK since a single backend can't
      * run multiple index creations in parallel.
      */
-    hspool->sortstate = tuplesort_begin_index_hash(index, hash_mask, work_mem, false, max_mem);
+    hspool->sortstate = tuplesort_begin_index_hash(heap,
+                                                   index,
+                                                   hspool->high_mask,
+                                                   hspool->low_mask,
+                                                   hspool->max_buckets,
+                                                   work_mem,
+                                                   false,
+                                                   max_mem);
 
     return hspool;
 }
@@ -94,7 +110,7 @@ void _h_spool(HSpool *hspool, ItemPointer self, Datum *values, const bool *isnul
  * given a spool loaded by successive calls to _h_spool,
  * create an entire index.
  */
-void _h_indexbuild(HSpool *hspool)
+void _h_indexbuild(HSpool *hspool, Relation heapRel)
 {
     IndexTuple itup;
     bool should_free = false;
@@ -102,7 +118,7 @@ void _h_indexbuild(HSpool *hspool)
     tuplesort_performsort(hspool->sortstate);
 
     while ((itup = tuplesort_getindextuple(hspool->sortstate, true, &should_free)) != NULL) {
-        _hash_doinsert(hspool->index, itup);
+        _hash_doinsert(hspool->index, itup, heapRel);
         if (should_free)
             pfree(itup);
     }

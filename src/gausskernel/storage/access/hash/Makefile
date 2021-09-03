@@ -9,7 +9,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
      endif
   endif
 endif
-OBJS = hash.o hashfunc.o hashinsert.o hashovfl.o hashpage.o hashscan.o \
-       hashsearch.o hashsort.o hashutil.o
+OBJS = hash.o hashfunc.o hashinsert.o  hashovfl.o hashpage.o hashsearch.o\
+       hashsort.o hashutil.o hash_xlog.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -32,6 +32,7 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/nbtree.h"
+#include "access/hash_xlog.h"
 #include "access/xlogreader.h"
 #include "access/gist_private.h"
 #include "access/multixact.h"
@@ -165,7 +166,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
     { DispatchHeap2Record, RmgrRecordInfoValid, RM_HEAP2_ID, XLOG_HEAP2_FREEZE, XLOG_HEAP2_LOGICAL_NEWPAGE },
     { DispatchHeapRecord, RmgrRecordInfoValid, RM_HEAP_ID, XLOG_HEAP_INSERT, XLOG_HEAP_INPLACE },
     { DispatchBtreeRecord, RmgrRecordInfoValid, RM_BTREE_ID, XLOG_BTREE_INSERT_LEAF, XLOG_BTREE_REUSE_PAGE },
-    { DispatchHashRecord, NULL, RM_HASH_ID, 0, 0 },
+    { DispatchHashRecord, RmgrRecordInfoValid, RM_HASH_ID, XLOG_HASH_INIT_META_PAGE, XLOG_HASH_VACUUM_ONE_PAGE },
     { DispatchGinRecord, RmgrRecordInfoValid, RM_GIN_ID, XLOG_GIN_CREATE_INDEX, XLOG_GIN_VACUUM_DATA_LEAF_PAGE },
     /* XLOG_GIST_PAGE_DELETE is not used and info isn't continus  */
     { DispatchGistRecord, RmgrGistRecordInfoValid, RM_GIST_ID, 0, 0 },
@@ -1031,8 +1032,20 @@ static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, Time
 /* Run from the dispatcher thread. */
 static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
-    DispatchTxnRecord(record, expectedTLIs, recordXTime, false, true);
-    return true;
+    bool isNeedFullSync = false;
+
+    /* index not support mvcc, so we need to sync with trx thread when the record is vacuum */
+    if (IsHashVacuumPages(record) && g_supportHotStandby) {
+        GetSlotIds(record, ANY_WORKER, true);
+        /* sync with trxn thread */
+        /* only need to process in pageworker  thread, wait trxn sync */
+        /* pageworker exe, trxn don't need exe */
+        DispatchToSpecPageWorker(record, expectedTLIs, true);
+    } else {
+        DispatchRecordWithPages(record, expectedTLIs, true);
+    }
+
+    return isNeedFullSync;
 }
 
 /* Run from the dispatcher thread. */

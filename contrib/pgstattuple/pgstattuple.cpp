@@ -363,7 +363,6 @@ static void pgstat_hash_page(pgstattuple_type* stat, Relation rel, BlockNumber b
     Page page;
     OffsetNumber maxoff;
 
-    _hash_getlock(rel, blkno, HASH_SHARE);
     buf = _hash_getbuf_with_strategy(rel, blkno, HASH_READ, 0, bstrategy);
     page = BufferGetPage(buf);
 
@@ -390,7 +389,6 @@ static void pgstat_hash_page(pgstattuple_type* stat, Relation rel, BlockNumber b
     }
 
     _hash_relbuf(rel, buf);
-    _hash_droplock(rel, blkno, HASH_SHARE);
 }
 
 /*
