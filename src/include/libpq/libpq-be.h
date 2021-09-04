@@ -70,7 +70,8 @@ typedef struct {
 #include "libpq/sha2.h"
 #include "libcomm/libcomm.h"
 
-typedef enum CAC_state { CAC_OK, CAC_STARTUP, CAC_SHUTDOWN, CAC_RECOVERY, CAC_TOOMANY, CAC_WAITBACKUP } CAC_state;
+typedef enum CAC_state {
+    CAC_OK, CAC_STARTUP, CAC_SHUTDOWN, CAC_RECOVERY, CAC_TOOMANY, CAC_WAITBACKUP, CAC_OOM } CAC_state;
 
 /*
  * GSSAPI specific state information

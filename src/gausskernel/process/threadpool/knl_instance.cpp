@@ -282,6 +282,7 @@ static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
     comm_cxt->cal_all_space_info_in_progress = false;
     comm_cxt->current_gsrewind_count = 0;
     comm_cxt->usedDnSpace = NULL;
+    comm_cxt->rejectRequest = false;
 
     knl_g_quota_init(&g_instance.comm_cxt.quota_cxt);
     knl_g_localinfo_init(&g_instance.comm_cxt.localinfo_cxt);

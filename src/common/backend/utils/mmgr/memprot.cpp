@@ -41,6 +41,9 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 
+#define OOM_TIME_THRESHOLD 50
+#define OOM_TIME_INTERVAL_MSEC 1000
+
 /* Track memory usage by all shared memory context */
 int32 shareTrackedMemChunks = 0;
 int64 shareTrackedBytes = 0;
@@ -599,6 +602,19 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
     /* Query memory quota is exhausted. Reset the counter then return false. */
     if (MemoryIsNotEnough(total, *maxSize, needProtect)) {
         gs_atomic_add_32(currSize, -numChunksToReserve);
+        if (g_instance.attr.attr_memory.min_dynamic_memory >= 0) {
+            int current = pg_atomic_add_fetch_u32(&g_instance.exec_cxt.oomTimes, 1);
+            if (current == 1) {
+                g_instance.exec_cxt.firstTime = GetCurrentTimestamp();
+            }
+            if (current == OOM_TIME_THRESHOLD) {
+                if (!TimestampDifferenceExceeds(g_instance.exec_cxt.firstTime, GetCurrentTimestamp(),
+                    OOM_TIME_INTERVAL_MSEC)) {
+                    CleanConnectionByMemory(g_instance.attr.attr_memory.min_dynamic_memory);
+                }
+		g_instance.exec_cxt.oomTimes = 0;
+            }
+        }
         return false;
     }
 
@@ -1000,4 +1016,72 @@ void gs_memprot_process_gpu_memory(uint32 size)
 
         maxChunksPerProcess -= i;
     }
+}
+
+extern int kill_backend(ThreadId tid, bool checkPermission);
+
+static int memoryUsageCompare(const void* p1, const void* p2)
+{
+    SessMemoryUsage* m1 = (SessMemoryUsage*)p1;
+    SessMemoryUsage* m2 = (SessMemoryUsage*)p2;
+    /* release idle session first */
+    if (m1->state != m2->state) {
+        return m1->state < m2->state;
+    }
+    return m1->usedSize > m2->usedSize;
+}
+
+static void TerminateConnectionByMemory(int targetMemoryKBytes)
+{
+    int sessNum = 0;
+    SessMemoryUsage* sessMemory = NULL;
+    if (ENABLE_THREAD_POOL) {
+        sessMemory = g_threadPoolControler->GetSessionCtrl()->getSessionMemoryUsage(&sessNum);
+    } else {
+        sessMemory = getThreadMemoryUsage(&sessNum);
+    }
+
+    /* sort the session list by memory and state */
+    qsort(sessMemory, sessNum, sizeof(SessMemoryUsage), memoryUsageCompare);
+
+    uint64 currentMemory = (uint64)processMemInChunks << chunkSizeInBits;
+    const int BYTE_PER_KB = 1024;
+    uint64 targetMemory = (uint64)targetMemoryKBytes * BYTE_PER_KB;
+    int i = 0;
+    for (i = 0; i < sessNum; i++) {
+        if (unlikely(currentMemory < targetMemory)) {
+            break;
+        }
+
+        if (ENABLE_THREAD_POOL) {
+            ThreadPoolSessControl *sess_ctrl = g_threadPoolControler->GetSessionCtrl();
+            int ctrl_idx = sess_ctrl->FindCtrlIdxBySessId(sessMemory[i].sessid);
+            sess_ctrl->SendSignal((int)ctrl_idx, SIGTERM);
+        } else {
+            kill_backend(sessMemory[i].sessid, false);
+        }
+
+        currentMemory -= sessMemory[i].usedSize;
+    }
+
+    write_stderr("[OutOfMemoryFlee] Clean connection to release memory. current Memory is: %d MB, "
+                 " total connection: %d, clean connection: %d\n",
+        processMemInChunks >> (chunkSizeInBits - BITS_IN_MB), sessNum, i);
+
+    free(sessMemory);
+}
+
+void CleanConnectionByMemory(int targetMemory)
+{
+    PG_TRY();
+    {
+        g_instance.comm_cxt.rejectRequest = true;
+        TerminateConnectionByMemory(targetMemory);
+        g_instance.comm_cxt.rejectRequest = false;
+    }
+    PG_CATCH();
+    {
+        g_instance.comm_cxt.rejectRequest = false;
+    }
+    PG_END_TRY();
 }

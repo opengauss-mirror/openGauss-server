@@ -264,5 +264,12 @@ extern MemoryProtectFuncDef SharedFunctions;
             IsA((context), MemalignSharedAllocSetContext)))
 
 #define AllocSetContextUsedSpace(aset) ((aset)->totalSpace - (aset)->freeSpace)
+
+typedef struct SessMemoryUsage {
+    uint64 sessid;
+    int64 usedSize;
+    int state;
+} SessMemoryUsage;
+
 #endif /* MEMNODES_H */
 

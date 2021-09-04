@@ -591,6 +591,9 @@ void InitProcess(void)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to acquire mutex lock for deleMemContextMutex.")));
     t_thrd.proc->topmcxt = t_thrd.top_mem_cxt;
+    if (t_thrd.role == WORKER || t_thrd.role == THREADPOOL_WORKER) {
+        t_thrd.proc->usedMemory = &t_thrd.utils_cxt.trackedBytes;
+    }
     if (syscalllockRelease(&t_thrd.proc->deleMemContextMutex) != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
@@ -1134,6 +1137,7 @@ static void ProcKill(int code, Datum arg)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to acquire mutex lock for deleMemContextMutex.")));
     t_thrd.proc->topmcxt = NULL;
+    t_thrd.proc->usedMemory = NULL;
     if (syscalllockRelease(&t_thrd.proc->deleMemContextMutex) != 0)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
