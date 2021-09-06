@@ -4018,7 +4018,7 @@ static void InitConfigureNamesInt()
             gettext_noop("Sets the min number of dynamic memory hold by the process."),
             NULL,
             GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.min_dynamic_memory,
+            &u_sess->attr.attr_memory.min_dynamic_memory,
             -1,
             -1,
             INT_MAX,

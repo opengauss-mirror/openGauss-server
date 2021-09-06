@@ -602,7 +602,7 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
     /* Query memory quota is exhausted. Reset the counter then return false. */
     if (MemoryIsNotEnough(total, *maxSize, needProtect)) {
         gs_atomic_add_32(currSize, -numChunksToReserve);
-        if (g_instance.attr.attr_memory.min_dynamic_memory >= 0) {
+        if (u_sess && u_sess->attr.attr_memory.min_dynamic_memory >= 0) {
             int current = pg_atomic_add_fetch_u32(&g_instance.exec_cxt.oomTimes, 1);
             if (current == 1) {
                 g_instance.exec_cxt.firstTime = GetCurrentTimestamp();
@@ -610,7 +610,7 @@ static bool memTracker_ReserveMemChunks(int32 numChunksToReserve, bool needProte
             if (current == OOM_TIME_THRESHOLD) {
                 if (!TimestampDifferenceExceeds(g_instance.exec_cxt.firstTime, GetCurrentTimestamp(),
                     OOM_TIME_INTERVAL_MSEC)) {
-                    CleanConnectionByMemory(g_instance.attr.attr_memory.min_dynamic_memory);
+                    CleanConnectionByMemory(u_sess->attr.attr_memory.min_dynamic_memory);
                 }
 		g_instance.exec_cxt.oomTimes = 0;
             }
