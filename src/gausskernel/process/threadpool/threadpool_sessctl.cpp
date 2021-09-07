@@ -569,7 +569,12 @@ SessMemoryUsage* ThreadPoolSessControl::getSessionMemoryUsage(int* num)
         if (sess) {
             result[index].sessid = sess->session_id;
             result[index].usedSize = sess->stat_cxt.trackedBytes;
-            result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[sess->session_ctr_index].st_state;
+            /* BackendStatusArray may not assigned while new connection init */
+            if (t_thrd.shemem_ptr_cxt.BackendStatusArray != NULL) {
+                result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[sess->session_ctr_index].st_state;
+            } else {
+                result[index].state = STATE_IDLE;
+            }
             index++;
         }
         elem = DLGetSucc(elem);
