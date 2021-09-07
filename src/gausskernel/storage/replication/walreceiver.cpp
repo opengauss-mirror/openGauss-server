@@ -185,9 +185,7 @@ static void WalRecvSendArchiveXlogResponse();
 static void WalRecvSendArchiveXlogResult2Standby();
 static void SendArchiveStatus(bool status);
 static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response);
-static void InitArchiveStartPoint();
-static bool CheckXlogNameValid(char* xlog);
-int XlogNameCmp(const void* a, const void* b);
+static XLogRecPtr InitArchiveStartPoint();
 void ProcessWalRcvInterrupts(void)
 {
     /*
@@ -2020,18 +2018,30 @@ static void XLogWalRcvSendSwitchRequest(void)
  */
 static void WalRecvSendArchiveXlogResponse()
 {
-    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
-    ArchiveXlogResponseMeeeage reply;
+    char buf[sizeof(ArchiveXlogResponseMessage) + 1];
+    ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
     reply.pitr_result = g_instance.archive_obs_cxt.pitr_finish_result;
     reply.targetLsn = g_instance.archive_obs_cxt.archive_task.targetLsn;
+    XLogSegNo segno = 0;
+    char lastoff[MAXFNAMELEN];
+    XLByteToSeg(reply.targetLsn, segno);
+    XLogFileName(lastoff, reply.targetLsn, segno);
+    if (!reply.pitr_result) {
+        reply.archive_result = ARCHIVE_FAILED;
+    } else if (XLogArchiveCheckDone(lastoff)) {
+        reply.archive_result = ARCHIVE_SUCCESS;
+    } else {
+        reply.archive_result = ARCHIVE_SKIP;
+    }
+
     buf[0] = 'a';
     errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMeeeage),
+        sizeof(ArchiveXlogResponseMessage),
         &reply,
-        sizeof(ArchiveXlogResponseMeeeage));
+        sizeof(ArchiveXlogResponseMessage));
     securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
+    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMessage) + 1);
 
     ereport(LOG,
         (errmsg("WalRecvSendArchiveXlogResponse %d %X/%X", reply.pitr_result, 
@@ -2044,18 +2054,18 @@ static void WalRecvSendArchiveXlogResponse()
  */
 static void WalRecvSendArchiveXlogResult2Standby()
 {
-    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
-    ArchiveXlogResponseMeeeage reply;
+    char buf[sizeof(ArchiveXlogResponseMessage) + 1];
+    ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
     reply.pitr_result = g_instance.archive_standby_cxt.arch_finish_result;
     reply.targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
     buf[0] = 'n';
     errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMeeeage),
+        sizeof(ArchiveXlogResponseMessage),
         &reply,
-        sizeof(ArchiveXlogResponseMeeeage));
+        sizeof(ArchiveXlogResponseMessage));
     securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
+    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMessage) + 1);
     const char* archive_result_string = ((reply.pitr_result) ? "success" : "fail");
     ereport(LOG,
         (errmsg("WalRecvSendArchiveXlogResult2Standby archive_result:%s archive_lsn:%X/%X", archive_result_string, 
@@ -2887,11 +2897,11 @@ static void SendArchiveStatus(bool status)
     ArchiveStatusMessage message;
     errno_t errorno = EOK;
     message.is_archive_activied = status;
-    InitArchiveStartPoint();
+    XLogRecPtr start_point = InitArchiveStartPoint();
     const char* status_string = status ? "on" : "off";
-    ereport(LOG, (errmsg("the archive thread status is %s, and the start point of lsn is %ld",
-                        status_string, g_instance.archive_standby_cxt.standby_archive_start_point)));
-    message.startLsn = g_instance.archive_standby_cxt.standby_archive_start_point;
+    ereport(LOG, (errmsg("the archive thread status is %s, and the start point of lsn is %X/%X",
+                        status_string, (uint32)(start_point >> 32), (uint32)start_point)));
+    message.startLsn = start_point;
     buf[0] = 'S';
     errorno = memcpy_s(&buf[1],
         sizeof(ArchiveStatusMessage),
@@ -2917,133 +2927,28 @@ static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response)
 /*
  * InitArchiveStartPoint is used to find a start point which is the standby should check
  */
-static void InitArchiveStartPoint()
+static XLogRecPtr InitArchiveStartPoint()
 {
-    ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
-    if (!IsServerModeStandby() || obs_archive_slot != NULL) {
-        return;
-    }
-    struct stat stat_buf;
-    XLogRecPtr targetLsn = 0;
     XLogRecPtr flushPtr = t_thrd.walreceiverfuncs_cxt.WalRcv->walRcvCtlBlock->flushPtr;
-    XLogRecPtr* standby_archive_start_point = &g_instance.archive_standby_cxt.standby_archive_start_point;
-    XLogRecPtr backup = g_instance.archive_standby_cxt.standby_archive_start_point;
-    DIR *xldir = NULL;
-    struct dirent *xlde = NULL;
+    XLogRecPtr targetLsn = flushPtr - XLogSegSize;
 
-    errno_t errorno = EOK;
-    xldir = AllocateDir(XLOGDIR);
-
-    if (xldir == NULL) {
-        ereport(ERROR,
-                (errcode_for_file_access(),
-                errmsg("InitArchiveStartPoint: could not open transaction log directory \"%s\": %m", XLOGDIR)));
-    }
-
-    /* find all xlog in the XLOGDIR and push it into a list */
-    List* xlog_names = NIL;
-    ListCell* xlog = NULL;
-    while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL){
-        if (!CheckXlogNameValid(xlde->d_name)) {
-            continue;
-        }
-        char* xlog_name = (char*)palloc(sizeof(char) * MAX_PATH);
-        errorno = snprintf_s(xlog_name, MAX_PATH, MAX_PATH - 1, xlde->d_name);
-        xlog_names = lappend(xlog_names, xlog_name);
-    }
-    if (xlog_names->length == 0) {
-        *standby_archive_start_point = flushPtr;
-        return;
-    }
-
-    /* cast the type List to array of string, and sort the array */
-    char** xlog_array = (char**)palloc((sizeof(char*) * xlog_names->length));
-    int count = 0;
-    foreach(xlog, xlog_names) {
-        xlog_array[count++] = (char*)lfirst(xlog);
-    }
-    qsort(xlog_array, xlog_names->length, sizeof(char*), XlogNameCmp);
-
-    /* check the lsn which is the existsed xlog but not archived */
-    for (;;) {
-        targetLsn += XLogSegSize;
-        char lastoff[MAXFNAMELEN];
+    /*
+     * Start from the previous xlog file of the flushptr.
+     * If the xlog file exists, it traverses backwards until the xlog file is archived.
+     * The next file is the oldest xlog file that has not been archived.
+     */
+    while (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
+        int errorno = 0;
         XLogSegNo segno = 0;
+        char lastoff[MAXFNAMELEN];
         XLByteToSeg(targetLsn, segno);
         errorno = snprintf_s(lastoff, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
                             (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-        
-        if (!CheckXlogNameValid(lastoff)) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE), errmsg("InitArchiveStartPoint:the lsn is error")));
-            break;
+
+        if (XLogArchiveCheckDone(lastoff)) {
+            return targetLsn + XLogSegSize;
         }
-
-        bool is_xlog = false;
-        for (int i = 0; i < xlog_names->length; i++) {
-            char* xlog_name = xlog_array[i];
-            int cmp_result = strcmp(lastoff, xlog_name);
-            if (cmp_result < 0) {
-                is_xlog = true;
-                break;
-            } else if (cmp_result > 0) {
-                continue;
-            } else {
-                is_xlog = true;
-                char statusPath[MAXPGPATH];
-                errorno = snprintf_s(statusPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/archive_status/%s%s", lastoff,
-                                    ".done");
-                securec_check_ss(errorno, "", "");
-                bool is_done = (stat(statusPath, &stat_buf) == 0);
-        
-                if (!is_done) {
-                    *standby_archive_start_point = targetLsn;
-                    ereport(LOG,
-                            (errmsg("the start point is %X/%X",
-                                    (uint32)(*standby_archive_start_point >> 32), (uint32)(*standby_archive_start_point))));
-                    return;
-                }
-                break;
-            }
-        }
-        if (!is_xlog) {
-            ereport(LOG, (errmsg("can not found this xlog in the XLOGDIR")));
-            break;
-        }
+        targetLsn -= XLogSegSize;
     }
-
-    /* we use the smaller lsn as the archive start point */
-    if (backup <= *standby_archive_start_point) {
-        *standby_archive_start_point = backup;
-    }
-
-    /* we use the flushPtr as the archive start point if we can't find a start point according to the xlog */
-    if (*standby_archive_start_point == 0) {
-        *standby_archive_start_point = flushPtr;
-    }
-
-    /* release all memory which is used to store the xlog name */
-    foreach(xlog, xlog_names) {
-        char* name = (char*)lfirst(xlog);
-        pfree(name);
-        name = NULL;
-    }
-    if (xlog_array != NULL) {
-        pfree(xlog_array);
-        xlog_array = NULL;
-    }
-    FreeDir(xldir);
-    xldir = NULL;
-}
-
-static bool CheckXlogNameValid(char* xlog)
-{
-    if (strlen(xlog) != 24 || strspn(xlog, "0123456789ABCDEF") != 24) {
-        return false;
-    }
-    return true;
-}
-
-int XlogNameCmp(const void* a, const void* b)
-{
-    return strcmp(*(char* const*)a, *(char* const*)b);
+    return targetLsn + XLogSegSize;
 }

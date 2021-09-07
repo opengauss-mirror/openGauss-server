@@ -60,6 +60,7 @@
 #include "pgxc/pgxc.h"
 #include "replication/obswalreceiver.h"
 #include "replication/walreceiver.h"
+#include "access/xlogreader.h"
 /* ----------
  * Timer definitions.
  * ----------
@@ -128,7 +129,7 @@ static bool SendArchiveThreadStatusInternal(bool is_archive_activited);
 static void SendArchiveThreadStatus(bool status);
 static bool NotifyPrimaryArchiverActived(ThreadId* last_walrcv_pid, bool* sent_archive_status);
 static void NotifyPrimaryArchiverShutdown(bool sent_archive_status);
-static void ChangeArchiveTaskStatus2Done();
+static void ChangeArchiveTaskStatus2Done(const char* xlog);
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -567,7 +568,7 @@ static void pgarch_ArchiverCopyLoop(void)
                 pgarch_archiveDone(xlog);
 
                 /* archive xlog on standby success, we need to change the status of archive task. */
-                ChangeArchiveTaskStatus2Done();
+                ChangeArchiveTaskStatus2Done(xlog);
                 break; /* out of inner retry loop */
             } else {
                 if (++failures >= NUM_ARCHIVE_RETRIES) {
@@ -988,17 +989,26 @@ static void pgarch_archiveRoachForPitrStandby()
 
 static void CreateArchiveReadyFile()
 {
+    XLogRecPtr targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
+    if (!XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
+        ereport(WARNING, (errmsg("CreateArchiveReadyFile: the %X/%X is not exists, skipping",
+                                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+        volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
+        if (likely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_GET)) {
+            pg_memory_barrier();
+            g_instance.archive_standby_cxt.arch_finish_result = true;
+            pg_atomic_write_u32(arch_task_status, ARCH_TASK_DONE);
+        }
+        return;
+    }
     char xlogfname[MAXFNAMELEN];
-    ereport(LOG,
-        (errmsg("CreateArchiveReadyFile %X/%X", (uint32)(g_instance.archive_standby_cxt.archive_task.targetLsn >> 32),
-                (uint32)(g_instance.archive_standby_cxt.archive_task.targetLsn))));
+    ereport(LOG, (errmsg("CreateArchiveReadyFile %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
     
     XLogSegNo xlogSegno = 0;
-    XLByteToSeg(g_instance.archive_standby_cxt.archive_task.targetLsn, xlogSegno);
+    XLByteToSeg(targetLsn, xlogSegno);
     if (xlogSegno == InvalidXLogSegPtr) {
         g_instance.archive_standby_cxt.arch_finish_result = false;
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("Invalid Lsn: %lu", g_instance.archive_standby_cxt.archive_task.targetLsn)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid Lsn: %lu", targetLsn)));
     }
     XLogFileName(xlogfname, DEFAULT_TIMELINE_ID, xlogSegno);
 
@@ -1232,13 +1242,24 @@ static void NotifyPrimaryArchiverShutdown(bool sent_archive_status)
     }
 }
 
-static void ChangeArchiveTaskStatus2Done()
+static void ChangeArchiveTaskStatus2Done(const char* xlog)
 {
     if (IsServerModeStandby()) {
-        XLogRecPtr* standby_archive_start_point = &g_instance.archive_standby_cxt.standby_archive_start_point;
+        char fname[MAXFNAMELEN];
+        int segno = 0;
+        XLogRecPtr targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
+        XLByteToSeg(targetLsn, segno);
+        XLogFileName(fname, DEFAULT_TIMELINE_ID, segno);
+        if (strcmp(xlog, fname) != 0) {
+            /* 
+             * The archived xlog is not the xlog required by the archive task.
+             * Therefore, the archived xlog cannot be returned to the primary.
+             */
+            ereport(LOG, (errmsg("\"%s\" is not archived target, no reply is sent", xlog)));
+            return;
+        }
         volatile unsigned int *arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
         if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_GET)) {
-            *standby_archive_start_point = g_instance.archive_standby_cxt.archive_task.targetLsn;
             pg_memory_barrier();
             g_instance.archive_standby_cxt.arch_finish_result = true;
             pg_atomic_write_u32(arch_task_status, ARCH_TASK_DONE);

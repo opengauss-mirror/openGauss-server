@@ -142,12 +142,20 @@ typedef struct ArchiveXlogMessage {
 } ArchiveXlogMessage;
 
 /*
- * Refence :ArchiveXlogResponseMeeeage
+ * Refence :ArchiveXlogResponseMessage
  */
-typedef struct ArchiveXlogResponseMeeeage {
+typedef struct ArchiveXlogResponseMessage {
     bool pitr_result;
     XLogRecPtr targetLsn;
-} ArchiveXlogResponseMeeeage;
+    unsigned int archive_result;
+} ArchiveXlogResponseMessage;
+
+/* the result type of archive task */
+typedef enum {
+    ARCHIVE_SUCCESS = 0,
+    ARCHIVE_SKIP,
+    ARCHIVE_FAILED
+} ARCH_RESULT_STATUS;
 
 /*
  * Refence :ArchiveStatusMessage
