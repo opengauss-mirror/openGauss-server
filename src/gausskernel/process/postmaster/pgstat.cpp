@@ -8397,7 +8397,12 @@ SessMemoryUsage* getThreadMemoryUsage(int* num)
         if (proc->usedMemory != NULL) {
             result[index].sessid = proc->pid;
             result[index].usedSize = *proc->usedMemory;
-            result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[t_thrd.proc_cxt.MyBackendId - 1].st_state;
+	    /* BackendStatusArray may not assigned while new connnection init */
+            if (t_thrd.shemem_ptr_cxt.BackendStatusArray != NULL && proc->backendId != InvalidBackendId) {
+                result[index].state = (int)t_thrd.shemem_ptr_cxt.BackendStatusArray[proc->backendId - 1].st_state;
+            } else {
+                result[index].state = STATE_IDLE;
+            }
             index++;
         }
         (void)syscalllockRelease(&((PGPROC*)proc)->deleMemContextMutex);

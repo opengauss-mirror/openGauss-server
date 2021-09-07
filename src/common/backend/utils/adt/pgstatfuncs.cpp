@@ -8836,10 +8836,11 @@ Datum gs_total_nodegroup_memory_detail(PG_FUNCTION_ARGS)
     SRF_RETURN_DONE(funcctx);
 }
 
-#define MEMORY_TYPES_CNT 24
+#define MEMORY_TYPES_CNT 25
 const char* MemoryTypeName[] = {"max_process_memory",
     "process_used_memory",
     "max_dynamic_memory",
+    "min_dynamic_memory",
     "dynamic_used_memory",
     "dynamic_peak_memory",
     "dynamic_used_shrctx",
@@ -8933,63 +8934,67 @@ Datum pv_total_memory_detail(PG_FUNCTION_ARGS)
             fclose(f);
         }
 
-        mem_size[0] = (int)(g_instance.attr.attr_memory.max_process_memory >> BITS_IN_KB);
-        mem_size[1] = (int)res;
-        mem_size[2] = mctx_max_size;
-        mem_size[3] = mctx_used_size;
-        if (MEMPROT_INIT_SIZE > mem_size[3])
-            mem_size[3] = MEMPROT_INIT_SIZE;
-        mem_size[4] = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[5] = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[6] = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[7] = (int)(backendReservedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
-        mem_size[8] = (int)(backendUsedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
-        if (mem_size[8] < 0) {
-            mem_size[8] = 0;
+        int index = -1;
+        mem_size[++index] = (int)(g_instance.attr.attr_memory.max_process_memory >> BITS_IN_KB);
+        mem_size[++index] = (int)res;
+        mem_size[++index] = mctx_max_size;
+        mem_size[++index] = (int)(u_sess->attr.attr_memory.min_dynamic_memory >> BITS_IN_KB);
+        mem_size[++index] = mctx_used_size;
+        if (MEMPROT_INIT_SIZE > mem_size[index])
+            mem_size[index] = MEMPROT_INIT_SIZE;
+        mem_size[++index] = (int)(peakChunksPerProcess << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[++index] = (int)(shareTrackedMemChunks << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[++index] = (int)(peakChunksSharedContext << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[++index] = (int)(backendReservedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+        mem_size[++index] = (int)(backendUsedMemInChunk << (chunkSizeInBits - BITS_IN_MB));
+        if (mem_size[index] < 0) {
+            mem_size[index] = 0;
         }
-        mem_size[9] = maxSharedMemory;
-        mem_size[10] = shared;
-        mem_size[11] = (int)(g_instance.attr.attr_storage.cstore_buffers >> BITS_IN_KB);
-        mem_size[12] = cu_size;
+        mem_size[++index] = maxSharedMemory;
+        mem_size[++index] = shared;
+        mem_size[++index] = (int)(g_instance.attr.attr_storage.cstore_buffers >> BITS_IN_KB);
+        mem_size[++index] = cu_size;
         if (comm_size)
-            mem_size[13] = comm_original_memory;
+            mem_size[++index] = comm_original_memory;
         else
-            mem_size[13] = 0;
-        mem_size[14] = comm_size;
-        mem_size[15] = comm_peak_size;
+            mem_size[++index] = 0;
+        mem_size[++index] = comm_size;
+        mem_size[++index] = comm_peak_size;
+
+        /* other used memory */
+        mem_size[++index] = (int)(res - shared - text) - mctx_used_size - cu_size;
+        if (mem_size[index] < 0)  // res may be changed
+            mem_size[index] = 0;
 
 #ifdef ENABLE_MULTIPLE_NODES
         if (is_searchserver_api_load()) {
-            void* mem_info = get_searchlet_resource_info(&mem_size[18], &mem_size[19]);
+            void* mem_info = get_searchlet_resource_info(&mem_size[index + 2], &mem_size[index + 3]);
             if (mem_info != NULL) {
-                mem_size[17] = g_searchserver_memory;
+                mem_size[index + 1] = g_searchserver_memory;
                 pfree_ext(mem_info);
             }
         }
-#else
-        mem_size[17] = 0;
-#endif
-
-        mem_size[16] = (int)(res - shared - text) - mctx_used_size - cu_size - mem_size[16];
-        if (0 > mem_size[16])  // res may be changed
-            mem_size[16] = 0;
-
-#ifdef ENABLE_MULTIPLE_NODES
+        index += 3;
         PoolConnStat conn_stat;
         pooler_get_connection_statinfo(&conn_stat);
-        mem_size[20] = (int)(conn_stat.memory_size >> BITS_IN_MB);
-        mem_size[21] = (int)(conn_stat.free_memory_size >> BITS_IN_MB);
+        mem_size[++index] = (int)(conn_stat.memory_size >> BITS_IN_MB);
+        mem_size[++index] = (int)(conn_stat.free_memory_size >> BITS_IN_MB);
 #else
-        mem_size[20] = 0;
-        mem_size[21] = 0;
+        mem_size[++index] = 0;
+        mem_size[++index] = 0;
+        mem_size[++index] = 0;
+        mem_size[++index] = 0;
+        mem_size[++index] = 0;
 #endif
-        mem_size[22] = (int)(storageTrackedBytes >> BITS_IN_MB);
+
+        mem_size[++index] = (int)(storageTrackedBytes >> BITS_IN_MB);
 
         Assert(g_instance.attr.attr_sql.udf_memory_limit >= UDF_DEFAULT_MEMORY);
-        mem_size[23] = (int)((g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) >> BITS_IN_KB);
+        mem_size[++index] = (int)((g_instance.attr.attr_sql.udf_memory_limit - UDF_DEFAULT_MEMORY) >> BITS_IN_KB);
         ereport(DEBUG2, (errmodule(MOD_LLVM), errmsg("LLVM IR file count is %ld, total memory is %ldKB",
                 g_instance.codegen_IRload_process_count,
                 g_instance.codegen_IRload_process_count * IR_FILE_SIZE / 1024)));
+	Assert(index + 1 == MEMORY_TYPES_CNT);
     }
 
     /* stuff done on every call of the function */
