@@ -1,6 +1,6 @@
---------------------------------
----------- hash index ----------
---------------------------------
+-------------------------------------
+---------- hash index part1----------
+-------------------------------------
 
 set enable_seqscan = off;
 set enable_indexscan = off;
@@ -152,7 +152,7 @@ create index hash_t5_id1 on hash_table_5 using hash(id) with(fillfactor = 80);
 insert into hash_table_5 select random()*100, 'XXX', 'XXX' from generate_series(1,100);
 update hash_table_5 set name = 'aaa' where id = 80;
 alter index hash_t5_id1 set (fillfactor = 60);
-alter index hash_t5_id1 RESET (fillfactor);
+alter index hash_t5_id1 reset (fillfactor);
 explain (costs off) select * from hash_table_5 where id = 80;
 drop table hash_table_5 cascade;
 
@@ -167,3 +167,11 @@ insert into hash_table_6 select random()*100, 'XXX', 'XXX' from generate_series(
 delete from hash_table_6 where id in (50, 60, 70);
 explain (costs off) select * from hash_table_6 where id*10 = 80;
 drop table hash_table_6 cascade;
+
+-- create unlogged table index, which will be delete in hash_index_002
+drop table if exists hash_table_7;
+create unlogged table hash_table_7(id int, name varchar, sex varchar default 'male');
+insert into hash_table_7 select random()*100, 'XXX', 'XXX' from generate_series(1,1000);
+create index hash_t7_id1 on hash_table_7 using hash(id) with (fillfactor = 30);
+explain (costs off) select * from hash_table_7 where id = 80;
+select count(*) from hash_table_7;
