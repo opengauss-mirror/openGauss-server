@@ -3492,6 +3492,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
             WaitLatchOrSocket(&t_thrd.walsender_cxt.MyWalSnd->latch, wakeEvents, u_sess->proc_cxt.MyProcPort->sock,
                               sleeptime);
+            if (!AM_WAL_STANDBY_SENDER) {
+                SyncRepReleaseWaiters();
+            }
             t_thrd.int_cxt.ImmediateInterruptOK = false;
         }
 
@@ -3832,6 +3835,13 @@ static void WalSndKill(int code, Datum arg)
         (void)close(t_thrd.walsender_cxt.sendFile);
         t_thrd.walsender_cxt.sendFile = -1;
     }
+
+    /*
+     * Try to wake up walsenders which are in WaitLatchOrSocket of WalSndLoop.
+     * Or they would be woken up only by walwriter, which may cause that workers
+     * are not woken up in time.
+     */
+    WalSndWakeup();
 
     t_thrd.walsender_cxt.wsXLogJustSendRegion->start_ptr = InvalidXLogRecPtr;
     t_thrd.walsender_cxt.wsXLogJustSendRegion->end_ptr = InvalidXLogRecPtr;
