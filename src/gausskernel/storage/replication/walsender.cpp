@@ -3105,6 +3105,12 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
     last_syncconf_timestamp = GetCurrentTimestamp();
     t_thrd.walsender_cxt.last_logical_xlog_advanced_timestamp = GetCurrentTimestamp();
     t_thrd.walsender_cxt.waiting_for_ping_response = false;
+#define MINUTE_30 (30 * 60 * 1000) /* 30 minutes */
+    t_thrd.walsender_cxt.timeoutCheckInternal = u_sess->attr.attr_storage.wal_sender_timeout;
+    if (strcmp(u_sess->attr.attr_common.application_name, "gs_probackup") == 0 &&
+        t_thrd.walsender_cxt.timeoutCheckInternal < MINUTE_30) {
+        t_thrd.walsender_cxt.timeoutCheckInternal = MINUTE_30;
+    }
 
     /* Loop forever, unless we get an error */
     for (;;) {
@@ -3601,9 +3607,9 @@ static inline TimestampTz CalculateTimeout(TimestampTz last_reply_time)
 
     if (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
         return TimestampTzPlusMilliseconds(last_reply_time,
-                                           MULTIPLE_TIME * u_sess->attr.attr_storage.wal_sender_timeout);
+                                           MULTIPLE_TIME * t_thrd.walsender_cxt.timeoutCheckInternal);
     } else {
-        return TimestampTzPlusMilliseconds(last_reply_time, u_sess->attr.attr_storage.wal_sender_timeout);
+        return TimestampTzPlusMilliseconds(last_reply_time, t_thrd.walsender_cxt.timeoutCheckInternal);
     }
 }
 
