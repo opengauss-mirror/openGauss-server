@@ -2193,6 +2193,12 @@ typedef struct knl_t_walsender_context {
     struct pg_conn* advancePrimaryConn;
     /* Timestamp of the last check-timeout time in WalSndCheckTimeOut. */
     TimestampTz last_check_timeout_timestamp;
+    /*
+     * Actual timeout for guc wal_sender_timeout, default value is wal_sender_timeout.
+     * timeoutCheckInternal will greater than or equal to 30 minutes for gs_probackup. It is so
+     * hackly of 30 minutes, but now, 30 minutes is enough.
+     */
+    int timeoutCheckInternal;
 } knl_t_walsender_context;
 
 typedef struct knl_t_walreceiverfuncs_context {
