@@ -2908,6 +2908,8 @@ static void SendArchiveStatus(bool status)
         &message,
         sizeof(ArchiveStatusMessage));
     securec_check(errorno, "\0", "\0");
+    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
+    pg_atomic_write_u32(arch_task_status, ARCH_TASK_NONE);
     libpqrcv_send(buf, sizeof(ArchiveStatusMessage) + 1);
 }
 

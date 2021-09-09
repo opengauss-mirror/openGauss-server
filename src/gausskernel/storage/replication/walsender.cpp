@@ -5689,13 +5689,15 @@ static void CheckStandbyFinishArchive(XLogRecPtr targetLsn)
                             (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
         return;
     }
-    if (walsnd->arch_finish_result == true && XLByteEQ(walsnd->archive_target_lsn, targetLsn)) {
+    if (walsnd->arch_finish_result == true) {
         /* reset result flag */
-        walsnd->arch_finish_result = false;
+        if (XLByteEQ(walsnd->archive_target_lsn, targetLsn)) {
+            walsnd->arch_finish_result = false;
+            walsnd->arch_task_last_lsn = targetLsn;
+            ereport(LOG, (errmsg("the archive time is %.2lf seconds,last archive lsn change to \"%X/%X\"",
+                                ((double)time_diff / 1000), (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+        }
         walsnd->has_sent_arch_lsn = false;
-        walsnd->arch_task_last_lsn = targetLsn;
-        ereport(LOG, (errmsg("the archive time is %.2lf seconds,last archive lsn change to \"%X/%X\"",
-                            ((double)time_diff / 1000), (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
     }
 }
 
