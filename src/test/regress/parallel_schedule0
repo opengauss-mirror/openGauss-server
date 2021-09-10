@@ -111,6 +111,7 @@ test: single_node_random
 #test: single_node_arrays 
 #test: single_node_btree_index single_node_hash_index single_node_update 
 test: hash_index_001
+test: hash_index_002
 test: single_node_update 
 #test single_node_namespace
 #test: single_node_prepared_xacts 
