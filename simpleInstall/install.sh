@@ -242,7 +242,7 @@ function config_db() {
     sed -i "/^#port/c\port = $port"  $app/data/master/postgresql.conf
     sed -i "/^#port/c\port = $slave_port"  $app/data/slave/postgresql.conf
     sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr[0]} localport=$(($port+1)) localheartbeatport=$(($port+5)) localservice=$(($port+4)) remotehost=${ip_arr[0]} remoteport=$(($slave_port+1)) remoteheartbeatport=$(($slave_port+5)) remoteservice=$(($slave_port+4))'"  $app/data/master/postgresql.conf
-    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr[0]} localport=$(($slave_port+1)) localheartbeatport=$(($slave_port+5)) localservice=$(($slave_port+4)) remotehost=${ip_arr[0]} remoteport=$(($port+1)) remoteheartbeatport=$(($maser_port+5)) remoteservice=$(($port+4))'"  $app/data/slave/postgresql.conf
+    sed -i "/^#replconninfo1/c\replconninfo1 = 'localhost=${ip_arr[0]} localport=$(($slave_port+1)) localheartbeatport=$(($slave_port+5)) localservice=$(($slave_port+4)) remotehost=${ip_arr[0]} remoteport=$(($port+1)) remoteheartbeatport=$(($port+5)) remoteservice=$(($port+4))'"  $app/data/slave/postgresql.conf
     echo "remote_read_mode = non_authentication" | tee -a $app/data/master/postgresql.conf $app/data/slave/postgresql.conf
     echo "host    all             all             ${ip_arr[0]}/32            trust" | tee -a $app/data/master/pg_hba.conf $app/data/slave/pg_hba.conf
 }
