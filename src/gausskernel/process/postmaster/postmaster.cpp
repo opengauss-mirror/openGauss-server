@@ -2785,12 +2785,16 @@ static int ServerLoop(void)
         }
 
         /* If we have lost the archiver, try to start a new one */
-        if (XLogArchivingActive() && g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode) {
-            if (pmState == PM_RUN || pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) {
+        if (XLogArchivingActive() && g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode){
+            if (pmState == PM_RUN) {
                 g_instance.pid_cxt.PgArchPID = pgarch_start();
+            } else if (pmState == PM_HOT_STANDBY) {
+                obs_slot = getObsReplicationSlot();
+                if (obs_slot != NULL) {
+                    g_instance.pid_cxt.PgArchPID = pgarch_start();
+                }
             }
         }
-
         /* If we have lost the stats collector, try to start a new one */
         if (g_instance.pid_cxt.PgStatPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && !dummyStandbyMode)
             g_instance.pid_cxt.PgStatPID = pgstat_start();
