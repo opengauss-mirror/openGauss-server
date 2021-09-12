@@ -67,7 +67,7 @@
 #include "pgxc/barrier.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 36
+#define RESERVE_SIZE 35
 
 typedef struct ResourceOwnerData* ResourceOwner;
 
