@@ -295,7 +295,7 @@ Datum inet_to_cidr(PG_FUNCTION_ARGS)
     bits = ip_bits(src);
 
     /* safety check */
-    if ((bits < 0) || (bits >= ip_maxbits(src)))
+    if ((bits < 0) || (bits > ip_maxbits(src)))
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid inet bit length: %d", bits)));
 
     /* clone the original data */
