@@ -1439,6 +1439,8 @@ void instr_stmt_report_debug_query_id(uint64 debug_query_id)
 
 inline void instr_stmt_track_param_query(const char *query)
 {
+    if(query == NULL)
+        return;
     if (CURRENT_STMT_METRIC_HANDLE->params == NULL) {
         CURRENT_STMT_METRIC_HANDLE->query = pstrdup(query);
     } else {
