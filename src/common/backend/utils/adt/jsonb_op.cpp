@@ -1,24 +1,23 @@
-/*-------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
- * jsonb_op.c
+ * jsonb_op.cpp
  *   Special operators for jsonb only, used by various index access methods
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2014, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
- *    src/backend/utils/adt/jsonb_op.c
+ *    src/common/backend/utils/adt/jsonb_op.cpp
  *
- *-------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
  */
 #include "postgres.h"
 
 #include "miscadmin.h"
 #include "utils/jsonb.h"
 
-Datum
-jsonb_exists(PG_FUNCTION_ARGS)
+Datum jsonb_exists(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     text       *key = PG_GETARG_TEXT_PP(1);
@@ -35,22 +34,18 @@ jsonb_exists(PG_FUNCTION_ARGS)
     kval.string.val = VARDATA_ANY(key);
     kval.string.len = VARSIZE_ANY_EXHDR(key);
 
-    v = findJsonbValueFromSuperHeader(VARDATA(jb),
-                                      JB_FOBJECT | JB_FARRAY,
-                                      NULL,
-                                      &kval);
+    v = findJsonbValueFromSuperHeader(VARDATA(jb), JB_FOBJECT | JB_FARRAY, NULL, &kval);
 
     PG_RETURN_BOOL(v != NULL);
 }
 
-Datum
-jsonb_exists_any(PG_FUNCTION_ARGS)
+Datum jsonb_exists_any(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     ArrayType  *keys = PG_GETARG_ARRAYTYPE_P(1);
     JsonbValue *arrKey = arrayToJsonbSortedArray(keys);
-    uint32     *plowbound = NULL,
-                lowbound = 0;
+    uint32     *plowbound = NULL;
+    uint32      lowbound = 0;
     int         i;
 
     if (arrKey == NULL || arrKey->object.nPairs == 0) {
@@ -68,10 +63,8 @@ jsonb_exists_any(PG_FUNCTION_ARGS)
      * the lower bound of the last search.
      */
     for (i = 0; i < arrKey->array.nElems; i++) {
-        if (findJsonbValueFromSuperHeader(VARDATA(jb),
-                                          JB_FOBJECT | JB_FARRAY,
-                                          plowbound,
-                                          arrKey->array.elems + i) != NULL) {
+        if (findJsonbValueFromSuperHeader(VARDATA(jb), JB_FOBJECT | JB_FARRAY,
+                                          plowbound, arrKey->array.elems + i) != NULL) {
             PG_RETURN_BOOL(true);
         }
     }
@@ -79,8 +72,7 @@ jsonb_exists_any(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(false);
 }
 
-Datum
-jsonb_exists_all(PG_FUNCTION_ARGS)
+Datum jsonb_exists_all(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     ArrayType  *keys = PG_GETARG_ARRAYTYPE_P(1);
@@ -104,10 +96,8 @@ jsonb_exists_all(PG_FUNCTION_ARGS)
      * the lower bound of the last search.
      */
     for (i = 0; i < arrKey->array.nElems; i++) {
-        if (findJsonbValueFromSuperHeader(VARDATA(jb),
-                                          JB_FOBJECT | JB_FARRAY,
-                                          plowbound,
-                                          arrKey->array.elems + i) == NULL) {
+        if (findJsonbValueFromSuperHeader(VARDATA(jb), JB_FOBJECT | JB_FARRAY,
+                                          plowbound, arrKey->array.elems + i) == NULL) {
             PG_RETURN_BOOL(false);
         }
     }
@@ -115,11 +105,10 @@ jsonb_exists_all(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(true);
 }
 
-Datum
-jsonb_contains(PG_FUNCTION_ARGS)
+Datum jsonb_contains(PG_FUNCTION_ARGS)
 {
-    Jsonb      *val = PG_GETARG_JSONB(0);
-    Jsonb      *tmpl = PG_GETARG_JSONB(1);
+    Jsonb *val = PG_GETARG_JSONB(0);
+    Jsonb *tmpl = PG_GETARG_JSONB(1);
 
     JsonbIterator *it1 = NULL;
     JsonbIterator *it2 = NULL;
@@ -134,12 +123,11 @@ jsonb_contains(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(JsonbDeepContains(&it1, &it2));
 }
 
-Datum
-jsonb_contained(PG_FUNCTION_ARGS)
+Datum jsonb_contained(PG_FUNCTION_ARGS)
 {
     /* Commutator of "contains" */
-    Jsonb      *tmpl = PG_GETARG_JSONB(0);
-    Jsonb      *val = PG_GETARG_JSONB(1);
+    Jsonb *tmpl = PG_GETARG_JSONB(0);
+    Jsonb *val = PG_GETARG_JSONB(1);
 
     JsonbIterator *it1 = NULL;
     JsonbIterator *it2 = NULL;
@@ -154,12 +142,11 @@ jsonb_contained(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(JsonbDeepContains(&it1, &it2));
 }
 
-Datum
-jsonb_ne(PG_FUNCTION_ARGS)
+Datum jsonb_ne(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) != 0);
 
@@ -171,12 +158,11 @@ jsonb_ne(PG_FUNCTION_ARGS)
 /*
  * B-Tree operator class operators, support function
  */
-Datum
-jsonb_lt(PG_FUNCTION_ARGS)
+Datum jsonb_lt(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) < 0);
 
@@ -185,12 +171,11 @@ jsonb_lt(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-jsonb_gt(PG_FUNCTION_ARGS)
+Datum jsonb_gt(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) > 0);
 
@@ -199,12 +184,11 @@ jsonb_gt(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-jsonb_le(PG_FUNCTION_ARGS)
+Datum jsonb_le(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) <= 0);
 
@@ -213,13 +197,11 @@ jsonb_le(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-jsonb_ge(PG_FUNCTION_ARGS)
+Datum jsonb_ge(PG_FUNCTION_ARGS)
 {
-
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) >= 0);
 
@@ -228,12 +210,11 @@ jsonb_ge(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-jsonb_eq(PG_FUNCTION_ARGS)
+Datum jsonb_eq(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    bool        res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    bool   res = false;
 
     res = (compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb)) == 0);
 
@@ -242,12 +223,11 @@ jsonb_eq(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-jsonb_cmp(PG_FUNCTION_ARGS)
+Datum jsonb_cmp(PG_FUNCTION_ARGS)
 {
-    Jsonb      *jba = PG_GETARG_JSONB(0);
-    Jsonb      *jbb = PG_GETARG_JSONB(1);
-    int         res;
+    Jsonb *jba = PG_GETARG_JSONB(0);
+    Jsonb *jbb = PG_GETARG_JSONB(1);
+    int    res = false;
 
     res = compareJsonbSuperHeaderValue(VARDATA(jba), VARDATA(jbb));
 
@@ -259,8 +239,7 @@ jsonb_cmp(PG_FUNCTION_ARGS)
 /*
  * Hash operator class jsonb hashing function
  */
-Datum
-jsonb_hash(PG_FUNCTION_ARGS)
+Datum jsonb_hash(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     JsonbIterator *it = NULL;

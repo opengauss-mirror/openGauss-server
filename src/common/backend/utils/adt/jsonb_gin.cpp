@@ -1,19 +1,18 @@
-/*-------------------------------------------------------------------------
+/* -------------------------------------------------------------------------
  *
- * jsonb_gin.c
+ * jsonb_gin.cpp
  *   GIN support functions for jsonb
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2014, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
- *    src/backend/utils/adt/jsonb_gin.c
+ *    src/common/backend/utils/adt/jsonb_gin.cpp
  *
- *-------------------------------------------------------------------------
+ * -------------------------------------------------------------------------
  */
 #include "postgres.h"
-
 #include "access/gin.h"
 #include "access/skey.h"
 #include "catalog/pg_collation.h"
@@ -21,22 +20,20 @@
 #include "utils/builtins.h"
 #include "utils/jsonb.h"
 
-typedef struct PathHashStack
-{
+typedef struct PathHashStack {
     uint32  hash;
     struct PathHashStack *parent;
 }   PathHashStack;
 
 static text *make_text_key(const char *str, int len, char flag);
-static text *make_scalar_key(const JsonbValue * scalarVal, char flag);
+static text *make_scalar_key(const JsonbValue *scalarVal, char flag);
 
 /*
  *
  * jsonb_ops GIN opclass support functions
  *
  */
-Datum
-gin_compare_jsonb(PG_FUNCTION_ARGS)
+Datum gin_compare_jsonb(PG_FUNCTION_ARGS)
 {
     text       *arg1 = PG_GETARG_TEXT_PP(0);
     text       *arg2 = PG_GETARG_TEXT_PP(1);
@@ -48,21 +45,18 @@ gin_compare_jsonb(PG_FUNCTION_ARGS)
 
     a1p = VARDATA_ANY(arg1);
     a2p = VARDATA_ANY(arg2);
-
     len1 = VARSIZE_ANY_EXHDR(arg1);
     len2 = VARSIZE_ANY_EXHDR(arg2);
 
     /* Compare text as bttextcmp does, but always using C collation */
     result = varstr_cmp(a1p, len1, a2p, len2, C_COLLATION_OID);
-
     PG_FREE_IF_COPY(arg1, 0);
     PG_FREE_IF_COPY(arg2, 1);
 
     PG_RETURN_INT32(result);
 }
 
-Datum
-gin_extract_jsonb(PG_FUNCTION_ARGS)
+Datum gin_extract_jsonb(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = (Jsonb *) PG_GETARG_JSONB(0);
     int32      *nentries = (int32 *) PG_GETARG_POINTER(1);
@@ -79,9 +73,7 @@ gin_extract_jsonb(PG_FUNCTION_ARGS)
     }
 
     entries = (Datum *) palloc(sizeof(Datum) * total);
-
     it = JsonbIteratorInit(VARDATA(jb));
-
     while ((r = JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
         if (i >= total) {
             total *= 2;
@@ -141,12 +133,10 @@ gin_extract_jsonb(PG_FUNCTION_ARGS)
     }
 
     *nentries = i;
-
     PG_RETURN_POINTER(entries);
 }
 
-Datum
-gin_extract_jsonb_query(PG_FUNCTION_ARGS)
+Datum gin_extract_jsonb_query(PG_FUNCTION_ARGS)
 {
     int32      *nentries = (int32 *) PG_GETARG_POINTER(1);
     StrategyNumber strategy = PG_GETARG_UINT16(2);
@@ -156,9 +146,7 @@ gin_extract_jsonb_query(PG_FUNCTION_ARGS)
     if (strategy == JsonbContainsStrategyNumber) {
         /* Query is a jsonb, so just apply gin_extract_jsonb... */
         entries = (Datum *)
-            DatumGetPointer(DirectFunctionCall2(gin_extract_jsonb,
-                                                PG_GETARG_DATUM(0),
-                                                PointerGetDatum(nentries)));
+            DatumGetPointer(DirectFunctionCall2(gin_extract_jsonb, PG_GETARG_DATUM(0), PointerGetDatum(nentries)));
         /* ...although "contains {}" requires a full index scan */
         if (entries == NULL) {
             *searchMode = GIN_SEARCH_MODE_ALL;
@@ -169,11 +157,9 @@ gin_extract_jsonb_query(PG_FUNCTION_ARGS)
 
         *nentries = 1;
         entries = (Datum *) palloc(sizeof(Datum));
-        item = make_text_key(VARDATA_ANY(query), VARSIZE_ANY_EXHDR(query),
-                             JKEYELEM);
+        item = make_text_key(VARDATA_ANY(query), VARSIZE_ANY_EXHDR(query), JKEYELEM);
         entries[0] = PointerGetDatum(item);
-    } else if (strategy == JsonbExistsAnyStrategyNumber ||
-             strategy == JsonbExistsAllStrategyNumber) {
+    } else if (strategy == JsonbExistsAnyStrategyNumber || strategy == JsonbExistsAllStrategyNumber) {
         ArrayType  *query = PG_GETARG_ARRAYTYPE_P(0);
         Datum      *key_datums = NULL;
         bool       *key_nulls = NULL;
@@ -181,11 +167,7 @@ gin_extract_jsonb_query(PG_FUNCTION_ARGS)
         int         i,
                     j;
         text       *item = NULL;
-
-        deconstruct_array(query,
-                          TEXTOID, -1, false, 'i',
-                          &key_datums, &key_nulls, &key_count);
-
+        deconstruct_array(query, TEXTOID, -1, false, 'i', &key_datums, &key_nulls, &key_count);
         entries = (Datum *) palloc(sizeof(Datum) * key_count);
 
         for (i = 0, j = 0; i < key_count; ++i) {
@@ -193,9 +175,7 @@ gin_extract_jsonb_query(PG_FUNCTION_ARGS)
             if (key_nulls[i]) {
                 continue;
             }
-            item = make_text_key(VARDATA(key_datums[i]),
-                                 VARSIZE(key_datums[i]) - VARHDRSZ,
-                                 JKEYELEM);
+            item = make_text_key(VARDATA(key_datums[i]), VARSIZE(key_datums[i]) - VARHDRSZ, JKEYELEM);
             entries[j++] = PointerGetDatum(item);
         }
 
@@ -212,16 +192,13 @@ gin_extract_jsonb_query(PG_FUNCTION_ARGS)
     PG_RETURN_POINTER(entries);
 }
 
-Datum
-gin_consistent_jsonb(PG_FUNCTION_ARGS)
+Datum gin_consistent_jsonb(PG_FUNCTION_ARGS)
 {
     bool       *check = (bool *) PG_GETARG_POINTER(0);
     StrategyNumber strategy = PG_GETARG_UINT16(1);
-
-    /* Jsonb       *query = PG_GETARG_JSONB(2); */
+    /* example: Jsonb *query = PG_GETARG_JSONB(2); */
     int32       nkeys = PG_GETARG_INT32(3);
-
-    /* Pointer     *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
+    /* example: Pointer *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
     bool       *recheck = (bool *) PG_GETARG_POINTER(5);
     bool        res = true;
     int32       i;
@@ -267,21 +244,16 @@ gin_consistent_jsonb(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-gin_triconsistent_jsonb(PG_FUNCTION_ARGS)
+Datum gin_triconsistent_jsonb(PG_FUNCTION_ARGS)
 {
     GinLogicValue   *check = (GinLogicValue *) PG_GETARG_POINTER(0);
-    StrategyNumber strategy = PG_GETARG_UINT16(1);
-    /* Jsonb       *query = PG_GETARG_JSONB(2); */
-    int32       nkeys = PG_GETARG_INT32(3);
-    /* Pointer     *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
-    GinLogicValue   res = GIN_TRUE;
-
+    StrategyNumber   strategy = PG_GETARG_UINT16(1);
+    int32            nkeys = PG_GETARG_INT32(3);
+    GinLogicValue    res = GIN_TRUE;
     int32       i;
 
     if (strategy == JsonbContainsStrategyNumber) {
         bool    has_maybe = false;
-
         /*
          * All extracted keys must be present.  Combination of GIN_MAYBE and
          * GIN_TRUE gives GIN_MAYBE result because then all keys may be
@@ -307,8 +279,7 @@ gin_triconsistent_jsonb(PG_FUNCTION_ARGS)
         if (!has_maybe && res == GIN_TRUE) {
             res = GIN_MAYBE;
         }
-    } else if (strategy == JsonbExistsStrategyNumber ||
-             strategy == JsonbExistsAnyStrategyNumber) {
+    } else if (strategy == JsonbExistsStrategyNumber || strategy == JsonbExistsAnyStrategyNumber) {
         /* Existence of key guaranteed in default search mode */
         res = GIN_FALSE;
         for (i = 0; i < nkeys; i++) {
@@ -339,21 +310,16 @@ gin_triconsistent_jsonb(PG_FUNCTION_ARGS)
 }
 
 /*
- *
  * jsonb_hash_ops GIN opclass support functions
- *
  */
-Datum
-gin_consistent_jsonb_hash(PG_FUNCTION_ARGS)
+Datum gin_consistent_jsonb_hash(PG_FUNCTION_ARGS)
 {
-    bool       *check = (bool *) PG_GETARG_POINTER(0);
+    bool          *check = (bool *) PG_GETARG_POINTER(0);
     StrategyNumber strategy = PG_GETARG_UINT16(1);
-    /* Jsonb       *query = PG_GETARG_JSONB(2); */
-    int32       nkeys = PG_GETARG_INT32(3);
-    /* Pointer     *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
-    bool       *recheck = (bool *) PG_GETARG_POINTER(5);
-    bool        res = true;
-    int32       i;
+    int32          nkeys = PG_GETARG_INT32(3);
+    bool          *recheck = (bool *) PG_GETARG_POINTER(5);
+    bool           res = true;
+    int32          i;
 
     if (strategy != JsonbContainsStrategyNumber) {
         elog(ERROR, "unrecognized strategy number: %d", strategy);
@@ -379,17 +345,14 @@ gin_consistent_jsonb_hash(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(res);
 }
 
-Datum
-gin_triconsistent_jsonb_hash(PG_FUNCTION_ARGS)
+Datum gin_triconsistent_jsonb_hash(PG_FUNCTION_ARGS)
 {
     GinLogicValue   *check = (GinLogicValue *) PG_GETARG_POINTER(0);
-    StrategyNumber strategy = PG_GETARG_UINT16(1);
-    /* Jsonb       *query = PG_GETARG_JSONB(2); */
-    int32       nkeys = PG_GETARG_INT32(3);
-    /* Pointer     *extra_data = (Pointer *) PG_GETARG_POINTER(4); */
-    GinLogicValue   res = GIN_TRUE;
-    int32           i;
-    bool            has_maybe = false;
+    StrategyNumber   strategy = PG_GETARG_UINT16(1);
+    int32            nkeys = PG_GETARG_INT32(3);
+    GinLogicValue    res = GIN_TRUE;
+    int32            i;
+    bool             has_maybe = false;
 
     if (strategy != JsonbContainsStrategyNumber) {
         elog(ERROR, "unrecognized strategy number: %d", strategy);
@@ -425,8 +388,7 @@ gin_triconsistent_jsonb_hash(PG_FUNCTION_ARGS)
     PG_RETURN_GIN_LOGIC_VALUE(res);
 }
 
-Datum
-gin_extract_jsonb_hash(PG_FUNCTION_ARGS)
+Datum gin_extract_jsonb_hash(PG_FUNCTION_ARGS)
 {
     Jsonb      *jb = PG_GETARG_JSONB(0);
     int32      *nentries = (int32 *) PG_GETARG_POINTER(1);
@@ -445,16 +407,13 @@ gin_extract_jsonb_hash(PG_FUNCTION_ARGS)
     }
 
     entries = (Datum *) palloc(sizeof(Datum) * total);
-
     it = JsonbIteratorInit(VARDATA(jb));
-
     tail.parent = NULL;
     tail.hash = 0;
     stack = &tail;
 
     while ((r = JsonbIteratorNext(&it, &v, false)) != WJB_DONE) {
         PathHashStack  *tmp = NULL;
-
         if (i >= total) {
             total *= 2;
             entries = (Datum *) repalloc(entries, sizeof(Datum) * total);
@@ -516,12 +475,10 @@ gin_extract_jsonb_hash(PG_FUNCTION_ARGS)
     }
 
     *nentries = i;
-
     PG_RETURN_POINTER(entries);
 }
 
-Datum
-gin_extract_jsonb_query_hash(PG_FUNCTION_ARGS)
+Datum gin_extract_jsonb_query_hash(PG_FUNCTION_ARGS)
 {
     int32      *nentries = (int32 *) PG_GETARG_POINTER(1);
     StrategyNumber strategy = PG_GETARG_UINT16(2);
@@ -550,29 +507,26 @@ gin_extract_jsonb_query_hash(PG_FUNCTION_ARGS)
  * Build a text value from a cstring and flag suitable for storage as a key
  * value
  */
-static text *
-make_text_key(const char *str, int len, char flag)
+static text *make_text_key(const char *str, int len, char flag)
 {
-    text       *item = NULL;
+    text *item = NULL;
 
-    item = (text *) palloc(VARHDRSZ + len + 1);
+    item = (text *)palloc(VARHDRSZ + len + 1);
     SET_VARSIZE(item, VARHDRSZ + len + 1);
 
     *VARDATA(item) = flag;
-
-    memcpy(VARDATA(item) + 1, str, len);
-
+    errno_t rc = memcpy_s(VARDATA(item) + 1, len, str, len);
+    securec_check(rc, "\0", "\0");
     return item;
 }
 
 /*
  * Create a textual representation of a jsonbValue for GIN storage.
  */
-static text *
-make_scalar_key(const JsonbValue * scalarVal, char flag)
+static text *make_scalar_key(const JsonbValue *scalarVal, char flag)
 {
-    text       *item = NULL;
-    char       *cstr = NULL;
+    text *item = NULL;
+    char *cstr = NULL;
 
     switch (scalarVal->type) {
         case jbvNull:
@@ -596,8 +550,7 @@ make_scalar_key(const JsonbValue * scalarVal, char flag)
             pfree(cstr);
             break;
         case jbvString:
-            item = make_text_key(scalarVal->string.val, scalarVal->string.len,
-                                 flag);
+            item = make_text_key(scalarVal->string.val, scalarVal->string.len, flag);
             break;
         default:
             elog(ERROR, "invalid jsonb scalar type");

@@ -266,7 +266,7 @@ DROP FUNCTION IF EXISTS pg_catalog.json_populate_recordset(anyelement, json, boo
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3409;
 CREATE FUNCTION pg_catalog.json_populate_recordset (
 anyelement, json, boolean DEFAULT false
-) RETURNS SETOF anyelement LANGUAGE INTERNAL ROWS 100 VOLATILE  as 'json_populate_recordset';
+) RETURNS SETOF anyelement LANGUAGE INTERNAL ROWS 100 STABLE as 'json_populate_recordset';
 
 DROP FUNCTION IF EXISTS pg_catalog.json_to_record(json, boolean) CASCADE;
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 3410;
