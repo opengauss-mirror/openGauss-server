@@ -125,10 +125,8 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "archive_dest",
 #ifndef ENABLE_MULTIPLE_NODES
     "recovery_min_apply_delay",
-    "archive_mode",
     "sync_config_strategy"
 #else
-    NULL,
     NULL,
     NULL
 #endif

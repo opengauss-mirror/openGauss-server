@@ -3197,6 +3197,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         /* Check for input from the client */
         ProcessRepliesIfAny();
 
+#ifdef ENABLE_MULTIPLE_NODES
         /* Only the primary can send the archive lsn to standby */
         load_server_mode();
         if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && IsValidArchiverStandby(t_thrd.walsender_cxt.MyWalSnd)) {
@@ -3230,6 +3231,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             WalSndSendArchiveLsn2Standby(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn);
             pg_atomic_write_u32(standby_archive_flag, 0);
         } 
+#endif
 
         /* Walsender first startup, send a keepalive to standby, no need reply. */
         if (first_startup) {
