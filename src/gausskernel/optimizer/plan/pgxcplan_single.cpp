@@ -390,12 +390,14 @@ void pgxc_handle_unsupported_stmts(Query* query)
 bool contains_temp_tables(List* rtable)
 {
     ListCell* item = NULL;
+    char rel_persistence;
 
     foreach (item, rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(item);
 
         if (rte->rtekind == RTE_RELATION) {
-            if (IsTempTable(rte->relid))
+            rel_persistence = get_rel_persistence(rte->relid);
+            if (rel_persistence == RELPERSISTENCE_TEMP || rel_persistence == RELPERSISTENCE_GLOBAL_TEMP)
                 return true;
         } else if (rte->rtekind == RTE_SUBQUERY && contains_temp_tables(rte->subquery->rtable))
             return true;
