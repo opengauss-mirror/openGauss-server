@@ -46,7 +46,7 @@
 #include "libpq/be-fsstubs.h"
 #include "libpq/libpq-fs.h"
 #include "miscadmin.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/large_object.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -82,7 +82,7 @@ Datum lo_open(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -106,7 +106,7 @@ Datum lo_close(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -135,7 +135,7 @@ int lo_read(int fd, char* buf, int len)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -163,7 +163,7 @@ int lo_write(int fd, const char* buf, int len)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -199,7 +199,7 @@ Datum lo_lseek(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -218,7 +218,7 @@ Datum lo_creat(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -240,7 +240,7 @@ Datum lo_create(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -262,7 +262,7 @@ Datum lo_tell(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -279,7 +279,7 @@ Datum lo_unlink(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -322,7 +322,7 @@ Datum loread(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -346,7 +346,7 @@ Datum lowrite(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -370,7 +370,7 @@ Datum lo_import(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -389,7 +389,7 @@ Datum lo_import_with_oid(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -472,7 +472,7 @@ Datum lo_export(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 
@@ -561,7 +561,7 @@ Datum lo_truncate(PG_FUNCTION_ARGS)
 #ifdef PGXC
     ereport(ERROR,
         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Postgres-XC does not support large object yet"),
+            errmsg("openGauss does not support large object yet"),
             errdetail("The feature is not currently supported")));
 #endif
 

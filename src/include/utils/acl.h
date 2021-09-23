@@ -84,7 +84,7 @@ typedef enum { DML_PRIVS_INDEX = 0, DDL_PRIVS_INDEX } PRIVS_INDEX;
 
 /*
  * Definitions for convenient access to Acl (array of AclItem).
- * These are standard PostgreSQL arrays, but are restricted to have one
+ * These are standard openGauss arrays, but are restricted to have one
  * dimension and no nulls.	We also ignore the lower bound when reading,
  * and set it to one when writing.
  *
@@ -158,6 +158,7 @@ typedef ArrayType Acl;
 #define ACL_ALL_RIGHTS_FDW (ACL_USAGE)
 #define ACL_ALL_RIGHTS_FOREIGN_SERVER (ACL_USAGE)
 #define ACL_ALL_RIGHTS_FUNCTION (ACL_EXECUTE)
+#define ACL_ALL_RIGHTS_PACKAGE (ACL_EXECUTE)
 #define ACL_ALL_RIGHTS_LANGUAGE (ACL_USAGE)
 #define ACL_ALL_RIGHTS_LARGEOBJECT (ACL_SELECT | ACL_UPDATE)
 #define ACL_ALL_RIGHTS_NAMESPACE (ACL_USAGE | ACL_CREATE)
@@ -187,6 +188,7 @@ typedef ArrayType Acl;
 #define ACL_ALL_DDL_RIGHTS_TABLESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_NAMESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_FUNCTION (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_PACKAGE  (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_TYPE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_FOREIGN_SERVER (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_FDW (ACL_NO_DDL_RIGHTS)
@@ -196,6 +198,36 @@ typedef ArrayType Acl;
 #define ACL_ALL_DDL_RIGHTS_LANGUAGE (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_DOMAIN (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_KEY (ACL_DROP)
+
+/* External representations of the ddl privilege bits --- aclitemin/aclitemout */
+#define ACL_ALTER_CHR 'A' /* known as "modify" */
+#define ACL_DROP_CHR 'P' /* known as "remove" */
+#define ACL_COMMENT_CHR 'm' /* known as "statement" */
+#define ACL_INDEX_CHR 'i'
+#define ACL_VACUUM_CHR 'v'
+
+/* string holding all ddl privilege code chars, in order by bitmask position */
+#define ACL_ALL_DDL_RIGHTS_STR "APmiv"
+
+/* Bitmasks defining "all ddl rights" for each supported object type */
+#define ACL_ALL_DDL_RIGHTS_COLUMN (ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_RELATION (ACL_ALTER | ACL_DROP | ACL_COMMENT | ACL_INDEX | ACL_VACUUM)
+#define ACL_ALL_DDL_RIGHTS_VIEW (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_SEQUENCE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_NODEGROUP (ACL_ALTER | ACL_DROP)
+#define ACL_ALL_DDL_RIGHTS_DATABASE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_TABLESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_NAMESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FUNCTION (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_PACKAGE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_TYPE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FOREIGN_SERVER (ACL_ALTER | ACL_DROP | ACL_COMMENT)
+#define ACL_ALL_DDL_RIGHTS_FDW (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DATA_SOURCE (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DIRECTORY (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_LARGEOBJECT (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_LANGUAGE (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DOMAIN (ACL_NO_DDL_RIGHTS)
 
 /* operation codes for pg_*_aclmask */
 typedef enum {
@@ -239,6 +271,7 @@ typedef enum AclObjectKind {
     ACL_KIND_DIRECTORY,       /* pg_directory */
     ACL_KIND_COLUMN_SETTING,  /* column setting */
     ACL_KIND_GLOBAL_SETTING,  /* master client key */
+    ACL_KIND_PACKAGE,         /* pg_package */
     MAX_ACL_KIND              /* MUST BE LAST */
 } AclObjectKind;
 
@@ -335,9 +368,9 @@ extern AclResult gs_sec_cmk_aclcheck(Oid key_oid, Oid roleid, AclMode mode, bool
 extern AclResult gs_sec_cek_aclcheck(Oid key_oid, Oid roleid, AclMode mode, bool check_nodegroup = false);
 
 extern void aclcheck_error(AclResult aclerr, AclObjectKind objectkind, const char* objectname);
-
+extern void aclcheck_error_msg(AclResult aclerr, AclObjectKind objectkind, const char *objectname, char *errstr,
+    int size);
 extern void aclcheck_error_col(AclResult aclerr, AclObjectKind objectkind, const char* objectname, const char* colname);
-
 extern void aclcheck_error_type(AclResult aclerr, Oid typeOid);
 
 /* ownercheck routines just return true (owner) or false (not) */
@@ -347,6 +380,7 @@ extern bool pg_oper_ownercheck(Oid oper_oid, Oid roleid);
 extern bool pg_proc_ownercheck(Oid proc_oid, Oid roleid);
 extern bool pg_language_ownercheck(Oid lan_oid, Oid roleid);
 extern bool pg_largeobject_ownercheck(Oid lobj_oid, Oid roleid);
+extern bool pg_package_ownercheck(Oid package_oid, Oid roleid);
 extern bool pg_namespace_ownercheck(Oid nsp_oid, Oid roleid);
 extern bool pg_tablespace_ownercheck(Oid spc_oid, Oid roleid);
 extern bool pg_opclass_ownercheck(Oid opc_oid, Oid roleid);

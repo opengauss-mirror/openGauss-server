@@ -1,0 +1,383 @@
+-- default roles
+SELECT oid, * FROM pg_authid WHERE rolname like 'gs_role_%' ORDER BY oid;
+ oid  |        rolname         | rolsuper | rolinherit | rolcreaterole | rolcreatedb | rolcatupdate | rolcanlogin | rolreplication | rolauditadmin | rolsystemadmin | rolconnlimit | rolpassword | rolvalidbegin | rolvaliduntil |  rolrespool  | roluseft | rolparentid | roltabspace | rolkind | rolnodegroup | roltempspace | rolspillspace | rolexcpdata | rolmonitoradmin | roloperatoradmin | rolpolicyadmin 
+------+------------------------+----------+------------+---------------+-------------+--------------+-------------+----------------+---------------+----------------+--------------+-------------+---------------+---------------+--------------+----------+-------------+-------------+---------+--------------+--------------+---------------+-------------+-----------------+------------------+----------------
+ 1044 | gs_role_copy_files     | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+ 1045 | gs_role_signal_backend | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+ 1046 | gs_role_tablespace     | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+ 1047 | gs_role_replication    | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+ 1048 | gs_role_account_lock   | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+ 1055 | gs_role_pldebugger     | f        | t          | f             | f           | f            | f           | f              | f             | f              |           -1 |             |               |               | default_pool | f        |           0 |             | n       |            0 |              |               |             | f               | f                | f
+(6 rows)
+
+\du gs_role_signal_backend
+                   List of roles
+       Role name        |  Attributes  | Member of 
+------------------------+--------------+-----------
+ gs_role_signal_backend | Cannot login | {}
+
+-- prepare
+CREATE user test_user1 PASSWORD '1234567i*';
+CREATE user test_sysadmin SYSADMIN PASSWORD '1234567i*';
+CREATE user test_createrole CREATEROLE PASSWORD '1234567i*';
+CREATE user test_monadmin MONADMIN PASSWORD '1234567i*';
+CREATE user test_createdb CREATEDB PASSWORD '1234567i*';
+CREATE DATABASE test_base owner test_createdb;
+CREATE user test_persis PERSISTENCE PASSWORD '1234567i*';
+CREATE user test_opr OPRADMIN PASSWORD '1234567i*';
+CREATE user test_oprpersis OPRADMIN PERSISTENCE PASSWORD '1234567i*';
+CREATE user test_root CREATEROLE CREATEDB MONADMIN PASSWORD '1234567i*';
+GRANT gs_role_copy_files,gs_role_signal_backend,gs_role_tablespace,
+      gs_role_replication,gs_role_account_lock TO test_root WITH ADMIN OPTION;
+-- "gs_role_" prefix
+CREATE USER gs_ PASSWORD '1234567i*';
+CREATE USER role_gs_role_ PASSWORD '1234567i*';
+CREATE USER gs_role PASSWORD '1234567i*';
+DROP USER gs_, role_gs_role_, gs_role;
+CREATE USER gs_role_ PASSWORD '1234567i*'; -- failed
+ERROR:  role name "gs_role_" is reserved
+DETAIL:  Role names starting with "gs_role_" are reserved.
+CREATE USER gs_role_defaule_roles PASSWORD '1234567i*'; -- failed
+ERROR:  role name "gs_role_defaule_roles" is reserved
+DETAIL:  Role names starting with "gs_role_" are reserved.
+ALTER USER test_user1 RENAME TO gs_;
+ALTER USER gs_ RENAME TO role_gs_role_;
+ALTER USER role_gs_role_ RENAME TO gs_role_; -- failed
+ERROR:  role name "gs_role_" is reserved
+DETAIL:  Role names starting with "gs_role_" are reserved.
+ALTER USER role_gs_role_ RENAME TO gs_role_defaule_roles; -- failed
+ERROR:  role name "gs_role_defaule_roles" is reserved
+DETAIL:  Role names starting with "gs_role_" are reserved.
+ALTER USER role_gs_role_ RENAME TO test_user1;
+CREATE SCHEMA gs_defaule_roles;
+DROP SCHEMA gs_defaule_roles;
+CREATE SCHEMA gs_role_defaule_roles;
+DROP SCHEMA gs_role_defaule_roles;
+-- alter or drop default roles
+-- all failed
+ALTER USER gs_role_signal_backend PASSWORD '1234567i*8';
+ERROR:  Permission denied to alter predefined roles.
+ALTER USER gs_role_signal_backend SYSADMIN;
+ERROR:  Permission denied to alter predefined roles.
+ALTER USER gs_role_signal_backend ACCOUNT LOCK;
+ERROR:  Permission denied to alter predefined roles.
+ALTER USER gs_role_signal_backend RENAME TO test_user3;
+ERROR:  Permission denied to rename predefined roles.
+ALTER USER gs_role_signal_backend RENAME TO gs_role_test_user3;
+ERROR:  Permission denied to rename predefined roles.
+DROP ROLE gs_role_signal_backend;
+ERROR:  Permission denied to drop predefined roles.
+DROP USER gs_role_signal_backend;
+ERROR:  Permission denied to drop predefined roles.
+DROP USER test_user1,gs_role_signal_backend;
+ERROR:  Permission denied to drop predefined roles.
+DROP USER gs_role_signal_backend,test_user1;
+ERROR:  Permission denied to drop predefined roles.
+-- GRANT/REVOKE
+-- sysadmin
+SET ROLE test_sysadmin PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user1;
+REVOKE gs_role_signal_backend FROM test_user1;
+CREATE USER test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend;
+DROP USER test_user2;
+-- createrole
+SET ROLE test_createrole PASSWORD '1234567i*';
+GRANT test_user1 TO gs_role_signal_backend;
+REVOKE test_user1 FROM gs_role_signal_backend;
+GRANT gs_role_signal_backend TO test_user1; -- failed
+ERROR:  must have admin option on predefined role "gs_role_signal_backend"
+CREATE user test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend; -- failed
+ERROR:  must have admin option on predefined role "gs_role_signal_backend"
+-- root
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user1;
+REVOKE gs_role_signal_backend FROM test_user1;
+CREATE USER test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend;
+REVOKE gs_role_signal_backend FROM test_user2;
+-- normal user
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT test_user2 TO gs_role_signal_backend; -- failed
+ERROR:  must have admin option on role "test_user2"
+GRANT gs_role_signal_backend TO test_user2; -- failed
+ERROR:  must have admin option on predefined role "gs_role_signal_backend"
+RESET ROLE;
+GRANT gs_role_signal_backend TO test_user1 WITH ADMIN OPTION;
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user2; -- success
+SET ROLE test_user2 PASSWORD '1234567i*';
+REVOKE gs_role_signal_backend FROM test_user1; -- failed
+ERROR:  must have admin option on predefined role "gs_role_signal_backend"
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user2 WITH ADMIN OPTION; -- success
+SET ROLE test_user2 PASSWORD '1234567i*';
+REVOKE gs_role_signal_backend FROM test_user1,test_user2; -- success
+-- prepare
+RESET ROLE;
+GRANT test_user1 to test_user2;
+-- gs_role_copy_files
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_copy_server_files=on" >/dev/null 2>&1
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+ roleid | member | grantor | admin_option 
+--------+--------+---------+--------------
+--?.*
+(1 row)
+
+CREATE TABLE public.copy_role_tbl (fir int);
+INSERT INTO public.copy_role_tbl VALUES (1),(2);
+GRANT select,insert ON public.copy_role_tbl TO test_user1,test_user2;
+GRANT usage ON SCHEMA public TO test_user1,test_user2;
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_copy_files TO test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+RESET ROLE;
+REVOKE gs_role_copy_files FROM test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+ERROR:  must be system admin or a member of the gs_role_copy_files role to COPY to or from a file
+HINT:  Anyone can COPY to stdout or from stdin. gsql's \copy command also works for anyone.
+\! rm -rf @abs_srcdir@/data/copy_tbl
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_copy_server_files=off" >/dev/null 2>&1
+-- gs_role_signal_backend
+-- gs_role_tablespace
+RESET ROLE;
+REVOKE usage ON SCHEMA public FROM test_user1,test_user2;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+ roleid | member | grantor | admin_option 
+--------+--------+---------+--------------
+--?.*
+(1 row)
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+ERROR:  Permission denied to create tablespace "tsp1".
+HINT:  Must be system admin or a member of the gs_role_tablespace role to create a tablespace.
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+ERROR:  Permission denied to create tablespace "tsp2".
+HINT:  Must be system admin or a member of the gs_role_tablespace role to create a tablespace.
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_tablespace TO test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+RESET ROLE;
+REVOKE gs_role_tablespace FROM test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+ERROR:  Permission denied to create tablespace "tsp1".
+HINT:  Must be system admin or a member of the gs_role_tablespace role to create a tablespace.
+DROP TABLESPACE tsp2;
+ERROR:  permission denied for tablespace tsp2
+DETAIL:  N/A
+DROP TABLESPACE tsp1; -- success
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+ERROR:  Permission denied to create tablespace "tsp2".
+HINT:  Must be system admin or a member of the gs_role_tablespace role to create a tablespace.
+DROP TABLESPACE tsp2;
+\! rm -rf @testtablespace@/tsp1
+\! rm -rf @testtablespace@/tsp2
+-- gs_role_replication
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+ roleid | member | grantor | admin_option 
+--------+--------+---------+--------------
+--?.*
+(1 row)
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+ERROR:  permission denied for terminate snapshot thread
+DETAIL:  only system admin or replication role or a member of the gs_role_replication rolecan terminate snapshot thread
+CONTEXT:  referenced column: kill_snapshot
+SELECT pg_create_physical_replication_slot('privs_test_physlot', true);
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_create_physical_replication_slot
+SELECT pg_create_logical_replication_slot('privs_test_slot', 'mppdb_decoding');
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_create_logical_replication_slot
+SELECT pg_logical_slot_get_changes('privs_test_slot', NULL, NULL);
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_logical_slot_get_changes
+SELECT pg_logical_slot_peek_changes('privs_test_slot', NULL, NULL);
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_logical_slot_peek_changes
+SELECT pg_logical_slot_get_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_logical_slot_get_binary_changes
+SELECT pg_logical_slot_peek_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_logical_slot_peek_binary_changes
+SELECT pg_drop_replication_slot('privs_test_slot');
+ERROR:  must be system admin or replication role or a member of the gs_role_replication role to use replication slots
+CONTEXT:  referenced column: pg_drop_replication_slot
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_replication TO test_user1;
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+ kill_snapshot 
+---------------
+ 
+(1 row)
+
+SELECT pg_create_physical_replication_slot('privs_test_physlot', true);
+ pg_create_physical_replication_slot 
+-------------------------------------
+ (privs_test_physlot,)
+(1 row)
+
+SELECT pg_create_logical_replication_slot('privs_test_slot', 'mppdb_decoding');
+--?.*
+--?.*
+--?.*
+(1 row)
+
+SELECT pg_create_physical_replication_slot_extern('uuid', false, 'obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1');
+ERROR:  message is inleagel  "obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1"
+CONTEXT:  referenced column: pg_create_physical_replication_slot_extern
+SELECT pg_replication_slot_advance('privs_test_slot', NULL);
+--?.*
+--?.*
+--?.*
+(1 row)
+
+SELECT pg_logical_slot_get_changes('privs_test_slot', NULL, NULL);
+ pg_logical_slot_get_changes 
+-----------------------------
+(0 rows)
+
+SELECT pg_logical_slot_peek_changes('privs_test_slot', NULL, NULL);
+ pg_logical_slot_peek_changes 
+------------------------------
+(0 rows)
+
+SELECT pg_logical_slot_get_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+ pg_logical_slot_get_binary_changes 
+------------------------------------
+(0 rows)
+
+SELECT pg_logical_slot_peek_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+ pg_logical_slot_peek_binary_changes 
+-------------------------------------
+(0 rows)
+
+SELECT pg_drop_replication_slot('privs_test_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+SELECT pg_drop_replication_slot('privs_test_physlot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+RESET ROLE;
+REVOKE gs_role_replication FROM test_user1;
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+ERROR:  permission denied for terminate snapshot thread
+DETAIL:  only system admin or replication role or a member of the gs_role_replication rolecan terminate snapshot thread
+CONTEXT:  referenced column: kill_snapshot
+-- gs_role_account_lock
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+ roleid | member | grantor | admin_option 
+--------+--------+---------+--------------
+--?.*
+(1 row)
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ERROR:  Permission denied.
+ALTER USER test_user2 ACCOUNT LOCK;
+ERROR:  Permission denied.
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ERROR:  Permission denied.
+ALTER USER test_user2 ACCOUNT LOCK;
+ERROR:  Permission denied.
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_account_lock TO test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT UNLOCK;
+ALTER USER test_sysadmin ACCOUNT LOCK;
+ALTER USER test_createrole ACCOUNT LOCK;
+ALTER USER songrr ACCOUNT LOCK; -- failed
+ERROR:  Permission denied.
+ALTER USER test_persis ACCOUNT LOCK; -- failed
+ERROR:  Permission denied.
+ALTER USER test_opr ACCOUNT LOCK;
+ALTER USER test_oprpersis ACCOUNT LOCK; -- failed
+ERROR:  Permission denied.
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT UNLOCK;
+ALTER USER test_user2 ACCOUNT UNLOCK;
+ALTER USER test_sysadmin ACCOUNT UNLOCK;
+ALTER USER test_createrole ACCOUNT UNLOCK;
+ALTER USER songrr ACCOUNT UNLOCK; -- failed
+ERROR:  Permission denied.
+ALTER USER test_persis ACCOUNT UNLOCK; -- failed
+ERROR:  Permission denied.
+ALTER USER test_opr ACCOUNT UNLOCK;
+ALTER USER test_oprpersis ACCOUNT UNLOCK; -- failed
+ERROR:  Permission denied.
+RESET ROLE;
+REVOKE gs_role_account_lock FROM test_user1;
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ERROR:  Permission denied.
+ALTER USER test_user2 ACCOUNT LOCK;
+ERROR:  Permission denied.
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ERROR:  Permission denied.
+ALTER USER test_user2 ACCOUNT LOCK;
+ERROR:  Permission denied.
+-- clean
+RESET ROLE;
+DROP TABLE public.copy_role_tbl;
+DROP USER test_user1,test_user2,test_sysadmin,test_createrole;
+DROP USER test_root,test_persis,test_opr,test_oprpersis,test_monadmin;

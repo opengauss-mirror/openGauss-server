@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -21,30 +21,9 @@
 #include <netdb.h>
 #endif
 
-/*
- * GetEnvStr
- *
- * Note: malloc space for get the return of getenv() function, then return the malloc space.
- *         so, this space need be free.
- */
-static char* GetEnvStr(const char* env)
-{
-    char* tmpvar = NULL;
-    const char* temp = getenv(env);
-    errno_t rc = 0;
-    if (temp != NULL) {
-        size_t len = strlen(temp);
-        if (0 == len)
-            return NULL;
-        tmpvar = (char*)malloc(len + 1);
-        if (tmpvar != NULL) {
-            rc = strcpy_s(tmpvar, len + 1, temp);
-            securec_check_c(rc, "\0", "\0");
-            return tmpvar;
-        }
-    }
-    return NULL;
-}
+#ifdef ENABLE_UT
+#define static
+#endif
 
 /* --------------------------
  * get_prompt
@@ -60,6 +39,7 @@ static char* GetEnvStr(const char* env)
  * %> - database server port number
  * %n - database user name
  * %/ - current database
+ * %o - gaussdb-ified current database
  * %~ - like %/ but "~" when database name equals user name
  * %# - "#" if superuser, ">" otherwise
  * %R - in prompt1 normally =, or ^ if single line mode,
@@ -94,6 +74,7 @@ char* get_prompt(promptStatus_t status)
     bool esc = false;
     const char* p = NULL;
     const char* prompt_string = NULL;
+    const char* username = NULL;
     errno_t rc = EOK;
 
     switch (status) {
@@ -121,14 +102,26 @@ char* get_prompt(promptStatus_t status)
 
     destination[0] = '\0';
 
+    const char* gsname = "openGauss";   /* gaussdb-ify name */
+
     for (p = prompt_string; *p && strlen(destination) < sizeof(destination) - 1; p++) {
         check_memset_s(memset_s(buf, sizeof(buf), 0, sizeof(buf)));
         if (esc) {
             switch (*p) {
                     /* Current database */
                 case '/':
-                    if (NULL != pset.db) {
+                    if (pset.db != NULL) {
                         rc = strncpy_s(buf, sizeof(buf), PQdb(pset.db), strlen(PQdb(pset.db)) + 1);
+                        securec_check_c(rc, "\0", "\0");
+                    }
+                    break;
+                case 'o':   /* gaussdb-ify overwrite default prompt */
+                    if (pset.db != NULL) {
+                        if (strcmp(PQdb(pset.db), "postgres") == 0) {
+                            rc = strncpy_s(buf, sizeof(buf), gsname, strlen(gsname) + 1);
+                        } else {
+                            rc = strncpy_s(buf, sizeof(buf), PQdb(pset.db), strlen(PQdb(pset.db)) + 1);
+                        }
                         securec_check_c(rc, "\0", "\0");
                     }
                     break;
@@ -163,15 +156,18 @@ char* get_prompt(promptStatus_t status)
 
                         /* INET socket */
                         if (NULL != host && host[0] && !is_absolute_path(host)) {
-                            strlcpy(buf, host, sizeof(buf));
+                            rc = strcpy_s(buf, sizeof(buf), host);
+                            check_strcpy_s(rc);
                             if (*p == 'm')
                                 buf[strcspn(buf, ".")] = '\0';
                         }
 #ifdef HAVE_UNIX_SOCKETS
                         /* UNIX socket */
                         else {
-                            if ((host == NULL) || strcmp(host, DEFAULT_PGSOCKET_DIR) == 0 || *p == 'm')
-                                strlcpy(buf, "local", sizeof(buf));
+                            if ((host == NULL) || strcmp(host, DEFAULT_PGSOCKET_DIR) == 0 || *p == 'm') {
+                                rc = strcpy_s(buf, sizeof(buf), "local");
+                                check_strcpy_s(rc);
+                            }
                             else
                                 check_sprintf_s(sprintf_s(buf, sizeof(buf), "local:%s", host));
                         }
@@ -180,13 +176,18 @@ char* get_prompt(promptStatus_t status)
                     break;
                     /* DB server port number */
                 case '>':
-                    if ((pset.db != NULL) && (PQport(pset.db) != NULL))
-                        strlcpy(buf, PQport(pset.db), sizeof(buf));
+                    if ((pset.db != NULL) && (PQport(pset.db) != NULL)) {
+                        rc = strcpy_s(buf, sizeof(buf), PQport(pset.db));
+                        check_strcpy_s(rc);
+                    }
                     break;
                     /* DB server user name */
                 case 'n':
-                    if (pset.db != NULL)
-                        strlcpy(buf, session_username(), sizeof(buf));
+                    username = session_username();
+                    if ((pset.db != NULL) && (username != NULL)) {
+                        rc = strcpy_s(buf, sizeof(buf), username);
+                        check_strcpy_s(rc);
+                    }
                     break;
 
                 case '0':
@@ -299,8 +300,10 @@ char* get_prompt(promptStatus_t status)
                     nameend = (int)strcspn(name, ":");
                     name[nameend] = '\0';
                     val = GetVariable(pset.vars, name);
-                    if (NULL != val)
-                        strlcpy(buf, val, sizeof(buf));
+                    if (NULL != val) {
+                        rc = strcpy_s(buf, sizeof(buf), val);
+                        check_strcpy_s(rc);
+                    }
                     free(name);
                     name = NULL;
                     p += nameend + 1;

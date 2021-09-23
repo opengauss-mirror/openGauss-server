@@ -42,6 +42,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pgxc_slice.h"
+#include "catalog/storage_xlog.h"
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/tablecmds.h"
@@ -53,12 +54,13 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/rbcleaner.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "storage/copydir.h"
 #include "storage/lmgr.h"
 #include "storage/ipc.h"
 #include "storage/procarray.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -78,6 +80,7 @@
 #include "tcop/utility.h"
 #endif
 #include "storage/dfs/dfs_connector.h"
+#include "storage/smgr/segment.h"
 
 typedef struct {
     Oid src_dboid;  /* source (template) DB */
@@ -339,6 +342,8 @@ void createdb(const CreatedbStmt* stmt)
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied to copy database \"%s\"", dbtemplate)));
     }
+
+    RbCltPurgeDatabase(src_dboid);
 
     /* If encoding or locales are defaulted, use source's setting */
     if (encoding < 0) {
@@ -619,7 +624,7 @@ void createdb(const CreatedbStmt* stmt)
                 dsttablespace = dst_deftablespace;
             else
                 dsttablespace = srctablespace;
-
+            
             dstpath = GetDatabasePath(dboid, dsttablespace);
 
             /*
@@ -815,7 +820,7 @@ void ts_dropdb_xact_callback(bool isCommit, const void* arg)
 
 #ifdef ENABLE_MULTIPLE_NODES
 void handle_compaction_dropdb(const char* dbname)
-{   
+{
     /**
      * if timeseries db and compaction working, send sigusr1 to compaction producer
      * signal will block producer switch session.
@@ -842,6 +847,125 @@ void handle_compaction_dropdb(const char* dbname)
     }
 }
 #endif
+
+typedef struct {
+    int nPendingDeletes;
+    Oid dbOid;
+    Oid pendingDeletes[1];
+} DropDbArg;
+
+static void InsertDropDbInfo(Oid dbOid, DropDbArg** dropDbInfo, const List *pendingDeletesList)
+{
+    int nPendingDeletes = list_length(pendingDeletesList);
+    *dropDbInfo = (DropDbArg*)palloc(offsetof(DropDbArg, pendingDeletes) + nPendingDeletes * sizeof(Oid));
+    (*dropDbInfo)->nPendingDeletes = nPendingDeletes;
+    (*dropDbInfo)->dbOid = dbOid;
+    ListCell *lc = NULL;
+    int index = 0;
+    foreach(lc, pendingDeletesList) {
+        Oid dsttablespace = lfirst_oid(lc);
+        (*dropDbInfo)->pendingDeletes[index++] = dsttablespace;
+    }
+}
+
+static void InitDropDbInfo(Oid dbOid, DropDbArg** dropDbInfo)
+{
+    Relation rel;
+    TableScanDesc scan;
+    HeapTuple tuple;
+    Snapshot snapshot;
+    List *pendingDeletesList = NULL;
+    /*
+     * As in createdb(), we'd better use an MVCC snapshot here, since this
+     * scan can run for a long time.  Duplicate visits to tablespaces would be
+     * harmless, but missing a tablespace could result in permanently leaked
+     * files.
+     *
+     * XXX change this when a generic fix for SnapshotNow races is implemented
+     */
+    snapshot = RegisterSnapshot(GetLatestSnapshot());
+    
+    rel = heap_open(TableSpaceRelationId, AccessShareLock);
+    scan = tableam_scan_begin(rel, snapshot, 0, NULL);
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+        Oid dsttablespace = HeapTupleGetOid(tuple);
+        char* dstpath = NULL;
+        struct stat st;
+
+        /* Don't mess with the global tablespace */
+        if (dsttablespace == GLOBALTABLESPACE_OID)
+            continue;
+
+        dstpath = GetDatabasePath(dbOid, dsttablespace);
+
+        if (lstat(dstpath, &st) < 0 || !S_ISDIR(st.st_mode)) {
+            /* Assume we can ignore it */
+            pfree_ext(dstpath);
+            continue;
+        }
+        /* add vaild path oid */
+        pendingDeletesList = lappend_oid(pendingDeletesList, dsttablespace);
+        pfree_ext(dstpath);
+    }
+
+    tableam_scan_end(scan);
+    heap_close(rel, AccessShareLock);
+    UnregisterSnapshot(snapshot);
+
+    InsertDropDbInfo(dbOid, dropDbInfo, pendingDeletesList);
+    list_free(pendingDeletesList);
+}
+/* 
+ * Use record tablespace oid list instead of using snapshot scan,
+ * because we cannot see the information of target db after dropping
+ * database success.
+ */
+static void DropdbXactCallback(bool isCommit, const void* arg)
+{
+    if (!isCommit) {
+        return;
+    }
+    DropDbArg *dropDbInfo = (DropDbArg *)arg;
+    Oid dbOid = dropDbInfo->dbOid;
+    int len = dropDbInfo->nPendingDeletes;
+    int index;
+    for (index = 0; index < len; index++) {
+        Oid dsttablespace = dropDbInfo->pendingDeletes[index];
+        char* dstpath = NULL;
+        struct stat st;
+
+        /* Don't mess with the global tablespace */
+        if (dsttablespace == GLOBALTABLESPACE_OID)
+            continue;
+
+        dstpath = GetDatabasePath(dbOid, dsttablespace);
+
+        if (lstat(dstpath, &st) < 0 || !S_ISDIR(st.st_mode)) {
+            /* Assume we can ignore it */
+            pfree_ext(dstpath);
+            continue;
+        }
+
+        if (!rmtree(dstpath, true))
+            ereport(
+                WARNING, (errmsg("some useless files may be left behind in old database directory \"%s\"", dstpath)));
+
+        /* Record the filesystem change in XLOG */
+        {
+            xl_dbase_drop_rec xlrec;
+
+            xlrec.db_id = dbOid;
+            xlrec.tablespace_id = dsttablespace;
+
+            XLogBeginInsert();
+            XLogRegisterData((char*)&xlrec, sizeof(xl_dbase_drop_rec));
+
+            (void)XLogInsert(RM_DBASE_ID, XLOG_DBASE_DROP | XLR_SPECIAL_REL_UPDATE);
+        }
+
+        pfree_ext(dstpath);
+    }
+}
 
 /*
  * DROP DATABASE
@@ -898,6 +1022,8 @@ void dropdb(const char* dbname, bool missing_ok)
     if (aclresult != ACLCHECK_OK && !pg_database_ownercheck(db_id, GetUserId())) {
         aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DATABASE, dbname);
     }
+
+    RbCltPurgeDatabase(db_id);
 
     /* DROP hook for the database being removed */
     if (object_access_hook) {
@@ -998,20 +1124,25 @@ void dropdb(const char* dbname, bool missing_ok)
      * worse, it will delete files that belong to a newly created database
      * with the same OID.
      */
-    ForgetDatabaseFsyncRequests(db_id);
+    ForgetDatabaseSyncRequests(db_id);
 
     /*
      * Force a checkpoint to make sure the checkpointer has received the
-     * message sent by ForgetDatabaseFsyncRequests. On Windows, this also
+     * message sent by ForgetDatabaseSyncRequests. On Windows, this also
      * ensures that background procs don't hold any open files, which would
      * cause rmdir() to fail.
      */
     RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
 
     /*
-     * Remove all tablespace subdirs belonging to the database.
+     * Register all pending delete tablespace belonging to the database.
+     * Callback function do real work after commit transaction.
      */
-    remove_dbtablespaces(db_id);
+    DropDbArg *dropDbInfo = NULL;
+    InitDropDbInfo(db_id, &dropDbInfo);
+    int dropDbInfoLen = offsetof(DropDbArg, pendingDeletes) + dropDbInfo->nPendingDeletes * sizeof(Oid);
+    set_dbcleanup_callback(DropdbXactCallback, dropDbInfo, dropDbInfoLen);
+    pfree_ext(dropDbInfo);
 
     /*
      * Close pg_database, but keep lock till commit.
@@ -1070,6 +1201,9 @@ void RenameDatabase(const char* oldname, const char* newname)
     int notherbackends;
     int npreparedxacts;
     List* existTblSpcList = NIL;
+    Relation pg_job_tbl = NULL;
+    TableScanDesc scan = NULL;
+    HeapTuple tuple = NULL;
 
     /*
      * Look up the target database's OID, and get exclusive lock on it. We
@@ -1141,6 +1275,22 @@ void RenameDatabase(const char* oldname, const char* newname)
      * Close pg_database, but keep lock till commit.
      */
     heap_close(rel, NoLock);
+    /*
+     * change the database name in the pg_job. 
+     */
+    pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
+    scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
+
+    while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+        Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
+        if (strcmp(NameStr(pg_job->dbname), oldname) == 0) {
+            update_pg_job_dbname(pg_job->job_id, newname);
+        }
+    }
+
+    heap_endscan(scan);
+    heap_close(pg_job_tbl, ExclusiveLock);
+
 }
 
 /*
@@ -2191,7 +2341,7 @@ void xlog_db_create(Oid dstDbId, Oid dstTbSpcId, Oid srcDbId, Oid srcTbSpcId)
         RelFileNode tmp = {srcTbSpcId, srcDbId, 0, InvalidBktId};
 
         /* forknum and blockno has no meaning */
-        log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT);
+        log_invalid_page(tmp, MAIN_FORKNUM, 0, NOT_PRESENT, NULL);
     }
 }
 
@@ -2214,7 +2364,7 @@ void xlog_db_drop(Oid dbId, Oid tbSpcId)
     DropDatabaseBuffers(dbId);
 
     /* Also, clean out any fsync requests that might be pending in md.c */
-    ForgetDatabaseFsyncRequests(dbId);
+    ForgetDatabaseSyncRequests(dbId);
 
     /* Clean out the xlog relcache too */
     XLogDropDatabase(dbId);
@@ -2236,6 +2386,34 @@ void xlog_db_drop(Oid dbId, Oid tbSpcId)
     }
 }
 
+void xlogRemoveRemainSegsByDropDB(Oid dbId, Oid tablespaceId)
+{
+    Assert(dbId != InvalidOid || tablespaceId != InvalidOid);
+    
+    AutoMutexLock remainSegsLock(&g_instance.xlog_cxt.remain_segs_lock);
+    remainSegsLock.lock();
+    if (t_thrd.xlog_cxt.remain_segs == NULL) {
+        t_thrd.xlog_cxt.remain_segs = redo_create_remain_segs_htbl();
+    }
+
+    HASH_SEQ_STATUS status;
+    hash_seq_init(&status, t_thrd.xlog_cxt.remain_segs);
+    ExtentTag *extentTag = NULL;
+    while ((extentTag = (ExtentTag *)hash_seq_search(&status)) != NULL) {
+        if ((dbId != InvalidOid && extentTag->remainExtentHashTag.rnode.dbNode != dbId) || 
+            (tablespaceId != InvalidOid && extentTag->remainExtentHashTag.rnode.spcNode != tablespaceId)) {
+            continue;
+        }
+
+        if (hash_search(t_thrd.xlog_cxt.remain_segs,
+                        (void *)&extentTag->remainExtentHashTag, HASH_REMOVE, NULL) == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hash table corrupted.")));
+        }
+    }
+
+    remainSegsLock.unLock();
+}
+
 void dbase_redo(XLogReaderState* record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
@@ -2246,6 +2424,7 @@ void dbase_redo(XLogReaderState* record)
     } else if (info == XLOG_DBASE_DROP) {
         xl_dbase_drop_rec* xlrec = (xl_dbase_drop_rec*)XLogRecGetData(record);
         xlog_db_drop(xlrec->db_id, xlrec->tablespace_id);
+        xlogRemoveRemainSegsByDropDB(xlrec->db_id, xlrec->tablespace_id);
     } else
         ereport(PANIC, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("dbase_redo: unknown op code %hhu", info)));
 

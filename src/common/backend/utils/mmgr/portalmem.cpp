@@ -220,7 +220,7 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
 
     /* create a resource owner for the portal */
     portal->resowner = ResourceOwnerCreate(t_thrd.utils_cxt.CurTransactionResourceOwner, "Portal",
-        MEMORY_CONTEXT_EXECUTOR);
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     /* initialize portal fields that don't start off zero */
     portal->status = PORTAL_NEW;
@@ -591,7 +591,6 @@ void PortalDrop(Portal portal, bool isTopCommit)
         MemoryContextDelete(portal->copyCxt);
 
     u_sess->parser_cxt.param_message = NULL;
-
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         u_sess->parser_cxt.param_info = NULL;
     }

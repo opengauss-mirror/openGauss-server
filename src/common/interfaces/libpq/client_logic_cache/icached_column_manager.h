@@ -28,6 +28,7 @@
 #include "nodes/parsenodes_common.h"
 #include "icached_column_manager.h"
 #include "icached_columns.h"
+#include "cached_proc.h"
 
 typedef struct pg_conn PGconn;
 
@@ -35,16 +36,34 @@ class ExprPartsList;
 enum class CacheRefreshType;
 class ICachedColumn;
 class CachedColumnSetting;
+class CachedGlobalSetting;
+class GlobalHookExecutor;
+class ColumnHookExecutor;
+class CachedType;
 
 /* *
  * @brief testing if column is relevant
  */
 class ICachedColumnManager {
 public:
-    static ICachedColumnManager &get_instance();
 
     virtual ~ICachedColumnManager() = default;
     virtual bool load_cache(PGconn *conn) = 0;
+    virtual void clear() = 0;
+    virtual const GlobalHookExecutor** get_global_hook_executors(size_t& global_hook_executors_size) const = 0;
+    virtual const CachedGlobalSetting* get_global_setting_by_fqdn(const char* globalSettingFqdn) const = 0;
+    virtual size_t get_object_fqdn(const char* object_name, bool is_global_setting, char* object_fqdn) const = 0;
+    virtual const CachedColumnSetting** get_column_setting_by_global_setting_fqdn(const char* global_setting_fqdn, 
+        size_t& column_settings_list_size) const = 0;
+    virtual bool remove_schema(const char* schema_name) = 0;
+    virtual void set_user_schema(const char* user_name) = 0;
+    virtual void load_search_path(const char* search_path, const char* username) = 0;
+    virtual ColumnHookExecutor* get_column_hook_executor(Oid columnSettingOid) const = 0;
+    virtual const CachedGlobalSetting** get_global_settings_by_schema_name(const char* schema_name,
+        size_t& global_settings_list_size) const = 0;
+    virtual const CachedColumnSetting** get_column_setting_by_schema_name(const char* schemaName,
+        size_t& column_settings_list_size) const = 0;
+    virtual const CachedColumnSetting* get_column_setting_by_fqdn(const char* columnSettingFqdn) const = 0;
 
     /* *
      * @brief getting columns information from cache by querying using its full name params
@@ -120,6 +139,13 @@ public:
      */
     virtual const ICachedColumn *get_cached_column(unsigned int tid, unsigned int cid) const = 0;
 
+    /**
+     * @brief getting column information from cache by querying cached column Oid
+     * @param oid   OID of the cached column
+     * @return shared pointer to column information
+     */
+    virtual const ICachedColumn *get_cached_column(const Oid oid) const = 0;
+
     virtual const bool has_cached_columns(const char *db_name, const char *schema_name, const char *table_name) = 0;
     virtual ICachedColumn *create_cached_column(const char *name) = 0;
     virtual const bool is_schema_contains_objects(const char *schmeaname) = 0;
@@ -143,6 +169,18 @@ public:
     virtual const bool is_cache_empty() const = 0;
 
     virtual DatabaseType get_sql_compatibility() const = 0;
+
+    /**
+     * @brief getting function information from cache by querying using its full name params
+     * @param db_name  catalog name where the table contains this column is located
+     * @param schema_name  schmea name where the table contains this column is located
+     * @param function_name function name
+     * @return shared pointer to column information
+     */
+    virtual CachedProc* get_cached_proc(const char* db_name, const char* schema_name,
+        const char* function_name) const = 0;
+    virtual const CachedProc* get_cached_proc(Oid funcOid) const = 0;
+    virtual const CachedType* get_cached_type(Oid typid) const  = 0;
 };
 
 #endif

@@ -77,6 +77,7 @@ typedef struct BucketMapCache {
 
     /* bucketmap content, palloc()-ed form top memory context */
     uint2* bucketmap;
+    int    bucketcnt;
 } NodeGroupBucketMap;
 
 static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bucketmap_datum, ItemPointer ctid);
@@ -201,6 +202,7 @@ static void contractBucketMap(Relation rel, HeapTuple old_group, oidvector* new_
     oidvector* old_nodes = NULL;
     text* old_bucket_str = NULL;
     uint2* old_bucket_ptr = NULL;
+    int bktlen = 0;
     nodeinfo* node_array = NULL;
     bool need_free = false;
 
@@ -214,7 +216,7 @@ static void contractBucketMap(Relation rel, HeapTuple old_group, oidvector* new_
     old_bucket_str = (text*)heap_getattr(old_group, Anum_pgxc_group_buckets, RelationGetDescr(rel), &isNull);
     if (isNull)
         ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("can't get old group buckets.")));
-    text_to_bktmap(old_bucket_str, old_bucket_ptr, BUCKETDATALEN);
+    text_to_bktmap(old_bucket_str, old_bucket_ptr, &bktlen);
 
     node_array = (nodeinfo*)palloc0(old_nodes->dim1 * sizeof(nodeinfo));
 
@@ -934,7 +936,7 @@ static List* PgxcGetRelationRoleList()
 
         roles_list = list_append_unique_oid(roles_list, shdepend->refobjid);
 
-        tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
 
     tableam_scan_end(scan);
@@ -943,7 +945,8 @@ static List* PgxcGetRelationRoleList()
     /* Include all roles related to resource pool (excluding default resource pool). */
     rel = heap_open(AuthIdRelationId, AccessShareLock);
     scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
-    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         rpoid = InvalidOid;
@@ -1114,7 +1117,7 @@ oidvector* PgxcGetRedisNodes(Relation rel, char redist_kind)
         if (need_free)
             pfree_ext(gmember);
 
-        tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+        tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
     }
     tableam_scan_end(scan);
 
@@ -1334,7 +1337,7 @@ bool IsNodeInLogicCluster(Oid* oid_array, int count, Oid excluded)
     relation = heap_open(PgxcGroupRelationId, AccessShareLock);
     scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
 
-    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
 
     while (tuple) {
         group_oid = HeapTupleGetOid(tuple);
@@ -1963,7 +1966,9 @@ static void PgxcGroupConvertVCGroup(const char* group_name, const char* lcname)
     }
 
     /* check whether other node group exist or not. */
-    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
     if (tuple) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2068,7 +2073,9 @@ static void PgxcGroupSetVCGroup(const char* group_name, const char* install_name
     }
 
     /* check whether other node group exist or not. */
-    tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
+    tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection);
+
     if (tuple) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -3586,7 +3593,7 @@ static void BucketMapCacheAddEntry(Oid groupoid, Datum groupanme_datum, Datum bu
     securec_check(rc, "\0", "\0");
     bmc->bucketmap = (uint2*)palloc0(BUCKETDATALEN * sizeof(uint2));
     ItemPointerCopy(ctid, &bmc->ctid);
-    text_to_bktmap((text*)bucketmap_datum, bmc->bucketmap, BUCKETDATALEN);
+    text_to_bktmap((text*)bucketmap_datum, bmc->bucketmap, &bmc->bucketcnt);
 
     elog(DEBUG2, "Add [%s][%u]'s bucketmap to BucketMapCache", bmc->groupname, groupoid);
 
@@ -3688,7 +3695,7 @@ static void BucketMapCacheUpdate(BucketMapCache* bmc)
     /* update bucketmap and groupname but don't repalloc memory */
     rc = strcpy_s(bmc->groupname, NAMEDATALEN, (const char*)DatumGetCString(groupname_datum));
     securec_check(rc, "\0", "\0");
-    text_to_bktmap((text*)bucketmap_datum, bmc->bucketmap, BUCKETDATALEN);
+    text_to_bktmap((text*)bucketmap_datum, bmc->bucketmap, &bmc->bucketcnt);
 
     ReleaseSysCache(htup);
     heap_close(rel, AccessShareLock);
@@ -3758,7 +3765,7 @@ void BucketMapCacheDestroy(void)
  * Return:
  *    bucketmap that is found
  */
-uint2* BucketMapCacheGetBucketmap(Oid groupoid)
+uint2* BucketMapCacheGetBucketmap(Oid groupoid, int *bucketlen)
 {
     Assert(groupoid != InvalidOid);
 
@@ -3802,6 +3809,7 @@ uint2* BucketMapCacheGetBucketmap(Oid groupoid)
                 BucketMapCacheUpdate(bmc);
             }
             bucketmap = bmc->bucketmap;
+            *bucketlen = bmc->bucketcnt;
 
             ReleaseSysCache(tup);
 
@@ -3839,7 +3847,7 @@ uint2* BucketMapCacheGetBucketmap(Oid groupoid)
         heap_close(rel, AccessShareLock);
 
         /* Re-search from bucketmap cache */
-        bucketmap = BucketMapCacheGetBucketmap(groupoid);
+        bucketmap = BucketMapCacheGetBucketmap(groupoid, bucketlen);
 
         Assert(bucketmap != NULL);
     }
@@ -3858,12 +3866,12 @@ uint2* BucketMapCacheGetBucketmap(Oid groupoid)
  * Return:
  *    bucketmap that is found
  */
-uint2* BucketMapCacheGetBucketmap(const char* groupname)
+uint2* BucketMapCacheGetBucketmap(const char* groupname, int *bucketlen)
 {
     Assert(groupname != NULL);
 
     Oid groupoid = get_pgxc_groupoid(groupname, false /* Missing not OK */);
-    return BucketMapCacheGetBucketmap(groupoid);
+    return BucketMapCacheGetBucketmap(groupoid, bucketlen);
 }
 
 /*
@@ -3973,6 +3981,7 @@ static void generateConsistentHashBucketmap(CreateGroupStmt* stmt, oidvector* no
     int2 *new_node_array = NULL;
     int skip_bucket, target_bucket, tmp_skip_bucket;
     uint2* old_bucket_map = NULL;
+    int old_bucket_cnt = 0;
     int j, new_member_count, old_member_count, b_node, b_nnode;
     int len = BUCKETDATALEN * sizeof(uint2);
     text* groupbucket = NULL;
@@ -4015,7 +4024,7 @@ static void generateConsistentHashBucketmap(CreateGroupStmt* stmt, oidvector* no
             groupbucket =
                 (text*)heap_getattr(tuple, Anum_pgxc_group_buckets, RelationGetDescr(pgxc_group_rel), &isNull);
             if (!isNull) {
-                text_to_bktmap(groupbucket, old_bucket_map, BUCKETDATALEN);
+                text_to_bktmap(groupbucket, old_bucket_map, &old_bucket_cnt);
             }
 
             new_node_array = (int2*)palloc(new_member_count * sizeof(int2));
@@ -4407,7 +4416,7 @@ List* GetNodeGroupOidCompute(Oid role_id)
     return objects;
 }
 
-uint2* GetBucketMapByGroupName(const char* groupname)
+uint2* GetBucketMapByGroupName(const char* groupname, int *bucketlen)
 {
     Relation rel;
     HeapTuple htup;
@@ -4423,7 +4432,7 @@ uint2* GetBucketMapByGroupName(const char* groupname)
 
     groupbucket = heap_getattr(htup, Anum_pgxc_group_buckets, RelationGetDescr(rel), &isNull);
     if (!isNull) {
-        text_to_bktmap((text*)groupbucket, bktmap, BUCKETDATALEN);
+        text_to_bktmap((text*)groupbucket, bktmap, bucketlen);
     }
 
     ReleaseSysCache(htup);

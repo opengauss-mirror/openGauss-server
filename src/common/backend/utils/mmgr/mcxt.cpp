@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * mcxt.c
- *	  POSTGRES memory context management code.
+ *	  openGauss memory context management code.
  *
  * This module handles context management operations that are independent
  * of the particular kind of context being operated on.  It calls
@@ -499,6 +499,23 @@ void MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
         context->prevchild = NULL;
         context->nextchild = NULL;
     }
+}
+
+/*
+ * MemoryContextAllowInCriticalSection
+ *      Allow/disallow allocations in this memory context within a critical
+ *      section.
+ *
+ * Normally, memory allocations are not allowed within a critical section,
+ * because a failure would lead to PANIC.  There are a few exceptions to
+ * that, like allocations related to debugging code that is not supposed to
+ * be enabled in production.  This function can be used to exempt specific
+ * memory contexts from the assertion in palloc().
+ */
+void MemoryContextAllowInCriticalSection(MemoryContext context, bool allow)
+{
+    AssertArg(MemoryContextIsValid(context));
+    context->allowInCritSection = allow;
 }
 
 /*

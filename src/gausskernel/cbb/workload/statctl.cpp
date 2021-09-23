@@ -2780,7 +2780,6 @@ void WLMUpdateUserInfo(void)
             Oid uid = uids[idx];
             char keystr[NAMEDATALEN + 64] = {0};
             char name[NAMEDATALEN];
-
             /* we will get user name, but maybe the user has been removed */
             if (GetRoleName(uid, name, sizeof(name)) == NULL) {
                 continue;
@@ -7179,11 +7178,10 @@ WLMIoStatisticsList* WLMGetIOStatisticsGeneral()
 int WLMGetProgPath(const char* argv0)
 {
     char gaussdb_bin_path[STAT_PATH_LEN] = {0};
-
     int rc;
+    char real_exec_path[PATH_MAX + 1] = {'\0'};
 
     char* exec_path = gs_getenv_r("GAUSSHOME");
-
     if (exec_path == NULL) {
         /* find the binary path with binary name */
         if (find_my_exec(argv0, gaussdb_bin_path) < 0) {
@@ -7198,17 +7196,23 @@ int WLMGetProgPath(const char* argv0)
         get_parent_directory(exec_path);
     }
     Assert(exec_path != NULL);
-    if (backend_env_valid(exec_path, "GAUSSHOME") == false) {
+
+    if (realpath(exec_path, real_exec_path) == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Incorrect backend environment variable $GAUSSHOME"),
+                errdetail("Please refer to the backend instance log for the detail")));
+    }
+    if (backend_env_valid(real_exec_path, "GAUSSHOME") == false) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("Incorrect backend environment variable $GAUSSHOME"),
             errdetail("Please refer to the backend instance log for the detail")));
     }
-    check_backend_env(exec_path);
+    check_backend_env(real_exec_path);
     rc = snprintf_s(g_instance.wlm_cxt->stat_manager.execdir,
         sizeof(g_instance.wlm_cxt->stat_manager.execdir),
         sizeof(g_instance.wlm_cxt->stat_manager.execdir) - 1,
         "%s",
-        exec_path);
+        real_exec_path);
     securec_check_ss(rc, "\0", "\0");
 
     /* If it's absolute path, it will use it as log directory */
@@ -7506,8 +7510,8 @@ bool WLMUpdateMemoryInfo(bool need_adjust)
         if (need_adjust) {
             adjust_count /= 2;  // just adjust 2GB
 
-            gs_atomic_add_32(&dynmicTrackedMemChunks, -adjust_count);
-            gs_atomic_add_32(&processMemInChunks, -adjust_count);
+            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&dynmicTrackedMemChunks, adjust_count);
+            (void)pg_atomic_sub_fetch_u32((volatile uint32*)&processMemInChunks, adjust_count);
             ereport(LOG,
                 (errmsg("Reset memory counting for real used memory is %d MB "
                         "and counting used memory is %d MB, adjust memory is %d MB.",

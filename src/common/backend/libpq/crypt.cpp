@@ -33,13 +33,11 @@
 #include "cipher.h"
 #include "openssl/evp.h"
 
-
 /* IAM authenication: iam role and config path info. */
 #define IAM_ROLE_WITH_DWSDB_PRIV "dws_db_acc"
 #define DWS_IAMAUTH_CONFIG_PATH "/opt/dws/iamauth/"
 #define CLUSTERID_LEN 36 //clusterid example:36cessba-ec3d-478f-a5b7-561a9a5f463f
 #define TENANTID_LEN 32 //tenantid example:9e57dcaa89164a149f1b5f7130c49c52
-
 
 static bool GetValidPeriod(const char *role, password_info *passInfo);
 
@@ -70,14 +68,11 @@ int32 get_password_stored_method(const char* role, char* encrypted_string, int l
     } else if (isSHA256(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
-
         stored_method = SHA256_PASSWORD;
     } else if (isSM3(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SM3_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
-
         stored_method = SM3_PASSWORD;
-
     } else if (isCOMBINED(shadow_pass)) {
         rc = strncpy_s((char*)encrypted_string, len, shadow_pass + SHA256_LENGTH, ENCRYPTED_STRING_LENGTH);
         securec_check(rc, "\0", "\0");
@@ -183,6 +178,150 @@ int CheckUserValid(Port* port, const char* role)
     return retval;
 }
 
+/*
+ * Brief			: whether the digest of passwd equal to the passDigest
+ * Description		: the compare mainly contains the digest of password
+ * Notes			:
+ */
+bool VerifyPasswdDigest(const char* rolename, char* passwd, char* passDigest)
+{
+    char encrypted_md5_password[MD5_PASSWD_LEN + 1] = {0};
+    char encrypted_sha256_password[SHA256_PASSWD_LEN + 1] = {0};
+    char encryptedSm3Password[SM3_PASSWD_LEN + 1] = {0};
+    char encrypted_combined_password[MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1] = {0};
+    char salt[SALT_LENGTH * 2 + 1] = {0};
+    int iteration_count = 0;
+    errno_t rc = EOK;
+
+    if (passwd == NULL || passDigest == NULL || strlen(passDigest) == 0) {
+        return false;
+    }
+
+    if (isMD5(passDigest)) {
+        if (!pg_md5_encrypt(passwd, rolename, strlen(rolename), encrypted_md5_password)) {
+            /* Var 'encrypted_md5_password' has not been assigned any value if the function return 'false' */
+            str_reset(passwd);
+            str_reset(passDigest);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("md5-password encryption failed.")));
+        }
+        if (strncmp(passDigest, encrypted_md5_password, MD5_PASSWD_LEN + 1) == 0) {
+            rc = memset_s(encrypted_md5_password, MD5_PASSWD_LEN + 1, 0, MD5_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            return true;
+        }
+    } else if (isSHA256(passDigest)) {
+        rc = strncpy_s(salt, sizeof(salt), &passDigest[SHA256_LENGTH], sizeof(salt) - 1);
+        securec_check(rc, "\0", "\0");
+        salt[sizeof(salt) - 1] = '\0';
+
+        iteration_count = get_stored_iteration(rolename);
+        if (iteration_count == -1) {
+            iteration_count = ITERATION_COUNT;
+        }
+        if (!pg_sha256_encrypt(passwd, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
+            rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            str_reset(passwd);
+            str_reset(passDigest);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sha256-password encryption failed.")));
+        }
+
+        if (strncmp(passDigest, encrypted_sha256_password, SHA256_LENGTH + SALT_STRING_LENGTH) == 0 && 
+            strncmp(passDigest + (SHA256_PASSWD_LEN - STORED_KEY_STRING_LENGTH), encrypted_sha256_password + 
+                (SHA256_PASSWD_LEN - STORED_KEY_STRING_LENGTH), STORED_KEY_STRING_LENGTH) == 0) {
+            rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            return true;
+        }
+    } else if (isSM3(passDigest)) {
+        rc = strncpy_s(salt, sizeof(salt), &passDigest[SM3_LENGTH], sizeof(salt) - 1);
+        securec_check(rc, "\0", "\0");
+        salt[sizeof(salt) - 1] = '\0';
+
+        iteration_count = get_stored_iteration(rolename);
+        if (!GsSm3Encrypt(passwd, salt, strlen(salt), encryptedSm3Password, NULL, iteration_count)) {
+            rc = memset_s(encryptedSm3Password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed.")));
+        }
+
+        if (strncmp(passDigest, encryptedSm3Password, SM3_PASSWD_LEN) == 0) {
+            rc = memset_s(encryptedSm3Password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            return true;
+        }
+    } else if (isCOMBINED(passDigest)) {
+        rc = strncpy_s(salt, sizeof(salt), &passDigest[SHA256_LENGTH], sizeof(salt) - 1);
+        securec_check(rc, "\0", "\0");
+        salt[sizeof(salt) - 1] = '\0';
+
+        iteration_count = get_stored_iteration(rolename);
+        if (iteration_count == -1) {
+            iteration_count = ITERATION_COUNT;
+        }
+        if (!pg_sha256_encrypt(passwd, salt, strlen(salt), encrypted_sha256_password, NULL, iteration_count)) {
+            rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            str_reset(passwd);
+            str_reset(passDigest);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("first stage encryption password failed")));
+        }
+
+        if (!pg_md5_encrypt(passwd, rolename, strlen(rolename), encrypted_md5_password)) {
+            /* Var 'encrypted_md5_password' has not been assigned any value if the function return 'false' */
+            str_reset(passwd);
+            str_reset(passDigest);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("second stage encryption password failed")));
+        }
+
+        rc = snprintf_s(encrypted_combined_password,
+            MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1,
+            MD5_PASSWD_LEN + SHA256_PASSWD_LEN,
+            "%s%s",
+            encrypted_sha256_password,
+            encrypted_md5_password);
+        securec_check_ss(rc, "\0", "\0");
+
+        /*
+         * When alter user's password:
+         * 1. No need to compare the new iteration and old iteration.
+         * 2. No need to compare MD5 password, just compare SHA256 is enough.
+         */
+        if (strncmp(passDigest, encrypted_combined_password, SHA256_LENGTH + SALT_STRING_LENGTH) == 0 && 
+            strncmp(passDigest + (SHA256_PASSWD_LEN - STORED_KEY_STRING_LENGTH), encrypted_combined_password + 
+                (SHA256_PASSWD_LEN - STORED_KEY_STRING_LENGTH), STORED_KEY_STRING_LENGTH) == 0) {
+            /* clear the sensitive messages in the stack. */
+            rc = memset_s(encrypted_md5_password, MD5_PASSWD_LEN + 1, 0, MD5_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            rc = memset_s(encrypted_combined_password,
+                MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1,
+                0,
+                MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1);
+            securec_check(rc, "\0", "\0");
+            return true;
+        }
+    } else {
+        if (strcmp(passwd, passDigest) == 0) {
+            return true;
+        }
+    }
+
+    /* clear sensitive messages in stack. */
+    rc = memset_s(encrypted_md5_password, MD5_PASSWD_LEN + 1, 0, MD5_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(encryptedSm3Password, SM3_PASSWD_LEN + 1, 0, SM3_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(
+        encrypted_combined_password, MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1, 0, MD5_PASSWD_LEN + SHA256_PASSWD_LEN + 1);
+    securec_check(rc, "\0", "\0");
+
+    return false;
+}
+
 /* Database Security:  Support SHA256.*/
 int crypt_verify(const Port* port, const char* role, char* client_pass)
 {
@@ -245,18 +384,8 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
     if (shadow_pass == NULL || *shadow_pass == '\0')
         return STATUS_ERROR; /* empty password */
 
-    if (isMD5(shadow_pass)) {
-        char crypt_empty[MD5_PASSWD_LEN + 1];
-
-        if (!pg_md5_encrypt("", port->user_name, strlen(port->user_name), crypt_empty)) {
-            pfree_ext(pass_info.shadow_pass);
-            return STATUS_ERROR;
-        }
-
-        if (strcmp(shadow_pass, crypt_empty) == 0) {
-            pfree_ext(pass_info.shadow_pass);
-            return STATUS_ERROR; /* empty password */
-        }
+    if (VerifyPasswdDigest(port->user_name, "\0", shadow_pass)) {
+        return STATUS_ERROR;
     }
 
     /*
@@ -404,52 +533,52 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
             break;
         }
         case uaSM3: {
-            char stored_key[STORED_KEY_BYTES_LENGTH + 1] = {0};
-            char stored_key_string[STORED_KEY_STRING_LENGTH + 1] = {0};
-            char hmac_result[HMAC_LENGTH + 1] = {0};
-            char xor_result[HMAC_LENGTH + 1] = {0};
-            char token[TOKEN_LENGTH + 1] = {0};
-            char hash_result[HMAC_LENGTH + 1] = {0};
-            char hash_result_string[HMAC_LENGTH * 2 + 1] = {0};
-            char client_pass_bytes[HMAC_LENGTH + 1] = {0};
-            int hmac_length = HMAC_LENGTH;
+            char stored_key_sm3[STORED_KEY_BYTES_LENGTH + 1] = {0};
+            char stored_key_string_sm3[STORED_KEY_STRING_LENGTH + 1] = {0};
+            char hmac_result_sm3[HMAC_LENGTH + 1] = {0};
+            char xor_result_sm3[HMAC_LENGTH + 1] = {0};
+            char token_sm3[TOKEN_LENGTH + 1] = {0};
+            char hash_result_sm3[HMAC_LENGTH + 1] = {0};
+            char hash_result_string_sm3[HMAC_LENGTH * 2 + 1] = {0};
+            char client_pass_bytes_sm3[HMAC_LENGTH + 1] = {0};
+            int hmac_length_sm3 = HMAC_LENGTH;
 
             if (H_LENGTH != strlen(client_pass)) {
                 pfree_ext(pass_info.shadow_pass);
                 return STATUS_WRONG_PASSWORD;
             }
 
-            errorno = strncpy_s(stored_key_string,
-                sizeof(stored_key_string),
+            errorno = strncpy_s(stored_key_string_sm3,
+                sizeof(stored_key_string_sm3),
                 &shadow_pass[SM3_LENGTH + SALT_STRING_LENGTH + HMAC_STRING_LENGTH],
-                sizeof(stored_key_string) - 1);
+                sizeof(stored_key_string_sm3) - 1);
             securec_check(errorno, "\0", "\0");
-            stored_key_string[sizeof(stored_key_string) - 1] = '\0';
-            sha_hex_to_bytes32(stored_key, stored_key_string);
-            sha_hex_to_bytes4(token, (char*)port->token);
+            stored_key_string_sm3[sizeof(stored_key_string_sm3) - 1] = '\0';
+            sha_hex_to_bytes32(stored_key_sm3, stored_key_string_sm3);
+            sha_hex_to_bytes4(token_sm3, (char*)port->token);
             CRYPT_hmac_ret = CRYPT_hmac(NID_hmacWithSHA256,
-                (GS_UCHAR*)stored_key,
+                (GS_UCHAR*)stored_key_sm3,
                 STORED_KEY_LENGTH,
-                (GS_UCHAR*)token,
+                (GS_UCHAR*)token_sm3,
                 TOKEN_LENGTH,
-                (GS_UCHAR*)hmac_result,
-                (GS_UINT32*)&hmac_length);
+                (GS_UCHAR*)hmac_result_sm3,
+                (GS_UINT32*)&hmac_length_sm3);
 
             if (CRYPT_hmac_ret) {
                 pfree_ext(pass_info.shadow_pass);
                 return STATUS_ERROR;
             }
 
-            sha_hex_to_bytes32(client_pass_bytes, client_pass);
-            if (XOR_between_password(hmac_result, client_pass_bytes, xor_result, HMAC_LENGTH)) {
+            sha_hex_to_bytes32(client_pass_bytes_sm3, client_pass);
+            if (XOR_between_password(hmac_result_sm3, client_pass_bytes_sm3, xor_result_sm3, HMAC_LENGTH)) {
                 pfree_ext(pass_info.shadow_pass);
                 return STATUS_ERROR;
             }
 
-            CRYPT_digest_ret = EVP_Digest((GS_UCHAR*)xor_result,
+            CRYPT_digest_ret = EVP_Digest((GS_UCHAR*)xor_result_sm3,
                 HMAC_LENGTH,
-                (GS_UCHAR*)hash_result,
-                (GS_UINT32*)&hmac_length,
+                (GS_UCHAR*)hash_result_sm3,
+                (GS_UINT32*)&hmac_length_sm3,
                 EVP_sm3(),
                 NULL);
 
@@ -458,8 +587,8 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                 return STATUS_ERROR;
             }
 
-            sha_bytes_to_hex64((uint8*)hash_result, hash_result_string);
-            if (strncmp(hash_result_string, stored_key_string, HMAC_LENGTH * 2) == 0) {
+            sha_bytes_to_hex64((uint8*)hash_result_sm3, hash_result_string_sm3);
+            if (strncmp(hash_result_string_sm3, stored_key_string_sm3, HMAC_LENGTH * 2) == 0) {
                 RFC5802_pass = true;
             } else {
                 pfree_ext(pass_info.shadow_pass);
@@ -505,8 +634,8 @@ int crypt_verify(const Port* port, const char* role, char* client_pass)
                     errorno = memset_s(crypt_client_pass, (SM3_PASSWD_LEN + 1), 0, (SM3_PASSWD_LEN + 1));
                     securec_check(errorno, "\0", "\0");
                 }
-                if (!gs_sm3_encrypt(
-                        client_pass, port->user_name, strlen(port->user_name), crypt_client_pass, NULL)) {
+                if (!GsSm3Encrypt(
+                    client_pass, port->user_name, strlen(port->user_name), crypt_client_pass, NULL)) {
                     pfree_ext(crypt_client_pass);
                     pfree_ext(pass_info.shadow_pass);
                     return STATUS_ERROR;

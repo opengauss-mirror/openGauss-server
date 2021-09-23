@@ -1152,9 +1152,9 @@ NON_EXEC_STATIC void WLMmonitorMain(void)
          * pooler thread does NOT exist any more, PoolerLock of LWlock is used instead.
          *
          * PoolManagerDisconnect() which is called by PGXCNodeCleanAndRelease()
-         * is the last call to pooler in the postgres thread, and PoolerLock is
+         * is the last call to pooler in the openGauss thread, and PoolerLock is
          * used in PoolManagerDisconnect(), but it is called after ProcKill()
-         * when postgres thread exits.
+         * when openGauss thread exits.
          * ProcKill() releases any of its held LW locks. So Assert(!(proc == NULL ...))
          * will fail in LWLockAcquire() which is called by PoolManagerDisconnect().
          *
@@ -1475,9 +1475,9 @@ NON_EXEC_STATIC void WLMarbiterMain(void)
          * pooler thread does NOT exist any more, PoolerLock of LWlock is used instead.
          *
          * PoolManagerDisconnect() which is called by PGXCNodeCleanAndRelease()
-         * is the last call to pooler in the postgres thread, and PoolerLock is
+         * is the last call to pooler in the openGauss thread, and PoolerLock is
          * used in PoolManagerDisconnect(), but it is called after ProcKill()
-         * when postgres thread exits.
+         * when openGauss thread exits.
          * ProcKill() releases any of its held LW locks. So Assert(!(proc == NULL ...))
          * will fail in LWLockAcquire() which is called by PoolManagerDisconnect().
          *

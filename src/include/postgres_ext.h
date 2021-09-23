@@ -3,16 +3,16 @@
  * postgres_ext.h
  *
  *	   This file contains declarations of things that are visible everywhere
- *	in PostgreSQL *and* are visible to clients of frontend interface libraries.
+ *	in openGauss *and* are visible to clients of frontend interface libraries.
  *	For example, the Oid type is part of the API of libpq and other libraries.
  *
  *	   Declarations which are specific to a particular interface should
  *	go in the header file for that interface (such as libpq-fe.h).	This
- *	file is only for fundamental Postgres declarations.
+ *	file is only for fundamental openGauss declarations.
  *
- *	   User-written C functions don't count as "external to Postgres."
+ *	   User-written C functions don't count as "external to openGauss."
  *	Those function much as local modifications to the backend itself, and
- *	use header files that are otherwise internal to Postgres to interface
+ *	use header files that are otherwise internal to openGauss to interface
  *	with the backend.
  *
  * src/include/postgres_ext.h
@@ -25,7 +25,7 @@
 
 #include "gs_thread.h"
 /*
- * Object ID is a fundamental type in Postgres.
+ * Object ID is a fundamental type in openGauss.
  */
 typedef unsigned int Oid;
 
@@ -36,11 +36,12 @@ typedef unsigned int Oid;
 #endif
 
 #define VirtualBktOid     (Oid(1))
-#define InvalidBktId    (-1)
+#define VirtualSegmentOid (Oid(2))
+#define InvalidBktId      (-1)
+#define SegmentBktId      (16384)
 
-#define DIR_BUCKET_ID    (-2) // relfilenode points to a bucket dir
-#define BUCKET_ID_IS_DIR(bucket_node) ((bucket_node) == DIR_BUCKET_ID)
-#define BUCKET_NODE_IS_VALID(bucket_node) ((bucket_node) > InvalidBktId)
+#define BUCKET_NODE_IS_VALID(bucket_node) ((bucket_node) > InvalidBktId && (bucket_node) < SegmentBktId)
+#define BUCKET_OID_IS_VALID(bucketOid) ((bucketOid) >= FirstNormalObjectId)
 
 #define OID_MAX  UINT_MAX
 

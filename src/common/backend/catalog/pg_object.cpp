@@ -24,7 +24,9 @@
 #include "postgres.h"
 #include "access/heapam.h"
 #include "access/xact.h"
+#include "access/transam.h"
 #include "catalog/indexing.h"
+#include "utils/inval.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_class.h"
 #include "utils/memutils.h"
@@ -32,6 +34,7 @@
 #include "utils/timestamp.h"
 #include "utils/rel.h"
 #include "miscadmin.h"
+#include "catalog/index.h"
 
 /*
  * @Description: Insert a new record to pg_object.
@@ -40,9 +43,11 @@
  * @in creator - object creator.
  * @in ctime - object create time.
  * @in mtime - object modify time.
+ * @in createcsn - the commit sequence number when object create.
+ * @in changecsn - the commit sequence number when the old version expires. 
  * @returns - void
  */
-void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, bool hasCtime, bool hasMtime)
+void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, const PgObjectOption objectOpt)
 {
     Datum values[Natts_pg_object];
     bool nulls[Natts_pg_object];
@@ -59,10 +64,11 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, bool ha
     rc = memset_s(replaces, sizeof(replaces), true, sizeof(replaces));
     securec_check_c(rc, "\0", "\0");
 
-    if (!IsNormalProcessingMode() || u_sess->attr.attr_common.upgrade_mode != 0 || IsInitdb) {
+    if (IsInitdb) {
         return;
     }
     Datum nowtime = TimeGetDatum(GetCurrentTransactionStartTimestamp());
+    CommitSeqNo csn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
     if (nowtime == (Datum)NULL) {
         return;
     }
@@ -75,18 +81,29 @@ void CreatePgObject(Oid objectOid, PgObjectType objectType, Oid creator, bool ha
         nulls[Anum_pg_object_creator - 1] = true;
     }
 
-    if (hasCtime) {
+    if (objectOpt.hasCtime) {
         values[Anum_pg_object_ctime - 1] = nowtime;
     } else {
         nulls[Anum_pg_object_ctime - 1] = true;
     }
 
-    if (hasMtime) {
+    if (objectOpt.hasMtime) {
         values[Anum_pg_object_mtime - 1] = nowtime;
     } else {
         nulls[Anum_pg_object_mtime - 1] = true;
     }
 
+    if (objectOpt.hasCreatecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+        values[Anum_pg_object_createcsn - 1] = UInt64GetDatum(csn);
+    } else {
+        nulls[Anum_pg_object_createcsn - 1] = true;
+    }
+
+    if (objectOpt.hasChangecsn && (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+        values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
+    } else {
+        nulls[Anum_pg_object_changecsn - 1] = true;
+    }
     rel = heap_open(PgObjectRelationId, RowExclusiveLock);
 
     oldtuple = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
@@ -133,6 +150,113 @@ void DeletePgObject(Oid objectOid, PgObjectType objectType)
 }
 
 /*
+ * Description: If an index is defined on the table, the changecsn of that table should
+ * be the maximum value of the changecsn of the table and index.
+ *
+ * Parameters:
+ * 	@in indexIds: the index list define on table.
+ * 	@in relationChangecsn: the changecsn of table recorded in pg_object.
+ * Returns: CommitSeqNo
+ */
+static CommitSeqNo GetMaxChangecsn(List* indexIds, CommitSeqNo relationChangecsn)
+{
+    HeapTuple tup = NULL;
+    TupleDesc tupdesc = NULL;
+    ListCell* indexId = NULL;
+    CommitSeqNo changecsn = InvalidCommitSeqNo;
+    CommitSeqNo maxChangecsn = relationChangecsn;
+    bool changecsnIsnull = false;
+    Datum valueChangecsn;
+    Relation objectRel = heap_open(PgObjectRelationId, AccessShareLock);
+    tupdesc = RelationGetDescr(objectRel);
+    foreach(indexId, indexIds) {
+        Oid indexOid = lfirst_oid(indexId);
+        tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(indexOid), CharGetDatum(OBJECT_TYPE_INDEX));
+        if (!HeapTupleIsValid(tup)) { 
+            changecsn = InvalidCommitSeqNo;
+        } else {
+            valueChangecsn = heap_getattr(tup, Anum_pg_object_changecsn, tupdesc, &changecsnIsnull);
+            if (!changecsnIsnull) {
+                changecsn = UInt64GetDatum(valueChangecsn);
+            }
+            ReleaseSysCache(tup);
+        }
+        if (changecsn > maxChangecsn) {
+            maxChangecsn = changecsn;
+        }
+    }
+    list_free_ext(indexIds);
+    heap_close(objectRel, AccessShareLock);
+    return maxChangecsn;
+}
+
+/*
+ * Description: Get createcsn and changecsn from pg_object.
+ *
+ * Parameters:
+ * 	@in objectOid: object id.
+ * 	@in objectType: object type.
+ * 	@in csnInfo: the createcsn and changecsn of object.
+ * Returns: void
+ */
+void GetObjectCSN(Oid objectOid, Relation userRel, PgObjectType objectType, ObjectCSN * const csnInfo)
+{
+    HeapTuple tup = NULL;
+    TupleDesc tupdesc = NULL;
+    bool createcsnIsnull = false;
+    bool changecsnIsnull = false;
+    Relation relation = NULL;
+    Datum valueChangecsn;
+    Datum valueCreatecsn;
+    /* 
+       The pg_object system table does not hold objects generated during the database init 
+       process,so the object's createcsn and changecsn is zero during the process.
+    */
+    if (IsInitdb || !(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM)) {
+        return;
+    }
+    /* 
+       The pg_object records mtime and changecsn when the DDL command occurs.However,unlike 
+       the normal table creation process, no user can directly operate on the system 
+       table after the initialization process. So we record createcsn and changecsn of the 
+       system table as zero.
+    */
+    if (objectOid < FirstNormalObjectId) {
+        return;
+    }
+    relation = heap_open(PgObjectRelationId, RowExclusiveLock);
+    tupdesc = RelationGetDescr(relation);
+    tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
+    if (!HeapTupleIsValid(tup)) { 
+        heap_close(relation, RowExclusiveLock);
+        return;
+    } else {
+        valueChangecsn = heap_getattr(tup, Anum_pg_object_changecsn, tupdesc, &changecsnIsnull);
+        valueCreatecsn = heap_getattr(tup, Anum_pg_object_createcsn, tupdesc, &createcsnIsnull);
+        if (!changecsnIsnull) {
+            csnInfo->changecsn = UInt64GetDatum(valueChangecsn);
+        }
+        if (!createcsnIsnull) {
+            csnInfo->createcsn = UInt64GetDatum(valueCreatecsn);
+        }
+        /* 
+            When an  index is created or modified, the changecsn of table defining
+            index should be updated to the maximum changecsn of the index and table.
+        */
+        if (objectType == OBJECT_TYPE_RELATION) {
+            bool hasindex = userRel->rd_rel->relhasindex;
+            if (hasindex) {
+                List* indexIds = RelationGetIndexList(userRel);
+                csnInfo->changecsn = GetMaxChangecsn(indexIds, csnInfo->changecsn);
+            }
+        }
+        ReleaseSysCache(tup);
+        heap_close(relation, RowExclusiveLock);
+    }
+    return;
+}
+
+/*
  * Description: Check object whether exist.
  *
  * Parameters:
@@ -173,6 +297,7 @@ bool CheckObjectExist(Oid objectOid, PgObjectType objectType)
  * Parameters:
  * 	@in objectOid: object id.
  * 	@in objectType: object type.
+ * 	@in updateChangecsn: If true, update changecSN.
  * Returns: void
  */
 void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
@@ -182,21 +307,16 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
     }
     Relation relation = NULL;
     HeapTuple tup = NULL;
+    CommitSeqNo csn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
     Datum nowtime = TimeGetDatum(GetCurrentTransactionStartTimestamp());
-    if (!IsNormalProcessingMode() || u_sess->attr.attr_common.upgrade_mode != 0 || IsInitdb) {
+    if (IsInitdb || !IsNormalProcessingMode() || nowtime == (Datum)NULL || !CheckObjectExist(objectOid, objectType)) {
         return;
     }
-    if (nowtime == (Datum)NULL) {
-        return;
-    }
-    if (!CheckObjectExist(objectOid, objectType)) {
-        return;
-    }
-
     relation = heap_open(PgObjectRelationId, RowExclusiveLock);
     tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
     if (!HeapTupleIsValid(tup)) {
-        CreatePgObject(objectOid, objectType, InvalidOid, false, true);
+        PgObjectOption objectOpt = {false, true, false, true};
+        CreatePgObject(objectOid, objectType, InvalidOid, objectOpt);
     } else {
         Datum values[Natts_pg_object];
         bool nulls[Natts_pg_object];
@@ -210,12 +330,67 @@ void UpdatePgObjectMtime(Oid objectOid, PgObjectType objectType)
         securec_check(rc, "\0", "\0");
         replaces[Anum_pg_object_mtime - 1] = true;
         values[Anum_pg_object_mtime - 1] = nowtime;
-
+        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+            if (!u_sess->exec_cxt.isExecTrunc) {
+                replaces[Anum_pg_object_changecsn - 1] = true;
+                values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
+            }
+        }
         HeapTuple newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
         simple_heap_update(relation, &newtuple->t_self, newtuple);
         CatalogUpdateIndexes(relation, newtuple);
         ReleaseSysCache(tup);
         heap_freetuple_ext(newtuple);
+        if (t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) {
+            if (!u_sess->exec_cxt.isExecTrunc &&
+                (objectType == OBJECT_TYPE_RELATION || objectType == OBJECT_TYPE_INDEX)) {
+                Relation userRel = RelationIdGetRelation(objectOid);
+                CacheInvalidateRelcache(userRel);
+                RelationClose(userRel);
+            }
+        }
+    }
+    heap_close(relation, RowExclusiveLock);
+}
+
+/*
+ * Description: Update changecsn in pg_object when object changed.
+ *
+ * Parameters:
+ * 	@in objectOid: object id.
+ * 	@in objectType: object type.
+ * Returns: void
+ */
+void UpdatePgObjectChangecsn(Oid objectOid, PgObjectType objectType)
+{
+    Relation relation = NULL;
+    HeapTuple tup = NULL;
+    CommitSeqNo csn = t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo;
+    if (!(t_thrd.proc->workingVersionNum >= INPLACE_UPDATE_WERSION_NUM) || IsInitdb) {
+        return;
+    }
+    if (!CheckObjectExist(objectOid, objectType)) {
+        return;
+    }
+    relation = heap_open(PgObjectRelationId, RowExclusiveLock);
+    tup = SearchSysCache2(PGOBJECTID, ObjectIdGetDatum(objectOid), CharGetDatum(objectType));
+    if (!HeapTupleIsValid(tup)) {
+        PgObjectOption objectOpt = {false, true, false, true};
+        CreatePgObject(objectOid, objectType, InvalidOid, objectOpt);
+    } else {
+        Datum values[Natts_pg_object] = {0};
+        bool nulls[Natts_pg_object] = {0};
+        bool replaces[Natts_pg_object] = {0};
+        replaces[Anum_pg_object_changecsn - 1] = true;
+        values[Anum_pg_object_changecsn - 1] = UInt64GetDatum(csn);
+        HeapTuple newtuple = heap_modify_tuple(tup, RelationGetDescr(relation), values, nulls, replaces);
+        simple_heap_update(relation, &newtuple->t_self, newtuple);
+        CatalogUpdateIndexes(relation, newtuple);
+        ReleaseSysCache(tup);
+        heap_freetuple_ext(newtuple);
+        Relation userRel = RelationIdGetRelation(objectOid);
+        CacheInvalidateRelcache(userRel);
+        RelationClose(userRel);
     }
     heap_close(relation, RowExclusiveLock);
 }

@@ -33,6 +33,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = libcomm_util.o libcomm_err.o libcomm_list.o libcomm_thread.o libcomm_lqueue.o libcomm_queue.o libcomm_perf.o libcomm_adapter.o libcomm_interface.o libcomm_shakehands.o libcomm_memory.o
+OBJS = libcomm_util.o libcomm_err.o libcomm_list.o libcomm_thread.o libcomm_lqueue.o libcomm_queue.o libcomm_perf.o \
+      libcomm_adapter.o libcomm_interface.o libcomm_shakehands.o libcomm_memory.o libcomm_client_ssl.o libcomm_server_ssl.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

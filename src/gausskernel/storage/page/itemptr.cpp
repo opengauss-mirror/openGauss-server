@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * itemptr.cpp
- *	  POSTGRES disk item pointer code.
+ *	  openGauss disk item pointer code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

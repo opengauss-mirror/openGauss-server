@@ -11,27 +11,30 @@
 subdir = src
 top_builddir = ..
 include Makefile.global
--include distribute/Makefile.dist
+
+ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_yes)
+dirs_in_central_mode = $(top_builddir)/../distribute/cm $(top_builddir)/../distribute/bin 
+endif
 
 ifeq ($(enable_multiple_nodes), yes)
 SUBDIRS = \
 	lib \
-	distribute/cm \
-	distribute/gtm \
+	$(top_builddir)/../distribute/cm \
+	$(top_builddir)/../distribute/gtm \
 	common \
-	distribute/lib/hotpatch \
-	distribute/bin \
+	$(top_builddir)/../distribute/lib/hotpatch \
+	$(top_builddir)/../distribute/bin \
 	lib/elog \
 	bin \
 	gausskernel \
 	common/backend/utils/mb/conversion_procs \
 	common/backend/snowball \
 	include \
-	distribute/include \
+	$(top_builddir)/../distribute/include \
 	common/pl \
 	makefiles \
-	distribute/test/regress \
-	distribute/test/ha
+	$(top_builddir)/../distribute/test/regress \
+	$(top_builddir)/../distribute/test/ha
 else
 SUBDIRS = \
 	lib \
@@ -44,7 +47,7 @@ SUBDIRS = \
 	include \
 	common/pl \
 	makefiles \
-	test/regress 
+	test/regress
 endif
 
 # There are too many interdependencies between the subdirectories, so
@@ -53,12 +56,12 @@ endif
 
 # cm and gtm all depends on etcdapi, build it first
 ifeq ($(enable_multiple_nodes), yes)
-all: $(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h
+all: $(top_builddir)/../distribute/cm/cm_etcdapi/libgoetcdapi.h
 
-install: $(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h
+install: $(top_builddir)/../distribute/cm/cm_etcdapi/libgoetcdapi.h
 
-$(top_builddir)/src/distribute/cm/cm_etcdapi/libgoetcdapi.h:
-	$(MAKE) -C $(top_builddir)/src/distribute/cm/cm_etcdapi
+$(top_builddir)/../distribute/cm/cm_etcdapi/libgoetcdapi.h:
+	$(MAKE) -C $(top_builddir)/../distribute/cm/cm_etcdapi
 endif
 
 $(recurse)
@@ -88,24 +91,25 @@ distprep:
 ifeq ($(enable_multiple_nodes), yes)
 clean:
 	$(MAKE) -C common $@
-	$(MAKE) -C distribute/lib $@
+	$(MAKE) -C $(top_builddir)/../distribute/lib $@
 	$(MAKE) -C lib $@
-	$(MAKE) -C distribute/test $@
+	$(MAKE) -C $(top_builddir)/../distribute/test $@
 	$(MAKE) -C common/tutorial NO_PGXS=1 $@
 
 distclean maintainer-clean:
-	$(MAKE) -C distribute/test $@
+	$(MAKE) -C $(top_builddir)/../distribute/test $@
 	$(MAKE) -C common/tutorial NO_PGXS=1 $@
 	rm -f Makefile.port Makefile.global
 
 coverage:
 	$(MAKE) -C lib $@
 	$(MAKE) -C common $@
-	$(MAKE) -C distribute/lib $@
+	$(MAKE) -C $(top_builddir)/../distribute/lib $@
 	$(MAKE) -C cm $@	
 	$(MAKE) -C gausskernel $@
 	$(MAKE) -C common/utils/mb/conversion_procs $@
 	$(MAKE) -C common/snowball $@
+	$(MAKE) -C test/whitebox $@
 	$(MAKE) -C bin $@
 else
 clean:
@@ -115,12 +119,14 @@ clean:
 	$(MAKE) -C common/tutorial NO_PGXS=1 $@
 	$(MAKE) -C test/isolation $@
 	$(MAKE) -C test/thread $@
+	$(MAKE) -C test/whitebox $@
 
 distclean maintainer-clean:
 	$(MAKE) -C test $@
 	$(MAKE) -C common/tutorial NO_PGXS=1 $@
 	$(MAKE) -C test/isolation $@
 	$(MAKE) -C test/thread $@
+	$(MAKE) -C test/whitebox $@
 	rm -f Makefile.port Makefile.global
 
 coverage:
@@ -130,6 +136,7 @@ coverage:
 	$(MAKE) -C gausskernel $@
 	$(MAKE) -C common/utils/mb/conversion_procs $@
 	$(MAKE) -C common/snowball $@
+	$(MAKE) -C test/whitebox $@
 	$(MAKE) -C bin $@
 endif
 

@@ -31,6 +31,7 @@ static void stream_walker_query_recursive(Query* query, shipping_context *cxt);
 static void stream_walker_query_distinct(Query* query, shipping_context *cxt);
 static void stream_walker_query_returning(Query* query, shipping_context *cxt);
 static void stream_walker_query_merge(Query* query, shipping_context *cxt);
+static void stream_walker_query_upsert(Query *query, shipping_context *cxt);
 static void stream_walker_query_rtable(Query* query, shipping_context *cxt);
 static void stream_walker_query_exec_direct(Query* query, shipping_context *cxt);
 static void stream_walker_query_cte(Query* query, shipping_context *cxt);
@@ -184,6 +185,10 @@ static void stream_walker_query_merge(Query* query, shipping_context *cxt)
     
                     cxt->is_nextval_shippable = saved_is_nextval_shippable;
                     cxt->allow_func_in_targetlist = false;
+                } else {
+                    if (expression_tree_walker((Node*)mc->targetList, (bool (*)())stream_walker, (void *)cxt)) {
+                        cxt->current_shippable = false;
+                    }
                 }
     
                 if (expression_tree_walker((Node*)mc->qual, (bool (*)())stream_walker, (void *)cxt)) {
@@ -194,6 +199,22 @@ static void stream_walker_query_merge(Query* query, shipping_context *cxt)
                     cxt->current_shippable = false;
                 }
             }
+        }
+    }
+}
+
+static void stream_walker_query_upsert(Query *query, shipping_context *cxt)
+{
+    if (query->commandType == CMD_INSERT && query->upsertClause != NULL) {
+        /* For replicated table in stream, upsertClause cannot contain unshippable expression */
+        if (query->resultRelation &&
+            IsLocatorReplicated(rt_fetch(query->resultRelation, query->rtable)->locator_type)) {
+            bool saved_disallow_volatile_func_shippable = cxt->disallow_volatile_func_shippable;
+            cxt->disallow_volatile_func_shippable = true;
+            if (expression_tree_walker((Node *)query->upsertClause, (bool (*)())stream_walker, (void *)cxt)) {
+                cxt->current_shippable = false;
+            }
+            cxt->disallow_volatile_func_shippable = saved_disallow_volatile_func_shippable;
         }
     }
 }
@@ -344,6 +365,7 @@ static void stream_walker_query(Query* query, shipping_context *cxt)
     stream_walker_query_rtable(query, cxt);
     stream_walker_query_exec_direct(query, cxt);
     stream_walker_query_merge(query, cxt);
+    stream_walker_query_upsert(query, cxt);
     stream_walker_query_cte(query, cxt);
     stream_walker_query_limitoffset(query, cxt);
     stream_walker_query_targetlist(query, cxt);
@@ -758,6 +780,33 @@ static bool contain_unsupport_expression(Node* expr, void* context)
             foreach (temp, (List*)expr) {
                 if (contain_unsupport_expression((Node*)lfirst(temp), context)) {
                     cxt->current_shippable = false;
+                }
+            }
+        } break;
+        case T_WindowFunc: {
+            WindowFunc* winfunc = (WindowFunc*)expr;
+            ListCell* temp = NULL;
+
+            /*
+             * We need to be extra careful with row_number() in INSERT/UPDATE/DELETE/MERGE
+             * on replicated relations, since the data on DNs doesn't neccessarily have the same order
+             * for example:
+             * INSERT INTO rep SELECT c1, c2, row_number() OVER (order by c1) as rn FROM rep WHERE c1 = 1;
+             * The output of column rep.c2 in SELECT may vary depends on the order of data in rep.c2,
+             * which is not allowed in replicated relations. Thus, we need to make sure the row_number()
+             * doesn't ship in this case.
+             */
+            if (winfunc->winfnoid == ROWNUMBERFUNCOID) {
+                foreach (temp, cxt->query_list) {
+                    Query* query = (Query*)lfirst(temp);
+                    if (query->resultRelation &&
+                        GetLocatorType(rt_fetch(query->resultRelation, query->rtable)->relid) == 'R') {
+                        sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                            NOTPLANSHIPPING_LENGTH,
+                            "row_number() can not be shipped when INSERT/UPDATE/DELETE a replication table");
+                        securec_check_ss_c(sprintf_rc, "\0", "\0");
+                        cxt->current_shippable = false;
+                    }
                 }
             }
         } break;

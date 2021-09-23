@@ -237,6 +237,8 @@ void GPCResetAll()
 
 void GPCCleanDatanodeStatement(int dn_stmt_num, const char* stmt_name)
 {
+    if (stmt_name == NULL || stmt_name[0] == '\0' || !IS_PGXC_COORDINATOR)
+        return;
     int n = 0;
     char *tmp_name = NULL;
     for (n = 0; n < dn_stmt_num; n++) {

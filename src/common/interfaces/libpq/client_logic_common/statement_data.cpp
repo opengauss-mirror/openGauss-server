@@ -16,7 +16,7 @@
  * statement_data.cpp
  *
  * IDENTIFICATION
- *	  src\common\interfaces\libpq\client_logic_common\statement_data.cpp
+ *      src\common\interfaces\libpq\client_logic_common\statement_data.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -29,6 +29,11 @@ StatementData::~StatementData()
 {
     params.new_query_size = 0;
     libpq_free(params.new_query);
+}
+
+ICachedColumnManager* StatementData::GetCacheManager() const
+{
+    return conn->client_logic->m_cached_column_manager;
 }
 
 const size_t StatementData::get_total_change() const
@@ -98,10 +103,13 @@ void StatementData::replace_raw_values()
             }
         }
         /* move to the right */
-        check_memmove_s(memmove_s(params.new_query + raw_value->m_location + new_size,
-            params.new_query_size - raw_value->m_location - original_size,
-            params.new_query + raw_value->m_location + original_size,
-            params.new_query_size - raw_value->m_location - original_size));
+        size_t dest_max = params.new_query_size - raw_value->m_location - original_size;
+        if (dest_max > 0) {
+            check_memmove_s(memmove_s(params.new_query + raw_value->m_location + new_size,
+                dest_max,
+                params.new_query + raw_value->m_location + original_size,
+                params.new_query_size - raw_value->m_location - original_size));
+        }
         /* shrink buffer */
         if (new_size < original_size) {
             params.new_query = (char *)libpq_realloc(params.new_query, params.new_query_size,

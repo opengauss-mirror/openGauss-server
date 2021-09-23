@@ -28,13 +28,16 @@
 #include "utils/elog.h"
 #include "utils/builtins.h"
 #include "access/double_write.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "pgstat.h"
 #include "utils/palloc.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "gs_bbox.h"
 #include "postmaster/bgwriter.h"
+#include "knl/knl_thread.h"
+#include "tde_key_management/tde_key_storage.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -189,7 +192,7 @@ void dw_pread_file(int fd, void *buf, int size, int64 offset)
     }
 }
 
-void dw_pwrite_file(int fd, const void *buf, int size, int64 offset)
+void dw_pwrite_file(int fd, const void *buf, int size, int64 offset, const char* fileName)
 {
     int write_size = 0;
     uint32 try_times = 0;
@@ -201,14 +204,15 @@ void dw_pwrite_file(int fd, const void *buf, int size, int64 offset)
             pg_usleep(DW_SLEEP_US);
             continue;
         } else if (write_size < 0) {
-            ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("Write file error")));
+            ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
+                errmsg("Write file \"%s\" error: %m", fileName)));
         } else {
             break;
         }
     }
     if (write_size != size) {
         ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW),
-                        errmsg("Write file size mismatch: expected %d, written %d", size, write_size)));
+            errmsg("Write file \"%s\" size mismatch: expected %d, written %d", fileName, size, write_size)));
     }
 }
 
@@ -243,7 +247,7 @@ static void dw_extend_file(int fd, const void *buf, int buf_size, int64 size, bo
     remain_size = size;
     while (remain_size > 0) {
         size = (remain_size > buf_size) ? buf_size : remain_size;
-        dw_pwrite_file(fd, buf, size, offset);
+        dw_pwrite_file(fd, buf, size, offset, (single ? SINGLE_DW_FILE_NAME : DW_FILE_NAME));
         offset += size;
         remain_size -= size;
     }
@@ -251,7 +255,7 @@ static void dw_extend_file(int fd, const void *buf, int buf_size, int64 size, bo
 
 static void dw_set_pg_checksum(char *page, BlockNumber blockNum)
 {
-    if (PageIsNew(page)) {
+    if (!CheckPageZeroCases((PageHeader)page)) {
         return;
     }
 
@@ -263,24 +267,19 @@ static void dw_set_pg_checksum(char *page, BlockNumber blockNum)
 static bool dw_verify_pg_checksum(PageHeader page_header, BlockNumber blockNum)
 {
     /* new page donot have crc and lsn, we donot recovery it */
-    if (PageIsNew(page_header)) {
+    if (!CheckPageZeroCases(page_header)) {
         ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: new page")));
         return false;
     }
-    if (PageIsChecksumByFNV1A(page_header)) {
-        uint16 checksum = pg_checksum_page((char *)page_header, blockNum);
-        return checksum == page_header->pd_checksum;
-    } else {
-        ereport(WARNING, (errmodule(MOD_DW), errmsg("DW verify checksum: page checksum flag is wrong")));
-        return false;
-    }
+    uint16 checksum = pg_checksum_page((char *)page_header, blockNum);
+    return checksum == page_header->pd_checksum;
 }
 
 inline void dw_prepare_page(dw_batch_t *batch, uint16 page_num, uint16 page_id, uint16 dwn)
 {
-    if (g_instance.dw_batch_cxt.contain_hashbucket == true) {
+    if (g_instance.dw_batch_cxt.is_new_relfilenode == true) {
         if (t_thrd.proc->workingVersionNum < DW_SUPPORT_SINGLE_FLUSH_VERSION) {
-            page_num = page_num | IS_HASH_BKT_MASK;
+            page_num = page_num | IS_HASH_BKT_SEGPAGE_MASK;
         }
         batch->buftag_ver = HASHBUCKET_TAG;
     } else {
@@ -364,7 +363,7 @@ static void dw_recover_file_head(knl_g_dw_context *cxt, bool single)
     }
 
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0);
+    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0, (single ? SINGLE_DW_FILE_NAME : DW_FILE_NAME));
     pgstat_report_waitevent(WAIT_EVENT_END);
 }
 
@@ -379,11 +378,45 @@ static inline void dw_log_page_header(PageHeader page)
 }
 
 template <typename T>
-static inline void dw_log_data_page(int elevel, const char *state, T *buf_tag)
+static inline void dw_log_data_page(int elevel, const char* state, T* buf_tag)
 {
     ereport(elevel, (errmodule(MOD_DW),
                      errmsg("%s: buf_tag[rel %u/%u/%u blk %u fork %d]", state, buf_tag->rnode.spcNode,
                             buf_tag->rnode.dbNode, buf_tag->rnode.relNode, buf_tag->blockNum, buf_tag->forkNum)));
+}
+
+template <typename T>
+static SMGR_READ_STATUS dw_recover_read_page(SMgrRelation relation, RelFileNode relnode, char *data_page, T *buf_tag)
+{
+    if (IsSegmentPhysicalRelNode(relnode)) {
+        SMgrOpenSpace(relation);
+        if (relation->seg_space == NULL) {
+            dw_log_data_page(WARNING, "Segment data file deleted", buf_tag);
+            return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
+        }
+        if (spc_size(relation->seg_space, relnode.relNode, buf_tag->forkNum) <= buf_tag->blockNum) {
+            dw_log_data_page(WARNING, "Segment data page deleted", buf_tag);
+            return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
+        }
+        seg_physical_read(relation->seg_space, relnode, buf_tag->forkNum, buf_tag->blockNum, data_page);
+        if (!PageIsVerified((Page)data_page, buf_tag->blockNum)) {
+            return SMGR_READ_STATUS::SMGR_RD_CRC_ERROR;
+        } else {
+            return SMGR_READ_STATUS::SMGR_RD_OK;
+        }
+    } else {
+        if (!smgrexists(relation, buf_tag->forkNum, buf_tag->blockNum)) {
+            dw_log_data_page(WARNING, "Data file deleted", buf_tag);
+            return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
+        }
+        BlockNumber blk_num = smgrnblocks(relation, buf_tag->forkNum);
+        if (blk_num <= buf_tag->blockNum) {
+            dw_log_data_page(WARNING, "Data page deleted", buf_tag);
+            return SMGR_READ_STATUS::SMGR_RD_NO_BLOCK;
+        }
+        SMGR_READ_STATUS rdStatus = smgrread(relation, buf_tag->forkNum, buf_tag->blockNum, data_page);
+        return rdStatus;
+    }
 }
 
 template <typename T1, typename T2>
@@ -392,8 +425,9 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
     uint16 i;
     PageHeader dw_page;
     SMgrRelation relation;
-    BlockNumber blk_num;
     RelFileNode relnode;
+    bool pageCorrupted = false;
+
     for (i = 0; i < GET_REL_PGAENUM(batch->page_num); i++) {
         buf_tag = &batch->buf_tag[i];
         if (tag_ver == HASHBUCKET_TAG) {
@@ -408,29 +442,31 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
             relnode.bucketNode = InvalidBktId;
         }
         relation = smgropen(relnode, InvalidBackendId, GetColumnNum(buf_tag->forkNum));
-        if (!smgrexists(relation, buf_tag->forkNum)) {
-            dw_log_data_page(WARNING, "Data file deleted", buf_tag);
+
+        SMGR_READ_STATUS rdStatus = dw_recover_read_page(relation, relnode, (char *)data_page, buf_tag);
+        if (rdStatus == SMGR_READ_STATUS::SMGR_RD_NO_BLOCK) {
             continue;
         }
-        blk_num = smgrnblocks(relation, buf_tag->forkNum);
-        if (blk_num <= buf_tag->blockNum) {
-            dw_log_data_page(WARNING, "Data page deleted", buf_tag);
-            continue;
-        }
-        smgrread(relation, buf_tag->forkNum, buf_tag->blockNum, (char *)data_page);
+        pageCorrupted = (rdStatus == SMGR_READ_STATUS::SMGR_RD_CRC_ERROR);
 
         dw_page = (PageHeader)((char *)batch + (i + 1) * BLCKSZ);
         if (!dw_verify_pg_checksum(dw_page, buf_tag->blockNum)) {
-            dw_log_data_page(WARNING, "DW page broken", buf_tag);
+            dw_log_data_page(WARNING, "DW batch page broken", buf_tag);
             dw_log_page_header(dw_page);
             continue;
         }
 
         dw_log_data_page(DW_LOG_LEVEL, "DW page fine", buf_tag);
         dw_log_page_header(dw_page);
-        if (!dw_verify_pg_checksum(data_page, buf_tag->blockNum) ||
-            XLByteLT(PageGetLSN(data_page), PageGetLSN(dw_page))) {
-            smgrwrite(relation, buf_tag->forkNum, buf_tag->blockNum, (const char *)dw_page, false);
+        if (pageCorrupted || XLByteLT(PageGetLSN(data_page), PageGetLSN(dw_page))) {
+            if (IsSegmentPhysicalRelNode(relnode)) {
+                // seg_space must be initialized before.
+                seg_physical_write(relation->seg_space, relnode, buf_tag->forkNum, buf_tag->blockNum,
+                                   (const char *)dw_page, false);
+            } else {
+                smgrwrite(relation, buf_tag->forkNum, buf_tag->blockNum, (const char *)dw_page, false);
+            }
+
             dw_log_data_page(LOG, "Date page recovered", buf_tag);
             dw_log_page_header(data_page);
         }
@@ -480,7 +516,7 @@ int get_dw_page_min_idx()
             }
         }
     }
-	
+
     return min_idx;
 }
 
@@ -531,7 +567,7 @@ static bool dw_reset_if_need(knl_g_dw_context *cxt, uint16 pages_to_write, bool 
         wait_all_dw_page_finish_flush();
     }
 
-    smgrsync_for_dw();
+    CheckPointSyncForDw();
 
     if (trunc_file) {
         if (!LWLockConditionalAcquire(cxt->flush_lock, LW_EXCLUSIVE)) {
@@ -575,7 +611,7 @@ static bool dw_reset_if_need(knl_g_dw_context *cxt, uint16 pages_to_write, bool 
 
     Assert(file_head->head.dwn == file_head->tail.dwn);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0);
+    dw_pwrite_file(cxt->fd, file_head, BLCKSZ, 0, DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     pg_atomic_add_fetch_u64(&cxt->batch_stat_info.file_trunc_num, 1);
@@ -645,7 +681,7 @@ static void dw_recover_batch_head(knl_g_dw_context *cxt, dw_batch_t *curr_head)
     securec_check(rc, "\0", "\0");
     dw_prepare_page(curr_head, 0, cxt->file_head->start, cxt->file_head->head.dwn);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(cxt->fd, curr_head, BLCKSZ, (curr_head->head.page_id * BLCKSZ));
+    dw_pwrite_file(cxt->fd, curr_head, BLCKSZ, (curr_head->head.page_id * BLCKSZ), DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 }
 
@@ -720,7 +756,7 @@ static void dw_recover_partial_write(knl_g_dw_context *cxt)
             break;
         }
         if (t_thrd.proc->workingVersionNum < DW_SUPPORT_SINGLE_FLUSH_VERSION) {
-            bool is_hashbucket = ((curr_head->page_num & IS_HASH_BKT_MASK) != 0);
+            bool is_hashbucket = ((curr_head->page_num & IS_HASH_BKT_SEGPAGE_MASK) != 0);
             curr_head->buftag_ver = is_hashbucket ? HASHBUCKET_TAG : ORIGIN_TAG;
         }
 
@@ -805,7 +841,7 @@ static void dw_generate_batch_file()
     batch_head->head.page_id = DW_BATCH_FILE_START;
     dw_calc_batch_checksum(batch_head);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(fd, file_head, (BLCKSZ + BLCKSZ), 0);
+    dw_pwrite_file(fd, file_head, (BLCKSZ + BLCKSZ), 0, DW_FILE_NAME);
     dw_extend_file(fd, file_head, DW_FILE_EXTEND_SIZE, remain_size, false);
     pgstat_report_waitevent(WAIT_EVENT_END);
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double write batch flush file created successfully")));
@@ -841,7 +877,7 @@ static void dw_free_resource(knl_g_dw_context *cxt)
     cxt->closed = 1;
 }
 
-bool dw_file_check_and_rebuild()
+void dw_file_check_and_rebuild()
 {
     if (file_exists(DW_BUILD_FILE_NAME)) {
         ereport(LOG, (errmodule(MOD_DW), errmsg("Double write initializing after build")));
@@ -873,9 +909,7 @@ bool dw_file_check_and_rebuild()
         }
 
         /* Create the DW file. */
-        if (dw_enabled()) {
-            dw_bootstrap();
-        }
+        dw_bootstrap();
 
         /* Remove the DW build file. */
         if (unlink(DW_BUILD_FILE_NAME) != 0) {
@@ -884,28 +918,26 @@ bool dw_file_check_and_rebuild()
         }
     }
 
-    if (!file_exists(DW_FILE_NAME) && dw_enabled()) {
-        /* Create the batch file. */
-        dw_generate_batch_file();
+    if (!file_exists(DW_FILE_NAME)) {
+        ereport(PANIC, (errcode_for_file_access(), errmodule(MOD_DW), errmsg("batch flush DW file does not exist")));
     }
 
     if (t_thrd.proc->workingVersionNum >= DW_SUPPORT_SINGLE_FLUSH_VERSION) {
-        if (!file_exists(SINGLE_DW_FILE_NAME) && dw_enabled()) {
-            /* Create the single file. */
-            dw_generate_single_file();
+        if (!file_exists(SINGLE_DW_FILE_NAME)) {
+            ereport(PANIC, (errcode_for_file_access(),
+                errmodule(MOD_DW), errmsg("single flush DW file does not exist")));
         }
     } else {
         if (!file_exists(SINGLE_DW_FILE_NAME)) {
             ereport(LOG, (errmodule(MOD_DW), 
                 errmsg("first upgrade to DW_SUPPORT_SINGLE_FLUSH_VERSION, need init the single file")));
+            dw_generate_single_file();
         } else {
             (void)unlink(SINGLE_DW_FILE_NAME);
-        }
-        /* Create the single file if need.*/
-        if (dw_enabled())
             dw_generate_single_file();
+        }
     }
-    return file_exists(DW_FILE_NAME) && file_exists(SINGLE_DW_FILE_NAME);
+
 }
 
 const void init_dw_single_flush_map()
@@ -919,12 +951,33 @@ const void init_dw_single_flush_map()
     uint16 batch_num = (DW_SINGLE_DIRTY_PAGE_NUM / batch_size) + (DW_SINGLE_DIRTY_PAGE_NUM % batch_size == 0 ? 0 : 1);
     LWLock *lock = NULL;
 
+    /*
+     * i: block id
+     * m: block offset
+     * j: actual position, j = i * batch_size + m
+     * pos: dw_cxt slot, pos = m * batch_num + i
+     * 
+     * Note that the last block does not contain enough tag, which will influence the calculation of pos, 
+     * see example as follow: 
+     * 
+     * ---- | ----- | ----- |
+     * 1 4    2 5     3 6
+     * 7 9    8 10
+     * 11 13  12 14
+     */
+    int tagNumLastBlock = DW_SINGLE_DIRTY_PAGE_NUM % batch_size;
+    if (tagNumLastBlock == 0) {
+        tagNumLastBlock = batch_size;
+    }
+
     for (i = 0; i < batch_num; i++) {
         lock = LWLockAssign(LWTRANCHE_DW_SINGLE_WRITE);
-        for (m = 0, j = i * batch_size;
-            j < (i + 1) * batch_size && j < DW_SINGLE_DIRTY_PAGE_NUM;
-            j++, m++) {
-            pos = i + m * batch_num;
+        for (m = 0; m < batch_size && j < DW_SINGLE_DIRTY_PAGE_NUM; j++, m++) {
+            if (m < tagNumLastBlock) {
+                pos = m * batch_num + i;
+            } else {
+                pos = m * batch_num + i - (m - tagNumLastBlock);
+            }
             dw_cxt->single_flush_pos[pos].write_lock = lock;
             dw_cxt->single_flush_pos[pos].actual_pos = j;
             dw_cxt->single_flush_state[pos].data_flush = false;
@@ -985,6 +1038,7 @@ void dw_cxt_init_single()
     single_cxt->unaligned_buf = (char *)palloc0((blk_num + 1 + 1) * BLCKSZ); 
     buf = (char *)TYPEALIGN(BLCKSZ, single_cxt->unaligned_buf);
 
+
     single_cxt->file_head = (dw_file_head_t *)buf;
     buf += BLCKSZ;
     single_cxt->buf = buf;
@@ -1018,46 +1072,38 @@ void dw_init(bool shut_down)
 
     old_mem_cxt = MemoryContextSwitchTo(mem_cxt);
 
-    bool do_recovery = dw_file_check_and_rebuild();
+    dw_file_check_and_rebuild();
     ereport(LOG, (errmodule(MOD_DW), errmsg("Double Write init")));
 
-    if (do_recovery) {
-        dw_cxt_init_batch();
-        dw_cxt_init_single();
+    dw_cxt_init_batch();
+    dw_cxt_init_single();
 
-        /* recovery batch flush dw file */
-        (void)LWLockAcquire(batch_cxt->flush_lock, LW_EXCLUSIVE);
-        dw_recover_file_head(batch_cxt, false);
+    /* recovery batch flush dw file */
+    (void)LWLockAcquire(batch_cxt->flush_lock, LW_EXCLUSIVE);
+    dw_recover_file_head(batch_cxt, false);
 
-        dw_recover_partial_write(batch_cxt);
-        LWLockRelease(batch_cxt->flush_lock);
+    dw_recover_partial_write(batch_cxt);
+    LWLockRelease(batch_cxt->flush_lock);
 
-        /* recovery single flush dw file */
-        (void)LWLockAcquire(single_cxt->flush_lock, LW_EXCLUSIVE);
-        dw_recover_file_head(single_cxt, true);
-        if (!shut_down) {
-            dw_recovery_partial_write_single();
-        }
-        /* reset the file after the recovery is complete */
-        dw_force_reset_single_file();
-        LWLockRelease(single_cxt->flush_lock);
+    /* recovery single flush dw file */
+    (void)LWLockAcquire(single_cxt->flush_lock, LW_EXCLUSIVE);
+    dw_recover_file_head(single_cxt, true);
+    if (!shut_down) {
+        dw_recovery_partial_write_single();
     }
+    /* reset the file after the recovery is complete */
+    dw_force_reset_single_file();
+    LWLockRelease(single_cxt->flush_lock);
 
     /*
      * After recovering partially written pages (if any), we will un-initialize, if the double write is disabled.
      */
     if (!dw_enabled()) {
-        if (do_recovery) {
-            dw_free_resource(batch_cxt);
-            dw_free_resource(single_cxt);
-        }
+        dw_free_resource(batch_cxt);
+        dw_free_resource(single_cxt);
         (void)MemoryContextSwitchTo(old_mem_cxt);
         MemoryContextDelete(g_instance.dw_batch_cxt.mem_cxt);
         ereport(LOG, (errmodule(MOD_DW), errmsg("Double write exit after recovering partial write")));
-
-        /* remove double file if not needed */
-        (void)unlink(DW_FILE_NAME);
-        (void)unlink(SINGLE_DW_FILE_NAME);
     } else {
         (void)MemoryContextSwitchTo(old_mem_cxt);
     }
@@ -1065,14 +1111,27 @@ void dw_init(bool shut_down)
     smgrcloseall();
 }
 
-static void dw_encrypt_page(char *dest_addr)
+static void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag)
 {
-    size_t plain_len, cipher_len;
-    if (isEncryptedCluster() && !PageIsNew(dest_addr)) {
-        plain_len = BLCKSZ - GetPageHeaderSize(dest_addr);
-        encryptBlockOrCUData(PageGetContents(dest_addr), plain_len, PageGetContents(dest_addr), &cipher_len);
-        Assert(plain_len == cipher_len);
-        PageSetEncrypt((Page)dest_addr);
+    if (XLOG_NEED_PHYSICAL_LOCATION(buf_desc->tag.rnode)) {
+        if (buf_desc->seg_fileno != EXTENT_INVALID) {
+            // buffer descriptor contains the physical location
+            Assert(buf_desc->seg_fileno <= EXTENT_TYPES && buf_desc->seg_fileno > EXTENT_INVALID);
+            buf_tag->rnode.relNode = buf_desc->seg_fileno;
+            buf_tag->blockNum = buf_desc->seg_blockno;
+        } else {
+            SegPageLocation loc =
+                seg_get_physical_location(buf_desc->tag.rnode, buf_desc->tag.forkNum, buf_desc->tag.blockNum);
+            Assert(loc.blocknum != InvalidBlockNumber);
+            buf_tag->rnode.relNode = (uint8) EXTENT_SIZE_TO_TYPE(loc.extent_size);
+            buf_tag->blockNum = loc.blocknum;
+        }
+        if (buf_tag->blockNum == InvalidBlockNumber || buf_tag->rnode.relNode == EXTENT_INVALID) {
+            Assert(0);
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+                errmsg("dw_transfer_phybuffer_addr failed !blockNum is %u, relNode is %d.\n", buf_tag->blockNum,
+                buf_tag->rnode.relNode)));
+        }
     }
 }
 
@@ -1099,7 +1158,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     }
 
     PinBuffer_Locked(buf_desc);
-
+    
     /* We must use a conditional lock acquisition here to avoid deadlock. If
      * page_writer and double_write are enabled, only page_writer is allowed to
      * flush the buffers. So the backends (BufferAlloc, FlushRelationBuffers,
@@ -1117,16 +1176,23 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     }
     *is_skipped = false;
     thrd_dw_cxt->write_pos++;
-    if (thrd_dw_cxt->write_pos <= GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket)) {
+    if (thrd_dw_cxt->write_pos <= GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->is_new_relfilenode)) {
         batch = (dw_batch_t*)thrd_dw_cxt->dw_buf;
         page_num = thrd_dw_cxt->write_pos;
     } else {
         batch = (dw_batch_t*)(thrd_dw_cxt->dw_buf + 
-            (GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket) + 1) * BLCKSZ);
-        page_num = thrd_dw_cxt->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->contain_hashbucket);
+            (GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->is_new_relfilenode) + 1) * BLCKSZ);
+        page_num = thrd_dw_cxt->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(thrd_dw_cxt->is_new_relfilenode);
     }
-    if (thrd_dw_cxt->contain_hashbucket) {
+
+    BlockNumber phyBlock = buf_desc->tag.blockNum;
+
+    if (thrd_dw_cxt->is_new_relfilenode) {
         batch->buf_tag[page_num - 1] = buf_desc->tag;
+        dw_transfer_phybuffer_addr(buf_desc, &batch->buf_tag[page_num - 1]);
+
+        /* physical block may be changed */
+        phyBlock = batch->buf_tag[page_num - 1].blockNum;
     } else {
         /* change struct to nohash bucket */
         batch_nohbkt = (dw_batch_first_ver *)batch;
@@ -1136,6 +1202,7 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
         batch_nohbkt->buf_tag[page_num - 1].rnode.spcNode = buf_desc->tag.rnode.spcNode;
         batch_nohbkt->buf_tag[page_num - 1].rnode.relNode = buf_desc->tag.rnode.relNode;
     }
+
     dest_addr = (char *)batch + page_num * BLCKSZ;
     block = BufHdrGetBlock(buf_desc);
     rc = memcpy_s(dest_addr, BLCKSZ, block, BLCKSZ);
@@ -1145,17 +1212,27 @@ static XLogRecPtr dw_copy_page(ThrdDwCxt* thrd_dw_cxt, int buf_desc_id, bool* is
     UnpinBuffer(buf_desc, true);
 
     page_lsn = PageGetLSN(dest_addr);
-    dw_encrypt_page(dest_addr);
+    if (buf_desc->encrypt) {
+        TdeInfo *tde_info = NULL;
+        tde_info = TDE::TDEBufferCache::get_instance().search_cache(buf_desc->tag.rnode);
+        if (tde_info == NULL) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("double write copy page get TDE buffer cache entry failed"), errdetail("N/A"), 
+                errcause("TDE cache miss this key"), erraction("check cache status")));
+        }
+        PageDataEncryptIfNeed(dest_addr, tde_info, false);
+    }
 
-    dw_set_pg_checksum(dest_addr, buf_desc->tag.blockNum);
+    dw_set_pg_checksum(dest_addr, phyBlock);
+    
     return page_lsn;
 }
 
 inline uint16 dw_batch_add_extra(uint16 page_num)
 {
-    bool contain_hashbucket = g_instance.dw_batch_cxt.contain_hashbucket;
-    Assert(page_num <= GET_DW_DIRTY_PAGE_MAX(contain_hashbucket));
-    if (page_num <= GET_DW_BATCH_DATA_PAGE_MAX(contain_hashbucket)) {
+    bool is_new_relfilenode = g_instance.dw_batch_cxt.is_new_relfilenode;
+    Assert(page_num <= GET_DW_DIRTY_PAGE_MAX(is_new_relfilenode));
+    if (page_num <= GET_DW_BATCH_DATA_PAGE_MAX(is_new_relfilenode)) {
         return page_num + DW_EXTRA_FOR_ONE_BATCH;
     } else {
         return page_num + DW_EXTRA_FOR_TWO_BATCH;
@@ -1168,9 +1245,9 @@ static void dw_assemble_batch(knl_g_dw_context *dw_cxt, uint16 page_id, uint16 d
     uint16 first_batch_pages;
     uint16 second_batch_pages;
 
-    if (dw_cxt->write_pos > GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->contain_hashbucket)) {
-        first_batch_pages = GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->contain_hashbucket);
-        second_batch_pages = dw_cxt->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->contain_hashbucket);
+    if (dw_cxt->write_pos > GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->is_new_relfilenode)) {
+        first_batch_pages = GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->is_new_relfilenode);
+        second_batch_pages = dw_cxt->write_pos - GET_DW_BATCH_DATA_PAGE_MAX(dw_cxt->is_new_relfilenode);
     } else {
         first_batch_pages = dw_cxt->write_pos;
         second_batch_pages = 0;
@@ -1200,7 +1277,7 @@ static inline void dw_stat_batch_flush(dw_stat_info_batch *stat_info, uint32 pag
     if (page_to_write < DW_WRITE_STAT_LOWER_LIMIT) {
         (void)pg_atomic_add_fetch_u64(&stat_info->low_threshold_writes, 1);
         (void)pg_atomic_add_fetch_u64(&stat_info->low_threshold_pages, page_to_write);
-    } else if (page_to_write > GET_DW_BATCH_MAX(g_instance.dw_batch_cxt.contain_hashbucket)) {
+    } else if (page_to_write > GET_DW_BATCH_MAX(g_instance.dw_batch_cxt.is_new_relfilenode)) {
         (void)pg_atomic_add_fetch_u64(&stat_info->high_threshold_writes, 1);
         (void)pg_atomic_add_fetch_u64(&stat_info->high_threshold_pages, page_to_write);
     }
@@ -1220,13 +1297,12 @@ static void dw_batch_flush(knl_g_dw_context* dw_cxt, XLogRecPtr latest_lsn, Thrd
 
     if (!XLogRecPtrIsInvalid(latest_lsn)) {
         XLogWaitFlush(latest_lsn);
-        g_instance.ckpt_cxt_ctl->page_writer_xlog_flush_loc = latest_lsn;
     }
 
     (void)LWLockAcquire(dw_cxt->flush_lock, LW_EXCLUSIVE);
 
-    if (thrd_dw_cxt->contain_hashbucket) {
-        dw_cxt->contain_hashbucket = true;
+    if (thrd_dw_cxt->is_new_relfilenode) {
+        dw_cxt->is_new_relfilenode = true;
     }
 
     dw_cxt->write_pos = thrd_dw_cxt->write_pos;
@@ -1244,14 +1320,14 @@ static void dw_batch_flush(knl_g_dw_context* dw_cxt, XLogRecPtr latest_lsn, Thrd
     dw_assemble_batch(dw_cxt, offset_page, file_head->head.dwn);
 
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(dw_cxt->fd, dw_cxt->buf, (pages_to_write * BLCKSZ), (offset_page * BLCKSZ));
+    dw_pwrite_file(dw_cxt->fd, dw_cxt->buf, (pages_to_write * BLCKSZ), (offset_page * BLCKSZ), DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     dw_stat_batch_flush(&dw_cxt->batch_stat_info, pages_to_write);
     /* the tail of this flushed batch is the head of the next batch */
     dw_cxt->flush_page += (pages_to_write - 1);
     dw_cxt->write_pos = 0;
-    dw_cxt->contain_hashbucket = false;
+    dw_cxt->is_new_relfilenode = false;
     thrd_dw_cxt->dw_page_idx = offset_page;
     LWLockRelease(dw_cxt->flush_lock);
 
@@ -1278,7 +1354,7 @@ void dw_perform_batch_flush(uint32 size, CkptSortItem *dirty_buf_list, ThrdDwCxt
         ereport(ERROR, (errmodule(MOD_DW), errmsg("[batch flush] Double write already closed")));
     }
 
-    Assert(size > 0 && size <= GET_DW_DIRTY_PAGE_MAX(thrd_dw_cxt->contain_hashbucket));
+    Assert(size > 0 && size <= GET_DW_DIRTY_PAGE_MAX(thrd_dw_cxt->is_new_relfilenode));
     batch_size = (uint16)size;
     thrd_dw_cxt->write_pos = 0;
 
@@ -1310,7 +1386,7 @@ void dw_perform_batch_flush(uint32 size, CkptSortItem *dirty_buf_list, ThrdDwCxt
             latest_lsn = page_lsn;
         }
     }
-    if (force_finish_enabled()) {
+    if (FORCE_FINISH_ENABLED) {
         update_max_page_flush_lsn(latest_lsn, t_thrd.proc_cxt.MyProcPid, false);
     }
     if (thrd_dw_cxt->write_pos > 0) {
@@ -1409,7 +1485,6 @@ void dw_exit(bool single)
     }
 
     dw_free_resource(dw_cxt);
-
 }
 
 static void dw_generate_single_file()
@@ -1441,7 +1516,7 @@ static void dw_generate_single_file()
     remain_size = (DW_SINGLE_DIRTY_PAGE_NUM + DW_SINGLE_BUFTAG_PAGE_NUM) * BLCKSZ;
     dw_prepare_file_head(file_head, 0, 0);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(fd, file_head, BLCKSZ, 0);
+    dw_pwrite_file(fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
     rc = memset_s(file_head, BLCKSZ, 0, BLCKSZ);
     securec_check(rc, "\0", "\0");
     dw_extend_file(fd, file_head, DW_FILE_EXTEND_SIZE, remain_size, true);
@@ -1454,11 +1529,9 @@ static void dw_generate_single_file()
     return;
 }
 
-uint16 dw_single_flush(BufferDesc *buf_desc)
+static uint16 dw_single_flush_internal(BufferTag tag, Block block, XLogRecPtr page_lsn, bool encrypt, BufferTag phy_tag)
 {
     errno_t rc;
-    uint32 buf_state;
-    XLogRecPtr page_lsn;
     uint16 map_pos;
     uint16 actual_pos;
     uint32 page_write_offset;
@@ -1468,19 +1541,22 @@ uint16 dw_single_flush(BufferDesc *buf_desc)
     knl_g_dw_context* dw_single_cxt = &g_instance.dw_single_cxt;
     dw_file_head_t *file_head = dw_single_cxt->file_head;
     char *buf = t_thrd.proc->dw_buf;
-    Block block = BufHdrGetBlock(buf_desc);
 
     /* first step, copy buffer to dw buf, than flush page lsn, the buffer content lock  is already held */
     rc = memcpy_s(buf, BLCKSZ, block, BLCKSZ);
     securec_check(rc, "\0", "\0");
 
-    buf_state = LockBufHdr(buf_desc);
-    page_lsn = BufferGetLSN(buf_desc);
-    UnlockBufHdr(buf_desc, buf_state);
     XLogWaitFlush(page_lsn);
-    dw_encrypt_page(buf);
-    dw_set_pg_checksum(buf, buf_desc->tag.blockNum);
-
+    if (encrypt) {
+        TdeInfo *tde_info = NULL;
+        tde_info = TDE::TDEBufferCache::get_instance().search_cache(tag.rnode);
+        if (tde_info == NULL) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+                errmsg("double write single flush get TDE buffer cache entry failed"), errdetail("N/A"), 
+                errcause("TDE cache miss this key"), erraction("check cache status")));
+        }
+        PageDataEncryptIfNeed(buf, tde_info, false);
+    }
     pgstat_report_waitevent(WAIT_EVENT_DW_SINGLE_POS);
     (void)LWLockAcquire(dw_single_cxt->flush_lock, LW_EXCLUSIVE);
     (void)dw_single_file_recycle(false);
@@ -1495,7 +1571,8 @@ uint16 dw_single_flush(BufferDesc *buf_desc)
 
     item.data_page_idx = actual_pos;
     item.dwn = file_head->head.dwn;
-    item.buf_tag = buf_desc->tag;
+    item.buf_tag = phy_tag;
+    dw_set_pg_checksum(buf, item.buf_tag.blockNum);
 
     /* Contents are protected with a CRC */
     INIT_CRC32C(item.crc);
@@ -1510,7 +1587,7 @@ uint16 dw_single_flush(BufferDesc *buf_desc)
      * 4. write the whole block to dw file, release lock
      */
     pgstat_report_waitevent(WAIT_EVENT_DW_SINGLE_WRITE);
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, page_write_offset, SINGLE_DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.total_writes, 1);
 
@@ -1523,13 +1600,37 @@ uint16 dw_single_flush(BufferDesc *buf_desc)
     dw_pread_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset);
     rc = memcpy_s(buf + block_offset, BLCKSZ - block_offset, &item, sizeof(dw_single_flush_item));
     securec_check(rc, "\0", "\0");
-    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset);
+    dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_write_offset, SINGLE_DW_FILE_NAME);
     LWLockRelease(dw_single_cxt->single_flush_pos[map_pos].write_lock);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     (void)pg_atomic_add_fetch_u64(&dw_single_cxt->single_stat_info.total_writes, 1);
 
     return map_pos;
+}
+
+/*
+ * Current, this function is only used by segment-page, which does not support TDE. If we want to support TDE,
+ * we could add additional parameter.
+ */
+uint16 dw_single_flush_without_buffer(BufferTag tag, Block block)
+{
+    return dw_single_flush_internal(tag, block, PageGetLSN(block), false, tag);
+}
+
+
+uint16 dw_single_flush(BufferDesc *buf_desc)
+{
+    uint32 buf_state = LockBufHdr(buf_desc);
+
+    Block block = BufHdrGetBlock(buf_desc);
+    XLogRecPtr page_lsn = BufferGetLSN(buf_desc);
+    UnlockBufHdr(buf_desc, buf_state);
+
+    BufferTag phy_tag = buf_desc->tag;
+    dw_transfer_phybuffer_addr(buf_desc, &phy_tag);
+
+    return dw_single_flush_internal(buf_desc->tag, block, page_lsn, buf_desc->encrypt, phy_tag);
 }
 
 int page_idx_compare(const void* arg1, const void* arg2)
@@ -1590,7 +1691,7 @@ void dw_empty_buftag_page(uint16 org_start, uint16 max_idx)
 
             rc = memset_s(buf + start_offset, set_size, 0, set_size);
             securec_check(rc, "\0", "\0");
-            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset);
+            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME);
             LWLockRelease(pos_lock);
             batch++;
             batch_begin = page_idx[i];
@@ -1607,7 +1708,7 @@ void dw_empty_buftag_page(uint16 org_start, uint16 max_idx)
 
             rc = memset_s(buf + start_offset, set_size, 0, set_size);
             securec_check(rc, "\0", "\0");
-            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset);
+            dw_pwrite_file(dw_single_cxt->fd, buf, BLCKSZ, tag_offset, SINGLE_DW_FILE_NAME);
             LWLockRelease(pos_lock);
             break;
         }
@@ -1624,12 +1725,12 @@ void dw_force_reset_single_file()
     knl_g_dw_context* single_cxt = &g_instance.dw_single_cxt;
     dw_file_head_t *file_head = single_cxt->file_head;
 
-    smgrsync_for_dw();
+    CheckPointSyncForDw();
 
     dw_prepare_file_head((char *)file_head, 0, file_head->head.dwn + 1);
     Assert(file_head->head.dwn == file_head->tail.dwn);
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     (void)pg_atomic_add_fetch_u64(&single_cxt->single_stat_info.file_reset_num, 1);
@@ -1753,7 +1854,7 @@ bool dw_single_file_recycle(bool trunc_file)
         securec_check(rc, "\0", "\0");
     }
 
-    smgrsync_for_dw();
+    CheckPointSyncForDw();
 
     if (trunc_file) {
         dw_empty_buftag_page(org_start, max_idx);
@@ -1799,7 +1900,7 @@ bool dw_single_file_recycle(bool trunc_file)
 
     Assert(file_head->head.dwn == file_head->tail.dwn);
     pgstat_report_waitevent(WAIT_EVENT_DW_SINGLE_WRITE);
-    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0);
+    dw_pwrite_file(single_cxt->fd, file_head, BLCKSZ, 0, SINGLE_DW_FILE_NAME);
     pgstat_report_waitevent(WAIT_EVENT_END);
 
     ereport(LOG, (errmodule(MOD_DW), errmsg("Reset single flush DW file: file_head[dwn %hu, start %hu], "
@@ -1818,13 +1919,16 @@ bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
     if (item->dwn != dwn) {
         return false;
     }
+
     if (item->buf_tag.forkNum == InvalidForkNumber || item->buf_tag.blockNum == InvalidBlockNumber ||
         item->buf_tag.rnode.relNode == InvalidOid) {
-        ereport(WARNING,
-            (errmsg("dw recovery, find invalid item [page_idx %hu dwn %hu] skip this item,"
-            "buf_tag[rel %u/%u/%u blk %u fork %d]", item->data_page_idx, item->dwn,
-            item->buf_tag.rnode.spcNode, item->buf_tag.rnode.dbNode, item->buf_tag.rnode.relNode,
-            item->buf_tag.blockNum, item->buf_tag.forkNum)));
+        if (item->dwn != 0 || item->data_page_idx != 0) {
+            ereport(WARNING,
+                (errmsg("dw recovery, find invalid item [page_idx %hu dwn %hu] skip this item,"
+                "buf_tag[rel %u/%u/%u blk %u fork %d]", item->data_page_idx, item->dwn,
+                item->buf_tag.rnode.spcNode, item->buf_tag.rnode.dbNode, item->buf_tag.rnode.relNode,
+                item->buf_tag.blockNum, item->buf_tag.forkNum)));
+        }
         return false;
     }
     pg_crc32c crc;
@@ -1903,14 +2007,31 @@ void dw_recovery_page_single(const dw_single_flush_item *item, uint16 item_num)
     for (uint16 i = 0; i < item_num; i++) {
         buf_tag = item[i].buf_tag;
         relation = smgropen(buf_tag.rnode, InvalidBackendId, GetColumnNum(buf_tag.forkNum));
-        if (!smgrexists(relation, buf_tag.forkNum)) {
-            dw_log_recovery_page(WARNING, "Data file deleted", buf_tag);
-            continue;
-        }
-        blk_num = smgrnblocks(relation, buf_tag.forkNum);
-        if (blk_num <= buf_tag.blockNum) {
-            dw_log_recovery_page(WARNING, "Data page deleted", buf_tag);
-            continue;
+
+        if (IsSegmentPhysicalRelNode(buf_tag.rnode)) {
+            SMgrOpenSpace(relation);
+            if (relation->seg_space == NULL) {
+                dw_log_recovery_page(WARNING, "Segment data file deleted", buf_tag);
+                continue;
+            }
+            if (spc_size(relation->seg_space, buf_tag.rnode.relNode, buf_tag.forkNum) <= buf_tag.blockNum) {
+                dw_log_recovery_page(WARNING, "Segment data page deleted", buf_tag);
+                continue;
+            }
+            seg_physical_read(relation->seg_space, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum,
+                              (char *)data_block);
+        } else {
+            if (!smgrexists(relation, buf_tag.forkNum, buf_tag.blockNum)) {
+                dw_log_recovery_page(WARNING, "Data file deleted", buf_tag);
+                continue;
+            }
+            blk_num = smgrnblocks(relation, buf_tag.forkNum);
+            if (blk_num <= buf_tag.blockNum) {
+                dw_log_recovery_page(WARNING, "Data page deleted", buf_tag);
+                continue;
+            }
+            /* read data page */
+            smgrread(relation, buf_tag.forkNum, buf_tag.blockNum, data_block);
         }
 
         /* read dw file page */
@@ -1918,20 +2039,21 @@ void dw_recovery_page_single(const dw_single_flush_item *item, uint16 item_num)
         dw_pread_file(single_cxt->fd, dw_block, BLCKSZ, offset);
 
         if (!dw_verify_pg_checksum((PageHeader)dw_block, buf_tag.blockNum)) {
-            dw_log_recovery_page(WARNING, "DW page broken", buf_tag);
+            dw_log_recovery_page(WARNING, "DW single page broken", buf_tag);
             dw_log_page_header((PageHeader)dw_block);
             continue;
         }
-
         dw_log_recovery_page(DW_LOG_LEVEL, "DW page fine", buf_tag);
-
-        /* read data page */
-        smgrread(relation, buf_tag.forkNum, buf_tag.blockNum, data_block);
-
         dw_log_page_header((PageHeader)data_block);
         if (!dw_verify_pg_checksum((PageHeader)data_block, buf_tag.blockNum) ||
             XLByteLT(PageGetLSN(data_block), PageGetLSN(dw_block))) {
-            smgrwrite(relation, buf_tag.forkNum, buf_tag.blockNum, (const char *)dw_block, false);
+            if (IsSegmentPhysicalRelNode(buf_tag.rnode)) {
+                // seg_space must be initialized before.
+                seg_physical_write(relation->seg_space, buf_tag.rnode, buf_tag.forkNum, buf_tag.blockNum,
+                                   (const char *)dw_block, false);
+            } else {
+                smgrwrite(relation, buf_tag.forkNum, buf_tag.blockNum, (const char *)dw_block, false);
+            }
             dw_log_recovery_page(LOG, "Date page recovered", buf_tag);
             dw_log_page_header((PageHeader)data_block);
         }

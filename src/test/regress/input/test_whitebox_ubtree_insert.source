@@ -1,0 +1,23 @@
+\! rm -f @abs_srcdir@/ubtree_insert_1
+\! echo "ubtinsert,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-begin,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-found,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-end,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeCheckUnique,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeInsertOnPage,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-begin,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-bulk-extend,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-extend,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "GetAvailablePageOnPage-got,PRINT," >> @abs_srcdir@/ubtree_insert_1
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/ubtree_insert_1';
+
+-- case 1: print insert path
+drop table if exists t1;
+create table t1 (c1 int primary key, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+drop table t1;
+
+\! rm -f @abs_srcdir@/ubtree_insert_1

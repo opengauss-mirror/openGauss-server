@@ -122,6 +122,22 @@ id=14,class=1,name=name_k
 id=13,class=1,name=name_k
 id=12,class=1,name=name_k
 id=11,class=1,name=name_k
+c2=2
+
+c2=3
+
+break of a resultset of pstmt1
+c2=2
+
+c2=3
+
+break of a resultset of pstmt1
+c2=2
+
+c2=3
+
+break of a resultset of pstmt1
+end of a resultset
 close connection
 DROP TABLE IF EXISTS jdbcpbebypass CASCADE;
 RESET ROLE;

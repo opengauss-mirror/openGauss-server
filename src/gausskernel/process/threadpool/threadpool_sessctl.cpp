@@ -28,7 +28,9 @@
 #include "threadpool/threadpool.h"
 
 #include "access/xact.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
+#include "commands/user.h"
 #include "gssignal/gs_signal.h"
 #include "lib/dllist.h"
 #include "libpq/ip.h"
@@ -50,6 +52,8 @@
 #include "utils/ps_status.h"
 #include "utils/acl.h"
 #include "executor/executor.h"
+
+#include "communication/commproxy_interface.h"
 
 ThreadPoolSessControl::ThreadPoolSessControl(MemoryContext context)
 {
@@ -95,6 +99,7 @@ knl_session_context* ThreadPoolSessControl::CreateSession(Port* port)
     int rc = memcpy_s(sc->proc_cxt.MyProcPort, sizeof(Port), port, sizeof(Port));
     securec_check(rc, "\0", "\0");
 
+    ereport(DEBUG4, (errmsg("CreateSession fd:[%d] to dispatch.", port->sock)));
     if (AllocateSlot(sc)) {
         sc->stat_cxt.trackedBytes += u_sess->stat_cxt.trackedBytes;
         sc->stat_cxt.trackedMemChunks += u_sess->stat_cxt.trackedMemChunks;
@@ -201,13 +206,19 @@ void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* se
     if (!OidIsValid(u_sess->misc_cxt.CurrentUserId)) {
         return;
     }
-    /* Only superuser , DB owner and user himself have the permission to send singal. */
-    if (!superuser() && !pg_database_ownercheck(sess->proc_cxt.MyDatabaseId, u_sess->misc_cxt.CurrentUserId)) {
+
+    /* Only users with sysadmin privilege or the member of gs_role_signal_backend role
+     * or the owner of the database or user himself have the permission to send singal. */
+    bool role_signal_backend_permission = is_member_of_role(GetUserId(), DEFAULT_ROLE_SIGNAL_BACKENDID) &&
+        (sess->proc_cxt.MyRoleId != BOOTSTRAP_SUPERUSERID && !is_role_persistence(sess->proc_cxt.MyRoleId));
+    if (!superuser() && !pg_database_ownercheck(sess->proc_cxt.MyDatabaseId, u_sess->misc_cxt.CurrentUserId) &&
+        !role_signal_backend_permission) {
         if (sess->proc_cxt.MyRoleId != GetUserId()) {
             *lock = 0;
             ereport(ERROR,
                 (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    (errmsg("must be system admin, db owner or have the same role to terminate other backend"))));
+                    (errmsg("must have sysadmin privilege or a member of the gs_role_signal_backend role or the "
+                    "owner of the database or the same user to terminate other backend"))));
         }
     }
 }
@@ -246,7 +257,7 @@ int ThreadPoolSessControl::SendSignal(int ctrl_index, int signal)
                 /* Session may be NULL when the session exits during the clean connection process.
                    We do nothing if the session is NULL */
                 if (sess == NULL) {
-                    /* restore the value */
+                    /* restore the value. */
                     ctrl->lock = 0;
                     status = ESRCH;
                     break;
@@ -583,14 +594,17 @@ void ThreadPoolSessControl::CheckSessionTimeout()
         knl_session_context* sess = ctrl->sess;
         if (sess != NULL && sess->attr.attr_common.SessionTimeout != 0) {
             if (sess->storage_cxt.session_timeout_active) {
-                if (now >= sess->storage_cxt.session_fin_time) {
+                if (now >= sess->storage_cxt.session_fin_time && sess->attr.attr_common.SessionTimeoutCount < 10) {
 #ifdef HAVE_INT64_TIMESTAMP
-                    elog(LOG, "close session : %lu due to session timeout : %d, max finish time is %ld. But now is:%ld",
-                         sess->session_id, sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %ld. But now is:%ld",
+                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #else
-                    elog(LOG, "close session : %lu due to session timeout : %d, max finish time is %lf. But now is:%lf",
-                         sess->session_id, sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
+                    elog(LOG, "close session : %lu for %d times due to session timeout : %d, max finish time is %lf. But now is:%lf",
+                         sess->session_id, sess->attr.attr_common.SessionTimeoutCount + 1,
+                         sess->attr.attr_common.SessionTimeout, sess->storage_cxt.session_fin_time, now);
 #endif
+                    sess->attr.attr_common.SessionTimeoutCount++;
                     CloseClientSocket(sess, false);
                 }
             }

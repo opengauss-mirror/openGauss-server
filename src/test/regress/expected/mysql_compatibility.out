@@ -635,7 +635,7 @@ select timestampdiff(second, '2018-01-01', now());
 
 select timestampdiff(microsecond, '2018-01-01', now());
  timestamp_diff 
-----------------
+--?.*
 --?.*
 (1 row)
 

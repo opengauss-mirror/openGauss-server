@@ -100,7 +100,6 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
     }
 }
 
-
 PGClientLogicParams::~PGClientLogicParams()
 {
     for (size_t i = 0; i < nParams; i++) {
@@ -111,6 +110,7 @@ PGClientLogicParams::~PGClientLogicParams()
     libpq_free(new_param_values);
     libpq_free(copy_sizes);
     libpq_free(adjusted_paramTypes);
+
     libpq_free(adjusted_param_values);
     libpq_free(adjusted_param_lengths);
     libpq_free(new_query);

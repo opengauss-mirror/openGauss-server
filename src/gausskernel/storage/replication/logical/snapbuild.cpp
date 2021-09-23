@@ -139,7 +139,7 @@
 #include "access/heapam.h"
 
 #include "storage/buf/block.h" /* debugging output */
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"

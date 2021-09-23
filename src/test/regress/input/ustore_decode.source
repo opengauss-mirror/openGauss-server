@@ -1,0 +1,27 @@
+SELECT 'init' FROM pg_create_logical_replication_slot('ustore_slot', 'mppdb_decoding');
+
+create table t1 (a int, b text) with (storage_type = ustore);
+insert into t1 values (generate_series(1, 10), 'abc');
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+update t1 set b = 'bcd' where a = 1;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+delete from t1 where a = 2;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+alter table t1 add column c int;
+insert into t1 values (generate_series(11, 20), 'efg', 1);
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+delete from t1 where a = 3;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+create table t2 (a int, b text, c int) with (storage_type = ustore);
+COPY t2 from '@abs_srcdir@/data/ustore_decode.data';
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+
+SELECT * FROM pg_drop_replication_slot('ustore_slot');
+
+drop table t1;
+drop table t2;

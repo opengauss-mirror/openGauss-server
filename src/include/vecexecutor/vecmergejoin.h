@@ -26,7 +26,7 @@
 #define VECMERGEJOIN_H
 
 #include "nodes/execnodes.h"
-#include "executor/nodeMergejoin.h"
+#include "executor/node/nodeMergejoin.h"
 extern VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int eflags);
 extern VectorBatch* ExecVecMergeJoin(VecMergeJoinState* node);
 extern void ExecEndVecMergeJoin(VecMergeJoinState* node);

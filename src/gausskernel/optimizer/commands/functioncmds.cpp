@@ -39,6 +39,7 @@
 #include "access/tableam.h"
 #include "access/sysattr.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_aggregate.h"
@@ -47,6 +48,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_type_fn.h"
@@ -62,15 +64,18 @@
 #include "parser/parse_expr.h"
 #include "parser/parse_func.h"
 #include "parser/parse_type.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
+#include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "utils/pl_package.h"
 #include "catalog/pg_class.h"
 #include "access/transam.h"
 #include "pgxc/execRemote.h"
@@ -83,7 +88,7 @@ typedef struct PendingLibraryDelete {
 } PendingLibraryDelete;
 
 static void AlterFunctionOwner_internal(Relation rel, HeapTuple tup, Oid newOwnerId);
-
+static void checkAllowAlter(HeapTuple tup);
 static int2vector* GetDefaultArgPos(List* defargpos);
 
 /*
@@ -251,12 +256,15 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
         FunctionParameter* fp = (FunctionParameter*)lfirst(x);
         TypeName* t = fp->argType;
         bool isinput = false;
-        Oid toid;
+        Oid toid = InvalidOid;
         Type typtup;
         AclResult aclresult;
-
+        char* objname = NULL;
+        objname = strVal(linitial(t->names));
         typtup = LookupTypeName(NULL, t, NULL);
-
+        if (!HeapTupleIsValid(typtup)) {
+            toid = findPackageParameter(objname);
+        }
         /*
          * If the type is relation, then we check
          * whether the table is in installation group
@@ -285,7 +293,7 @@ static void examine_parameter_list(List* parameters, Oid languageOid, const char
             }
             toid = typeTypeId(typtup);
             ReleaseSysCache(typtup);
-        } else {
+        } else if (!OidIsValid(toid)) {
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type %s does not exist", TypeNameToString(t))));
             toid = InvalidOid; /* keep compiler quiet */
         }
@@ -659,7 +667,8 @@ static void compute_attributes_sql_style(const List* options, List** as, char** 
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("ROWS must be positive")));
     }
 
-    if (strcmp(*language, "c") != 0 && strcmp(*language, "java") != 0) {
+    if (strcmp(*language, "c") != 0 && strcmp(*language, "java") != 0 && 
+            strncmp(*language, "plpython", strlen("plpython")) != 0) {
         if (fencedItem == NULL) {
             *fenced = false;
         } else if (intVal(fencedItem->arg) == 1) {
@@ -810,7 +819,7 @@ static void CheckWindowFuncValid(Oid languageOid, const char* prosrc_str)
  * CreateFunction
  *	 Execute a CREATE FUNCTION utility statement.
  */
-void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
+void CreateFunction(CreateFunctionStmt* stmt, const char* queryString, Oid pkg_oid)
 {
     char* probin_str = NULL;
     char* prosrc_str = NULL;
@@ -820,7 +829,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     Oid languageOid;
     Oid languageValidator;
     char* funcname = NULL;
-    Oid namespaceId;
+    Oid namespaceId = InvalidOid;
     AclResult aclresult;
     oidvector* parameterTypes = NULL;
     ArrayType* allParameterTypes = NULL;
@@ -846,7 +855,6 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     bool shippable = false;
     bool package = false;
     bool proIsProcedure = stmt->isProcedure;
-
     probin_str = NULL;
     prosrc_str = NULL;
 
@@ -857,12 +865,33 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
     bool isalter = false;
 
     /* Convert list of names to a name and namespace */
-    namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname, &funcname);
+    if (!OidIsValid(pkg_oid)) {
+        namespaceId = QualifiedNameGetCreationNamespace(stmt->funcname, &funcname);
+    } else {
+        char *schemaname = NULL;
+        DeconstructQualifiedName(stmt->funcname, &schemaname, &funcname);
+        HeapTuple tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkg_oid));
+        if (HeapTupleIsValid(tuple)) {
+            Form_gs_package pkgform = (Form_gs_package)GETSTRUCT(tuple);
+            namespaceId = pkgform->pkgnamespace;
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PACKAGE), errmsg("package not found")));
+        }
+        ReleaseSysCache(tuple);
+    }
 
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
         aclcheck_error(aclresult, ACL_KIND_NAMESPACE, get_namespace_name(namespaceId));
+
+    if (namespaceId == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create function \"%s\"", funcname),
+                errhint("must be %s to create a function in public schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
+    }
 
     //@Temp Table. Lock Cluster after determine whether is a temp object,
     // so we can decide if locking other coordinator
@@ -885,12 +914,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         proowner = GetUserId();
     }
     /* default attributes */
-    isWindowFunc = false;
-    isStrict = false;
-    security = false;
-    isLeakProof = false;
     volatility = PROVOLATILE_VOLATILE;
-    proconfig = NULL;
     procost = -1; /* indicates not set */
     prorows = -1; /* indicates not set */
     shippable = false;
@@ -1033,6 +1057,7 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
      */
     ProcedureCreate(funcname,
         namespaceId,
+        pkg_oid,
         stmt->isOraStyle,
         stmt->replace,
         returnsSet,
@@ -1060,7 +1085,9 @@ void CreateFunction(CreateFunctionStmt* stmt, const char* queryString)
         fenced,
         shippable,
         package,
-        proIsProcedure);
+        proIsProcedure,
+        stmt->inputHeaderSrc,
+        stmt->isPrivate);
 }
 
 /*
@@ -1236,8 +1263,127 @@ void RemoveFunctionById(Oid funcOid)
     if (funcOid != InvalidOid) {
         DeletePgObject(funcOid, OBJECT_TYPE_PROC);
     }
+        ce_cache_refresh_type |= 0x20; /* refresh proc cache */
+}
+/*
+ * Guts of function deletion.
+ *
+ * Note: this is also used for aggregate deletion, since the OIDs of
+ * both functions and aggregates point to pg_proc.
+ */
+void remove_encrypted_proc_by_id(Oid funcOid)
+{
+    Relation relation;
+    HeapTuple tup;
+
+    /*
+     * Delete the pg_proc tuple.
+     */
+    relation = heap_open(ClientLogicProcId, RowExclusiveLock);
+
+
+    tup = SearchSysCache1(GSCLPROCOID, ObjectIdGetDatum(funcOid));
+    if (!HeapTupleIsValid(tup)) /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
+
+    simple_heap_delete(relation, &tup->t_self);
+
+    ReleaseSysCache(tup);
+
+    heap_close(relation, RowExclusiveLock);
 }
 
+/*
+ * delete a package by package oid
+ */
+void RemovePackageById(Oid pkgOid, bool isBody)
+{
+    Relation relation;
+    /*
+     * Delete the pg_proc tuple.
+     */
+    relation = heap_open(PackageRelationId, RowExclusiveLock);
+
+    HeapTuple pkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+    if (!HeapTupleIsValid(pkgtup)) /* should not happen */
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+    if (!isBody) {
+        /*
+            if replace package specification,delete all function in this package first.
+        */
+        simple_heap_delete(relation, &pkgtup->t_self);
+    } else {
+        bool nulls[Natts_gs_package];
+        Datum values[Natts_gs_package];
+        bool replaces[Natts_gs_package];
+        for (int i = 0; i < Natts_gs_package; i++) {
+            nulls[i] = false;
+            values[i] = (Datum)NULL;
+            replaces[i] = false;
+        }
+        replaces[Anum_gs_package_pkgbodyinitsrc - 1] = true;
+        nulls[Anum_gs_package_pkgbodyinitsrc - 1] = true;
+        replaces[Anum_gs_package_pkgbodydeclsrc - 1] = true;
+        nulls[Anum_gs_package_pkgbodydeclsrc - 1] = true;
+        HeapTuple newtup = heap_modify_tuple(pkgtup, RelationGetDescr(relation), values, nulls, replaces);
+        simple_heap_update(relation, &newtup->t_self, newtup); 
+    }
+    ReleaseSysCache(pkgtup);
+
+    heap_close(relation, RowExclusiveLock);
+
+    /*
+     * If there's a pg_aggregate tuple, delete that too.
+     */
+
+    /* Recode time of delete package. */
+    if (pkgOid != InvalidOid) {
+        DeletePgObject(pkgOid, OBJECT_TYPE_PKGSPEC);
+    }
+}
+
+void dropFunctionByPackageOid(Oid package_oid) 
+{
+    if (!OidIsValid(package_oid)) {
+        return;
+    }
+
+    HeapTuple oldtup;
+    ScanKeyData entry;
+    ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(package_oid));
+    Relation pg_proc_rel = heap_open(ProcedureRelationId, RowExclusiveLock);
+    SysScanDesc scan = systable_beginscan(pg_proc_rel, InvalidOid, false, NULL, 1, &entry);
+    while ((oldtup = systable_getnext(scan)) != NULL) {
+        HeapTuple proctup = heap_copytuple(oldtup);
+        Oid funcOid = InvalidOid;
+        if (HeapTupleIsValid(proctup)) {
+            funcOid = HeapTupleGetOid(proctup);
+            if (!OidIsValid(funcOid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmodule(MOD_PLSQL),
+                        errmsg("cache lookup failed for relid %u", funcOid)));
+            }
+        } else {
+            ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmodule(MOD_PLSQL),
+                        errmsg("cache lookup failed for relid %u", funcOid)));
+        }
+        CacheInvalidateFunction(funcOid);
+        (void)deleteDependencyRecordsFor(ProcedureRelationId, funcOid, true);
+
+        /* the 'shared dependencies' also change when update. */
+        deleteSharedDependencyRecordsFor(ProcedureRelationId, funcOid, 0);
+
+        /* send invalid message for for relation holding replaced function as trigger */
+        InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(proctup))->prorettype);
+        RemoveFunctionById(funcOid);
+        heap_freetuple(proctup);
+    }    
+    systable_endscan(scan);
+    heap_close(pg_proc_rel, RowExclusiveLock);
+}
 /*
  * Rename function
  */
@@ -1249,9 +1395,7 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
     Form_pg_proc procForm;
     Relation rel;
     AclResult aclresult;
-
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
-
     procOid = LookupFuncNameTypeNames(name, argtypes, false);
 
     /* if the function is a builtin function, its Oid is less than 10000.
@@ -1273,14 +1417,16 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
-
+    TrForbidAccessRbObject(ProcedureRelationId, procOid, NameStr(procForm->proname));
     if (procForm->proisagg)
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("\"%s\" is an aggregate function", NameListToString(name)),
                 errhint("Use ALTER AGGREGATE to rename aggregate functions.")));
-
     namespaceOid = procForm->pronamespace;
+
+    checkAllowAlter(tup);
+    oidvector* proargs = ProcedureGetArgTypes(tup);
 
     /* make sure the new name doesn't exist */
     if (SearchSysCacheExists3(PROCNAMEARGSNSP,
@@ -1290,7 +1436,7 @@ void RenameFunction(List* name, List* argtypes, const char* newname)
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function %s already exists in schema \"%s\"",
-                    funcname_signature_string(newname, procForm->pronargs, NIL, procForm->proargtypes.values),
+                    funcname_signature_string(newname, procForm->pronargs, NIL, proargs->values),
                     get_namespace_name(namespaceOid))));
     }
 
@@ -1327,7 +1473,6 @@ void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
     Relation rel;
     Oid procOid;
     HeapTuple tup;
-
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     procOid = LookupFuncNameTypeNames(name, argtypes, false);
@@ -1347,9 +1492,13 @@ void AlterFunctionOwner(List* name, List* argtypes, Oid newOwnerId)
                 errmsg("function \"%s\" is a masking function,its owner can not be changed", NameListToString(name))));
     }
 
+    TrForbidAccessRbObject(ProcedureRelationId, procOid);
+
     tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procOid));
+
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
+    checkAllowAlter(tup);
 
     if (((Form_pg_proc)GETSTRUCT(tup))->proisagg)
         ereport(ERROR,
@@ -1372,7 +1521,6 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId)
 {
     Relation rel;
     HeapTuple tup;
-
     /* if the function is a builtin function, its Oid is less than 10000.
      * we can't allow change the ownerId of the builtin functions
      */
@@ -1392,8 +1540,10 @@ void AlterFunctionOwner_oid(Oid procOid, Oid newOwnerId)
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procOid));
+
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
+    checkAllowAlter(tup);
     AlterFunctionOwner_internal(rel, tup, newOwnerId);
 
     /* Recode time of change the funciton owner. */
@@ -1538,7 +1688,7 @@ void AlterFunction(AlterFunctionStmt* stmt)
     DefElem* fencedItem = NULL;
     DefElem* shippable_item = NULL;
     DefElem* package_item = NULL;
-
+    bool isNull = false;
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     funcOid = LookupFuncNameTypeNames(stmt->func->funcname, stmt->func->funcargs, false);
@@ -1560,10 +1710,20 @@ void AlterFunction(AlterFunctionStmt* stmt)
     }
 
     tup = SearchSysCacheCopy1(PROCOID, ObjectIdGetDatum(funcOid));
+    Datum packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isNull);
+    Oid packageoid = DatumGetObjectId(packageOidDatum);
+    if (OidIsValid(packageoid)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                    errmsg("\"%s\" is a function in package.", NameListToString(stmt->func->funcname)),
+                    errhint("Use ALTER PACKAGE to alter functions.")));               
+    }
     if (!HeapTupleIsValid(tup)) /* should not happen */
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
 
     procForm = (Form_pg_proc)GETSTRUCT(tup);
+
+    TrForbidAccessRbObject(ProcedureRelationId, funcOid, NameStr(procForm->proname));
 
     /* Must be owner or have alter privilege of the target object. */
     AclResult aclresult = pg_proc_aclcheck(funcOid, GetUserId(), ACL_ALTER);
@@ -1777,6 +1937,10 @@ void SetFunctionArgType(Oid funcOid, int argIndex, Oid newArgType)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
     procForm = (Form_pg_proc)GETSTRUCT(tup);
 
+    // No need to check Anum_pg_proc_proargtypesext attribute, because this function is called for
+    // procedures/functions that have less than or equal to FUNC_MAX_ARGS_INROW parameters
+    Assert(procForm->pronargs <= FUNC_MAX_ARGS_INROW);
+
     if (argIndex < 0 || argIndex >= procForm->pronargs || procForm->proargtypes.values[argIndex] != OPAQUEOID)
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("function %u doesn't return OPAQUE", funcOid)));
 
@@ -1876,6 +2040,11 @@ void CreateCast(CreateCastStmt* stmt)
 
         procstruct = (Form_pg_proc)GETSTRUCT(tuple);
         nargs = procstruct->pronargs;
+
+        // No need to check Anum_pg_proc_proargtypesext attribute, because cast function
+        // will not have more than FUNC_MAX_ARGS_INROW parameters
+        Assert(nargs <= FUNC_MAX_ARGS_INROW);
+
         if (nargs < 1 || nargs > 3)
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("cast function must take one to three arguments")));
@@ -2152,6 +2321,8 @@ void AlterFunctionNamespace(List* name, List* argtypes, bool isagg, const char* 
     /* get schema OID and check its permissions */
     nspOid = LookupCreationNamespace(newschema);
 
+    TrForbidAccessRbObject(ProcedureRelationId, nspOid);
+
     (void)AlterFunctionNamespace_oid(procOid, nspOid);
 }
 
@@ -2183,6 +2354,7 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
     tup = SearchSysCacheCopy1(PROCOID, ObjectIdGetDatum(procOid));
     if (!HeapTupleIsValid(tup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", procOid)));
+    checkAllowAlter(tup);
     proc = (Form_pg_proc)GETSTRUCT(tup);
 
     /* check permissions on function */
@@ -2193,6 +2365,15 @@ Oid AlterFunctionNamespace_oid(Oid procOid, Oid nspOid)
 
     /* common checks on switching namespaces */
     CheckSetNamespace(oldNspOid, nspOid, ProcedureRelationId, procOid);
+
+    /* disallow move objects into public schemas for non-admin user */
+    if (nspOid == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), 
+                 errmsg("permission denied to move objects into public schema"),
+                 errhint("must be %s to move objects into public schema.",
+                         g_instance.attr.attr_security.enablePrivilegesSeparate ? "initial user" : "sysadmin")));
+    }
 
     /* check for duplicate name (more friendly than unique-index failure) */
     if (SearchSysCacheExists3(PROCNAMEARGSNSP,
@@ -2544,4 +2725,23 @@ Oid GetFunctionNodeGroup(AlterFunctionStmt* stmt)
     funcid = LookupFuncNameTypeNames(stmt->func->funcname, stmt->func->funcargs, false);
 
     return GetFunctionNodeGroupByFuncid(funcid);
+}
+
+
+static void checkAllowAlter(HeapTuple tup) {
+    Datum packageOidDatum;
+    Oid packageOid = InvalidOid;
+    bool isnull = false;
+    packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
+    if (!isnull) {
+        packageOid = DatumGetObjectId(packageOidDatum);
+    }
+    if (OidIsValid(packageOid)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("alter function in package is not allowed"),
+                errdetail("please rebuild package"),
+                errcause("package is one object,not allow alter function in package"),
+                erraction("rebuild package")));
+    }
 }

@@ -50,7 +50,7 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	int2		typlen;
 
 	/*
-	 * typbyval determines whether internal Postgres routines pass a value of
+	 * typbyval determines whether internal openGauss routines pass a value of
 	 * this type by value or by reference.	typbyval had better be FALSE if
 	 * the length is not 1, 2, or 4 (or 8 on 8-byte-Datum machines).
 	 * Variable-length types are always passed by reference. Note that
@@ -129,7 +129,7 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	/* ----------------
 	 * typalign is the alignment required when storing a value of this
 	 * type.  It applies to storage on disk as well as most
-	 * representations of the value inside Postgres.  When multiple values
+	 * representations of the value inside openGauss.  When multiple values
 	 * are stored consecutively, such as in the representation of a
 	 * complete row on disk, padding is inserted before a datum of this
 	 * type so that it begins on the specified boundary.  The alignment
@@ -355,6 +355,10 @@ DATA(insert OID = 32 (	oidvector_extend  PGNSP PGUID -1 f b A f t \054 0	26 1013
 DESCR("array of oids, used in system tables and support toast storage");
 #define OIDVECTOREXTENDOID	32
 
+DATA(insert OID = 33 (	int2vector_extend PGNSP PGUID -1 f b A f t \054 0	21 1004 int2vectorin_extend int2vectorout_extend int2vectorrecv_extend int2vectorsend_extend - - - i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("array of int2, used in system tables and support toast storage");
+#define INT2VECTOREXTENDOID	33
+
 DATA(insert OID = 86 (	raw		PGNSP PGUID -1 f b U f t \054 0	0  87 rawin rawout rawrecv rawsend - - - i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("variable-length string, binary values escaped");
 #define RAWOID  86
@@ -375,6 +379,7 @@ DATA(insert OID = 71 (	pg_type			PGNSP PGUID -1 f c C f t \054 1247 0 0 record_i
 DATA(insert OID = 75 (	pg_attribute	PGNSP PGUID -1 f c C f t \054 1249 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 81 (	pg_proc			PGNSP PGUID -1 f c C f t \054 1255 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 83 (	pg_class		PGNSP PGUID -1 f c C f t \054 1259 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 9745 (	gs_package			PGNSP PGUID -1 f c C f t \054 7815 0 0 record_in record_out record_recv record_send - - - d x f 0 -1 0 0 _null_ _null_ _null_ ));
 
 /* OIDS 100 - 199 */
 DATA(insert OID = 114 ( json		   PGNSP PGUID -1 f b U f t \054 0 0 199 json_in json_out json_recv json_send - - - i x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -477,6 +482,7 @@ DATA(insert OID = 1002 (  _char		 PGNSP PGUID -1 f b A f t \054 0	18 0 array_in 
 #define CHARARRAYOID 1002
 DATA(insert OID = 1003 (  _name		 PGNSP PGUID -1 f b A f t \054 0	19 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define NAMEARRAYOID 1003
+DATA(insert OID = 1004 (  _int2vector_extend PGNSP PGUID -1 f b A f t \054 0	33 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DATA(insert OID = 1005 (  _int2		 PGNSP PGUID -1 f b A f t \054 0	21 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define INT2ARRAYOID 1005
 DATA(insert OID = 5546 (  _int1		 PGNSP PGUID -1 f b A f t \054 0	5545 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
@@ -755,21 +761,39 @@ DESCR("hypper log log internal type");
 DATA(insert OID = 4371 ( _hll_trans_type  PGNSP PGUID  -1 f p P f t \054 0  4370 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("hypper log log internal type");
 
-DATA(insert OID = 4402 ( byteawithoutorderwithequalcol   PGNSP PGUID -1 f b U f t \054 0 0 1001 byteawithoutorderwithequalcolin byteawithoutorderwithequalcolout byteawithoutorderwithequalcolrecv byteawithoutorderwithequalcolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 4402 ( byteawithoutorderwithequalcol   PGNSP PGUID -1 f b U f t \054 0 0 4404 byteawithoutorderwithequalcolin byteawithoutorderwithequalcolout byteawithoutorderwithequalcolrecv byteawithoutorderwithequalcolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("encrypted data variable-length string, binary values escaped");
 #define BYTEAWITHOUTORDERWITHEQUALCOLOID		4402
 
-DATA(insert OID = 4403 ( byteawithoutordercol   PGNSP PGUID -1 f b U f t \054 0 0 1001 byteawithoutordercolin byteawithoutordercolout byteawithoutordercolrecv byteawithoutordercolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 5801 ( hash16 PGNSP PGUID 8 t b U f t \054 0 0 5803 hash16in hash16out - - - - - d p f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hash16 id");
+#define HASH16OID 5801
+
+/* uuid */
+DATA(insert OID = 5802 ( hash32 PGNSP PGUID 16 f b U f t \054 0 0 5804 hash32in hash32out - - - - - c p f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("hash32 id");
+#define HASH32OID 5802
+
+DATA(insert OID = 5803 ( _hash16 PGNSP PGUID -1 f b A f t \054 0 5801 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 5804 ( _hash32 PGNSP PGUID -1 f b A f t \054 0 5802 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+
+DATA(insert OID = 4403 ( byteawithoutordercol   PGNSP PGUID -1 f b U f t \054 0 0 4405 byteawithoutordercolin byteawithoutordercolout byteawithoutordercolrecv byteawithoutordercolsend byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout - i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("encrypted data variable-length string, binary values escaped");
 #define BYTEAWITHOUTORDERCOLOID		4403
 
-DATA(insert OID = 4404 ( _byteawithoutorderwithequalcol   PGNSP PGUID -1 f b A f t \054 0 0 1001 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 4404 ( _byteawithoutorderwithequalcol   PGNSP PGUID -1 f b A f t \054 0 4402 0 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("encrypted data variable-length string, binary values escaped");
 #define BYTEAWITHOUTORDERWITHEQUALCOLARRAYOID   4404
 
-DATA(insert OID = 4405 ( _byteawithoutordercol   PGNSP PGUID -1 f b A f t \054 0 0 1001 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+DATA(insert OID = 4405 ( _byteawithoutordercol   PGNSP PGUID -1 f b A f t \054 0 4403 0 array_in array_out array_recv array_send byteawithoutorderwithequalcoltypmodin byteawithoutorderwithequalcoltypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("encrypted data variable-length string, binary values escaped");
 #define BYTEAWITHOUTORDERCOLARRAYOID    4405
+
+DATA(insert OID = 4406 ( TdigestData		PGNSP PGUID -1 f b U f t \054 0 0 4407 tdigest_in tdigest_out 0 0 - - - i m f 0 -1 0 0 _null_ _null_ _null_ ));
+#define TDIGESTGOID		4406
+
+DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 array_in array_out array_recv array_send - - array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
+#define TDIGESTGARRAYOID		4407
 
 /*
  * macros

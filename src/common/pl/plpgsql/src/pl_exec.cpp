@@ -13,7 +13,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include "plpgsql.h"
+#include "utils/plpgsql.h"
 
 #include <ctype.h>
 
@@ -21,6 +21,7 @@
 #include "access/tupconvert.h"
 #include "auditfuncs.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "executor/spi_priv.h"
@@ -34,9 +35,7 @@
 #include "pgstat.h"
 #include "optimizer/clauses.h"
 #include "storage/proc.h"
-#ifndef ENABLE_MULTIPLE_NODES
 #include "tcop/autonomoustransaction.h"
-#endif
 #include "tcop/tcopprot.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -54,6 +53,7 @@
 #include "pgxc/pgxcnode.h"
 #include "pgxc/execRemote.h"
 #include "instruments/instr_unique_sql.h"
+#include "commands/sqladvisor.h"
 
 extern bool checkRecompileCondition(CachedPlanSource* plansource);
 static const char* const raise_skip_msg = "RAISE";
@@ -94,7 +94,7 @@ typedef struct SimpleEcontextStackEntry {
  * Local function forward declarations
  ************************************************************/
 static void plpgsql_exec_error_callback(void* arg);
-static PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
+extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
 
 static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block);
 static int exec_stmts(PLpgSQL_execstate* estate, List* stmts);
@@ -117,7 +117,7 @@ static int exec_stmt_foreach_a(PLpgSQL_execstate* estate, PLpgSQL_stmt_foreach_a
 static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt);
 static int exec_stmt_fetch(PLpgSQL_execstate* estate, PLpgSQL_stmt_fetch* stmt);
 static int exec_stmt_close(PLpgSQL_execstate* estate, PLpgSQL_stmt_close* stmt);
-static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt);
+static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt_null* stmt);
 static int exec_stmt_exit(PLpgSQL_execstate* estate, PLpgSQL_stmt_exit* stmt);
 static int exec_stmt_return(PLpgSQL_execstate* estate, PLpgSQL_stmt_return* stmt);
 static int exec_stmt_return_next(PLpgSQL_execstate* estate, PLpgSQL_stmt_return_next* stmt);
@@ -149,13 +149,13 @@ static void exec_eval_datum(
 static int exec_eval_integer(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull);
 static bool exec_eval_boolean(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull);
 static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool* isNull, Oid* rettype);
-static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples, Portal* portalP);
+static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples,
+                           Portal* portalP, bool isCollectParam = false);
 static int exec_for_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_forq* stmt, Portal portal, bool prefetch_ok, int dno);
 static ParamListInfo setup_param_list(PLpgSQL_execstate* estate, PLpgSQL_expr* expr);
 static void plpgsql_param_fetch(ParamListInfo params, int paramid);
 static void exec_move_row(
     PLpgSQL_execstate* estate, PLpgSQL_rec* rec, PLpgSQL_row* row, HeapTuple tup, TupleDesc tupdesc);
-static HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, TupleDesc tupdesc);
 static char* convert_value_to_string(PLpgSQL_execstate* estate, Datum value, Oid valtype);
 static Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTypMod);
 static Datum exec_cast_value(PLpgSQL_execstate* estate, Datum value, Oid valtype, Oid reqtype, FmgrInfo* reqinput,
@@ -198,9 +198,7 @@ static void BindCursorWithPortal(Portal portal, PLpgSQL_execstate *estate, int v
 static char* transformAnonymousBlock(char* query);
 static bool needRecompilePlan(SPIPlanPtr plan);
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void rebuild_exception_subtransaction_chain(PLpgSQL_execstate* estate);
-#endif
 
 static void stp_check_transaction_and_set_resource_owner(ResourceOwner oldResourceOwner,TransactionId oldTransactionId);
 static void stp_check_transaction_and_create_econtext(PLpgSQL_execstate* estate,TransactionId oldTransactionId);
@@ -296,6 +294,365 @@ static int check_line_validity(List* stmts, int linenum, int prevValidLine)
     return valid_line;
 }
 
+
+/*
+ * Append a SQL string literal representing "val" to buf.
+ */
+static void deparseStringLiteral(StringInfo buf, const char *val)
+{
+    const char *valptr = NULL;
+
+    /*
+     * Rather than making assumptions about the remote server's value of
+     * standard_conforming_strings, always use E'foo' syntax if there are any
+     * backslashes.  This will fail on remote servers before 8.1, but those
+     * are long out of support.
+     */
+    if (strchr(val, '\\') != NULL) {
+        appendStringInfoChar(buf, ESCAPE_STRING_SYNTAX);
+    }
+    appendStringInfoChar(buf, '\'');
+    for (valptr = val; *valptr; valptr++) {
+        char ch = *valptr;
+
+        if (SQL_STR_DOUBLE(ch, true)) {
+            appendStringInfoChar(buf, ch);
+        }
+        appendStringInfoChar(buf, ch);
+    }
+    appendStringInfoChar(buf, '\'');
+}
+
+
+void TypeValueToString(StringInfoData* buf, Oid consttype, Datum constvalue, bool constisnull)
+{
+    Oid typeOutput;
+    bool typIsVarlena;
+    bool isFloat = false;
+    bool needLabel = false;
+
+    if (constisnull) {
+        appendStringInfoString(buf, "NULL");
+        appendStringInfo(buf, "::%s", format_type_with_typemod(consttype, -1));
+        return;
+    }
+
+    getTypeOutputInfo(consttype, &typeOutput, &typIsVarlena);
+    char *extval = OidOutputFunctionCall(typeOutput, constvalue);
+
+    switch (consttype) {
+        case INT2OID:
+        case INT4OID:
+        case INT8OID:
+        case OIDOID:
+        case FLOAT4OID:
+        case FLOAT8OID:
+        case NUMERICOID: {
+            /*
+             * No need to quote unless it's a special value such as 'NaN'.
+             * See comments in get_const_expr().
+             */
+            if (strspn(extval, "0123456789+-eE.") == strlen(extval)) {
+                if (extval[0] == '+' || extval[0] == '-') {
+                    appendStringInfo(buf, "(%s)", extval);
+                } else {
+                    appendStringInfoString(buf, extval);
+                }
+                if (strcspn(extval, "eE.") != strlen(extval)) {
+                    isFloat = true; /* it looks like a float */
+                }
+            } else {
+                appendStringInfo(buf, "'%s'", extval);
+            }
+        } break;
+        case BITOID:
+        case VARBITOID:
+            appendStringInfo(buf, "B'%s'", extval);
+            break;
+        case BOOLOID:
+            if (strcmp(extval, "t") == 0) {
+                appendStringInfoString(buf, "true");
+            } else {
+                appendStringInfoString(buf, "false");
+            }
+            break;
+        default:
+            deparseStringLiteral(buf, extval);
+            break;
+    }
+
+    /*
+     * Append ::typename unless the constant will be implicitly typed as the
+     * right type when it is read in.
+     *
+     * XXX this code has to be kept in sync with the behavior of the parser,
+     * especially make_const.
+     */
+    switch (consttype) {
+        case BOOLOID:
+        case INT4OID:
+        case UNKNOWNOID:
+            needLabel = false;
+            break;
+        case NUMERICOID:
+            needLabel = !isFloat;
+            break;
+        case REFCURSOROID:
+            ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("Un-support:ref_cursor parameter is not supported for autonomous transactions.")));
+            break;
+        default:
+            needLabel = true;
+            break;
+    }
+    if (needLabel) {
+        appendStringInfo(buf, "::%s", format_type_with_typemod(consttype, -1));
+    }
+
+}
+
+static char* AssembleAutomnousStatement(PLpgSQL_function* func, FunctionCallInfo fcinfo, char* sourceText)
+{
+    Oid procedureOid = fcinfo->flinfo->fn_oid;
+    HeapTuple procTup = NULL;
+    StringInfoData buf;
+    char* nspName = NULL;
+
+    initStringInfo(&buf);
+
+    if (procedureOid != InvalidOid) {
+        /*
+         * Lookup the pg_proc tuple by Oid; we'll need it in any case
+         */
+        procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(procedureOid));
+        if (!HeapTupleIsValid(procTup)) {
+            ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for function %u, while compile function", procedureOid)));
+        }
+        Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(procTup);
+        char* proname = NameStr(procform->proname);
+        int nargs = procform->pronargs;
+
+        appendStringInfoString(&buf, "SELECT ");
+
+        /*
+         * Would this proc be found (given the right args) by regprocedurein?
+         * If not, we need to qualify it.
+         */
+        if (FunctionIsVisible(procedureOid))
+            nspName = NULL;
+        else
+            nspName = get_namespace_name(procform->pronamespace);
+
+        appendStringInfo(&buf, "%s", quote_qualified_identifier(nspName, NULL));
+        bool isNull = true;
+#ifndef ENABLE_MULTIPLE_NODES
+        Datum datum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isNull);
+        Oid proPackageId = DatumGetObjectId(datum);
+
+        if (proPackageId != InvalidOid) {
+            NameData* pkgName = GetPackageName(proPackageId);
+            if (pkgName != NULL) {
+                appendStringInfo(&buf, "%s", quote_qualified_identifier(NameStr(*pkgName), NULL));
+            } else {
+                ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("The package name cannot be found."),
+                        errdetail("proname: %s ,proPackageId: %d", proname,proPackageId),
+                        errcause("System error."),
+                        erraction("Please check PG_PROC table.")));
+
+            }
+        }
+#endif
+
+        appendStringInfo(&buf, "%s(", quote_qualified_identifier(NULL, proname));
+
+        isNull = false;
+        Datum proAllArgTypes = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
+        if (!isNull) {
+            ArrayType* arr = DatumGetArrayTypeP(proAllArgTypes); /* ensure not toasted */
+            int allNumArgs = ARR_DIMS(arr)[0];
+            if (ARR_NDIM(arr) != 1 || allNumArgs < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID) {
+                ReleaseSysCache(procTup);
+                ereport(ERROR,
+                    (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
+            }
+            Oid* argTypes = (Oid*)palloc(allNumArgs * sizeof(Oid));
+            errno_t rc = memcpy_s(argTypes, allNumArgs * sizeof(Oid), ARR_DATA_PTR(arr), allNumArgs * sizeof(Oid));
+            securec_check(rc, "\0", "\0");
+
+            for (int i = 0; i < allNumArgs; i++) {
+                if (argTypes[i] == REFCURSOROID) {
+                    pfree_ext(argTypes);
+                    ReleaseSysCache(procTup);
+                    ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                            errmsg("Un-support:ref_cursor parameter is not supported for autonomous transactions.")));
+                }
+            }
+            pfree_ext(argTypes);
+        }
+
+        for (int i = 0; i < nargs; i++) {
+            if (i > 0)
+                appendStringInfoChar(&buf, ',');
+
+            TypeValueToString(&buf, fcinfo->argTypes[i], fcinfo->arg[i], fcinfo->argnull[i]);
+        }
+
+        appendStringInfo(&buf, "); %s", "commit;");
+
+        ReleaseSysCache(procTup);
+
+    } else {
+        if (sourceText == NULL) {
+            ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("Invalid input anonymous block")));
+        } else {
+            appendStringInfo(&buf, "%s", sourceText);
+            appendStringInfo(&buf, "; %s", "commit;");
+        }
+    }
+
+    return buf.data;
+}
+
+
+
+/* ----------
+ * plpgsql_exec_autonm_function	Called by the call handler for
+ *				autonomous function execution.
+ * ----------
+ */
+Datum plpgsql_exec_autonm_function(PLpgSQL_function* func, 
+                                            FunctionCallInfo fcinfo, char* sourceText)
+{
+    TupleDesc tupDesc = NULL;
+    
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_DATANODE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), 
+                errmodule(MOD_PLSQL), errmsg("Un-support:DN does not support invoking autonomous transactions.")));
+    }
+#endif
+    /* 
+     * libpq link establishment 
+     * If no, create it. If yes, check its link status. 
+     */
+    CreateAutonomousSession();
+
+    if (func->fn_rettype == REFCURSOROID) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("ref_cursor parameter is not supported for autonomous transactions."),
+                errdetail("N/A"),
+                errcause("PL/SQL uses unsupported feature."),
+                erraction("Modify SQL statement according to the manual.")));
+    }
+
+    /* Statement concatenation. If the block is an anonymous block, the entire anonymous block is returned. */
+    char* sql = AssembleAutomnousStatement(func, fcinfo, sourceText);
+
+    /* If the return value of the function is of the record type, add the function to the temporary cache. */
+    if (sourceText == NULL && func->fn_retistuple 
+        && get_func_result_type(fcinfo->flinfo->fn_oid, NULL, &tupDesc) != TYPEFUNC_COMPOSITE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), 
+                errmodule(MOD_PLSQL), errmsg("unrecognized return type for PLSQL function.")));
+    }
+
+    List* search_path = fetch_search_path(false);
+
+    if (search_path != NIL) {
+        StringInfoData buf;
+        ListCell* l = NULL;
+        char* nspname = NULL;
+        initStringInfo(&buf);
+        appendStringInfo(&buf, "SET search_path TO ");
+        foreach (l, search_path) {
+            nspname = get_namespace_name(lfirst_oid(l));
+            if (nspname != NULL) { /* watch out for deleted namespace */
+                appendStringInfo(&buf, " %s", nspname);
+                if (lnext(l) != NULL) {
+                    appendStringInfoChar(&buf, ',');
+                }
+            }
+        }
+        appendStringInfoChar(&buf, ';');
+        (void)u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery(buf.data, NULL, 0);
+        list_free_ext(search_path);
+        if (buf.data != NULL) {
+            pfree(buf.data);
+        }
+    }
+
+    (void)u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("start transaction;", NULL, 0);
+
+    int64 automnXid = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select txid_current();", NULL, 0);
+
+    /* Call the libpq interface to send function names and parameters. */
+    Datum res = u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery(sql, tupDesc, automnXid, true);
+
+    /* Process the information whose return value is of the record type. */
+    if (sourceText == NULL && func->fn_retistuple) {
+        /*
+         * We have to check that the returned tuple actually matches the
+         * expected result type.  XXX would be better to cache the tupdesc
+         * instead of repeating get_call_result_type()
+         */
+        HeapTuple retTup = (HeapTuple)DatumGetPointer(res);
+        TupleDesc outTupdesc;
+        TupleConversionMap* tupMap = NULL;
+        switch (get_call_result_type(fcinfo, NULL, &outTupdesc)) {
+            case TYPEFUNC_COMPOSITE:
+                tupMap = convert_tuples_by_position(tupDesc,
+                    outTupdesc,
+                    gettext_noop("returned record type does not match expected record type"),
+                    func->fn_oid);
+                /* it might need conversion */
+                if (tupMap != NULL) {
+                    retTup = do_convert_tuple(retTup, tupMap);
+                }
+                /* no need to free map, we're about to return anyway */
+                break;
+            default:
+                /* shouldn't get here if retistuple is true ... */
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmodule(MOD_PLSQL), errmsg("unrecognized return type for PLSQL function.")));
+                break;
+        }
+        /*
+         * Copy tuple to upper executor memory, as a tuple Datum. Make
+         * sure it is labeled with the caller-supplied tuple type.
+         */
+        res = PointerGetDatum(SPI_returntuple(retTup, outTupdesc));
+    } else {
+        /*
+        * If the function's return type isn't by value, copy the value
+        * into upper executor memory context.
+        */
+        if (!fcinfo->isnull && !func->fn_retbyval) {
+            Size len;
+            void* tmp = NULL;
+            errno_t rc = EOK;
+
+            len = datumGetSize(res, false, func->fn_rettyplen);
+            tmp = SPI_palloc(len);
+            rc = memcpy_s(tmp, len, DatumGetPointer(res), len);
+            securec_check(rc, "\0", "\0");
+            res = PointerGetDatum(tmp);
+        }
+    }
+    if (sql != NULL) {
+        pfree(sql);
+    }
+
+    return res;
+
+}
+
 /* ----------
  * plpgsql_exec_function	Called by the call handler for
  *				function execution.
@@ -312,6 +669,12 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      * Setup the execution state
      */
     plpgsql_estate_setup(&estate, func, (ReturnSetInfo*)fcinfo->resultinfo);
+    func->debug = NULL;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    check_debug(func);
+#endif
+
     saved_current_stp_with_exception = plpgsql_get_current_value_stp_with_exception();
     /*
      * Setup error traceback support for ereport()
@@ -325,8 +688,49 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      * Make local execution copies of all the datums
      */
     estate.err_text = gettext_noop("during initialization of execution state");
+
+    /*
+     * if the datum type is unknown, it means it's a package variable,so we need
+     * compile the package , and replace the unknown type.
+     */
+
     for (i = 0; i < estate.ndatums; i++) {
-        estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+        if (func->datums[i]->dtype == PLPGSQL_DTYPE_UNKNOWN) {
+            PLpgSQL_package* pkg = NULL;
+            PLpgSQL_var* var = NULL;
+            var = (PLpgSQL_var*)func->datums[i];
+            char *objname = NULL;
+            char *nspname = NULL;
+            char* pkgname = NULL;
+            Oid pkgOid = InvalidOid;
+            struct PLpgSQL_nsitem* nse = NULL;
+            DeconstructQualifiedName(var->pkg_name, &nspname, &objname, &pkgname);
+            
+            if (objname!=NULL) {
+                pkgOid = PackageNameGetOid(objname);
+            }
+            if (pkg == NULL) {
+                pkg = PackageInstantiation(pkgOid);
+            }
+            var->pkg = pkg;
+            nse = plpgsql_ns_lookup(pkg->public_ns, false, var->refname, NULL, NULL, NULL);
+            if (nse == NULL) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_NONEXISTANT_VARIABLE), (errmsg("not found package variable"))));
+            } else {
+                func->datums[i] = pkg->datums[nse->itemno];
+                func->datums[i]->dno = i;
+                func->datums[i]->dtype = pkg->datums[nse->itemno]->dtype;
+            }
+        }
+    }
+
+    for (i = 0; i < estate.ndatums; i++) {
+        if (func->datums[i]->ispkg != true) {
+            estate.datums[i] = copy_plpgsql_datum(func->datums[i]);
+        } else {
+            estate.datums[i] = func->datums[i];
+        }
     }
 
     /*
@@ -408,7 +812,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     /* Set the magic implicit cursor attribute variable ROWCOUNT to 0 */
     exec_set_sql_rowcount(&estate, -1);
 
-    exec_set_sqlcode(&estate, 0);
+    if (estate.sqlcode_varno) {
+        exec_set_sqlcode(&estate, 0);
+    }
+
 
     /*
      * Let the instrumentation plugin peek at this function
@@ -438,8 +845,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
         if (rc == PLPGSQL_RC_CONTINUE) {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmodule(MOD_PLSQL),
-                    errmsg("CONTINUE cannot be used outside a loop")));
+                    errmodule(MOD_PLSQL), errmsg("CONTINUE cannot be used outside a loop")));
         } else if (rc == PLPGSQL_RC_GOTO_UNRESOLVED) {
             ereport(ERROR,
                 (errcode(ERRCODE_SYNTAX_ERROR),
@@ -449,8 +855,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_S_R_E_FUNCTION_EXECUTED_NO_RETURN_STATEMENT),
-                    errmodule(MOD_PLSQL),
-                    errmsg("control reached end of function without RETURN")));
+                    errmodule(MOD_PLSQL), errmsg("control reached end of function without RETURN")));
         }
     }
 
@@ -514,7 +919,8 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
                     }
                     tupmap = convert_tuples_by_position(estate.rettupdesc,
                         tupdesc,
-                        gettext_noop("returned record type does not match expected record type"));
+                        gettext_noop("returned record type does not match expected record type"),
+                        estate.func->fn_oid);
                     /* it might need conversion */
                     if (tupmap != NULL) {
                         rettup = do_convert_tuple(rettup, tupmap);
@@ -542,8 +948,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
                     /* shouldn't get here if retistuple is true ... */
                     ereport(ERROR,
                         (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                            errmodule(MOD_PLSQL),
-                            errmsg("unrecognized return type for PLSQL function.")));
+                            errmodule(MOD_PLSQL), errmsg("unrecognized return type for PLSQL function.")));
                     break;
             }
 
@@ -600,7 +1005,6 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
     }
 
     // Check for interrupts sent by pl debugger and other plugins.
-    //
     CHECK_FOR_INTERRUPTS();
 
     for (i = 0; i < estate.ndatums; i++) {
@@ -612,6 +1016,10 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
             if (newm->is_cursor_var) {
                 errorno = memcpy_s(func->datums[i], sizeof(PLpgSQL_var), estate.datums[i], sizeof(PLpgSQL_var));
                 securec_check(errorno, "\0", "\0");
+            }
+            if (estate.rettupdesc && i < estate.rettupdesc->natts &&
+                IsClientLogicType(estate.rettupdesc->attrs[i]->atttypid) && newm->datatype) {
+                newm->datatype->atttypmod = estate.rettupdesc->attrs[i]->atttypmod;
             }
         }
     }
@@ -939,8 +1347,7 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
         } else {
             ereport(ERROR,
                 (errcode(ERRCODE_S_R_E_FUNCTION_EXECUTED_NO_RETURN_STATEMENT),
-                    errmodule(MOD_PLSQL),
-                    errmsg("control reached end of trigger procedure without RETURN")));
+                    errmodule(MOD_PLSQL), errmsg("control reached end of trigger procedure without RETURN")));
         }
     }
 
@@ -973,7 +1380,8 @@ HeapTuple plpgsql_exec_trigger(PLpgSQL_function* func, TriggerData* trigdata)
         /* check rowtype compatibility */
         tupmap = convert_tuples_by_position(estate.rettupdesc,
             trigdata->tg_relation->rd_att,
-            gettext_noop("returned row structure does not match the structure of the triggering table"));
+            gettext_noop("returned row structure does not match the structure of the triggering table"),
+            estate.func->fn_oid);
         /* it might need conversion */
         if (tupmap != NULL) {
 			/* no need to free map, we're about to return anyway */
@@ -1371,7 +1779,7 @@ static int check_line_validity_in_for_query(PLpgSQL_stmt_forq* stmt, int linenum
  * Support function for initializing local execution variables
  * ----------
  */
-static PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
+PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum)
 {
     PLpgSQL_datum* result = NULL;
     errno_t errorno = EOK;
@@ -1510,6 +1918,9 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     volatile int rc = -1;
     int i;
     int n;
+    int n_initvars = 0; 
+    int* initvarnos;
+
     SubTransactionId subXid = InvalidSubTransactionId;
 
     /*
@@ -1520,15 +1931,34 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     estate->err_text = gettext_noop("during statement block local variable initialization");
 
-    for (i = 0; i < block->n_initvars; i++) {
-        n = block->initvarnos[i];
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+        /*
+         * when compile package , inline_code_block means it's a package instantiation block,
+         * so it's only has package variables,and the variable must be declared in package.
+         */
+        if (strcmp(estate->func->fn_signature, "inline_code_block") ==0 ) {
+            n_initvars = u_sess->plsql_cxt.plpgsql_curr_compile_package->n_initvars;
+            initvarnos = u_sess->plsql_cxt.plpgsql_curr_compile_package->initvarnos;
+        } else {
+            n_initvars = block->n_initvars;
+            initvarnos = block->initvarnos;      
+        }
+    } else {
+        n_initvars = block->n_initvars;
+        initvarnos = block->initvarnos;
+    }
 
+    for (i = 0; i < n_initvars; i++) {
+        n = initvarnos[i];
         switch (estate->datums[n]->dtype) {
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)(estate->datums[n]);
-
                 /* free any old value, in case re-entering block */
-                free_var(var);
+                if (!var->ispkg) {
+                    free_var(var);
+                } else {
+                    var->freeval = false;
+                }
 
                 /* Initially it contains a NULL */
                 var->value = (Datum)0;
@@ -1676,19 +2106,10 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
             plpgsql_create_econtext(estate);
 
             estate->err_text = NULL;
-#ifndef ENABLE_MULTIPLE_NODES
-            if (IsAutonomousTransaction(estate, block)) {
-                AttachToAutonomousSession(estate, block);
-            }
-#endif
+
             /* Run the block's statements */
             rc = exec_stmts(estate, block->body);
 
-#ifndef ENABLE_MULTIPLE_NODES
-            if (IsAutonomousTransaction(estate, block)) {
-                DetachToAutonomousSession(estate);
-            }
-#endif
             estate->err_text = gettext_noop("during statement block exit");
 
             /*
@@ -1758,11 +2179,6 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
             t_thrd.xact_cxt.bInAbortTransaction = false;
             FlushErrorState();
 
-#ifndef ENABLE_MULTIPLE_NODES
-            if (IsAutonomousTransaction(estate, block)) {
-                DetachToAutonomousSession(estate);
-            }
-#endif
             if (edata->sqlerrcode == ERRCODE_OPERATOR_INTERVENTION ||
                 edata->sqlerrcode == ERRCODE_QUERY_CANCELED ||
                 edata->sqlerrcode == ERRCODE_QUERY_INTERNAL_CANCEL ||
@@ -1836,10 +2252,20 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
 
                     state_var = (PLpgSQL_var*)estate->datums[block->exceptions->sqlstate_varno];
                     errm_var = (PLpgSQL_var*)estate->datums[block->exceptions->sqlerrm_varno];
-
-                    assign_text_var(state_var, unpack_sql_state(edata->sqlerrcode));
-                    assign_text_var(errm_var, edata->message);
-
+                    if (state_var->pkg != NULL) {
+                        MemoryContext temp = MemoryContextSwitchTo(state_var->pkg->pkg_cxt);
+                        assign_text_var(state_var, unpack_sql_state(edata->sqlerrcode));
+                        MemoryContextSwitchTo(temp);
+                    } else {
+                        assign_text_var(state_var, unpack_sql_state(edata->sqlerrcode));
+                    }
+                    if (errm_var->pkg != NULL) {
+                        MemoryContext temp = MemoryContextSwitchTo(errm_var->pkg->pkg_cxt);
+                        assign_text_var(errm_var, edata->message);
+                        MemoryContextSwitchTo(temp);
+                    } else {
+                        assign_text_var(errm_var, edata->message);
+                    }
                     /*
                      * Also set up cur_error so the error data is accessible
                      * inside the handler.
@@ -1891,35 +2317,8 @@ static int exec_stmt_block(PLpgSQL_execstate* estate, PLpgSQL_stmt_block* block)
          * Just execute the statements in the block's body
          */
         estate->err_text = NULL;
-#ifdef ENABLE_MULTIPLE_NODES
+
         rc = exec_stmts(estate, block->body);
-#else
-        if (IsAutonomousTransaction(estate, block)) {
-            AttachToAutonomousSession(estate, block);
-
-            MemoryContext oldcontext = CurrentMemoryContext;
-            PG_TRY();
-            {
-                rc = exec_stmts(estate, block->body);
-
-                DetachToAutonomousSession(estate);
-            }
-            PG_CATCH();
-            {
-                /* here to make sure closing session properly when error happens in exec_stmts, then rethrow error */
-                MemoryContextSwitchTo(oldcontext);
-                ErrorData* edata = CopyErrorData();
-                FlushErrorState();
-
-                DetachToAutonomousSession(estate);
-
-                ReThrowError(edata);
-            }
-            PG_END_TRY();
-        } else {
-            rc = exec_stmts(estate, block->body);
-        }
-#endif
 
         stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
         u_sess->SPI_cxt.is_stp = savedIsSTP;
@@ -2143,6 +2542,12 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 
     CHECK_FOR_INTERRUPTS();
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (estate->func->debug) {
+        estate->func->debug->debugCallback(estate->func, estate);
+    }
+#endif
+
     switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
         case PLPGSQL_STMT_BLOCK:
             rc = exec_stmt_block(estate, (PLpgSQL_stmt_block*)stmt);
@@ -2257,19 +2662,11 @@ static int exec_stmt(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
 
         case PLPGSQL_STMT_COMMIT:
         case PLPGSQL_STMT_ROLLBACK:
-#ifndef ENABLE_MULTIPLE_NODES
-            if (estate->autonomous_session) {
-                const char* query = ((enum PLpgSQL_stmt_types)stmt->cmd_type == PLPGSQL_STMT_COMMIT) ?
-                                    "commit" : "rollback";
-                estate->autonomous_session->ExecSimpleQuery(query);
-                return PLPGSQL_RC_OK;
-            }
-#endif
             rc = exec_stmt_transaction(estate, stmt);
             break;
 
         case PLPGSQL_STMT_NULL:
-            rc = exec_stmt_null(estate, (PLpgSQL_stmt*)stmt);
+            rc = exec_stmt_null(estate, (PLpgSQL_stmt_null*)stmt);
             break;
 
         default:
@@ -2864,11 +3261,18 @@ static int exec_stmt_fors(PLpgSQL_execstate* estate, PLpgSQL_stmt_fors* stmt)
 {
     Portal portal = NULL;
     int rc;
+    /* Check to see if it is being collected by sqladvsior */
+    bool isCollectParam = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    if (checkAdivsorState()) {
+        isCollectParam = true;
+    }
+#endif
 
     /*
      * Open the implicit cursor for the statement using exec_run_select
      */
-    rc = exec_run_select(estate, stmt->query, 0, &portal);
+    rc = exec_run_select(estate, stmt->query, 0, &portal, isCollectParam);
     if (rc != SPI_OK_SELECT) {
         ereport(DEBUG1,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmodule(MOD_PLSQL), errmsg("exec_run_select returns %d", rc)));
@@ -3008,7 +3412,13 @@ static int exec_stmt_forc(PLpgSQL_execstate* estate, PLpgSQL_stmt_forc* stmt)
      * If cursor variable was NULL, store the generated portal name in it
      */
     if (curname == NULL) {
-        assign_text_var(curvar, portal->name);
+        if (curvar->pkg != NULL) {
+            MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
+            assign_text_var(curvar, portal->name);
+            temp = MemoryContextSwitchTo(temp);
+        } else {
+            assign_text_var(curvar, portal->name);
+        }
     }
 
     /* save the status of display cursor before Modify attributes of cursor */
@@ -3471,7 +3881,8 @@ static int exec_stmt_return_next(PLpgSQL_execstate* estate, PLpgSQL_stmt_return_
                 }
 
                 tupmap = convert_tuples_by_position(
-                    rec->tupdesc, tupdesc, gettext_noop("wrong record type supplied in RETURN NEXT"));
+                    rec->tupdesc, tupdesc, gettext_noop("wrong record type supplied in RETURN NEXT"),
+                    estate->func->fn_oid);
                 tuple = rec->tup;
                 /* it might need conversion */
                 if (tupmap != NULL) {
@@ -3571,7 +3982,8 @@ static int exec_stmt_return_query(PLpgSQL_execstate* estate, PLpgSQL_stmt_return
     }
 
     tupmap = convert_tuples_by_position(
-        portal->tupDesc, estate->rettupdesc, gettext_noop("structure of query does not match function result type"));
+        portal->tupDesc, estate->rettupdesc, gettext_noop("structure of query does not match function result type"),
+        estate->func->fn_oid);
 
     for (;;) {
         int i;
@@ -3879,9 +4291,6 @@ static void plpgsql_estate_setup(PLpgSQL_execstate* estate, PLpgSQL_function* fu
     estate->rettupdesc = NULL;
     estate->exitlabel = NULL;
     estate->cur_error = NULL;
-#ifndef ENABLE_MULTIPLE_NODES
-    estate->autonomous_session = NULL;
-#endif
     estate->tuple_store = NULL;
     estate->cursor_return_data = NULL;
     if (rsi != NULL) {
@@ -4076,14 +4485,6 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
             g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
-#ifndef ENABLE_MULTIPLE_NODES
-        /* autonomous transaction */
-        if (estate->autonomous_session && IsValidAutonomousTransactionQuery(STMT_SQL, expr, stmt->into)) {
-            ATResult atresult =  estate->autonomous_session->ExecSimpleQuery(expr->query);
-            exec_set_found(estate, atresult.withtuple);
-            return PLPGSQL_RC_OK;
-        }
-#endif
 
     /*
      * Set up ParamListInfo (hook function and possibly data values)
@@ -4129,7 +4530,11 @@ static int exec_stmt_execsql(PLpgSQL_execstate* estate, PLpgSQL_stmt_execsql* st
      * Execute the plan
      */
     rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI, estate->readonly_func, tcount);
-
+#ifdef ENABLE_MULTIPLE_NODES
+    if (checkAdivsorState() && checkSPIPlan(expr->plan)) {
+        collectDynWithArgs(expr->query, paramLI, expr->plan->cursor_options);
+    }
+#endif
     // This is used for nested STP. If the transaction Id changed,
     // then need to create new econtext for the TopTransaction.
     stp_check_transaction_and_create_econtext(estate,oldTransactionId);
@@ -4484,12 +4889,7 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     querystr = pstrdup(querystr);
 
     exec_eval_cleanup(estate);
-#ifndef ENABLE_MULTIPLE_NODES
-    if (estate->autonomous_session && IsValidAutonomousTransactionQuery(STMT_DYNAMIC, stmt->query, stmt->into)) {
-        estate->autonomous_session->ExecSimpleQuery(querystr);
-        return PLPGSQL_RC_OK;
-    }
-#endif
+
     if (stmt->params != NULL) {
         stmt->ppd = (void*)exec_eval_using_params(estate, stmt->params);
     }
@@ -4506,7 +4906,17 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
 
         /* Compile the anonymous code block */
         /* support pass external parameter in anonymous block */
-        func = plpgsql_compile_inline(querystr);
+        PG_TRY();
+        {
+            func = plpgsql_compile_inline(querystr);
+        }
+        PG_CATCH();
+        {
+            /* package may use this ptr for check, need reset it */
+            u_sess->plsql_cxt.plpgsql_curr_compile = NULL;
+            PG_RE_THROW();
+        }
+        PG_END_TRY();
 
         /* Mark the function as busy, just pro forma */
         func->use_count++;
@@ -4590,7 +5000,13 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
         free_params_data(ppd);
         stmt->ppd = NULL;
     } else {
-        exec_res = SPI_execute(querystr, estate->readonly_func, 0);
+        bool isCollectParam = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    if (checkAdivsorState()) {
+        isCollectParam = true;
+    }
+#endif
+        exec_res = SPI_execute(querystr, estate->readonly_func, 0, isCollectParam);
     }
     /*
      * This is used for nested STP. If the transaction Id changed,
@@ -4915,7 +5331,6 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
     PLpgSQL_expr* query = NULL;
     Portal portal = NULL;
     ParamListInfo paramLI = NULL;
-
     /* ----------
      * Get the cursor variable and if it has an assigned name, check
      * that it's not in use currently.
@@ -4923,7 +5338,17 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
      */
     curvar = (PLpgSQL_var*)(estate->datums[stmt->curvar]);
     if (!curvar->isnull) {
-        curname = TextDatumGetCString(curvar->value);
+        if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
+            if (curvar->pkg != NULL) {
+                MemoryContext temp;
+                PLpgSQL_package* pkg = curvar->pkg;
+                temp = MemoryContextSwitchTo(pkg->pkg_cxt);
+                curname = TextDatumGetCString(curvar->value);
+                MemoryContextSwitchTo(temp);
+            }
+        } else {
+            curname = TextDatumGetCString(curvar->value);
+        }
         if (SPI_cursor_find(curname) != NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_DUPLICATE_CURSOR),
@@ -4959,7 +5384,13 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
          * If cursor variable was NULL, store the generated portal name in it
          */
         if (curname == NULL) {
-            assign_text_var(curvar, portal->name);
+            if (curvar->pkg != NULL) {
+                MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
+                assign_text_var(curvar, portal->name);
+                temp = MemoryContextSwitchTo(temp);
+            } else {
+                assign_text_var(curvar, portal->name);
+            }
         }
         BindCursorWithPortal(portal, estate, curvar->dno);
         exec_set_isopen(estate, true, curvar->dno + CURSOR_ISOPEN);
@@ -5020,16 +5451,22 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
             exec_prepare_plan(estate, query, curvar->cursor_options);
         }
     }
-
+    /* Check to see if it is being collected by sqladvsior */
+    bool isCollectParam = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    if (checkAdivsorState()) {
+        isCollectParam = true;
+    }
+#endif
     /*
      * Set up ParamListInfo (hook function and possibly data values)
      */
     paramLI = setup_param_list(estate, query);
-
     /*
      * Open the cursor
      */
-    portal = SPI_cursor_open_with_paramlist(curname, query->plan, paramLI, estate->readonly_func);
+    portal = SPI_cursor_open_with_paramlist(curname, query->plan, paramLI, estate->readonly_func, isCollectParam);
+
     if (portal == NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_CURSOR),
@@ -5041,7 +5478,15 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
      * If cursor variable was NULL, store the generated portal name in it
      */
     if (curname == NULL) {
-        assign_text_var(curvar, portal->name);
+        if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid)) {
+            if (curvar->pkg != NULL) {
+                MemoryContext temp = MemoryContextSwitchTo(curvar->pkg->pkg_cxt);
+                assign_text_var(curvar, portal->name);
+                MemoryContextSwitchTo(temp);
+            } 
+        } else {
+            assign_text_var(curvar, portal->name);
+        }
     }
 
     if (curname != NULL) {
@@ -5329,7 +5774,7 @@ static int exec_stmt_transaction(PLpgSQL_execstate *estate, PLpgSQL_stmt* stmt)
  * exec_stmt_null			Locate the execution status.
  * ----------
  */
-static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt* stmt)
+static int exec_stmt_null(PLpgSQL_execstate* estate, PLpgSQL_stmt_null* stmt)
 {
     Assert(estate && stmt->lineno >= 0);
 
@@ -5471,7 +5916,13 @@ void exec_assign_value(PLpgSQL_execstate* estate, PLpgSQL_datum* target, Datum v
              * context.
              */
             if (!var->datatype->typbyval && !*isNull) {
-                newvalue = datumCopy(newvalue, false, var->datatype->typlen);
+                if (var->ispkg) {
+                    MemoryContext temp = MemoryContextSwitchTo(var->pkg->pkg_cxt);
+                    newvalue = datumCopy(newvalue, false, var->datatype->typlen);
+                    MemoryContextSwitchTo(temp);
+                } else {
+                    newvalue = datumCopy(newvalue, false, var->datatype->typlen);
+                }
             }
 
             /*
@@ -6332,8 +6783,10 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
 /* ----------
  * exec_run_select			Execute a select query
  * ----------
+ * @isCollectParam: default false, is used to collect sql info in sqladvisor online model.
  */
-static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples, Portal* portalP)
+static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples,
+                           Portal* portalP, bool isCollectParam)
 {
     ParamListInfo paramLI;
     int rc;
@@ -6347,15 +6800,6 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
     if (ENABLE_CN_GPC && g_instance.plan_cache->CheckRecreateSPICachePlan(expr->plan)) {
         g_instance.plan_cache->RecreateSPICachePlan(expr->plan);
     }
-#ifndef ENABLE_MULTIPLE_NODES
-    /* autonomous transaction */
-    PLpgSQL_exectype etype = (maxtuples == 0 && portalP == NULL) ? STMT_PERFORM : STMT_UNKNOW;
-    if (estate->autonomous_session && IsValidAutonomousTransactionQuery(etype, expr, false)) {
-        ATResult atresult =  estate->autonomous_session->ExecSimpleQuery(expr->query);
-        exec_set_found(estate, atresult.withtuple);
-        return PLPGSQL_RC_OK;
-    }
-#endif
 
     /*
      * Set up ParamListInfo (hook function and possibly data values)
@@ -6366,7 +6810,7 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
      * If a portal was requested, put the query into the portal
      */
     if (portalP != NULL) {
-        *portalP = SPI_cursor_open_with_paramlist(NULL, expr->plan, paramLI, estate->readonly_func);
+        *portalP = SPI_cursor_open_with_paramlist(NULL, expr->plan, paramLI, estate->readonly_func, isCollectParam);
         if (*portalP == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_CURSOR),
@@ -6389,6 +6833,11 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
      * Execute the query
      */
     rc = SPI_execute_plan_with_paramlist(expr->plan, paramLI, estate->readonly_func, maxtuples);
+#ifdef ENABLE_MULTIPLE_NODES
+    if (isCollectParam && checkSPIPlan(expr->plan)) {
+        collectDynWithArgs(expr->query, paramLI, expr->plan->cursor_options);
+    }
+#endif
     plpgsql_estate = NULL;
     if (rc != SPI_OK_SELECT) {
         ereport(ERROR,
@@ -6698,8 +7147,13 @@ static bool exec_eval_simple_expr(
      * estate->cur_expr, which setup_param_list() sets.
      */
     save_cur_expr = estate->cur_expr;
-
-    paramLI = setup_param_list(estate, expr);
+    /*
+     * For validation estate->datums should be NULL
+     * since there is no parameter set vo validation
+     */
+    if (estate->datums) {
+        paramLI = setup_param_list(estate, expr);
+    }
     econtext->ecxt_param_list_info = paramLI;
 
     /*
@@ -7130,7 +7584,7 @@ static void exec_move_row(
  * A NULL return indicates rowtype mismatch; caller must raise suitable error
  * ----------
  */
-static HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, TupleDesc tupdesc)
+HeapTuple make_tuple_from_row(PLpgSQL_execstate* estate, PLpgSQL_row* row, TupleDesc tupdesc)
 {
     int natts = tupdesc->natts;
     HeapTuple tuple = NULL;
@@ -7248,6 +7702,10 @@ static Datum pl_coerce_type_typmod(Datum value, Oid targetTypeId, int32 targetTy
         }
 
         procstruct = (Form_pg_proc)GETSTRUCT(tp);
+
+        // No need to check Anum_pg_proc_proargtypesext attribute, because cast function
+        // will not have more than FUNC_MAX_ARGS_INROW parameters
+        Assert(procstruct->pronargs <= FUNC_MAX_ARGS_INROW);
 
         /*
          * These Asserts essentially check that function is a legal coercion
@@ -8416,6 +8874,13 @@ void plpgsql_HashTableDeleteAll()
         func->use_count = 0;
         plpgsql_free_function_memory(func);
     }
+    hash_seq_init(&hash_seq, u_sess->plsql_cxt.plpgsql_HashTable);
+    plpgsql_pkg_HashEnt* pkgHentry = NULL;
+    while ((pkgHentry = (plpgsql_pkg_HashEnt *)hash_seq_search(&hash_seq)) != NULL) {
+        PLpgSQL_package* pkg = pkgHentry->package;
+        plpgsql_pkg_HashTableDelete(pkg);
+        plpgsql_free_package_memory(pkg);
+    }
 }
 
 void plpgsql_HashTableDeleteFunc(Oid func_oid)
@@ -8479,4 +8944,371 @@ void plpgsql_restore_current_value_stp_with_exception(bool saved_current_stp_wit
 void plpgsql_set_current_value_stp_with_exception() 
 {
     u_sess->SPI_cxt.current_stp_with_exception = true;
+}
+
+typedef struct {
+    int nargs;      /* number of arguments */
+    Oid* types;     /* types of arguments */
+    int* param_ids; /* evaluated argument values */
+} DynParamsData;
+
+typedef struct {
+    DynParamsData* dp;
+    SQLFunctionParseInfoPtr pinfo;
+} pl_validate_dynexpr_info;
+
+static MemoryContext _SPI_execmem(void)
+{
+    return MemoryContextSwitchTo(u_sess->SPI_cxt._current->execCxt);
+}
+
+/*
+ * _SPI_begin_call: begin a SPI operation within a connected procedure
+ */
+static int _SPI_begin_call(bool execmem)
+{
+    if (u_sess->SPI_cxt._curid + 1 != u_sess->SPI_cxt._connected)
+        return SPI_ERROR_UNCONNECTED;
+    u_sess->SPI_cxt._curid++;
+    if (u_sess->SPI_cxt._current != &(u_sess->SPI_cxt._stack[u_sess->SPI_cxt._curid])) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SPI stack corrupted when begin SPI operation.")));
+    }
+
+    if (execmem) { /* switch to the Executor memory context */
+        _SPI_execmem();
+    }
+
+    return 0;
+}
+
+/*
+ * exec_eval_using_params --- evaluate params of USING clause
+ */
+static DynParamsData* validate_using_params(List* params, PLpgSQL_function* func, SQLFunctionParseInfoPtr pinfo)
+{
+    DynParamsData* ppd = NULL;
+    int nargs;
+    int i;
+    ListCell* lc = NULL;
+
+    ppd = (DynParamsData*)palloc(sizeof(DynParamsData));
+    nargs = list_length(params);
+
+    ppd->nargs = nargs;
+    ppd->types = (Oid*)palloc(nargs * sizeof(Oid));
+    ppd->param_ids = (int*)palloc(nargs * sizeof(int));
+
+    /* Get all types to verify param_index */
+    bool isNull = false;
+    char* argmodes = NULL;
+    int n_modes = 0;
+    HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(func->fn_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmodule(MOD_EXECUTOR),
+            errmsg("cache lookup failed for function %u when initialize function cache.", func->fn_oid)));
+    }
+
+    Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+    if (!isNull) {
+        ArrayType* arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
+        if (arr) {
+            n_modes = ARR_DIMS(arr)[0];
+            argmodes = (char*)ARR_DATA_PTR(arr);
+        }
+    }
+    i = 0;
+    foreach (lc, params) {
+        PLpgSQL_expr* param = (PLpgSQL_expr*)lfirst(lc);
+        SPIPlanPtr plan = NULL;
+        pl_validate_expression(param, func, pinfo, &plan);
+        if (plan) {
+            SPI_keepplan(plan);
+            param->plan = plan;
+        }
+        /* Check to see if it's a simple expression */
+        exec_simple_check_plan(param);
+        ppd->types[i] = param->expr_simple_type;
+
+
+        if (ppd->types[i] == UNKNOWNOID) {
+            /*
+             * Treat 'unknown' parameters as text, since that's what most
+             * people would expect. SPI_execute_with_args can coerce unknown
+             * constants in a more intelligent way, but not unknown Params.
+             * This code also takes care of copying into the right context.
+             * Note we assume 'unknown' has the representation of C-string.
+             */
+            ppd->types[i] = TEXTOID;
+        }
+        if (param->expr_simple_expr && nodeTag(param->expr_simple_expr) == T_Param) {
+            int allp_id = ((Param*)param->expr_simple_expr)->paramid;
+            int param_id = 0;
+            /* get input param id since dynexec uses allparamtypes */
+            if (argmodes) {
+                for (int i = 0; i < allp_id && i < n_modes; i++) {
+                    if (argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_INOUT ||
+                        argmodes[i] == PROARGMODE_VARIADIC) {
+                        param_id++;
+                    }
+                }
+            } else {
+                param_id = allp_id;
+            }
+            ppd->param_ids[i] = param_id;
+        } else {
+            ppd->param_ids[i] = 0;
+        }
+        i++;
+        if (param->plan) {
+            SPI_freeplan(param->plan);
+            param->plan = NULL;
+        }
+    }
+    ReleaseSysCache(tuple);
+    return ppd;
+}
+
+/*
+ * plpgsql_dynparam_ref		parser callback for ParamRefs (dynamic execution)
+ */
+static Node* plpgsql_dynparam_ref(ParseState* pstate, ParamRef* pref)
+{
+    DynParamsData* dp = (DynParamsData*)pstate->p_ref_hook_state;
+    int p_no = pref->number - 1;
+    if (p_no < 0 || p_no >= dp->nargs) {
+        return NULL; /* parameter not known to plpgsql */
+    }
+    Param* param = makeNode(Param);
+    param->paramkind = PARAM_EXTERN;
+    param->paramid = dp->param_ids[p_no];
+    param->paramtype = dp->types[p_no];
+    param->location = pref->location;
+
+    return (Node*)param;
+}
+
+static void plpgsql_crete_dynaproc_parser_setup(struct ParseState* pstate, pl_validate_dynexpr_info* dexpr_info)
+{
+    pstate->p_pre_columnref_hook = NULL;
+    pstate->p_post_columnref_hook = NULL;
+    pstate->p_paramref_hook = plpgsql_dynparam_ref;
+    /* no need to use p_coerce_param_hook */
+    pstate->p_ref_hook_state = (void*)dexpr_info->dp;
+    pstate->p_create_proc_operator_hook = sql_create_proc_operator_ref;
+    pstate->p_create_proc_insert_hook = sql_fn_parser_replace_param_type_for_insert;
+    pstate->p_cl_hook_state = dexpr_info->pinfo;
+}
+
+void validate_stmt_dynexecute(PLpgSQL_stmt_dynexecute* stmt, PLpgSQL_function* func, SQLFunctionParseInfoPtr pinfo,
+    List** stmt_list)
+{
+    Datum query;
+    bool isnull = false;
+    Oid restype;
+    char* querystr = NULL;
+    PLpgSQL_stmt stmtblock;
+    stmtblock.cmd_type = stmt->cmd_type;
+    stmtblock.lineno = stmt->lineno;
+    PLpgSQL_execstate estate;
+    ListCell* lc1 = NULL;
+    plpgsql_estate_setup(&estate, func, (ReturnSetInfo*)NULL);
+    /* For validation set  estate->datums to null */
+    pfree_ext(estate.datums);
+    estate.datums = NULL;
+
+    query = exec_eval_expr(&estate, stmt->query, &isnull, &restype);
+    if (isnull) {
+        ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED), errmodule(MOD_PLSQL),
+            errmsg("query string argument of EXECUTE statement is null")));
+    }
+
+    /* Get the C-String representation */
+    querystr = convert_value_to_string(&estate, query, restype);
+    /* copy it out of the temporary context before we clean up */
+    querystr = pstrdup(querystr);
+
+    exec_eval_cleanup(&estate);
+    if (!stmt->params) {
+        return;
+    }
+    DynParamsData* dp = validate_using_params(stmt->params, func, pinfo);
+    if (!dp) {
+        return;
+    }
+    int res;
+    _SPI_plan plan;
+
+    res = _SPI_begin_call(false);
+    if (res < 0) {
+        return;
+    }
+    errno_t errorno = memset_s(&plan, sizeof(_SPI_plan), '\0', sizeof(_SPI_plan));
+    securec_check(errorno, "\0", "\0");
+    plan.magic = _SPI_PLAN_MAGIC;
+    plan.cursor_options = 0;
+    plan.nargs = 0;
+    plan.argtypes = NULL;
+    plan.parserSetup = (ParserSetupHook)plpgsql_crete_dynaproc_parser_setup;
+    pl_validate_dynexpr_info dvi;
+    dvi.dp = dp;
+    dvi.pinfo = pinfo;
+    plan.parserSetupArg = &dvi;
+
+    _SPI_prepare_oneshot_plan_for_validator(querystr, &plan);
+    ErrorContextCallback spi_err_context;
+
+    foreach (lc1, plan.plancache_list) {
+        CachedPlanSource* plansource = (CachedPlanSource*)lfirst(lc1);
+
+        spi_err_context.arg = (void*)plansource->query_string;
+
+        /*
+         * If this is a one-shot plan, we still need to do parse analysis.
+         */
+        if (plan.oneshot) {
+            Node* parsetree = plansource->raw_parse_tree;
+            const char* src = plansource->query_string;
+            List* statement_list = NIL;
+
+            /*
+             * Parameter datatypes are driven by parserSetup hook if provided,
+             * otherwise we use the fixed parameter list.
+             */
+            if (plan.parserSetup != NULL) {
+                Assert(plan.nargs == 0);
+                statement_list = pg_analyze_and_rewrite_params(parsetree, src, plan.parserSetup, plan.parserSetupArg);
+            } else {
+                statement_list = pg_analyze_and_rewrite(parsetree, src, plan.argtypes, plan.nargs);
+            }
+            *stmt_list = list_concat(*stmt_list, list_copy(statement_list));
+        }
+    }
+    if (NIL != plan.plancache_list) {
+        list_free_deep(plan.plancache_list);
+        plan.plancache_list = NIL;
+    }
+    _SPI_end_call(false);
+}
+
+void pl_validate_stmt_block_in_subtransaction(PLpgSQL_stmt_block *block, PLpgSQL_function *func,
+    SQLFunctionParseInfoPtr pinfo, SPIPlanPtr *plan, List **dynexec_list)
+{
+    /*
+     * Execute the statements in the block's body inside a sub-transaction
+     */
+    SubTransactionId subXid = InvalidSubTransactionId;
+    /*
+     * First initialize all variables declared in this block
+     */
+    bool savedisAllowCommitRollback = u_sess->SPI_cxt.is_allow_commit_rollback;
+    bool savedIsSTP = u_sess->SPI_cxt.is_stp;
+    bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
+    MemoryContext oldcontext = CurrentMemoryContext;
+    ResourceOwner oldOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    TransactionId oldTransactionId = SPI_get_top_transaction_id();
+    bool need_rethrow = false;
+#ifdef ENABLE_MULTIPLE_NODES
+    /* CN should send savepoint command to remote nodes to begin sub transaction remotely. */
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        /* if do savepoint, always treat myself as local write node */
+        RegisterTransactionLocalNode(true);
+        RecordSavepoint("Savepoint s1", "s1", false, SUB_STMT_SAVEPOINT);
+        pgxc_node_remote_savepoint("Savepoint s1", EXEC_ON_DATANODES, true, true);
+    }
+#endif
+    PG_TRY();
+    {
+        BeginInternalSubTransaction(NULL);
+    }
+    PG_CATCH();
+    {
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+        OverrideStackEntry *entry = NULL;
+        Assert(u_sess->catalog_cxt.overrideStack != NULL);
+        u_sess->SPI_cxt.portal_stp_exception_counter--;
+        entry = (OverrideStackEntry *)linitial(u_sess->catalog_cxt.overrideStack);
+        if (entry->nestLevel < GetCurrentTransactionNestLevel()) {
+            AbortSubTransaction();
+            CleanupSubTransaction();
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            HandleReleaseOrRollbackSavepoint("rollback to s1", "s1", SUB_STMT_ROLLBACK_TO);
+            /* CN send rollback savepoint to remote nodes to abort sub transaction remotely */
+            pgxc_node_remote_savepoint("rollback to s1", EXEC_ON_DATANODES, false, false);
+            HandleReleaseOrRollbackSavepoint("release s1", "s1", SUB_STMT_RELEASE);
+            /* CN should send release savepoint command to remote nodes for savepoint name reuse */
+            pgxc_node_remote_savepoint("release s1", EXEC_ON_DATANODES, false, false);
+        }
+#endif
+        // Get last transaction's ResourceOwner.
+        stp_check_transaction_and_set_resource_owner(oldOwner, oldTransactionId);
+        MemoryContextSwitchTo(oldcontext);
+        /*
+         * If AtEOSubXact_SPI() popped any SPI context of the subxact, it
+         * will have left us in a disconnected state.  We need this hack
+         * to return to connected state.
+         */
+        SPI_restore_connection();
+        /* Must clean up the econtext too */
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    subXid = GetCurrentSubTransactionId();
+    /* Want to run statements inside function's memory context */
+    MemoryContextSwitchTo(oldcontext);
+    PG_TRY();
+    {
+        pl_validate_stmt_block(block, func, pinfo, plan, dynexec_list);
+    }
+    PG_CATCH();
+    {
+        stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+        u_sess->SPI_cxt.is_stp = savedIsSTP;
+        u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
+        /* gs_signal_handle maybe block sigusr2 when accept SIGINT */
+        gs_signal_unblock_sigusr2();
+        /* Save error info */
+        MemoryContextSwitchTo(oldcontext);
+        /* Set bInAbortTransaction to avoid core dump caused by recursive memory alloc exception */
+        t_thrd.xact_cxt.bInAbortTransaction = true;
+        t_thrd.xact_cxt.bInAbortTransaction = false;
+        /*
+         * If AtEOSubXact_SPI() popped any SPI context of the subxact, it
+         * will have left us in a disconnected state.  We need this hack
+         * to return to connected state.
+         */
+        SPI_restore_connection();
+        FlushErrorState();
+        need_rethrow = true;
+    }
+    PG_END_TRY();
+    /*
+     * rollback transaction unconditionally
+     */
+    // Get last transaction's ResourceOwner.
+    stp_check_transaction_and_set_resource_owner(oldOwner, oldTransactionId);
+    MemoryContextSwitchTo(oldcontext);
+    /* Abort the inner transaction */
+    if (GetCurrentSubTransactionId() == subXid) {
+        ResetPortalCursor(subXid, InvalidOid, 0);
+        RollbackAndReleaseCurrentSubTransaction();
+    }
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        HandleReleaseOrRollbackSavepoint("rollback to s1", "s1", SUB_STMT_ROLLBACK_TO);
+        /* CN send rollback savepoint to remote nodes to abort sub transaction remotely */
+        pgxc_node_remote_savepoint("rollback to s1", EXEC_ON_DATANODES, false, false);
+        HandleReleaseOrRollbackSavepoint("release s1", "s1", SUB_STMT_RELEASE);
+        /* CN should send release savepoint command to remote nodes for savepoint name reuse */
+        pgxc_node_remote_savepoint("release s1", EXEC_ON_DATANODES, false, false);
+    }
+#endif
+    MemoryContextSwitchTo(oldcontext);
+    // Get last transaction's ResourceOwner.
+    stp_check_transaction_and_set_resource_owner(oldOwner, oldTransactionId);
+    stp_retore_old_xact_stmt_state(savedisAllowCommitRollback);
+    if (need_rethrow) {
+        PG_RE_THROW();
+    }
 }

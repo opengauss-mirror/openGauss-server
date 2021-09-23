@@ -55,6 +55,8 @@
 #include "utils/ps_status.h"
 #include "executor/executor.h"
 
+#include "communication/commproxy_interface.h"
+
 #ifdef HAVE_POLL_H
 #include <poll.h>
 #endif
@@ -696,9 +698,33 @@ int ThreadPoolControler::DispatchSession(Port* port)
     ThreadPoolGroup* grp = NULL;
     knl_session_context* sc = NULL;
 
-    grp = FindThreadGroupWithLeastSession();
+    /*
+     * In comm_proxy mode, each accepted fd is combined with a fixed communicator thread in one NUMA group,
+     * we no longer distribute it with old mothod "group with latest sessions",
+     * so just return the communicator's NUMA group.
+     *
+     * Note: We assume that each connected user session can be equal-possibily distributed to communicators,
+     * fortunately,it looks like Euler OS can guarantee this(proved),
+     * otherwise we need revisit it.
+     *
+     * Performance optimization with comm_proxy when thread_pool m_groupNum same as comm_proxy numa groups
+     */
+    if (AmIProxyModeSockfd(port->sock) && m_groupNum == g_comm_proxy_config.s_numa_num) {
+        CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(port->sock);
+        grp = m_groups[comm_sock->m_group_id];
+    } else {
+        grp = FindThreadGroupWithLeastSession();
+    }
+
     if (grp == NULL) {
         Assert(false);
+        return STATUS_ERROR;
+    }
+    /* if this group is hanged, we don't accept new session */
+    if (grp->IsGroupHanged()) {
+        ereport(WARNING, 
+                (errmodule(MOD_THREAD_POOL), 
+                    errmsg("Group[%d] is too busy to add new session for now.", grp->GetGroupId())));
         return STATUS_ERROR;
     }
 

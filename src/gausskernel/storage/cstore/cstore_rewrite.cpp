@@ -2120,6 +2120,15 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     finishPartitionHeapSwap(destPartOid, tempTableOid, true, u_sess->utils_cxt.RecentXmin);
     partitionClose(partTableRel, destPart, NoLock);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+    * Each delta table of destPartOid and tempTableOid will not be swapped.
+    * We will build index of new delta table. After partition swap,
+    * tempTableOid has the old relfilenode, destPartOid has the new relfilenode.
+    */
+    BuildIndexOnNewDeltaTable(tempTableOid, destPartOid, RelationGetRelid(partTableRel));
+#endif
+
     /* ensure that preceding changes are all visible to the next deletion step. */
     CommandCounterIncrement();
 

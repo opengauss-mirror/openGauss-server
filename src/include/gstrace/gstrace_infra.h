@@ -40,7 +40,6 @@ typedef enum trace_data_fmt {
 
 /* Initialize context during startup process. */
 extern int gstrace_init(int key);
-extern void gstrace_destory(int code, uintptr_t arg);
 
 /* write one ENTRY trace record */
 extern void gstrace_entry(const uint32_t rec_id);
@@ -58,7 +57,6 @@ extern void gstrace_tryblock_exit(bool inCatch, int* oldTryCounter);
 #else
 
 #define gstrace_init(key) (1)
-#define gstrace_destory (NULL)
 #define gstrace_entry(rec_id)
 #define gstrace_exit(rec_id)
 #define gstrace_data(probe, rec_id, fmt_type, pData, data_len)

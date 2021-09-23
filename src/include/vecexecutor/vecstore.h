@@ -143,12 +143,18 @@ public:
                 if (NeedDecode(col)) {
                     ScalarValue val = batch->m_arr[col].m_vals[row];
                     Datum v = ScalarVector::Decode(val);
-                    multiColValue.m_values[col] = datumCopy(v, attr->attbyval, VARSIZE_ANY(v));
+                    int typlen = 0;
+                    if (batch->m_arr[col].m_desc.typeId == NAMEOID) {
+                        typlen = datumGetSize(v, false, -2);
+                    } else {
+                        typlen = VARSIZE_ANY(v);
+                    }
+                    multiColValue.m_values[col] = datumCopy(v, attr->attbyval, typlen);
                     if (m_addWidth)
-                        m_colWidth += VARSIZE_ANY(v);
+                        m_colWidth += typlen;
                     char* p = DatumGetPointer(multiColValue.m_values[col]);
                     UseMem(GetMemoryChunkSpace(p));
-                    multiColValue.size += datumGetSize(v, attr->attbyval, VARSIZE_ANY(v));
+                    multiColValue.size += datumGetSize(v, attr->attbyval, typlen);
                 } else {
                     multiColValue.m_values[col] = PointerGetDatum(batch->m_arr[col].m_vals[row]);
                     multiColValue.size += sizeof(Datum);

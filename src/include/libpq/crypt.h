@@ -26,7 +26,6 @@ typedef struct iam_token {
     char* tenant_id;
 } iam_token;
 
-
 typedef struct password_info {
     char* shadow_pass;
     TimestampTz vbegin;
@@ -38,6 +37,7 @@ typedef struct password_info {
 extern int32 get_password_stored_method(const char* role, char* encrypted_string, int len);
 extern bool get_stored_password(const char *role, password_info *pass_info);
 extern int CheckUserValid(Port* port, const char* role);
+extern bool VerifyPasswdDigest(const char* roleID, char* passwd, char* passDigest);
 extern int crypt_verify(const Port* port, const char* user, char* client_pass);
 extern int get_stored_iteration(const char* role);
 extern char* verify_cms_token(char* token_string);

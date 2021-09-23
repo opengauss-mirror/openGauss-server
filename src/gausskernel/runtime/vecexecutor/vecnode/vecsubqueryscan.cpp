@@ -25,10 +25,10 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "vecexecutor/vecsubqueryscan.h"
 #include "vecexecutor/vecexecutor.h"
-#include "executor/nodeSubqueryscan.h"
+#include "executor/node/nodeSubqueryscan.h"
 
 static VectorBatch* VecSubqueryNext(VecSubqueryScanState* node);
 

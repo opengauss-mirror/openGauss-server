@@ -1,6 +1,6 @@
 SET synchronous_commit = on;
 
-execute direct on (datanode1)'SELECT ''init'' FROM pg_create_logical_replication_slot(''regression_slot'', ''test_decoding'');';
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
 
 -- bug #13844, xids in non-decoded records need to be inspected
 CREATE TABLE xact_test(data text);
@@ -14,7 +14,7 @@ SAVEPOINT foo;
 INSERT INTO xact_test VALUES ('after-assignment');
 COMMIT;
 -- and now show those changes
-execute direct on (datanode1)'SELECT data FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'');';
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- bug #14279, do not propagate null snapshot from subtransaction
 BEGIN;
@@ -24,8 +24,8 @@ SAVEPOINT foo;
 -- now perform operation in subxact that creates and logs xid, but isn't decoded
 SELECT 1 FROM xact_test FOR UPDATE LIMIT 1;
 COMMIT;
-execute direct on (datanode1)'SELECT data FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'');';
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 DROP TABLE xact_test;
 
-execute direct on (datanode1)'SELECT pg_drop_replication_slot(''regression_slot'');';
+SELECT pg_drop_replication_slot('regression_slot');

@@ -19,7 +19,7 @@
 
 /*
  * Define SLRU segment size.  A page is the same BLCKSZ as is used everywhere
- * else in Postgres.  The segment size can be chosen somewhat arbitrarily;
+ * else in openGauss.  The segment size can be chosen somewhat arbitrarily;
  * we make it 2048 pages by default, or 16Mb, i.e. 64M transactions for CLOG
  * or 2M transactions for SUBTRANS.
  *

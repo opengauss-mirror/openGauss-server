@@ -27,10 +27,10 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "commands/tablespace.h"
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "executor/hashjoin.h"
-#include "executor/nodeHash.h"
-#include "executor/nodeHashjoin.h"
+#include "executor/node/nodeHash.h"
+#include "executor/node/nodeHashjoin.h"
 #include "miscadmin.h"
 #include "optimizer/clauses.h"
 #include "optimizer/streamplan.h"
@@ -1558,7 +1558,7 @@ static void ExecHashBuildSkewHash(HashJoinTable hashtable, Hash* node, int mcvsT
 
     /* do nothing if we don't have room for at least one skew bucket */
     /* Also, Do nothing if planner didn't identify the outer relation's join key */
-    if (u_sess->attr.attr_common.upgrade_mode != 0 || mcvsToUse <= 0 || !OidIsValid(node->skewTable)) {
+    if (mcvsToUse <= 0 || !OidIsValid(node->skewTable)) {
         return;
     }
 

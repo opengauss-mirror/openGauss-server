@@ -40,6 +40,7 @@
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "catalog/pg_proc_fn.h"
 
 static void parseNameAndArgTypes(const char* string, bool allowNone, List** names, int* nargs, Oid* argtypes);
 
@@ -301,6 +302,8 @@ char* format_procedure(Oid procedure_oid)
         char* nspname = NULL;
         StringInfoData buf;
 
+        oidvector* proargs = ProcedureGetArgTypes(proctup);
+
         /* XXX no support here for bootstrap mode */
 
         initStringInfo(&buf);
@@ -316,7 +319,7 @@ char* format_procedure(Oid procedure_oid)
 
         appendStringInfo(&buf, "%s(", quote_qualified_identifier(nspname, proname));
         for (i = 0; i < nargs; i++) {
-            Oid thisargtype = procform->proargtypes.values[i];
+            Oid thisargtype = proargs->values[i];
 
             if (i > 0)
                 appendStringInfoChar(&buf, ',');

@@ -66,6 +66,7 @@ RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 desi
         item = GetRedoItemPtr(NewReaderState(record, true));
     }
 
+    item->replay_undo = false;
     item->oldVersion = t_thrd.xlog_cxt.redo_oldversion_xlog;
     item->sharewithtrxn = false;
     item->blockbytrxn = false;
@@ -81,6 +82,7 @@ RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 desi
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
     item->syncServerMode = GetServerMode();
     pg_atomic_init_u32(&item->refCount, 0);
+    pg_atomic_init_u32(&item->trueRefCount, 0);
     pg_atomic_init_u32(&item->replayed, 0);
     item->nextByWorker = (RedoItem **)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
     pg_atomic_init_u32(&item->freed, 0);
@@ -111,6 +113,7 @@ RedoItem *CreateLSNMarker(XLogReaderState *record, List *expectedTLIs, bool buse
     item->syncXLogReceiptSource = t_thrd.xlog_cxt.XLogReceiptSource;
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
     item->syncServerMode = GetServerMode();
+    item->replay_undo = false;
 
     item->nextByWorker = (RedoItem **)(((uintptr_t)item) + MAXALIGN(sizeof(RedoItem)));
     pg_atomic_init_u32(&item->freed, 0);

@@ -21,7 +21,7 @@
 
 /*
  * This table stores info about all the built-in functions (ie, functions
- * that are compiled into the Postgres executable).  The table entries are
+ * that are compiled into the openGauss executable).  The table entries are
  * required to appear in Oid order, so that binary search can be used.
  */
 
@@ -80,6 +80,16 @@ typedef struct {
     bool* propackage;            /* [32] */
     const char* descr;           /* [33] description */
     char prokind;                /* [34] f:function, p:procedure*/
+    const char* proargsrc;       /* [35] procedure/function param input string */
+    Oid propackageid;            /* [36] OID of package containing this proc */
+    bool proisprivate;           /* [37] is a private function */
+
+    /*
+     * The following two fields are used only if the function has more than FUNC_MAX_ARGS_INROW (666) parameters,
+     * otherwise these are set to NULL.
+     */
+    ArrayOid* proargtypesext;       /* [38] parameter types (excludes OUT params), extended proargtypes */
+    ArrayInt2* prodefaultargposext; /* [39] extended prodefaultargpos */
 } Builtin_func;
 
 /* The function has the same names are put in one group */
@@ -166,6 +176,21 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
 #define _32(ind_is_pkg) _SetPointerField(propackage, ind_is_pkg, MakeSingleValuePtr(bool, ind_is_pkg))
 #define _33(desc_str) _SetField(descr, desc_str)
 #define _34(c_prokind) _SetField(prokind, c_prokind)
+#define _35(argSrc) _SetField(proargsrc, argSrc)
+#define _36(package_oid) _SetField(propackageid, package_oid)
+#define _37(is_private) _SetField(proisprivate, is_private)
+
+/*
+ * proargtypesext (_38) and prodefaultargposext (_39) are used only if the function has more than
+ * FUNC_MAX_ARGS_INROW (666) parameters. For all the builtin functions, these fields will be NULL (as none of them
+ * have parameters more than 666). This is checked in the code and set to NULL accordingly while generating
+ * the tuple. So it is not mandatory to set these parameters to NULL explicitly for all the existing functions in
+ * builtin_funcs.ini file.
+ */
+#define _38(ind_cnt, ...) _SetPointerField(proargtypesext, ind_cnt, MakeArrayOidPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _39(ind_cnt, ...) \
+    _SetPointerField(prodefaultargposext, ind_cnt, MakeArrayInt2Ptr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+
 /* Use Marcos _index() to initialize a built-in function, the indices between 0 ~ 20 are necessary,
  * and indices between 21 ~ 32 are optional */
 #define AddBuiltinFunc(...) \

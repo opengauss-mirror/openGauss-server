@@ -1,0 +1,20 @@
+<refentry id="SQL-DROP_MODEL">
+<refmeta>
+<refentrytitle>DROP MODEL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP MODEL</refname>
+<refpurpose>Drop an existing machine learning model</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+DROP MODEL model_name;
+
+Remove an existing model from the model warehouse.
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

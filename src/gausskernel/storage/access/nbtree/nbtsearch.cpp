@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtsearch.cpp
- *	  Search code for postgres btrees.
+ *	  Search code for openGauss btrees.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -30,9 +30,9 @@
 #include "catalog/pg_proc.h"
 
 static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber offnum);
-static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup, Oid partOid);
+static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, IndexTuple itup, Oid partOid,
+    int2 bucketid);
 static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir);
-static Buffer _bt_walk_left(Relation rel, Buffer buf);
 static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir);
 static void _bt_check_natts_correct(const Relation index, Page page, OffsetNumber offnum);
 
@@ -931,6 +931,9 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
     if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
         GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
     }
+    if (scan->xs_want_bucketid && cbi_scan_need_change_bucket(scan->xs_cbi_scan, currItem->bucketid)) {
+        cbi_set_bucketid(scan->xs_cbi_scan, currItem->bucketid);
+    }
 
     return true;
 }
@@ -990,6 +993,10 @@ bool _bt_next(IndexScanDesc scan, ScanDirection dir)
         GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
     }
 
+    if (scan->xs_want_bucketid && cbi_scan_need_change_bucket(scan->xs_cbi_scan, currItem->bucketid)) {
+        cbi_set_bucketid(scan->xs_cbi_scan, currItem->bucketid);
+    }
+
     return true;
 }
 
@@ -1022,7 +1029,7 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
     AttrNumber PartitionOidAttr;
     Oid partOid = InvalidOid;
     Oid heapOid = IndexScanGetPartHeapOid(scan);
-    bool isnull = false;
+    int2 bucketid = InvalidBktId;
 
     tupdesc = RelationGetDescr(scan->indexRelation);
     PartitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
@@ -1056,14 +1063,12 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
         while (offnum <= maxoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
             if (itup != NULL) {
-                /* Get partition oid for global partition index */
-                isnull = false;
-                partOid = scan->xs_want_ext_oid
-                              ? DatumGetUInt32(index_getattr(itup, PartitionOidAttr, tupdesc, &isnull))
-                              : heapOid;
-                Assert(!isnull);
+                /* Get partition oid for global partition index. */
+                partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
+                /* Get bucketid for crossbucket index. */
+                bucketid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
                 /* tuple passes all scan key conditions, so remember it */
-                _bt_saveitem(so, itemIndex, offnum, itup, partOid);
+                _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
                 itemIndex++;
             }
             if (!continuescan) {
@@ -1088,14 +1093,11 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
         while (offnum >= minoff) {
             itup = _bt_checkkeys(scan, page, offnum, dir, &continuescan);
             if (itup != NULL) {
-                isnull = false;
-                partOid = scan->xs_want_ext_oid
-                              ? DatumGetUInt32(index_getattr(itup, PartitionOidAttr, tupdesc, &isnull))
-                              : heapOid;
-                Assert(!isnull);
+                partOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, itup) : heapOid;
+                bucketid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, itup) : InvalidBktId;
                 /* tuple passes all scan key conditions, so remember it */
                 itemIndex--;
-                _bt_saveitem(so, itemIndex, offnum, itup, partOid);
+                _bt_saveitem(so, itemIndex, offnum, itup, partOid, bucketid);
             }
             if (!continuescan) {
                 /* there can't be any more matches, so stop */
@@ -1116,13 +1118,16 @@ static bool _bt_readpage(IndexScanDesc scan, ScanDirection dir, OffsetNumber off
 }
 
 /* Save an index item into so->currPos.items[itemIndex] */
-static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, const IndexTuple itup, Oid partOid)
+static void _bt_saveitem(BTScanOpaque so, int itemIndex, OffsetNumber offnum, const IndexTuple itup, Oid partOid,
+    int2 bucketid)
 {
     BTScanPosItem *currItem = &so->currPos.items[itemIndex];
 
     currItem->heapTid = itup->t_tid;
     currItem->indexOffset = offnum;
     currItem->partitionOid = partOid;
+    currItem->bucketid = bucketid;
+
     if (so->currTuples) {
         Size itupsz = IndexTupleSize(itup);
 
@@ -1273,7 +1278,7 @@ static bool _bt_steppage(IndexScanDesc scan, ScanDirection dir)
  * to be half-dead; the caller should check that condition and step left
  * again if it's important.
  */
-static Buffer _bt_walk_left(Relation rel, Buffer buf)
+Buffer _bt_walk_left(Relation rel, Buffer buf)
 {
     Page page;
     BTPageOpaqueInternal opaque;
@@ -1534,6 +1539,10 @@ static bool _bt_endpoint(IndexScanDesc scan, ScanDirection dir)
 
     if (scan->xs_want_ext_oid && GPIScanCheckPartOid(scan->xs_gpi_scan, currItem->partitionOid)) {
         GPISetCurrPartOid(scan->xs_gpi_scan, currItem->partitionOid);
+    }
+
+    if (scan->xs_want_bucketid && cbi_scan_need_change_bucket(scan->xs_cbi_scan, currItem->bucketid)) {
+        cbi_set_bucketid(scan->xs_cbi_scan, currItem->bucketid);
     }
 
     return true;

@@ -28,9 +28,11 @@ set work_mem = 64;
 
 
 -- Test bitmap-and.
+EXPLAIN (analyze on, costs off, timing off) SELECT count(*) FROM bmscantest WHERE a = 1 AND b = 1;
 SELECT count(*) FROM bmscantest WHERE a = 1 AND b = 1;
 
 -- Test bitmap-or.
+EXPLAIN (analyze on, costs off, timing off) SELECT count(*) FROM bmscantest WHERE a = 1 OR b = 1;
 SELECT count(*) FROM bmscantest WHERE a = 1 OR b = 1;
 
 

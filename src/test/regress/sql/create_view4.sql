@@ -2,7 +2,6 @@
 -- CREATE_VIEW3
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 /* unkown type */
 create table test_a (a integer not null); 

@@ -38,7 +38,7 @@
 #include <unordered_map>
 
 #ifdef ENABLE_THREAD_SAFETY
-#ifdef WIN32
+#if defined(WIN32) && !defined(_MINGW32) 
 #include "pthread-win32.h"
 #else
 #include <pthread.h>
@@ -55,8 +55,11 @@
 #include "cipher.h"
 #include "../../include/securec.h"
 #include "../../include/securec_check.h"
+#ifndef WIN32
+#define NO_COMPILE_CLASS_FDCOLLECTION
 #include "libcomm/libcomm.h"
-
+#undef NO_COMPILE_CLASS_FDCOLLECTION
+#endif
 #ifdef ENABLE_GSS
 #if defined(HAVE_GSSAPI_H)
 #include <gssapi.h>
@@ -93,7 +96,7 @@ typedef struct {
 #endif
 
 /*
- * POSTGRES backend dependent Constants.
+ * openGauss backend dependent Constants.
  */
 #define CMDSTATUS_LEN 64 /* should match COMPLETION_TAG_BUFSIZE */
 #define MAX_ERRMSG_LENGTH 1024
@@ -472,7 +475,9 @@ struct pg_conn {
     /* flag to identify the logic connection between cn and dn */
     bool is_logic_conn;
     /* logic connection address between cn and dn */
+#ifndef WIN32
     libcommaddrinfo libcomm_addrinfo;
+#endif
     /* Connection_info is a json string containing driver_name, driver_version, driver_path and os_user.
      * If connection_info is not NULL, use connection_info and ignore the value of connection_extra_info.
      * If connection_info is NULL:

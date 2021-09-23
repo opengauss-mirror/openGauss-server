@@ -154,7 +154,6 @@ SELECT * FROM ONLY c ORDER BY c.aa;
 SELECT * from ONLY d ORDER BY d.aa;
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 -- Confirm PRIMARY KEY adds NOT NULL constraint to child table
 CREATE TEMP TABLE z (b TEXT, PRIMARY KEY(aa, b)) inherits (a);

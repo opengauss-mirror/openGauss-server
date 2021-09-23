@@ -32,9 +32,11 @@
 #include "libpq-fe.h"
 #include "postgres_fe.h"
 #include "client_logic_processor/raw_values_list.h"
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-#include "client_logic/client_logic_enums.h"
-#endif
+#include "client_logic_cache/proc_list.h"
+#include "client_logic_cache/icached_rec.h"
+#include "client_logic_cache/icached_column_manager.h"
+#include "client_logic_common/client_logic_utils.h"
+#include "client_logic_data_fetcher/data_fetcher_manager.h"
 
 typedef struct pg_conn PGconn;
 
@@ -43,11 +45,22 @@ typedef struct CopyStateData CopyStateData;
 class CStringsMap;
 typedef CStringsMap StringArgs;
 class StatementData;
+class ICachedColumnManager;
 
 class HookResource;
 typedef struct objectFqdn {
     char data[NAMEDATALEN * 4];
 } ObjectFqdn;
+
+typedef struct JNIEnv_ JNIEnv; /* forward declaration */
+class _jobject;
+typedef _jobject *jobject;     /* forward declaration */
+
+#define HOOK_RESOURCES_COUNT 1
+typedef struct clientlogic_parser_context {
+    bool eaten_begin;
+    bool eaten_declare;
+} clientlogic_parser_context;
 
 class PreparedStatementsList;
 
@@ -56,8 +69,12 @@ class PreparedStatementsList;
 */
 class PGClientLogic {
 public:
-    PGClientLogic(PGconn *conn);
+    PGClientLogic(PGconn *conn, JNIEnv *java_env, jobject jdbc_handle);
     ~PGClientLogic();
+    void clear_functions_list();
+    void insert_function(const char *fname,  CachedProc *proc);
+    const ICachedRec* get_cl_rec(const Oid typid, const char* pname) const;
+    const int* get_rec_origial_ids(const Oid tpyid, const char* pname) const;
     PGconn* m_conn;
     bool enable_client_encryption;
     bool disable_once;
@@ -65,33 +82,36 @@ public:
     PreparedStatementsList *pendingStatements;
 
     char lastStmtName[NAMEDATALEN];
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    /* 
-     * while create cmk, we will do :
-     * (1) client : generate cmk key store files
-     * (2) server : check operation is allowed, return result
-     * (3) client : if server check failed, we will delete the cmk store files generated in step (1) 
-     */
-    CEQueryType query_type;
-    char query_args[MAX_KEY_PATH_VALUE_LEN];
-#endif
     ObjectFqdn *droppedSchemas;
     size_t droppedSchemas_size;
     size_t droppedSchemas_allocated;
-    ObjectFqdn *droppedGlobalSettings;
-    size_t droppedGlobalSettings_size;
-    size_t droppedGlobalSettings_allocated;
+    ObjName *droppedGlobalSettings;
     ObjectFqdn *droppedColumnSettings;
     size_t droppedColumnSettings_size;
     size_t droppedColumnSettings_allocated;
     ExecStatusType m_lastResultStatus;
+    bool isInvalidOperationOnColumn;
+    bool should_refresh_function;
+    bool isDuringRefreshCacheOnError;
+    bool is_external_err;
     CacheRefreshType cacheRefreshType;
-    std::unordered_map<std::string, HookResource *> m_hookResources;
+    HookResource* m_hookResources[HOOK_RESOURCES_COUNT];
 
     // GUC params
     GucParams gucParams;
     GucParams tmpGucParams;
     updateGucValues val_to_update;
     RawValuesList *rawValuesForReplace;
+    ICachedColumnManager* m_cached_column_manager;
+    char **called_functions_list;
+    size_t called_functions_list_size;
+    ProcList *proc_list;
+    size_t client_cache_id;
+
+    // sql parser context
+    clientlogic_parser_context m_parser_context; 
+    DataFetcherManager* m_data_fetcher_manager;
+private:
+    const ICachedRec* get_cl_proc(const char* pname) const;
 };
 #endif /* CL_STATE_H */

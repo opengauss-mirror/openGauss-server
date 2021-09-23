@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * dynahash
- *	  POSTGRES dynahash.h file definitions
+ *	  openGauss dynahash.h file definitions
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

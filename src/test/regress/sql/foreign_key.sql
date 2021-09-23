@@ -729,7 +729,6 @@ DROP TABLE pktable, fktable;
 -- test notice about expensive referential integrity checks,
 -- where the index cannot be used because of type incompatibilities.
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 CREATE TEMP TABLE pktable (
         id1     INT4 PRIMARY KEY,

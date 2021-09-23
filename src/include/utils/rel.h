@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * rel.h
- *	  POSTGRES relation descriptor (a/k/a relcache entry) definitions.
+ *	  openGauss relation descriptor (a/k/a relcache entry) definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -29,7 +29,7 @@
 #endif
 #include "rewrite/prs2lock.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "tcop/stmt_retry.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
@@ -94,6 +94,20 @@ typedef  struct  RelationBucketKey
     Oid         *bucketKeyType;		/*the data type of partition key*/
 }RelationBucketKey;
 
+/* describe commit sequence number of object in pg_object */
+typedef struct ObjectCSN
+{
+    CommitSeqNo  createcsn;
+    CommitSeqNo  changecsn;
+}ObjectCSN;
+
+typedef struct PgObjectOption {
+    bool hasCtime; 
+    bool hasMtime;
+    bool hasCreatecsn; 
+    bool hasChangecsn;
+} PgObjectOption;
+
 /*
  * Here are the contents of a relation cache entry.
  */
@@ -128,6 +142,7 @@ typedef struct RelationData {
     Form_pg_class rd_rel; /* RELATION tuple */
     TupleDesc rd_att;     /* tuple descriptor */
     Oid rd_id;            /* relation's object id */
+    bool rd_isblockchain; /* relation is in blockchain schema */
 
     LockInfoData rd_lockInfo;  /* lock mgr's info for locking relation */
     RuleLock* rd_rules;        /* rewrite rules */
@@ -164,8 +179,10 @@ typedef struct RelationData {
     /* use "struct" here to avoid needing to include htup.h: */
     struct HeapTupleData* rd_indextuple; /* all of pg_index tuple */
     Form_pg_am rd_am;                    /* pg_am tuple for index's AM */
+
     int rd_indnkeyatts;     /* index relation's indexkey nums */
-	TableAmType rd_tam_type; /*Table accessor method type*/
+    TableAmType rd_tam_type; /*Table accessor method type*/
+    int1 rd_indexsplit;  /* determines the page split method to use */
 
     /*
      * index access support info (used only for an index relation)
@@ -196,6 +213,7 @@ typedef struct RelationData {
     uint16* rd_exclstrats;     /* exclusion ops' strategy numbers, if any */
     void* rd_amcache;          /* available for use by index AM */
     Oid* rd_indcollation;      /* OIDs of index collations */
+    Buffer rd_rootcache;       /* for root caching */
 
     /*
      * foreign-table support
@@ -220,6 +238,13 @@ typedef struct RelationData {
     Oid rd_toastoid; /* Real TOAST table's OID, or InvalidOid */
     Oid rd_bucketoid;/* bucket OID in pg_hashbucket*/
 
+    CommitSeqNo rd_changecsn; /* the commit sequence number when the old version expires */
+    CommitSeqNo rd_createcsn; /* the commit sequence number when object create */
+
+    /* bucket key info, indicating which keys are used to comoute hash value */
+    int rd_bucketmapsize; /* Size of bucket map */
+    StorageType storage_type; /* storage type */
+    
     /*bucket key info, indicating which keys are used to comoute hash value */
     RelationBucketKey *rd_bucketkey;
 
@@ -231,6 +256,7 @@ typedef struct RelationData {
     Oid parentId; /*if this is construct by partitionGetRelation,this is Partition Oid,else this is InvalidOid*/
     /* use "struct" here to avoid needing to include pgstat.h: */
     struct PgStat_TableStatus* pgstat_info; /* statistics collection area */
+
 #ifdef PGXC
     RelationLocInfo* rd_locator_info;
     PartitionMap* sliceMap;
@@ -241,6 +267,8 @@ typedef struct RelationData {
     dlist_node node;
 
     Oid rd_mlogoid;
+    /* Is under the context of creating crossbucket index? */
+    bool newcbi;
 } RelationData;
 
 /*
@@ -272,8 +300,6 @@ typedef enum RedisRelAction {
     REDIS_REL_NORMAL,
     REDIS_REL_APPEND,
     REDIS_REL_READ_ONLY,
-    REDIS_REL_END_CATCHUP,
-    REDIS_REL_REFRESH,
     REDIS_REL_DESTINATION,
     REDIS_REL_RESET_CTID
 } RedisHtlAction;
@@ -297,11 +323,18 @@ typedef struct StdRdOptions {
     int internalMask;              /*internal mask*/
     bool ignore_enable_hadoop_env; /* ignore enable_hadoop_env */
     bool user_catalog_table;       /* use as an additional catalog relation */
+    bool segment;              /* enable segment-page storage for this relation */
     bool hashbucket;        /* enable hash bucket for this relation */
     bool primarynode;       /* enable primarynode mode for replication table */
+    bool crossbucket;       /* enable crossbucket index creation for this index relation */
+    char* wait_clean_cbi;
+    int bucketcnt;          /* number of bucket counts */
+    int parallel_workers;   /* max number of parallel workers */
     /* info for redistribution */
     Oid rel_cn_oid;
     RedisHtlAction append_mode_internal;
+
+    int initTd;
 
     // Important:
     // for string type, data is appended at the tail of its parent struct.
@@ -313,8 +346,9 @@ typedef struct StdRdOptions {
     // StdRdOptionsGetStringData macro must be used for accessing CHAR* type member.
     //
     char* compression; /* compress or not compress */
-    char* table_access_method; /*table access method kind */
+    char* storage_type; /*table access method kind */
     char* orientation; /* row-store or column-store */
+    char        *indexsplit; /* page split method */
     char* ttl; /* time to live for tsdb data management */
     char* period; /* partition range for tsdb data management */
     char* partition_interval; /* partition interval for streaming contquery table */
@@ -330,11 +364,22 @@ typedef struct StdRdOptions {
     char* start_ctid_internal;
     char* end_ctid_internal;
     char        *merge_list;
+    char* dek_cipher;
+    char* cmk_id;
+    char* encrypt_algo;
+    bool enable_tde;     /* switch flag for table-level TDE encryption */
     bool on_commit_delete_rows; /* global temp table */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
 #define HEAP_DEFAULT_FILLFACTOR 100
+
+#define UHEAP_MIN_TD 2
+#define UHEAP_MAX_TD 128
+#define UHEAP_DEFAULT_TD 4
+
+#define RelationGetTupleType(relation) \
+    ((relation)->rd_tam_type + 1)
 
 /*
  * RelationIsUsedAsCatalogTable
@@ -367,11 +412,29 @@ typedef struct StdRdOptions {
     (BLCKSZ * (100 - RelationGetFillFactor(relation, defaultff)) / 100)
 
 /*
+ * RelationGetTargetPageFreeSpace
+ *      Returns the relation's desired freespace per page in bytes, for use in page pruning.
+ *      Would only desire the page to be full up to 90% of its fillfactor before page pruning.
+ */
+#define RelationGetTargetPageFreeSpacePrune(relation, defaultff) \
+    (BLCKSZ * (100 - 0.9 * RelationGetFillFactor(relation, defaultff)) / 100)
+
+
+/*
  * RelationIsSecurityView
  *		Returns whether the relation is security view, or not
  */
 #define RelationIsSecurityView(relation) \
     ((relation)->rd_options ? ((StdRdOptions*)(relation)->rd_options)->security_barrier : false)
+
+/*
+ * RelationGetParallelWorkers
+ *      Returns the relation's parallel_workers reloption setting.
+ *      Note multiple eval of argument!
+ */
+#define RelationGetParallelWorkers(relation, defaultpw) \
+    ((relation)->rd_options ? \
+     ((StdRdOptions *) (relation)->rd_options)->parallel_workers : (defaultpw))
 
 /*
  * RelationIsValid
@@ -405,7 +468,10 @@ typedef struct StdRdOptions {
  */
 #define RelationGetRelid(relation) ((relation)->rd_id)
 
-#define RelationGetBktid(relation) ((relation)->rd_node.bucketNode)
+#define RelationGetBktid(relation) \
+    (IsBucketFileNode((relation)->rd_node) ? (relation)->rd_node.bucketNode : InvalidBktId)
+
+#define RelationGetStorageType(relation) ((relation)->storage_type)
 
 /*
  * RelationGetNumberOfAttributes
@@ -446,10 +512,60 @@ typedef struct StdRdOptions {
 #define RelationGetPartType(relation) ((relation)->rd_rel->parttype)
 
 /*
+ * RelationGetRelkind
+ *		Returns the rel's relkind.
+ */
+#define RelationGetRelkind(relation) ((relation)->rd_rel->relkind)
+
+/*
  * RelationGetNamespace
  *		Returns the rel's namespace OID.
  */
 #define RelationGetNamespace(relation) ((relation)->rd_rel->relnamespace)
+
+/*
+ * RelationGetOwner
+ *		Returns the rel's owner OID.
+ */
+#define RelationGetOwner(relation) ((relation)->rd_rel->relowner)
+
+/*
+ * RelationGetTablespace
+ *		Returns the rel's tablespace OID.
+ */
+#define RelationGetTablespace(relation) ((relation)->rd_rel->reltablespace)
+
+#define RelationGetRnodeSpace(relation) ((relation)->rd_node.spcNode)
+
+/*
+ * RelationGetCreatecsn
+ *		Returns the rel's create commit sequence number.
+ */
+#define RelationGetCreatecsn(r) ((r)->rd_createcsn)
+
+/*
+ * RelationGetChangecsn
+ *		Returns the rel's latest ddl commit sequence number.
+ */
+#define RelationGetChangecsn(r) ((r)->rd_changecsn)
+
+/*
+ * RelationGetRelFrozenxid
+ *		Returns the rel's frozenxid.
+ */
+#define RelationGetRelFrozenxid(r) ((r)->rd_rel->relfrozenxid)
+
+/*
+ * RelationGetRelFrozenxid64
+ *		Returns the rel's frozenxid64.
+ */
+extern TransactionId RelationGetRelFrozenxid64(Relation r);
+
+/*
+ * RelationGetRelFileNode
+ *		Returns the rel's relfilenode.
+ */
+#define RelationGetRelFileNode(r) ((r)->rd_rel->relfilenode)
 
 /*
  * RelationIsMapped
@@ -466,13 +582,8 @@ typedef struct StdRdOptions {
  */
 #define RelationOpenSmgr(relation)                                                                       \
     do {                                                                                                 \
-        if ((relation)->rd_smgr == NULL) {                                                               \
-            oidvector* bucketlist = NULL;                                                                \
-            if (RELATION_CREATE_BUCKET(relation)) {                                                      \
-                bucketlist = searchHashBucketByOid(relation->rd_bucketoid);                        \
-            }                                                                                            \
-            smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend, 0, bucketlist)); \
-            }                                                                                             \
+        if ((relation)->rd_smgr == NULL)                                                                 \
+            smgrsetowner(&((relation)->rd_smgr), smgropen((relation)->rd_node, (relation)->rd_backend)); \
     } while (0)
 
 /*
@@ -500,6 +611,17 @@ typedef struct StdRdOptions {
     ((relation)->rd_smgr != NULL ? (relation)->rd_smgr->smgr_targblock : InvalidBlockNumber)
 
 /*
+ * RelationGetPrevTargetBlock
+ *		Fetch relation's previous insertion target block.
+ *
+ * Returns InvalidBlockNumber if there is no previous target block.	Note
+ * that the target block status is discarded on any smgr-level invalidation.
+ */
+#define RelationGetPrevTargetBlock(relation) \
+    ((relation)->rd_smgr != NULL ? (relation)->rd_smgr->smgr_prevtargblock : InvalidBlockNumber)
+
+
+/*
  * RelationSetTargetBlock
  *		Set relation's current insertion target block.
  */
@@ -507,6 +629,16 @@ typedef struct StdRdOptions {
     do {                                                   \
         RelationOpenSmgr(relation);                        \
         (relation)->rd_smgr->smgr_targblock = (targblock); \
+    } while (0)
+
+/*
+ * RelationSetPrevTargetBlock
+ *		Set relation's current insertion target block.
+ */
+#define RelationSetPrevTargetBlock(relation, prevtargblock)        \
+    do {                                                   \
+        RelationOpenSmgr(relation);                        \
+        (relation)->rd_smgr->smgr_prevtargblock = (prevtargblock); \
     } while (0)
 
 /*
@@ -570,7 +702,8 @@ typedef struct StdRdOptions {
  */
 #define RELATION_IS_TEMP(relation) \
     ((relation)->rd_islocaltemp || \
-     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP || \
+     (relation)->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 
 /* global temp table implementations */
 #define RELATION_IS_GLOBAL_TEMP(relation) \
@@ -612,6 +745,25 @@ extern void RelationDecrementReferenceCount(Oid relationId);
  */
 #define RelationIsLogicallyLogged(relation) \
     (XLogLogicalInfoActive() && RelationNeedsWAL(relation) && !IsCatalogRelation(relation))
+
+/*
+ * RelationisEncryptEnable
+ *     Returns whether the relation encrypt or not
+ */
+#define RelationisEncryptEnable(relation) \
+        (((relation)->rd_options && (relation)->rd_rel->relkind == RELKIND_RELATION) ? \
+        ((StdRdOptions *)(relation)->rd_options)->enable_tde : false)
+
+#define RelationGetDekCipher(relation) \
+        StdRdOptionsGetStringData((relation)->rd_options, dek_cipher, NULL)
+
+#define RelationGetCmkId(relation) \
+        StdRdOptionsGetStringData((relation)->rd_options, cmk_id, NULL)
+
+#define RelationGetAlgo(relation) \
+        StdRdOptionsGetStringData((relation)->rd_options, encrypt_algo, NULL)
+
+extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 
 #endif /* REL_H */
 

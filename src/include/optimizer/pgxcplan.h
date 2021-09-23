@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pgxcplan.h
- *		Postgres-XC specific planner interfaces and structures.
+ *		openGauss specific planner interfaces and structures.
  *
  *
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group

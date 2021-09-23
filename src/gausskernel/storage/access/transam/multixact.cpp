@@ -62,6 +62,7 @@
 #include "access/xlogproc.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
+#include "storage/smgr/fd.h"
 #include "storage/lmgr.h"
 #include "storage/procarray.h"
 #include "utils/builtins.h"
@@ -69,7 +70,7 @@
 
 /*
  * Defines for MultiXactOffset page sizes.	A page is the same BLCKSZ as is
- * used everywhere else in Postgres.
+ * used everywhere else in openGauss.
  *
  * We need four bytes per offset and also four bytes per member
  */
@@ -143,7 +144,8 @@ typedef struct MultiXactStateData {
  * Last element of OldestMemberMXactID and OldestVisibleMXactId arrays.
  * Valid elements are (1..MaxOldestSlot); element 0 is never used.
  */
-#define MaxOldestSlot (g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts)
+#define MaxOldestSlot (g_instance.shmem_cxt.MaxBackends + \
+    g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS)
 
 /*
  * Definitions for the backend-local MultiXactId cache.
@@ -1781,6 +1783,7 @@ XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, ui
     int64 pageno = 0;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
     int ddltype = BLOCK_DDL_TYPE_NONE;
     *blocknum = 0;
@@ -1799,7 +1802,8 @@ XLogRecParseState *multixact_xlog_ddl_parse_to_block(XLogReaderState *record, ui
     if (recordstatehead == NULL) {
         return NULL;
     }
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, false,
                             (char *)XLogRecGetData(record));
     return recordstatehead;
@@ -1809,6 +1813,7 @@ XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record,
     uint64 pageno;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
     xl_multixact_create *xlrec = (xl_multixact_create *)XLogRecGetData(record);
     pageno = MultiXactIdToOffsetPage(xlrec->mid);
@@ -1819,7 +1824,8 @@ XLogRecParseState *multixact_xlog_offset_parse_to_block(XLogReaderState *record,
     }
     forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
     lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_OFF_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_OFF_TYPE, filenode, recordstatehead);
     XLogRecSetMultiXactOffState(&(recordstatehead->blockparse.extra_rec.blockmultixactoff), xlrec->moff, xlrec->mid);
     return recordstatehead;
 }
@@ -1857,7 +1863,8 @@ XLogRecParseState *multixact_xlog_mem_parse_to_block(XLogReaderState *record, ui
         }
         forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
         lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
-        XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate);
+        RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+        XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, filenode, blockstate);
         xidsarry[continuenum] = xlrec->xids[0];
         offset++;
         continuenum++;
@@ -1877,7 +1884,8 @@ XLogRecParseState *multixact_xlog_mem_parse_to_block(XLogReaderState *record, ui
             }
             forknum = (ForkNumber)(prev_pageno >> LOW_BLOKNUMBER_BITS);
             lowblknum = (BlockNumber)(prev_pageno & LOW_BLOKNUMBER_MASK);
-            XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, forknum, lowblknum, NULL, blockstate);
+            RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+            XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_MEM_TYPE, filenode, blockstate);
         }
         xidsarry[continuenum] = xlrec->xids[i];
         continuenum++;
@@ -1901,6 +1909,7 @@ XLogRecParseState *multixact_xlog_updateoid_parse_to_block(XLogReaderState *reco
 {
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     MultiXactId nextmulti;
     MultiXactOffset nextoffset;
     TransactionId max_xid;
@@ -1911,7 +1920,8 @@ XLogRecParseState *multixact_xlog_updateoid_parse_to_block(XLogReaderState *reco
     if (blockstate == NULL) {
         return NULL;
     }
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_UPDATEOID_TYPE, forknum, lowblknum, NULL, blockstate);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_MULITACT_UPDATEOID_TYPE, filenode, blockstate);
     nextmulti = xlrec->mid + 1;
     nextoffset = xlrec->moff + xlrec->nxids;
     max_xid = XLogRecGetXid(record);

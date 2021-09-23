@@ -28,8 +28,8 @@
 #include "storage/buf/block.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/buf/buf_internals.h"
-#include "storage/relfilenode.h"
-#include "storage/smgr.h"
+#include "storage/smgr/relfilenode.h"
+#include "storage/smgr/smgr.h"
 #include <libaio.h>
 
 /*

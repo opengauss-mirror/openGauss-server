@@ -80,8 +80,9 @@
 #include "replication/walsender_private.h"
 #include "replication/datasender.h"
 #include "replication/dataqueue.h"
+#include "replication/dcf_replication.h"
 #include "storage/buf/bufmgr.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
@@ -113,11 +114,10 @@ bool WalSegmemtRemovedhappened = false;
 volatile bool bSyncStat = false;
 volatile bool bSyncStatStatBefore = false;
 long g_logical_slot_sleep_time = 0;
+static int g_appname_extra_len = 3; /* [+]+\0 */
 
 #define AmWalSenderToDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY)
 #define AmWalSenderOnDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_DUMMYSTANDBY_STANDBY)
-#define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
-#define WAIT_FOR_ARCHIVE_TIME 10000L
 
 /*
  * calculate catchup late every 1000ms
@@ -130,10 +130,14 @@ static const int MILLISECONDS_PER_SECONDS = 1000;
 static const int MILLISECONDS_PER_MICROSECONDS = 1000;
 static const int INIT_CONTROL_REPLY = 3;
 static const int MAX_CONTROL_REPLY = 1000;
-static const int SLEEP_MORE = 200;
-static const int SLEEP_LESS = 200;
+static const int SLEEP_MORE = 400;
+static const int SLEEP_LESS = 400;
 static const int NODENAMELEN = 1024;
 static const int SHIFT_SPEED = 3;
+static const int EAGER_MODE_MULTIPLE = 20;
+#define NEED_CALCULATE_RTO \
+    (IS_PGXC_DATANODE && ((walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit) == 0 \
+        || forceUpdate))
 
 /*
  * This is set while we are streaming. When not set, SIGUSR2 signal will be
@@ -179,7 +183,7 @@ static void ProcessStandbyHSFeedbackMessage(void);
 static void ProcessStandbySwitchRequestMessage(void);
 static void ProcessRepliesIfAny(void);
 static bool LogicalSlotSleepFlag(void);
-static void do_actual_sleep(volatile WalSnd *walsnd, bool forceUpdate);
+static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate);
 static void LogCtrlCountSleepLimit(void);
 static void LogCtrlSleep(void);
 static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply);
@@ -219,26 +223,44 @@ static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn);
 static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
 static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogRecPtr* sndFlush, XLogRecPtr* sndReplay);
 static void ProcessArchiveFeedbackMessage(void);
-static void ProcessStandbyArchiveFeedbackMessage(void);
-static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term);
-static void WalSndSendArchiveLsn2Standby(XLogRecPtr targetLsn);
-static void ArchiveXlogOnStandby(XLogRecPtr targetLsn);
-static void SendLsn2Standby(XLogRecPtr targetLsn);
-static void CheckStandbyFinishArchive(XLogRecPtr targetLsn);
-static void ProcessArchiveStatusMessage();
-static void ResponseArchiveStatusMessage();
+static void WalSndArchiveXlog(ArchiveXlogMessage *archive_message);
+static ArchiveXlogMessage* get_archive_task_from_list();
 static void CalCatchupRate();
 
 char *DataDir = ".";
+
+void SetReportAppName(SndRole sendRole)
+{
+    char* appName = NULL;
+    const char* appNameType = NULL;
+    size_t appNameSize;
+    int nRet = 0;
+
+    if (sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY) {
+        appNameType = "WalSender to Secondary";
+    } else if (sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
+        appNameType = "WalSender to Build";
+    } else if (sendRole == SNDROLE_PRIMARY_STANDBY) {
+        appNameType = "WalSender to Standby";
+    } else {
+        /* appname is not required */
+        return;
+    }
+
+    appNameSize = strlen(appNameType) + strlen(u_sess->attr.attr_common.application_name) + g_appname_extra_len;
+    appName = (char*)palloc(appNameSize);
+    nRet = snprintf_s(appName, appNameSize, appNameSize - 1,
+                      "%s[%s]", appNameType, u_sess->attr.attr_common.application_name);
+    securec_check_ss(nRet, "\0", "\0");
+    pgstat_report_appname(appName);
+    pfree_ext(appName);
+}
 
 /* Main entry point for walsender process */
 int WalSenderMain(void)
 {
     MemoryContext walsnd_context;
     int nRet = 0;
-    char* appName = NULL;
-    const char* appNameType = NULL;
-    size_t appNameSize;
 
     t_thrd.proc_cxt.MyProgName = "WalSender";
     (void)ShowThreadName("WalSender");
@@ -270,7 +292,7 @@ int WalSenderMain(void)
 
     /* Set up resource owner */
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "walsender top-level resource owner",
-        MEMORY_CONTEXT_STORAGE);
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Let postmaster know that we're streaming. Once we've declared us as a
@@ -330,22 +352,8 @@ int WalSenderMain(void)
         }
 
         SpinLockRelease(&walsnd->mutex);
-
-        if (walsnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY) {
-            appNameType = "WalSender to Secondary";
-        } else if (walsnd->sendRole == SNDROLE_PRIMARY_BUILDSTANDBY) {
-            appNameType = "WalSender to Build";
-        } else if (walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
-            appNameType = "WalSender to Standby";
-        }
-
-        appNameSize = strlen(appNameType) + strlen(u_sess->attr.attr_common.application_name) + 3;
-        appName = (char*)palloc(appNameSize);
-        nRet = snprintf_s(appName, appNameSize, appNameSize - 1,
-                          "%s[%s]", appNameType, u_sess->attr.attr_common.application_name);
-        securec_check_ss(nRet, "\0", "\0");
-        pgstat_report_appname(appName);
-        pfree_ext(appName);
+        
+        SetReportAppName(walsnd->sendRole);
     }
 
     SyncRepInitConfig();
@@ -2109,14 +2117,6 @@ static void ProcessStandbyMessage(void)
             ProcessArchiveFeedbackMessage();
             break;
 
-        case 'n':
-            ProcessStandbyArchiveFeedbackMessage();
-            break;
-
-        case 'S':
-            ProcessArchiveStatusMessage();
-            break;
-
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -2243,22 +2243,20 @@ static bool LogicalSlotSleepFlag(void)
     return false;
 }
 
-static void do_actual_sleep(volatile WalSnd *walsnd, bool forceUpdate)
+static void LogCtrlDoActualSleep(volatile WalSnd *walsnd, bool forceUpdate)
 {
     bool logical_slot_sleep_flag = LogicalSlotSleepFlag();
     /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
-    if (walsnd->state == WALSNDSTATE_STREAMING && IS_PGXC_DATANODE) {
+    if (walsnd->state > WALSNDSTATE_BACKUP && IS_PGXC_DATANODE) {
         if (u_sess->attr.attr_storage.target_rto > 0 || u_sess->attr.attr_storage.time_to_target_rpo > 0) {
             if (walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit == 0
-                || walsnd->log_ctrl.just_keep_alive || forceUpdate) {
+                || forceUpdate) {
                 LogCtrlCalculateSleepTime();
                 LogCtrlCountSleepLimit();
             }
-            if (!walsnd->log_ctrl.just_keep_alive) {
-                pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
-                LogCtrlSleep();
-                pgstat_report_waitevent(WAIT_EVENT_END);
-            }
+            pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
+            LogCtrlSleep();
+            pgstat_report_waitevent(WAIT_EVENT_END);
             if (logical_slot_sleep_flag &&
                 g_logical_slot_sleep_time > t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time) {
                 pg_usleep(g_logical_slot_sleep_time - t_thrd.walsender_cxt.MyWalSnd->log_ctrl.sleep_time);
@@ -2270,6 +2268,21 @@ static void do_actual_sleep(volatile WalSnd *walsnd, bool forceUpdate)
         }
     }
     walsnd->log_ctrl.sleep_count++;
+}
+
+static void LogCtrlNeedForceUpdate(bool *forceUpdate, const StandbyReplyMessage *reply)
+{
+    /* use volatile pointer to prevent code rearrangement */
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    long millisec_time_diff = 0;
+    if (walsnd->log_ctrl.prev_reply_time > 0) {
+        long sec_to_time;
+        int microsec_to_time;
+        TimestampDifference(walsnd->log_ctrl.prev_reply_time, reply->sendTime, &sec_to_time, &microsec_to_time);
+        millisec_time_diff = sec_to_time * MILLISECONDS_PER_SECONDS
+            + microsec_to_time / MILLISECONDS_PER_MICROSECONDS;
+        *forceUpdate = millisec_time_diff > MILLISECONDS_PER_SECONDS;
+    }
 }
 
 static void AdvanceReplicationSlot(XLogRecPtr flush)
@@ -2329,27 +2342,17 @@ static void ProcessStandbyReplyMessage(void)
      */
     if (!AM_WAL_DB_SENDER) {
         bool forceUpdate = false;
-        long millisec_time_diff = 0;
-        if (walsnd->log_ctrl.prev_reply_time > 0) {
-            long sec_to_time;
-            int microsec_to_time;
-            TimestampDifference(walsnd->log_ctrl.prev_reply_time, reply.sendTime, &sec_to_time, &microsec_to_time);
-            millisec_time_diff = sec_to_time * MILLISECONDS_PER_SECONDS
-                + microsec_to_time / MILLISECONDS_PER_MICROSECONDS;
-            forceUpdate = millisec_time_diff > MILLISECONDS_PER_SECONDS;
-        }
-
-        if (IS_PGXC_DATANODE && ((walsnd->log_ctrl.sleep_count % walsnd->log_ctrl.sleep_count_limit) == 0
-            || walsnd->log_ctrl.just_keep_alive || forceUpdate)) {
+        LogCtrlNeedForceUpdate(&forceUpdate, &reply);
+        if (NEED_CALCULATE_RTO) {
             LogCtrlCalculateCurrentRTO(&reply);
-            if (getObsReplicationSlot() && (u_sess->attr.attr_storage.time_to_target_rpo > 0)) {
+            if (false && (u_sess->attr.attr_storage.time_to_target_rpo > 0)) {
                 LogCtrlCalculateCurrentRPO();
             }
             walsnd->log_ctrl.prev_reply_time = reply.sendTime;
             walsnd->log_ctrl.prev_flush = reply.flush;
             walsnd->log_ctrl.prev_apply = reply.apply;
         }
-        do_actual_sleep(walsnd, forceUpdate);
+        LogCtrlDoActualSleep(walsnd, forceUpdate);
     }
 
     if (IS_PGXC_DATANODE) {
@@ -2486,10 +2489,13 @@ static void ProcessStandbySwitchRequestMessage(void)
 
     pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char *)&message, sizeof(StandbySwitchRequestMessage));
 
-    if (message.demoteMode < SmartDemote || message.demoteMode > FastDemote) {
+    if (message.demoteMode < SmartDemote || message.demoteMode > ExtremelyFast) {
         ereport(WARNING,
                 (errmsg("invalid switchover mode in standby switchover request message: %d", message.demoteMode)));
         return;
+    } else if (message.demoteMode == ExtremelyFast){
+        g_instance.wal_cxt.upgradeSwitchMode = ExtremelyFast;
+        message.demoteMode = FastDemote;
     }
 
     SpinLockAcquire(&t_thrd.walsender_cxt.WalSndCtl->mutex);
@@ -2510,7 +2516,6 @@ static void ProcessStandbySwitchRequestMessage(void)
         ereport(NOTICE, (errmsg("could not continuing switchover process when catchup is alive.")));
         return;
     }
-
     if (t_thrd.walsender_cxt.WalSndCtl->demotion > NoDemote &&
         t_thrd.walsender_cxt.Demotion != t_thrd.walsender_cxt.WalSndCtl->demotion) {
         SpinLockRelease(&t_thrd.walsender_cxt.WalSndCtl->mutex);
@@ -2552,16 +2557,26 @@ static void ProcessStandbySwitchRequestMessage(void)
  */
 static void ProcessArchiveFeedbackMessage(void)
 {
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMeeeage reply;
+    ArchiveXlogResponseMessage reply;
     /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMessage));
     ereport(LOG,
-        (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-    g_instance.archive_obs_cxt.pitr_finish_result = reply.pitr_result;
-    g_instance.archive_obs_cxt.archive_task.targetLsn = reply.targetLsn;
-    if (walsnd->arch_latch == NULL) {
+        (errmsg("ProcessArchiveFeedbackMessage %s : %d %X/%X", 
+            reply.slot_name, reply.pitr_result, (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+
+
+    ArchiveTaskStatus *archive_task_status = NULL;
+    archive_task_status = find_archive_task_status(reply.slot_name);
+    if (archive_task_status == NULL) {
+        ereport(ERROR,
+            (errmsg("ProcessArchiveFeedbackMessage %s : %d %X/%X, but not find slot", 
+                reply.slot_name, reply.pitr_result, (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    }
+    SpinLockAcquire(&archive_task_status->mutex);
+    archive_task_status->pitr_finish_result = reply.pitr_result;
+    archive_task_status->archive_task.targetLsn = reply.targetLsn;
+    SpinLockRelease(&archive_task_status->mutex);
+    if (archive_task_status->archiver_latch == NULL) {
         /*
         * slave send feedback message for the arch request that sent during last restart,
         * and arch thread is not start yet, so we ignore this message unti arch thread is normal
@@ -2571,54 +2586,7 @@ static void ProcessArchiveFeedbackMessage(void)
                 (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
         return ;
     }
-    SetLatch(walsnd->arch_latch);
-}
-
-/*
- * Process the feedback to check is the standby archive successful
- */
-static void ProcessStandbyArchiveFeedbackMessage(void)
-{
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMeeeage reply;
-    /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
-    ereport(LOG,
-        (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-    walsnd->arch_finish_result = reply.pitr_result;
-    walsnd->archive_target_lsn = reply.targetLsn;
-}
-
-static void ProcessArchiveStatusMessage()
-{
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveStatusMessage message;
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&message, sizeof(ArchiveStatusMessage));
-    walsnd->is_start_archive = message.is_archive_activied;
-    if (message.startLsn == 0) {
-        XLogRecPtr receivePtr;
-        XLogRecPtr writePtr;
-        XLogRecPtr flushPtr;
-        XLogRecPtr replayPtr;
-        bool amSync = false;
-        bool got_recptr = false;
-        got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-        if (got_recptr) {
-            walsnd->arch_task_last_lsn = flushPtr;
-        } else {
-            ereport(ERROR,
-                    (errmsg("ProcessArchiveStatusMessage failed when call SyncRepGetSyncRecPtr")));
-        }
-    }
-
-    if (walsnd->arch_task_last_lsn < message.startLsn) {
-        walsnd->arch_task_last_lsn = message.startLsn;
-    }
-    ereport(LOG,
-            (errmsg("ProcessArchiveStatusMessage: reset last task lsn to %X/%X",
-                    (uint32)(walsnd->arch_task_last_lsn >> 32), (uint32)(walsnd->arch_task_last_lsn))));
-    ResponseArchiveStatusMessage();
+    SetLatch(archive_task_status->archiver_latch);
 }
 
 /*
@@ -2647,6 +2615,8 @@ static void LogCtrlCountSleepLimit(void)
 static void LogCtrlSleep(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
+                  errmsg("LogCtrlSleep:%lu", walsnd->log_ctrl.sleep_time)));
     if (walsnd->log_ctrl.sleep_time > 0 && walsnd->log_ctrl.sleep_time <= MICROSECONDS_PER_SECONDS) {
         pg_usleep(walsnd->log_ctrl.sleep_time);
     } else if (walsnd->log_ctrl.sleep_time > MICROSECONDS_PER_SECONDS) {
@@ -2736,7 +2706,7 @@ static void LogCtrlCalculateCurrentRTO(StandbyReplyMessage *reply)
 }
 
 /* Calculate the RTO and RPO changes and control the changes as long as one changes. */
-static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap)
+static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap, bool *isEagerMode)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
 
@@ -2753,7 +2723,7 @@ static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap)
             walsnd->log_ctrl.prev_RTO = walsnd->log_ctrl.current_RTO;
         }
 
-        int targetRTO = u_sess->attr.attr_storage.target_rto;
+        int targetRTO = u_sess->attr.attr_storage.target_rto / 2;
         int64 currentRTO = walsnd->log_ctrl.current_RTO;
         rtoGap = currentRTO - targetRTO;
         rtoPrevGap = walsnd->log_ctrl.prev_RTO - targetRTO;
@@ -2779,10 +2749,22 @@ static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap)
         *gapDiff = rtoGapDiff;
         *gap = rtoGap;
     }
-
+    *isEagerMode = walsnd->log_ctrl.current_RTO > u_sess->attr.attr_storage.target_rto
+        || walsnd->log_ctrl.current_RTO <= 1;
     ereport(DEBUG4, (errmodule(MOD_RTO_RPO), errmsg("[LogCtrlCalculateIndicatorChange] rto_gap=%d, rto_gap_diff=%d," 
             "rpo_gap=%d, rpo_gap_diff=%d, gap=%d, gap_diff=%d", 
         (int)rtoGap, (int)rtoGapDiff, (int)rpoGap, (int)rpoGapDiff, (int)*gap, (int)*gapDiff)));   
+}
+
+static void LogCtrlTreatNoDataSend()
+{
+    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    int64 sleepTime = walsnd->log_ctrl.sleep_time;
+    if (walsnd->log_ctrl.prev_send_time > 0 && ComputeTimeStamp(walsnd->log_ctrl.prev_send_time)
+        > (MILLISECONDS_PER_SECONDS * 3)) {
+        sleepTime -= SLEEP_LESS * EAGER_MODE_MULTIPLE;
+        walsnd->log_ctrl.sleep_time = (sleepTime >= 0) ? sleepTime : 0;
+    }
 }
 
 /*
@@ -2793,22 +2775,14 @@ static void LogCtrlCalculateIndicatorChange(int64 *gapDiff, int64 *gap)
  */
 static void LogCtrlCalculateSleepTime(void)
 {
+    LogCtrlTreatNoDataSend();
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
+    int64 sleepTime = walsnd->log_ctrl.sleep_time;
     int64 gapDiff;
     int64 gap;
-    if (walsnd->log_ctrl.just_keep_alive) {
-        if (walsnd->log_ctrl.current_RTO == 0)
-            walsnd->log_ctrl.sleep_time = 0;
-        else
-            walsnd->log_ctrl.sleep_time -= (SLEEP_LESS * 10);
-        if (walsnd->log_ctrl.sleep_time < 0)
-            walsnd->log_ctrl.sleep_time = 0;
-        return;
-    }
+    bool isEagerMode = false;
+    LogCtrlCalculateIndicatorChange(&gapDiff, &gap, &isEagerMode);
 
-    LogCtrlCalculateIndicatorChange(&gapDiff, &gap);
-
-    int64 sleepTime = walsnd->log_ctrl.sleep_time;
     /* use for rto log */
     int64 pre_time = walsnd->log_ctrl.sleep_time;
     int balance_range = 1;
@@ -2838,13 +2812,13 @@ static void LogCtrlCalculateSleepTime(void)
      *  get bigger, but no more than 1s
      */
     if (gap > balance_range) {
-        sleepTime += SLEEP_MORE;
+        sleepTime += isEagerMode ? (SLEEP_MORE * EAGER_MODE_MULTIPLE) : (SLEEP_MORE);
         walsnd->log_ctrl.sleep_time = (sleepTime < 1 * MICROSECONDS_PER_SECONDS) ? sleepTime : MICROSECONDS_PER_SECONDS;
     }
 
     /* need less sleep, currentRTO less than targetRTO */
     if (gap < -balance_range) {
-        sleepTime -= SLEEP_LESS;
+        sleepTime -= isEagerMode ? (SLEEP_LESS * EAGER_MODE_MULTIPLE) : (SLEEP_LESS);
         walsnd->log_ctrl.sleep_time = (sleepTime >= 0) ? sleepTime : 0;
     }
     /* log control take effect */
@@ -2879,7 +2853,7 @@ static void LogCtrlCalculateCurrentRPO(void)
     struct timeval timeVal;
     long timeToRPO = 0;
     // Obtain the timestamp in the ID in the hadr file.
-    if (obs_replication_read_barrier(HADR_BARRIER_ID_FILE, (char *)barrier)) {
+    if (obs_replication_read_file(HADR_BARRIER_ID_FILE, (char *)barrier, MAX_BARRIER_ID_LENGTH)) {
         ereport(DEBUG4, (errmodule(MOD_RTO_RPO), 
                       errmsg("[LogCtrlCalculateCurrentRPO] read barrier id from obs %s", barrier)));
         matchNum = sscanf_s(barrier, "hadr_%020" PRIu64 "_%013ld", &barrierId, &barrierTime);
@@ -3142,12 +3116,11 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 #endif
         }
 
-        volatile unsigned int *pitr_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->archive_flag;
-        if (unlikely(pg_atomic_read_u32(pitr_archive_flag) == 1)) {
-            WalSndArchiveXlog(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn, 
-                t_thrd.walsender_cxt.MyWalSnd->archive_obs_subterm);
-            pg_atomic_write_u32(pitr_archive_flag, 0);
-        } 
+        ArchiveXlogMessage *archive_message = NULL;
+        archive_message = get_archive_task_from_list();
+        if (unlikely(archive_message != NULL)) {
+            WalSndArchiveXlog(archive_message);
+        }
 
         /* switchover is forbidden when catchup thread in progress */
         if (catchup_online && t_thrd.walsender_cxt.WalSndCtl->demotion > NoDemote) {
@@ -3196,42 +3169,6 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
 
         /* Check for input from the client */
         ProcessRepliesIfAny();
-
-#ifdef ENABLE_MULTIPLE_NODES
-        /* Only the primary can send the archive lsn to standby */
-        load_server_mode();
-        if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && IsValidArchiverStandby(t_thrd.walsender_cxt.MyWalSnd)) {
-            XLogRecPtr receivePtr;
-            XLogRecPtr writePtr;
-            XLogRecPtr flushPtr;
-            XLogRecPtr replayPtr;
-            bool amSync = false;
-            bool got_recptr = false;
-            List* sync_standbys = SyncRepGetSyncStandbys(&amSync);
-            int standby_nums = list_length(sync_standbys);
-            list_free(sync_standbys);
-            got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-            if (got_recptr) {
-                ArchiveXlogOnStandby(flushPtr);
-            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL || 
-                        u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH ||
-                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && standby_nums == 0)) {
-                /*
-                 * This step is used to deal with the situation that synchronous standbys are not set.
-                 */
-                ArchiveXlogOnStandby(t_thrd.walsender_cxt.MyWalSnd->flush);
-            } else {
-                ereport(WARNING, (errcode(ERRCODE_WARNING),
-                                    errmsg("ArchiveXlogOnStandby failed when call SyncRepGetSyncRecPtr")));
-            }
-        }
-
-        volatile unsigned int *standby_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->standby_archive_flag;
-        if (unlikely(pg_atomic_read_u32(standby_archive_flag) == 1)) {
-            WalSndSendArchiveLsn2Standby(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn);
-            pg_atomic_write_u32(standby_archive_flag, 0);
-        } 
-#endif
 
         /* Walsender first startup, send a keepalive to standby, no need reply. */
         if (first_startup) {
@@ -3377,6 +3314,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
              * again until we've flushed it ... but we'd better assume we are not
              * caught up.
              */
+            pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
+            LogCtrlSleep();
+            pgstat_report_waitevent(WAIT_EVENT_END);
             if (!pq_is_send_pending())
                 send_data();
             else
@@ -3392,7 +3332,9 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
                 }
             }
         }
-
+        pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
+        LogCtrlSleep();
+        pgstat_report_waitevent(WAIT_EVENT_END);
         /* Try to flush pending output to the client */
         if (pq_flush_if_writable() != 0) {
             ereport(LOG, (errmsg("flush return not zero !\n")));
@@ -3707,12 +3649,6 @@ static void InitWalSnd(void)
             walsnd->replSender = false;
             walsnd->peer_role = UNKNOWN_MODE;
             walsnd->peer_state = NORMAL_STATE;
-            walsnd->is_start_archive = false;
-            walsnd->archive_target_lsn = 0;
-            walsnd->arch_task_last_lsn = 0;
-            walsnd->arch_finish_result = false;
-            walsnd->has_sent_arch_lsn = false;
-            walsnd->last_send_lsn_time = 0;
             walsnd->channel_get_replc = 0;
             rc = memset_s((void *)&walsnd->receive, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
             securec_check(rc, "", "");
@@ -3741,10 +3677,12 @@ static void InitWalSnd(void)
             walsnd->log_ctrl.pre_rate2 = 0;
             walsnd->log_ctrl.prev_RPO = -1;
             walsnd->log_ctrl.current_RPO = -1;
+            walsnd->log_ctrl.prev_send_time = 0;
+            walsnd->archive_task_count = 0;
+            walsnd->archive_task_list = NULL;
             walsnd->lastCalTime = 0;
             walsnd->lastCalWrite = InvalidXLogRecPtr;
             walsnd->catchupRate = 0;
-            walsnd->log_ctrl.just_keep_alive = false;
             SpinLockRelease(&walsnd->mutex);
             /* don't need the lock anymore */
             OwnLatch((Latch *)&walsnd->latch);
@@ -3773,9 +3711,7 @@ static void WalSndReset(WalSnd *walsnd)
     walsnd->peer_role = UNKNOWN_MODE;
     walsnd->replSender = false;
     walsnd->wal_sender_channel.localport = 0;
-    walsnd->wal_sender_channel.localservice = 0;
     walsnd->wal_sender_channel.remoteport = 0;
-    walsnd->wal_sender_channel.remoteservice = 0;
     walsnd->channel_get_replc = 0;
     rc = memset_s(walsnd->wal_sender_channel.localhost, sizeof(walsnd->wal_sender_channel.localhost), 0,
                   sizeof(walsnd->wal_sender_channel.localhost));
@@ -4204,6 +4140,9 @@ static void XLogSendPhysical(void)
                        sizeof(WalDataMessageHeader) + g_instance.attr.attr_storage.MaxSendSize * 1024, &msghdr,
                        sizeof(WalDataMessageHeader));
     securec_check(errorno, "\0", "\0");
+    pgstat_report_waitevent(WAIT_EVENT_LOGCTRL_SLEEP);
+    LogCtrlSleep();
+    pgstat_report_waitevent(WAIT_EVENT_END);
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message,
                                 1 + sizeof(WalDataMessageHeader) + nbytes);
 
@@ -4213,11 +4152,10 @@ static void XLogSendPhysical(void)
     {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-
+        walsnd->log_ctrl.prev_send_time = GetCurrentTimestamp();
         SpinLockAcquire(&walsnd->mutex);
         walsnd->sentPtr = t_thrd.walsender_cxt.sentPtr;
         SpinLockRelease(&walsnd->mutex);
-        walsnd->log_ctrl.just_keep_alive = false;
     }
 
     /* Report progress of XLOG streaming in PS display */
@@ -4398,6 +4336,8 @@ void WalSndShmemInit(void)
         for (i = 0; i < NUM_SYNC_REP_WAIT_MODE; i++)
             SHMQueueInit(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[i]));
 
+        SHMQueueInit(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue));
+
         for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
             WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
@@ -4548,7 +4488,7 @@ bool WalSndAllInProgress(int type)
     }
     if (num >= allNum) {
         /*
-         * Check if the number of active physical slot is match. In some fault 
+         * Check if the number of active physical slot is match. In some fault
          * scenario, it will appear that the replication slot corresponding to
          * walsender is not active. So we should considerate the number of active
          * slot too.
@@ -4564,8 +4504,8 @@ bool WalSndAllInProgress(int type)
         }
         LWLockRelease(ReplicationSlotControlLock);
         if (slot_num < num) {
-            ereport(WARNING, (errmsg("The number of walsender %d is not equal to the number of active slot %d.",
-                                     num, slot_num)));
+            ereport(WARNING,
+                (errmsg("The number of walsender %d is not equal to the number of active slot %d.", num, slot_num)));
             return false;
         }
         return true;
@@ -4681,6 +4621,116 @@ static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogR
         *sndFlush = GetStandbyFlushRecPtr(NULL);
         *sndReplay = GetXLogReplayRecPtr(NULL);
     }
+}
+
+Datum get_paxos_replication_info(PG_FUNCTION_ARGS)
+{
+    unsigned int paxosReplicaInfoTotal = 6;
+
+    TupleDesc tupdesc = NULL;
+    Tuplestorestate *tupstore = NULL;
+
+    XLogRecPtr paxosWrite = InvalidXLogRecPtr;
+    XLogRecPtr paxosCommit = InvalidXLogRecPtr;
+    XLogRecPtr localWrite = InvalidXLogRecPtr;
+    XLogRecPtr localFlush = InvalidXLogRecPtr;
+    XLogRecPtr localReplay = InvalidXLogRecPtr;
+
+    Datum values[paxosReplicaInfoTotal];
+    bool nulls[paxosReplicaInfoTotal];
+
+    char location[MAXFNAMELEN] = {0};
+    char *replicInfo = NULL;
+
+    int ret = 0;
+    int j = 0;
+    errno_t rc = EOK;
+    
+    rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    ServerMode local_role = UNKNOWN_MODE;
+    volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+
+    SpinLockAcquire(&hashmdata->mutex);
+    local_role = hashmdata->current_mode;
+    SpinLockRelease(&hashmdata->mutex);
+
+    set_xlog_location(local_role, &localWrite, &localFlush, &localReplay);
+
+    tupstore = BuildTupleResult(fcinfo, &tupdesc);
+
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
+        /*
+         * Only superusers can see details. Other users only get the pid
+         * value to know it's a receiver, but no details.
+         */
+        rc = memset_s(nulls, sizeof(nulls), 1, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+    } else {
+
+#ifndef ENABLE_MULTIPLE_NODES
+        /* paxos_write_location */
+        if (local_role == PRIMARY_MODE)
+            paxosWrite = GetPaxosWriteRecPtr();
+#endif
+        if (local_role == STANDBY_MODE)
+            paxosWrite = localWrite;
+        ret = snprintf_s(location, sizeof(location), sizeof(location) - 1,
+                         "%X/%X", static_cast<uint32>(paxosWrite >> 32), static_cast<uint32>(paxosWrite));
+        securec_check_ss(ret, "\0", "\0");
+        values[j++] = CStringGetTextDatum(location);
+
+#ifndef ENABLE_MULTIPLE_NODES
+        /* paxos_commit_location */
+        if (local_role == PRIMARY_MODE)
+            paxosCommit = GetPaxosConsensusRecPtr();
+#endif
+        if (local_role == STANDBY_MODE)
+            paxosCommit = localWrite;
+        ret = snprintf_s(location, sizeof(location), sizeof(location) - 1,
+                         "%X/%X", static_cast<uint32>(paxosCommit >> 32), static_cast<uint32>(paxosCommit));
+        securec_check_ss(ret, "\0", "\0");
+        values[j++] = CStringGetTextDatum(location);
+
+        /* local_write_location */
+        ret = snprintf_s(location, sizeof(location), sizeof(location) - 1,
+                         "%X/%X", static_cast<uint32>(localWrite >> 32), static_cast<uint32>(localWrite));
+        securec_check_ss(ret, "\0", "\0");
+        values[j++] = CStringGetTextDatum(location);
+
+        /* local_flush_location */
+        ret = snprintf_s(location, sizeof(location), sizeof(location) - 1,
+                         "%X/%X", static_cast<uint32>(localFlush >> 32), static_cast<uint32>(localFlush));
+        securec_check_ss(ret, "\0", "\0");
+        values[j++] = CStringGetTextDatum(location);
+
+        /* local_replay_location */
+        ret = snprintf_s(location, sizeof(location), sizeof(location) - 1,
+                         "%X/%X", static_cast<uint32>(localReplay >> 32), static_cast<uint32>(localReplay));
+        securec_check_ss(ret, "\0", "\0");
+        values[j++] = CStringGetTextDatum(location);
+
+
+        replicInfo = static_cast<char*>(palloc0(DCF_MAX_STREAM_INFO_LEN * sizeof(char)));
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf && t_thrd.dcf_cxt.dcfCtxInfo->isDcfStarted)
+            dcf_query_stream_info(1, replicInfo, DCF_MAX_STREAM_INFO_LEN * sizeof(char));
+#endif
+
+        /* DCF replication information */
+        values[j] = CStringGetTextDatum(replicInfo);
+    }
+
+    tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+    /* clean up and return the tuplestore */
+    tuplestore_donestoring(tupstore);
+
+    /* free space for parseResult */
+    pfree(replicInfo);
+
+    return (Datum) 0;
 }
 
 /*
@@ -4979,8 +5029,6 @@ static void WalSndKeepalive(bool requestReply)
     PrimaryKeepaliveMessage keepalive_message;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     errno_t errorno = EOK;
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
     /* Construct a new message */
     SpinLockAcquire(&hashmdata->mutex);
     keepalive_message.peer_role = hashmdata->current_mode;
@@ -5004,7 +5052,6 @@ static void WalSndKeepalive(bool requestReply)
     /* Flush the keepalive message to standby immediately. */
     if (pq_flush_if_writable() != 0)
         WalSndShutdown();
-    walsnd->log_ctrl.just_keep_alive = true;
 }
 
 /*
@@ -5140,52 +5187,22 @@ static void WalSndResponseSwitchover(char *msgbuf)
 /*
  * send archive xlog command
  */
-static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term)
+static void WalSndArchiveXlog(ArchiveXlogMessage *archive_message)
 {
-    ArchiveXlogMessage archive_message;
     errno_t errorno = EOK;
     ereport(LOG,
-        (errmsg("WalSndArchiveXlog %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-
-    archive_message.targetLsn = targetLsn;
-    archive_message.tli = get_controlfile_timeline();
-    archive_message.term = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file, 
-        g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
-    archive_message.sub_term = sub_term;
+        (errmsg("%s : WalSndArchiveXlog %X/%X", archive_message->slot_name,
+            (uint32)(archive_message->targetLsn >> 32), 
+            (uint32)(archive_message->targetLsn))));
 
     /* Prepend with the message type and send it. */
     t_thrd.walsender_cxt.output_xlog_message[0] = 'a';
     errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
         sizeof(ArchiveXlogMessage) + WS_MAX_SEND_SIZE,
-        &archive_message,
+        archive_message,
         sizeof(ArchiveXlogMessage));
     securec_check(errorno, "\0", "\0");
     (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(ArchiveXlogMessage) + 1);
-}
-
-/*
- * send archive lsn to standby
- */
-static void WalSndSendArchiveLsn2Standby(XLogRecPtr targetLsn)
-{
-    ArchiveXlogMessage archive_message;
-    errno_t errorno = EOK;
-    ereport(LOG,
-        (errmsg("WalSndSendArchiveLsn2Standby %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-
-    archive_message.targetLsn = targetLsn;
-
-    /* Prepend with the message type and send it. */
-    t_thrd.walsender_cxt.output_xlog_message[0] = 'n';
-    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(ArchiveXlogMessage) + WS_MAX_SEND_SIZE,
-        &archive_message,
-        sizeof(ArchiveXlogMessage));
-    securec_check(errorno, "\0", "\0");
-    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(ArchiveXlogMessage) + 1);
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    t_thrd.walsender_cxt.MyWalSnd->last_send_lsn_time = TIME_GET_MILLISEC(tv);
 }
 
 /*
@@ -5299,8 +5316,6 @@ static bool UpdateHaWalSenderChannel(int ha_remote_listen_port)
             replconninfo->remoteport == ha_remote_listen_port) {
             SpinLockAcquire(&walsnd->mutex);
             walsnd->channel_get_replc = i;
-            walsnd->wal_sender_channel.localservice = replconninfo->localservice;
-            walsnd->wal_sender_channel.remoteservice = replconninfo->remoteservice;
             SpinLockRelease(&walsnd->mutex);
             is_found = true;
             break;
@@ -5517,7 +5532,7 @@ void GetFastestReplayStandByServiceAddress(char *fastest_remote_address, char *s
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[fastest];
         SpinLockAcquire(&walsnd->mutex);
         rc = snprintf_s(fastest_remote_address, address_len, (address_len - 1), "%s:%d",
-                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteservice);
+                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteport);
         SpinLockRelease(&walsnd->mutex);
 
         securec_check_ss(rc, "", "");
@@ -5528,7 +5543,7 @@ void GetFastestReplayStandByServiceAddress(char *fastest_remote_address, char *s
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[second_fastest];
         SpinLockAcquire(&walsnd->mutex);
         rc = snprintf_s(second_fastest_remote_address, address_len, (address_len - 1), "%s:%d",
-                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteservice);
+                        walsnd->wal_sender_channel.remotehost, walsnd->wal_sender_channel.remoteport);
         SpinLockRelease(&walsnd->mutex);
 
         securec_check_ss(rc, "", "");
@@ -5627,104 +5642,36 @@ XLogSegNo WalGetSyncCountWindow(void)
     return (XLogSegNo)(uint32)u_sess->attr.attr_storage.wal_keep_segments;
 }
 
-static void ArchiveXlogOnStandby(XLogRecPtr flushLsn)
+void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd)
 {
-    /* Check whether the active node is connected to the standby node. */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-
-    /*
-     * Check whether the size of the newly archived xlog file is greater than that of the last archived xlog file.
-     * If the size is greater than the xlog size, the system sends an archive LSN to the standby node for archiving.
-     */
-    if ((flushLsn - walsnd->arch_task_last_lsn ) > XLogSegSize) {
-        XLogRecPtr targetLsn;
-        targetLsn = Min(walsnd->arch_task_last_lsn + XLogSegSize -
-                        (walsnd->arch_task_last_lsn % XLogSegSize) - 1,
-                        flushLsn);
-        if (walsnd->arch_task_last_lsn == targetLsn) {
-            targetLsn = Min(targetLsn + XLogSegSize, flushLsn);
-        }
-        if (!walsnd->has_sent_arch_lsn) {
-            SendLsn2Standby(targetLsn);
-        } else {
-            CheckStandbyFinishArchive(targetLsn);
-        }
-    }
-}
-
-/*
- * SendLsn2Standby
- * 
- * Sending the lsn which is need to be archived by standby.
- * It will return true if send archive lsn successful.
- */
-static void SendLsn2Standby(XLogRecPtr targetLsn)
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
     if (walsnd == NULL) {
-        /* send failed, walsnd is null */
-        return;
+        Assert(0);
+        return ;
     }
-    ereport(LOG,
-            (errmsg("the lsn which is ready to be sent is: \"%X/%X\"",
-                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-    walsnd->has_sent_arch_lsn = true;
-    if (!XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush)) {
-        walsnd->arch_task_lsn = targetLsn;
-        pg_atomic_write_u32(&walsnd->standby_archive_flag, 1);
-    }
+    SpinLockAcquire(&walsnd->mutex_archive_task_list);
+    walsnd->archive_task_list = lappend_int(walsnd->archive_task_list, archive_task_status_idx);
+    walsnd->archive_task_count++;
+    SpinLockRelease(&walsnd->mutex_archive_task_list);
 }
 
-/*
- * CheckStandbyFinishArchive
- *
- * check the targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
- */
-static void CheckStandbyFinishArchive(XLogRecPtr targetLsn)
+ArchiveXlogMessage* get_archive_task_from_list() 
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    long time_diff = (long)TIME_GET_MILLISEC(tv) - walsnd->last_send_lsn_time;
-    if (walsnd->arch_finish_result == false && time_diff > WAIT_FOR_ARCHIVE_TIME) {
-        walsnd->has_sent_arch_lsn = false;
-        ereport(WARNING,
-                (errcode(ERRCODE_WARNING),
-                    errmsg("transaction xlog file \"%X/%X\" could not be archived: try again", 
-                            (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-        return;
-    }
-    if (walsnd->arch_finish_result == true && XLByteEQ(walsnd->archive_target_lsn, targetLsn)) {
-        /* reset result flag */
-        walsnd->arch_finish_result = false;
-        walsnd->has_sent_arch_lsn = false;
-        walsnd->arch_task_last_lsn = targetLsn;
-        ereport(LOG, (errmsg("the archive time is %.2lf seconds,last archive lsn change to \"%X/%X\"",
-                            ((double)time_diff / 1000), (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-    }
-}
-
-static void ResponseArchiveStatusMessage()
-{
-    char msgbuf[sizeof(ArchiveStatusResponseMessage) + 1];
-    msgbuf[0] = 'S';
-    ArchiveStatusResponseMessage response;
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    errno_t errorno = EOK;
-
-    if (walsnd == NULL)
-        return;
-
-    ereport(LOG,(errmsg("sending archive status response message")));
-
-    /* Prepend with the message type and send it. */
-    response.is_set_status_success = true;
-    errorno = memcpy_s(&msgbuf[1], sizeof(ArchiveStatusResponseMessage),
-                        &response, sizeof(ArchiveStatusResponseMessage));
-    securec_check(errorno, "\0", "\0");
-    (void)pq_putmessage_noblock('d', msgbuf, sizeof(ArchiveStatusResponseMessage) + 1);
+    volatile unsigned int *archive_task_count = &walsnd->archive_task_count;
+    if (*archive_task_count == 0) {
+        return NULL;
+    }
+    ArchiveXlogMessage *result = NULL;
+    int idx = -1;
+    SpinLockAcquire(&walsnd->mutex_archive_task_list);
+    idx = lfirst_int(list_head(walsnd->archive_task_list));
+    result = &g_instance.archive_obs_cxt.archive_status[idx].archive_task;
+    walsnd->archive_task_list = list_delete_first(walsnd->archive_task_list);
+    walsnd->archive_task_count--;
+    SpinLockRelease(&walsnd->mutex_archive_task_list);
+    return result;
 }
+
 /*
  * Calculate catchup rate of standby to estimate how long
  * the standby will be caught up with primary.

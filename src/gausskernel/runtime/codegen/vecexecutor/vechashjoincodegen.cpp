@@ -380,7 +380,7 @@ llvm::Function* VecHashJoinCodeGen::KeyMatchCodeGen(VecHashJoinState* node, Var*
      */
     if (node->enable_fast_keyMatch == 0) {
         /* get HashJoinTbl.hashBasedOperator.m_keyMatch[loop_idx] */
-        llvm::Value* keyMatch_val = builder.CreateAlignedLoad(mkeyMatch, 1, "m_keyMatch_i");
+        llvm::Value* keyMatch_val = builder.CreateLoad(int8Type, mkeyMatch, "m_keyMatch_i");
         keyMatch_val = builder.CreateTrunc(keyMatch_val, int1Type);
         builder.CreateCondBr(keyMatch_val, bb_checkNull, bb_ret);
     } else {
@@ -396,7 +396,7 @@ llvm::Function* VecHashJoinCodeGen::KeyMatchCodeGen(VecHashJoinState* node, Var*
     Vals4[2] = keyIdx;
     Vals4[3] = int32_1;
     llvm::Value* flag_cell = builder.CreateInBoundsGEP(mcellCache, Vals4);
-    flag_cell = builder.CreateAlignedLoad(flag_cell, 1, "flag");
+    flag_cell = builder.CreateLoad(int8Type, flag_cell, "flag");
     flag_cell = builder.CreateTrunc(flag_cell, int1Type);
     flag_batch = builder.CreateTrunc(flag_batch, int1Type);
     llvm::Value* and_flag = builder.CreateAnd(flag_cell, flag_batch);
@@ -426,7 +426,7 @@ llvm::Function* VecHashJoinCodeGen::KeyMatchCodeGen(VecHashJoinState* node, Var*
     Vals4[2] = keyIdx;
     Vals4[3] = int32_0;
     llvm::Value* val_cell = builder.CreateInBoundsGEP(mcellCache, Vals4);
-    val_cell = builder.CreateAlignedLoad(val_cell, 8, "val");
+    val_cell = builder.CreateLoad(int64Type, val_cell, "val");
 
     /* According to the data type to do comparison */
     switch (variable->vartype) {
@@ -478,7 +478,7 @@ llvm::Function* VecHashJoinCodeGen::KeyMatchCodeGen(VecHashJoinState* node, Var*
         Phi_result->addIncoming(andTrue_result, bb_andTrue);
         Phi_result->addIncoming(int8_0, bb_orTrue);
         Phi_result->addIncoming(orFalse_result, bb_orFalse);
-        builder.CreateAlignedStore(Phi_result, mkeyMatch, 1);
+        builder.CreateStore(Phi_result, mkeyMatch);
     } else {
         Phi_result = builder.CreatePHI(int8Type, 3);
         Phi_result->addIncoming(andTrue_result, bb_andTrue);
@@ -598,12 +598,17 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
 
     /* Define data types and some llvm consts */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
-    DEFINE_CG_PTRTYPE(VectorBatchPtrType, "class.VectorBatch");
-    DEFINE_CG_PTRTYPE(HashJoinTblPtrType, "class.HashJoinTbl");
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
+    DEFINE_CG_PTRTYPE(vecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(hashJoinTblPtrType, "class.HashJoinTbl");
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
-
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
+    
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
     DEFINE_CGVAR_INT32(int32_0, 0);
@@ -618,6 +623,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     DEFINE_CGVAR_INT32(int32_pos_scalvec_flag, pos_scalvec_flag);
     DEFINE_CGVAR_INT64(int64_0, 0);
     DEFINE_CGVAR_INT64(int64_1, 1);
+    DEFINE_CGVAR_INT64(int64_8032, 8032);
+    DEFINE_CGVAR_INT64(int64_8, 8);
     DEFINE_CGVAR_INT32(int32_6, 6);
 
     /* llvm array values, used to represent the location of some element */
@@ -630,8 +637,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
      * 		   		   (2) batch of probing data
      */
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "JittedHashInnerJoin", int32Type);
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("hashJoinTbl", HashJoinTblPtrType));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", VectorBatchPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("hashJoinTbl", hashJoinTblPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vecBatchPtrType));
     jitted_hashjoin = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     hashJoinTbl = llvmargs[0];
@@ -657,7 +664,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     /* start the main codegen process for hash inner join */
     /* get the number of rows of this batch */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* nRows = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    llvm::Value* nRows = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* get HashJoinTbl.m_joinStateLog.lastBuildIdx */
     Vals3[0] = int64_0;
@@ -672,7 +679,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     /* get HashJoinTbl.m_joinStateLog.restore */
     Vals3[2] = int32_2;
     llvm::Value* joinStateLog_restore = builder.CreateInBoundsGEP(hashJoinTbl, Vals3);
-    tmpval = builder.CreateAlignedLoad(joinStateLog_restore, 1, "restore");
+    tmpval = builder.CreateLoad(int8Type, joinStateLog_restore, "restore");
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_restoreFalse, bb_restoreTrue);
 
@@ -682,24 +689,21 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
      */
     builder.SetInsertPoint(bb_restoreTrue);
     /* corresponding to : m_joinStateLog.restore = false; */
-    builder.CreateAlignedStore(int8_0, joinStateLog_restore, 1);
+    builder.CreateStore(int8_0, joinStateLog_restore);
     /* get m_joinStateLog.lastBuildIdx; */
-    llvm::Value* lastBuildIdx = builder.CreateAlignedLoad(lastBuildIdx_addr, 4, "lastBuildIdx");
+    llvm::Value* lastBuildIdx = builder.CreateLoad(int32Type, lastBuildIdx_addr, "lastBuildIdx");
     /* get m_joinStateLog.lastCell */
-    llvm::Value* lastCell = builder.CreateAlignedLoad(lastCell_addr, 8, "lastCell");
+    llvm::Value* lastCell = builder.CreateLoad(hashCellPtrType, lastCell_addr, "lastCell");
 
     /* get HashJoinTbl.hashBasedOperator.m_cellCache[lastBuildIdx] */
-    DEFINE_CGVAR_INT64(int64_8032, 8032);
-    DEFINE_CGVAR_INT64(int64_8, 8);
     tmpval = builder.CreatePtrToInt(hashJoinTbl, int64Type);
     tmpval = builder.CreateAdd(tmpval, int64_8032);
     llvm::Value* tmpval2 = builder.CreateSExt(lastBuildIdx, int64Type);
     tmpval2 = builder.CreateMul(tmpval2, int64_8);
     tmpval = builder.CreateAdd(tmpval, tmpval2);
-    DEFINE_CG_PTRTYPE(hashCellPPtrType, hashCellPtrType);
-    llvm::Value* mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
+    llvm::Value* mcellCache = builder.CreateIntToPtr(tmpval, hashCellPtrPtrType);
 
-    builder.CreateAlignedStore(lastCell, mcellCache, 8);
+    builder.CreateStore(lastCell, mcellCache);
     builder.CreateBr(bb_restoreFalse);
 
     /* restore is false, so start the loop from 0
@@ -725,22 +729,22 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     /* get m_arr from batch */
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* arr = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* batch_arr = builder.CreateAlignedLoad(arr, 8, "batch_arr");
+    llvm::Value* batch_arr = builder.CreateLoad(scalarVecPtrType, arr, "batch_arr");
     /* HashJoinTbl.m_innerBatch */
     Vals[1] = int32_pos_hjointbl_inbatch;
     llvm::Value* innerBatch = builder.CreateInBoundsGEP(hashJoinTbl, Vals);
     /* HashJoinTbl.m_outerBatch */
     Vals[1] = int32_pos_hjointbl_outbatch;
     llvm::Value* outerBatch = builder.CreateInBoundsGEP(hashJoinTbl, Vals);
-    innerBatch = builder.CreateAlignedLoad(innerBatch, 8, "innerBatch");
-    outerBatch = builder.CreateAlignedLoad(outerBatch, 8, "outerBatch");
+    innerBatch = builder.CreateLoad(vecBatchPtrType, innerBatch, "innerBatch");
+    outerBatch = builder.CreateLoad(vecBatchPtrType, outerBatch, "outerBatch");
 
     /* Get m_arr from innerBatch and outerBatch */
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* inner_arr = builder.CreateInBoundsGEP(innerBatch, Vals);
-    inner_arr = builder.CreateAlignedLoad(inner_arr, 8, "inner_arr");
+    inner_arr = builder.CreateLoad(scalarVecPtrType, inner_arr, "inner_arr");
     llvm::Value* outer_arr = builder.CreateInBoundsGEP(outerBatch, Vals);
-    outer_arr = builder.CreateAlignedLoad(outer_arr, 8, "outer_arr");
+    outer_arr = builder.CreateLoad(scalarVecPtrType, outer_arr, "outer_arr");
 
     /* Extract vals and flags from m_innerBatch */
     mcols = innerPlanState(node)->ps_ResultTupleSlot->tts_tupleDescriptor->natts;
@@ -752,12 +756,12 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         Vals[0] = int64_jIdx;
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(inner_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "inner_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "inner_vals");
         inner_vals_array[j] = tmpval;
         /* Get m_flag from pVector */
         Vals[1] = int32_pos_scalvec_flag;
         tmpval = builder.CreateInBoundsGEP(inner_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "inner_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "inner_flag");
         inner_flag_array[j] = tmpval;
     }
 
@@ -773,21 +777,21 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         /* Get m_vals from pVector */
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(outer_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "outer_vals");
         outer_vals_array[j] = tmpval;
 
         tmpval = builder.CreateInBoundsGEP(batch_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "batch_val");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "batch_val");
         batch_vals_array[j] = tmpval;
 
         /* Get m_flag from pVector */
         Vals[1] = int32_pos_scalvec_flag;
         tmpval = builder.CreateInBoundsGEP(outer_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "outer_flag");
         outer_flag_array[j] = tmpval;
 
         tmpval = builder.CreateInBoundsGEP(batch_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 1, "batch_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "batch_flag");
         batch_flag_array[j] = tmpval;
     }
 
@@ -847,13 +851,13 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         Vals[0] = int64_0;
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_key_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "outer_key_vals");
         outer_keys_vals_array[j] = tmpval;
 
         Vals[1] = int32_pos_scalvec_flag;
         tmpval = builder.CreateInBoundsGEP(batch_arr, int64_outkeyIdx);  // address of ScalarVector
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_key_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "outer_key_flag");
         outer_keys_flag_array[j] = tmpval;
 
         inner_keyIdx_array[j] = int64_keyIdx;
@@ -878,8 +882,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     tmpval = builder.CreateAdd(tmpval, int64_8032);
     tmpval2 = builder.CreateMul(Phi_Idx, int64_8);
     tmpval = builder.CreateAdd(tmpval, tmpval2);
-    mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
-    llvm::Value* cellCache_loopEntry = builder.CreateAlignedLoad(mcellCache, 8, "cellCache");
+    mcellCache = builder.CreateIntToPtr(tmpval, hashCellPtrPtrType);
+    llvm::Value* cellCache_loopEntry = builder.CreateLoad(hashCellPtrType, mcellCache, "cellCache");
     tmpval = builder.CreatePtrToInt(cellCache_loopEntry, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
     builder.CreateCondBr(tmpval, bb_crit_edge, bb_pre_keyMatch);
@@ -902,9 +906,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     } else {
         /* just one hash clause */
         tmpval = builder.CreateInBoundsGEP(outer_keys_flag_array[0], Phi_Idx);
-        flag_batch = builder.CreateAlignedLoad(tmpval, 1, "flag_outer_key");
+        flag_batch = builder.CreateLoad(int8Type, tmpval, "flag_outer_key");
         tmpval = builder.CreateInBoundsGEP(outer_keys_vals_array[0], Phi_Idx);
-        vals_batch = builder.CreateAlignedLoad(tmpval, 1, "vals_outer_key");
+        vals_batch = builder.CreateLoad(int64Type, tmpval, "vals_outer_key");
     }
     builder.CreateBr(bb_keyMatch);
 
@@ -923,7 +927,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
      * and the match key result will be saved in m_keyMatch[i]
      */
     if (node->enable_fast_keyMatch == 0) {
-        builder.CreateAlignedStore(int8_1, mkeyMatch, 1);
+        builder.CreateStore(int8_1, mkeyMatch);
     }
     /* for each key, call the matchKey function
      * matchKey(HashJoinTbl *this, ScalarVector *col, int64 loopIdx, int64 keyIdx)
@@ -942,9 +946,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         /* Have multiple hash clauses */
         if (node->enable_fast_keyMatch == 0) {
             tmpval = builder.CreateInBoundsGEP(outer_keys_flag_array[j], Phi_Idx);
-            flag_batch = builder.CreateAlignedLoad(tmpval, 1, "flag_outer_key");
+            flag_batch = builder.CreateLoad(int8Type, tmpval, "flag_outer_key");
             tmpval = builder.CreateInBoundsGEP(outer_keys_vals_array[j], Phi_Idx);
-            vals_batch = builder.CreateAlignedLoad(tmpval, 1, "vals_outer_key");
+            vals_batch = builder.CreateLoad(int64Type, tmpval, "vals_outer_key");
         }
 
         if (node->enable_fast_keyMatch == 0)
@@ -956,7 +960,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     }
 
     if (node->enable_fast_keyMatch == 0) {
-        tmpval = builder.CreateAlignedLoad(mkeyMatch, 1, "keyMatch");
+        tmpval = builder.CreateLoad(int8Type, mkeyMatch, "keyMatch");
         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
         builder.CreateCondBr(tmpval, bb_NoMatch, bb_Matched);
     } else {
@@ -977,21 +981,21 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
         mvals = builder.CreateInBoundsGEP(inner_vals_array[j], resultRow_i64);
         mflag = builder.CreateInBoundsGEP(inner_flag_array[j], resultRow_i64);
 
-        /* get val from cellCache */
+        /* get hashVal.val from cellCache */
         DEFINE_CGVAR_INT64(int64_jIdx, (long long)j);
         Vals4[1] = int32_1;
         Vals4[2] = int64_jIdx;
         Vals4[3] = int32_0;
         val = builder.CreateInBoundsGEP(cellCache, Vals4);
-        val = builder.CreateAlignedLoad(val, 8, "cell_val");
+        val = builder.CreateLoad(int64Type, val, "cell_val");
         /* get flag from cellCache */
         Vals4[3] = int32_1;
         flag = builder.CreateInBoundsGEP(cellCache, Vals4);
-        flag = builder.CreateAlignedLoad(flag, 1, "cell_flag");
+        flag = builder.CreateLoad(int8Type, flag, "cell_flag");
 
         /* Assign the cell val to mvals and cell flag to mflag */
-        builder.CreateAlignedStore(val, mvals, 8);
-        builder.CreateAlignedStore(flag, mflag, 1);
+        builder.CreateStore(val, mvals);
+        builder.CreateStore(flag, mflag);
     }
 
     /* copy data from batch to outerBatch */
@@ -1003,13 +1007,13 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
 
         /* Get the val and flag from batch */
         val = builder.CreateInBoundsGEP(batch_vals_array[j], Phi_Idx);
-        val = builder.CreateAlignedLoad(val, 8, "batch_val");
+        val = builder.CreateLoad(int64Type, val, "batch_val");
         flag = builder.CreateInBoundsGEP(batch_flag_array[j], Phi_Idx);
-        flag = builder.CreateAlignedLoad(flag, 1, "batch_flag");
+        flag = builder.CreateLoad(int8Type, flag, "batch_flag");
 
         /* Assign the cell val to mvals and cell flag to mflag */
-        builder.CreateAlignedStore(val, mvals, 8);
-        builder.CreateAlignedStore(flag, mflag, 1);
+        builder.CreateStore(val, mvals);
+        builder.CreateStore(flag, mflag);
     }
 
     /* resultRow++ */
@@ -1022,15 +1026,16 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
 
     builder.SetInsertPoint(bb_BatchFull);
     llvm::Value* idx_int32 = builder.CreateTrunc(Phi_Idx, int32Type);
-    builder.CreateAlignedStore(idx_int32, lastBuildIdx_addr, 4);
+    builder.CreateStore(idx_int32, lastBuildIdx_addr);
 
+    // get cellCache.flag.m_next
     Vals3[0] = int64_0;
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     tmpval = builder.CreateInBoundsGEP(cellCache, Vals3);
-    llvm::Value* nextCell = builder.CreateAlignedLoad(tmpval, 8, "nextCell");
-    builder.CreateAlignedStore(nextCell, lastCell_addr, 8);
-    builder.CreateAlignedStore(int8_1, joinStateLog_restore, 1);
+    llvm::Value* nextCell = builder.CreateLoad(hashCellPtrType, tmpval, "nextCell");
+    builder.CreateStore(nextCell, lastCell_addr);
+    builder.CreateStore(int8_1, joinStateLog_restore);
     builder.CreateBr(bb_ret);
 
     /* try next cell of m_cellCache[i] and update m_cellCache[i] if next cell exists */
@@ -1046,7 +1051,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_normal(VecHashJoinState* nod
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     tmpval = builder.CreateInBoundsGEP(cellCache, Vals3);
-    nextCell = builder.CreateAlignedLoad(tmpval, 8, "nextCell");
+    nextCell = builder.CreateLoad(hashCellPtrType, tmpval, "nextCell");
     Phi_cellCache_keyMatch->addIncoming(nextCell, bb_TryNextCell);
     tmpval = builder.CreatePtrToInt(nextCell, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
@@ -1120,12 +1125,16 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     llvm::Value* mflag = NULL;
 
     /* Define data types and some llvm consts */
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
-    DEFINE_CG_PTRTYPE(VectorBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
+    DEFINE_CG_PTRTYPE(vecBatchPtrType, "class.VectorBatch");
     DEFINE_CG_PTRTYPE(HashJoinTblPtrType, "class.HashJoinTbl");
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
-
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
+    
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
     DEFINE_CGVAR_INT32(int32_0, 0);
@@ -1148,7 +1157,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
 
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "JittedHashInnerJoin_fastpath", int32Type);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("hashJoinTbl", HashJoinTblPtrType));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", VectorBatchPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vecBatchPtrType));
     jitted_hashjoin = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     /* start the main codegen process for hash inner join */
@@ -1174,7 +1183,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     /* entry basic block */
     /* get the number of rows of this batch */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* nRows = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    llvm::Value* nRows = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* get HashJoinTbl.m_joinStateLog.lastBuildIdx */
     Vals3[0] = int64_0;
@@ -1189,7 +1198,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     /* get HashJoinTbl.m_joinStateLog.restore */
     Vals3[2] = int32_2;
     llvm::Value* joinStateLog_restore = builder.CreateInBoundsGEP(hashJoinTbl, Vals3);
-    tmpval = builder.CreateAlignedLoad(joinStateLog_restore, 1, "restore");
+    tmpval = builder.CreateLoad(int8Type, joinStateLog_restore, "restore");
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_restoreFalse, bb_restoreTrue);
 
@@ -1197,11 +1206,11 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
      * m_joinStateLog, and reset the restore to false.
      */
     builder.SetInsertPoint(bb_restoreTrue);
-    builder.CreateAlignedStore(int8_0, joinStateLog_restore, 1);
+    builder.CreateStore(int8_0, joinStateLog_restore);
     /* get lastBuildIdx from m_joinStateLog */
-    llvm::Value* lastBuildIdx = builder.CreateAlignedLoad(lastBuildIdx_addr, 4, "lastBuildIdx");
+    llvm::Value* lastBuildIdx = builder.CreateLoad(int32Type, lastBuildIdx_addr, "lastBuildIdx");
     /* get m_joinStateLog.lastCell */
-    llvm::Value* lastCell = builder.CreateAlignedLoad(lastCell_addr, 8, "lastCell");
+    llvm::Value* lastCell = builder.CreateLoad(hashCellPtrType, lastCell_addr, "lastCell");
 
     /* get hashJoinTbl.vechashtable.m_cellCache[lastBuildIdx] */
     DEFINE_CGVAR_INT64(int64_8032, 8032);
@@ -1214,7 +1223,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     DEFINE_CG_PTRTYPE(hashCellPPtrType, hashCellPtrType);
     llvm::Value* mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
 
-    builder.CreateAlignedStore(lastCell, mcellCache, 8);
+    builder.CreateStore(lastCell, mcellCache);
     builder.CreateBr(bb_restoreFalse);
 
     /* restore is false, so start the loop from 0
@@ -1240,20 +1249,20 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     /* Get m_arr from batch */
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* arr = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* batch_arr = builder.CreateAlignedLoad(arr, 8, "batch_arr");
+    llvm::Value* batch_arr = builder.CreateLoad(scalarVecPtrType, arr, "batch_arr");
     /* hashJoinTbl.m_innerBatch */
     Vals[1] = int32_pos_hjointbl_inbatch;
     llvm::Value* innerBatch = builder.CreateInBoundsGEP(hashJoinTbl, Vals);
     /* hashJoinTbl.m_outerBatch */
     Vals[1] = int32_pos_hjointbl_outbatch;
     llvm::Value* outerBatch = builder.CreateInBoundsGEP(hashJoinTbl, Vals);
-    innerBatch = builder.CreateAlignedLoad(innerBatch, 8, "innerBatch");
-    outerBatch = builder.CreateAlignedLoad(outerBatch, 8, "outerBatch");
+    innerBatch = builder.CreateLoad(vecBatchPtrType, innerBatch, "innerBatch");
+    outerBatch = builder.CreateLoad(vecBatchPtrType, outerBatch, "outerBatch");
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* inner_arr = builder.CreateInBoundsGEP(innerBatch, Vals);
-    inner_arr = builder.CreateAlignedLoad(inner_arr, 8, "inner_arr");
+    inner_arr = builder.CreateLoad(scalarVecPtrType, inner_arr, "inner_arr");
     llvm::Value* outer_arr = builder.CreateInBoundsGEP(outerBatch, Vals);
-    outer_arr = builder.CreateAlignedLoad(outer_arr, 8, "outer_arr");
+    outer_arr = builder.CreateLoad(scalarVecPtrType, outer_arr, "outer_arr");
 
     mcols = innerPlanState(node)->ps_ResultTupleSlot->tts_tupleDescriptor->natts;
     llvm::Value** inner_vals_array = (llvm::Value**)palloc(sizeof(llvm::Value*) * mcols);
@@ -1264,12 +1273,12 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
         Vals[0] = int64_jIdx;
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(inner_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "inner_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "inner_vals");
         inner_vals_array[j] = tmpval;
         /* Get m_flag from pVector */
         Vals[1] = int32_pos_scalvec_flag;
         tmpval = builder.CreateInBoundsGEP(inner_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "inner_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "inner_flag");
         inner_flag_array[j] = tmpval;
     }
     mcols = outerPlanState(node)->ps_ResultTupleSlot->tts_tupleDescriptor->natts;
@@ -1283,21 +1292,21 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
         /* Get m_vals from pVector */
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(outer_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "outer_vals");
         outer_vals_array[j] = tmpval;
 
         tmpval = builder.CreateInBoundsGEP(batch_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "batch_val");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "batch_val");
         batch_vals_array[j] = tmpval;
 
         /* Get m_flag from pVector */
         Vals[1] = int32_pos_scalvec_flag;
         tmpval = builder.CreateInBoundsGEP(outer_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "outer_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "outer_flag");
         outer_flag_array[j] = tmpval;
 
         tmpval = builder.CreateInBoundsGEP(batch_arr, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 1, "batch_flag");
+        tmpval = builder.CreateLoad(int8PtrType, tmpval, "batch_flag");
         batch_flag_array[j] = tmpval;
     }
 
@@ -1357,7 +1366,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
         Vals[0] = int64_0;
         Vals[1] = int32_pos_scalvec_vals;
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "batch_vals");
+        tmpval = builder.CreateLoad(int64PtrType, tmpval, "batch_vals");
         inner_keyIdx_array[j] = int64_keyIdx;
         outer_key_mvals_array[j] = tmpval;
         j++;
@@ -1382,7 +1391,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     tmpval2 = builder.CreateMul(Phi_Idx, int64_8);
     tmpval = builder.CreateAdd(tmpval, tmpval2);
     mcellCache = builder.CreateIntToPtr(tmpval, hashCellPPtrType);
-    llvm::Value* cellCache_loopEntry = builder.CreateAlignedLoad(mcellCache, 8, "cellCache");
+    llvm::Value* cellCache_loopEntry = builder.CreateLoad(hashCellPtrType, mcellCache, "cellCache");
     tmpval = builder.CreatePtrToInt(cellCache_loopEntry, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
     builder.CreateCondBr(tmpval, bb_crit_edge, bb_keyMatch);
@@ -1401,7 +1410,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     tmpval = builder.CreateInBoundsGEP(Phi_cellCache_keyMatch, Vals3);
-    llvm::Value* nextCell = builder.CreateAlignedLoad(tmpval, 8, "nextCell");
+    llvm::Value* nextCell = builder.CreateLoad(hashCellPtrType, tmpval, "nextCell");
     Phi_cellCache_keyMatch->addIncoming(nextCell, bb_TryNextCell);
 
     llvm::Value* fastPath_result = NULL;
@@ -1421,9 +1430,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
         Vals4[2] = inner_keyIdx_array[j];
         Vals4[3] = int32_0;
         val_cell = builder.CreateInBoundsGEP(cellCache, Vals4);
-        val_cell = builder.CreateAlignedLoad(val_cell, 8, "cell_val");
+        val_cell = builder.CreateLoad(int64Type, val_cell, "cell_val");
         val_batch = builder.CreateInBoundsGEP(outer_key_mvals_array[j], Phi_Idx);
-        val_batch = builder.CreateAlignedLoad(val_batch, 8, "m_vals");
+        val_batch = builder.CreateLoad(int64Type, val_batch, "m_vals");
         switch (variable->vartype) {
             case INT4OID: {
                 val_cell = builder.CreateTrunc(val_cell, int32Type);
@@ -1465,15 +1474,15 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
         Vals4[2] = int64_jIdx;
         Vals4[3] = int32_0;
         val = builder.CreateInBoundsGEP(cellCache, Vals4);
-        val = builder.CreateAlignedLoad(val, 8, "cell_val");
+        val = builder.CreateLoad(int64Type, val, "cell_val");
         /* get flag from cellCache */
         Vals4[3] = int32_1;
         flag = builder.CreateInBoundsGEP(cellCache, Vals4);
-        flag = builder.CreateAlignedLoad(flag, 1, "cell_flag");
+        flag = builder.CreateLoad(int8Type, flag, "cell_flag");
 
         /* Assign the cell val to mvals and cell flag to mflag */
-        builder.CreateAlignedStore(val, mvals, 8);
-        builder.CreateAlignedStore(flag, mflag, 1);
+        builder.CreateStore(val, mvals);
+        builder.CreateStore(flag, mflag);
     }
 
     /* copy data from batch to outerBatch */
@@ -1485,13 +1494,13 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
 
         /* Get the val and flag from batch */
         val = builder.CreateInBoundsGEP(batch_vals_array[j], Phi_Idx);
-        val = builder.CreateAlignedLoad(val, 8, "batch_val");
+        val = builder.CreateLoad(int64Type, val, "batch_val");
         flag = builder.CreateInBoundsGEP(batch_flag_array[j], Phi_Idx);
-        flag = builder.CreateAlignedLoad(flag, 1, "batch_flag");
+        flag = builder.CreateLoad(int8Type, flag, "batch_flag");
 
         /* Assign the cell val to mvals and cell flag to mflag */
-        builder.CreateAlignedStore(val, mvals, 8);
-        builder.CreateAlignedStore(flag, mflag, 1);
+        builder.CreateStore(val, mvals);
+        builder.CreateStore(flag, mflag);
     }
     /* resultRow++ */
     llvm::Value* resultRow_Matched = builder.CreateAdd(Phi_resultRow_keyMatch, int32_1);
@@ -1503,10 +1512,10 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_fastpath(VecHashJoinState* n
 
     builder.SetInsertPoint(bb_BatchFull);
     llvm::Value* idx_int32 = builder.CreateTrunc(Phi_Idx, int32Type);
-    builder.CreateAlignedStore(idx_int32, lastBuildIdx_addr, 4);
+    builder.CreateStore(idx_int32, lastBuildIdx_addr);
     /* Save m_cellCache[i]->flag.m_next to joinStateLog */
-    builder.CreateAlignedStore(nextCell, lastCell_addr, 8);
-    builder.CreateAlignedStore(int8_1, joinStateLog_restore, 1);
+    builder.CreateStore(nextCell, lastCell_addr);
+    builder.CreateStore(int8_1, joinStateLog_restore);
     builder.CreateBr(bb_ret);
 
     /* try next cell of m_cellCache[i] and update m_cellCache[i] if next cell exists */
@@ -1598,6 +1607,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
 
     /* Define data types and some llvm consts */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -1605,6 +1616,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
     DEFINE_CG_PTRTYPE(vechashtablePtrType, "class.vechashtable");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
@@ -1666,7 +1678,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     /* entry basic block */
     /* get the number of rows of this batch : nrows = cellHead->flag.m_rows; */
     tmpval = builder.CreateBitCast(cellHead, int32PtrType);
-    llvm::Value* nRows = builder.CreateAlignedLoad(tmpval, 4, "nrows");
+    llvm::Value* nRows = builder.CreateLoad(int32Type, tmpval, "nrows");
     tmpval = builder.CreateICmpSGT(nRows, int32_0);
     builder.CreateCondBr(tmpval, bb_pre_loop, bb_ret);
 
@@ -1678,7 +1690,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     /* m_hashTbl is constructed by hashSize, mask = hashSize - 1 */
     Vals2[1] = int32_0;
     mask = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    mask = builder.CreateAlignedLoad(mask, 4, "m_size");
+    mask = builder.CreateLoad(int32Type, mask, "m_size");
     mask = builder.CreateSub(mask, int32_1);
 
     ListCell* lc_inner = NULL;
@@ -1741,7 +1753,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
         Vals4[2] = inner_keyIdx_array[j];
         Vals4[3] = int32_1;
         flag = builder.CreateInBoundsGEP(Phi_cell, Vals4);
-        flag = builder.CreateAlignedLoad(flag, 1, "flag");
+        flag = builder.CreateLoad(int8Type, flag, "flag");
         flag = builder.CreateAnd(flag, int8_1);
         tmpval = builder.CreateICmpEQ(flag, int8_0);
 
@@ -1755,7 +1767,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
         /* cell->m_val[keyIdx].val */
         Vals4[3] = int32_0;
         val = builder.CreateInBoundsGEP(Phi_cell, Vals4);
-        val = builder.CreateAlignedLoad(val, 8, "val");
+        val = builder.CreateLoad(int64Type, val, "val");
 
         /* get the variable type according to the preloaded variable */
         variable = inner_var[j];
@@ -1782,7 +1794,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
                 if (len >= 8) {
                     while (len >= 8) {
                         pval = builder.CreateIntToPtr(data1_int64, int64PtrType);
-                        pval = builder.CreateAlignedLoad(pval, 8, "int64data");
+                        pval = builder.CreateLoad(int64Type, pval, "int64data");
                         llvm_crc32_32_64(hash_res1, hash_res1, pval);
                         data1_int64 = builder.CreateAdd(data1_int64, int64_8);
                         len = len - 8;
@@ -1791,7 +1803,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
 
                 if (len >= 4) {
                     pval = builder.CreateIntToPtr(data1_int64, int32PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 4, "int32data");
+                    pval = builder.CreateLoad(int32Type, pval, "int32data");
                     llvm_crc32_32_32(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_4);
                     len = len - 4;
@@ -1799,7 +1811,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
 
                 if (len >= 2) {
                     pval = builder.CreateIntToPtr(data1_int64, int16PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 2, "int16data");
+                    pval = builder.CreateLoad(int16Type, pval, "int16data");
                     llvm_crc32_32_16(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_2);
                     len = len - 2;
@@ -1807,7 +1819,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
 
                 if (len == 1) {
                     pval = builder.CreateIntToPtr(data1_int64, int8PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 1, "int8data");
+                    pval = builder.CreateLoad(int8Type, pval, "int8data");
                     llvm_crc32_32_8(hash_res1, hash_res1, pval);
                 }
                 hash_result = hash_res1;
@@ -1837,19 +1849,19 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable(VecHashJoinSt
     /* Get m_data from vechashtable */
     Vals2[1] = int32_1;
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
+    m_data = builder.CreateLoad(hashCellPtrPtrType, m_data, "m_data");
 
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
-    llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
+    llvm::Value* lastCell = builder.CreateLoad(hashCellPtrType, m_data_idx, "lastCell");
 
-    builder.CreateAlignedStore(Phi_cell, m_data_idx, 8);
+    builder.CreateStore(Phi_cell, m_data_idx);
 
     /* get cell->flag.m_next */
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     llvm::Value* next_addr = builder.CreateInBoundsGEP(Phi_cell, Vals3);
 
-    builder.CreateAlignedStore(lastCell, next_addr, 8);
+    builder.CreateStore(lastCell, next_addr);
     tmpval = builder.CreateBitCast(Phi_cell, int8PtrType);
     tmpval = builder.CreateInBoundsGEP(tmpval, int64_cellsize);
 
@@ -1909,6 +1921,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
 
     /* Define data types and some llvm consts */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -1916,6 +1930,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
     DEFINE_CG_PTRTYPE(vechashtablePtrType, "class.vechashtable");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
@@ -1978,7 +1993,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     /* entry basic block */
     /* get the number of rows of this batch : nrows = cellHead->flag.m_rows; */
     tmpval = builder.CreateBitCast(cellHead, int32PtrType);
-    llvm::Value* nRows = builder.CreateAlignedLoad(tmpval, 4, "nrows");
+    llvm::Value* nRows = builder.CreateLoad(int32Type, tmpval, "nrows");
     tmpval = builder.CreateICmpSGT(nRows, int32_0);
     builder.CreateCondBr(tmpval, bb_pre_loop, bb_ret);
 
@@ -2005,7 +2020,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     /* m_hashTbl is constructed by hashSize, mask = hashSize - 1 */
     Vals2[1] = int32_0;
     mask = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    mask = builder.CreateAlignedLoad(mask, 4, "m_size");
+    mask = builder.CreateLoad(int32Type, mask, "m_size");
     mask = builder.CreateSub(mask, int32_1);
 
     ListCell* lc_inner = NULL;
@@ -2069,7 +2084,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
         Vals4[2] = inner_keyIdx_array[j];
         Vals4[3] = int32_1;
         flag = builder.CreateInBoundsGEP(Phi_cell, Vals4);
-        flag = builder.CreateAlignedLoad(flag, 1, "flag");
+        flag = builder.CreateLoad(int8Type, flag, "flag");
         flag = builder.CreateAnd(flag, int8_1);
         tmpval = builder.CreateICmpEQ(flag, int8_0);
 
@@ -2082,7 +2097,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
         builder.SetInsertPoint(bb_hashing[j]);
         Vals4[3] = int32_0;
         val = builder.CreateInBoundsGEP(Phi_cell, Vals4);
-        val = builder.CreateAlignedLoad(val, 8, "val");
+        val = builder.CreateLoad(int64Type, val, "val");
 
         variable = inner_var[j];
         switch (variable->vartype) {
@@ -2108,7 +2123,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
                 if (len >= 8) {
                     while (len >= 8) {
                         pval = builder.CreateIntToPtr(data1_int64, int64PtrType);
-                        pval = builder.CreateAlignedLoad(pval, 8, "int64data");
+                        pval = builder.CreateLoad(int64Type, pval, "int64data");
                         llvm_crc32_32_64(hash_res1, hash_res1, pval);
                         data1_int64 = builder.CreateAdd(data1_int64, int64_8);
                         len = len - 8;
@@ -2117,7 +2132,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
 
                 if (len >= 4) {
                     pval = builder.CreateIntToPtr(data1_int64, int32PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 4, "int32data");
+                    pval = builder.CreateLoad(int32Type, pval, "int32data");
                     llvm_crc32_32_32(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_4);
                     len = len - 4;
@@ -2125,7 +2140,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
 
                 if (len >= 2) {
                     pval = builder.CreateIntToPtr(data1_int64, int16PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 2, "int16data");
+                    pval = builder.CreateLoad(int16Type, pval, "int16data");
                     llvm_crc32_32_16(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_2);
                     len = len - 2;
@@ -2133,7 +2148,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
 
                 if (len == 1) {
                     pval = builder.CreateIntToPtr(data1_int64, int8PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 1, "int8data");
+                    pval = builder.CreateLoad(int8Type, pval, "int8data");
                     llvm_crc32_32_8(hash_res1, hash_res1, pval);
                 }
                 hash_result = hash_res1;
@@ -2163,23 +2178,23 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_buildHashTable_NeedCopy(VecH
     /* Get m_data from vechashtable */
     Vals2[1] = int32_1;
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
+    m_data = builder.CreateLoad(hashCellPtrPtrType, m_data, "m_data");
 
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
-    llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
+    llvm::Value* lastCell = builder.CreateLoad(hashCellPtrType, m_data_idx, "lastCell");
 
     llvm::Value* target = builder.CreateBitCast(Phi_copyCell, int8PtrType);
     llvm::Value* source = builder.CreateBitCast(Phi_cell, int8PtrType);
     builder.CreateMemCpy(target, (llvm::MaybeAlign)1, source, (llvm::MaybeAlign)1, cellSize_value);
 
-    builder.CreateAlignedStore(Phi_copyCell, m_data_idx, 8);
+    builder.CreateStore(Phi_copyCell, m_data_idx);
 
     /* get copyCell->flag.m_next */
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     llvm::Value* next_addr = builder.CreateInBoundsGEP(Phi_copyCell, Vals3);
 
-    builder.CreateAlignedStore(lastCell, next_addr, 8);
+    builder.CreateStore(lastCell, next_addr);
 
     /* Get next cell and next copyCell : GET_NTH_CELL(hashcell, i) */
     tmpval = builder.CreateBitCast(Phi_cell, int8PtrType);
@@ -2247,6 +2262,8 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
 
     /* Define data types and some llvm consts */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -2255,7 +2272,11 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(VectorBatchPtrType, "class.VectorBatch");
     DEFINE_CG_PTRTYPE(HashJoinTblPtrType, "class.HashJoinTbl");
+    DEFINE_CG_PTRTYPE(vechashtablePtrType, "class.vechashtable");
     DEFINE_CG_PTRTYPE(hashBasedOperatorPtrType, "class.hashBasedOperator.base");
+    DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -2307,7 +2328,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     /* entry basic block */
     /* get the number of rows of this batch : nrows = batch->m_rows */
     tmpval = builder.CreateInBoundsGEP(batch, Vals2);
-    llvm::Value* nRows = builder.CreateAlignedLoad(tmpval, 4, "nrows");
+    llvm::Value* nRows = builder.CreateLoad(int32Type, tmpval, "nrows");
     tmpval = builder.CreateICmpSGT(nRows, int32_0);
     builder.CreateCondBr(tmpval, bb_pre_loop, bb_ret);
 
@@ -2322,18 +2343,18 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     /* get hashBasedOperator.m_hashTbl */
     Vals2[1] = int32_pos_hBOper_htbl;
     llvm::Value* hashTbl = builder.CreateInBoundsGEP(hashBasedOperator, Vals2);
-    hashTbl = builder.CreateAlignedLoad(hashTbl, 8, "m_hashTbl");
+    hashTbl = builder.CreateLoad(vechashtablePtrType, hashTbl, "m_hashTbl");
 
     /* get m_hashTbl->m_size */
     Vals2[1] = int32_pos_hashtbl_size;
     mask = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    mask = builder.CreateAlignedLoad(mask, 4, "m_size");
+    mask = builder.CreateLoad(int32Type, mask, "m_size");
     mask = builder.CreateSub(mask, int32_1);
 
     /* get m_arr from the batch */
     Vals2[1] = int32_pos_batch_marr;
     llvm::Value* m_arr = builder.CreateInBoundsGEP(batch, Vals2);
-    m_arr = builder.CreateAlignedLoad(m_arr, 8, "m_arr");
+    m_arr = builder.CreateLoad(scalarVecPtrType, m_arr, "m_arr");
 
     /* get HashJoinTbl.m_match */
     Vals2[1] = int32_pos_hjointbl_match;
@@ -2401,9 +2422,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
         Vals2[0] = outer_keyIdx_array[j];
         Vals2[1] = int32_pos_scalvec_flag;
         flag = builder.CreateInBoundsGEP(m_arr, Vals2);
-        flag = builder.CreateAlignedLoad(flag, 8, "flag");
+        flag = builder.CreateLoad(int8PtrType, flag, "flag");
         flag = builder.CreateInBoundsGEP(flag, Phi_Idx);
-        flag = builder.CreateAlignedLoad(flag, 1, "flag_i");
+        flag = builder.CreateLoad(int8Type, flag, "flag_i");
         flag = builder.CreateAnd(flag, int8_1);
         tmpval = builder.CreateICmpEQ(flag, int8_0);
 
@@ -2417,9 +2438,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
         /* get the value of hash key from the batch : pVector[m_outkeyIdx].val */
         Vals2[1] = int32_pos_scalvec_vals;
         val = builder.CreateInBoundsGEP(m_arr, Vals2);
-        val = builder.CreateAlignedLoad(val, 8, "val");
+        val = builder.CreateLoad(int64PtrType, val, "val");
         val = builder.CreateInBoundsGEP(val, Phi_Idx);
-        val = builder.CreateAlignedLoad(val, 8, "val_i");
+        val = builder.CreateLoad(int64Type, val, "val_i");
 
         /* do hashing according to the hashkey type */
         variable = outer_var[j];
@@ -2446,7 +2467,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
                 if (len >= 8) {
                     while (len >= 8) {
                         pval = builder.CreateIntToPtr(data1_int64, int64PtrType);
-                        pval = builder.CreateAlignedLoad(pval, 8, "int64data");
+                        pval = builder.CreateLoad(int64Type, pval, "int64data");
                         llvm_crc32_32_64(hash_res1, hash_res1, pval);
                         data1_int64 = builder.CreateAdd(data1_int64, int64_8);
                         len = len - 8;
@@ -2455,7 +2476,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
 
                 if (len >= 4) {
                     pval = builder.CreateIntToPtr(data1_int64, int32PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 4, "int32data");
+                    pval = builder.CreateLoad(int32Type, pval, "int32data");
                     llvm_crc32_32_32(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_4);
                     len = len - 4;
@@ -2463,7 +2484,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
 
                 if (len >= 2) {
                     pval = builder.CreateIntToPtr(data1_int64, int16PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 2, "int16data");
+                    pval = builder.CreateLoad(int16Type, pval, "int16data");
                     llvm_crc32_32_16(hash_res1, hash_res1, pval);
                     data1_int64 = builder.CreateAdd(data1_int64, int64_2);
                     len = len - 2;
@@ -2471,7 +2492,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
 
                 if (len == 1) {
                     pval = builder.CreateIntToPtr(data1_int64, int8PtrType);
-                    pval = builder.CreateAlignedLoad(pval, 1, "int8data");
+                    pval = builder.CreateLoad(int8Type, pval, "int8data");
                     llvm_crc32_32_8(hash_res1, hash_res1, pval);
                 }
                 hash_result = hash_res1;
@@ -2504,16 +2525,16 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals3[2] = Phi_Idx;
     llvm::Value* m_cacheLoc_idx = builder.CreateInBoundsGEP(hashBasedOperator, Vals3);
 
-    builder.CreateAlignedStore(bucketIdx, m_cacheLoc_idx, 8);
+    builder.CreateStore(bucketIdx, m_cacheLoc_idx);
 
     /* get vechashtable.m_data */
     Vals2[0] = int64_0;
     Vals2[1] = int32_pos_hashtbl_data;
     llvm::Value* m_data = builder.CreateInBoundsGEP(hashTbl, Vals2);
-    m_data = builder.CreateAlignedLoad(m_data, 8, "m_data");
+    m_data = builder.CreateLoad(hashCellPtrPtrType, m_data, "m_data");
 
     llvm::Value* m_data_idx = builder.CreateInBoundsGEP(m_data, bucketIdx);
-    llvm::Value* lastCell = builder.CreateAlignedLoad(m_data_idx, 8, "lastCell");
+    llvm::Value* lastCell = builder.CreateLoad(hashCellPtrType, m_data_idx, "lastCell");
 
     /* get hashBasedOperator.m_cellCache[i] */
     Vals3[0] = int64_0;
@@ -2521,7 +2542,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_probeHashTable(VecHashJoinSt
     Vals3[2] = Phi_Idx;
     llvm::Value* m_cellCache_idx = builder.CreateInBoundsGEP(hashBasedOperator, Vals3);
 
-    builder.CreateAlignedStore(lastCell, m_cellCache_idx, 8);
+    builder.CreateStore(lastCell, m_cellCache_idx);
 
     /* increase idx */
     llvm::Value* nextIdx = builder.CreateAdd(Phi_Idx, int32_1);
@@ -2560,7 +2581,9 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_includeLong(VecHashJoinSt
     DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(bFImplPtrType, "class.filter::BloomFilterImpl");
+    DEFINE_CG_PTRTYPE(bitSetPtrType, "class.BitSet");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -2602,19 +2625,19 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_includeLong(VecHashJoinSt
     /* Get all the parameters that we needed */
     Vals[1] = int32_2;
     llvm::Value* numBits = builder.CreateInBoundsGEP(bfimpl, Vals);
-    numBits = builder.CreateAlignedLoad(numBits, 8, "numBits");
+    numBits = builder.CreateLoad(int64Type, numBits, "numBits");
     Vals[1] = int32_3;
     llvm::Value* numHashFunction = builder.CreateInBoundsGEP(bfimpl, Vals);
-    numHashFunction = builder.CreateAlignedLoad(numHashFunction, 8, "numHashFunc");
+    numHashFunction = builder.CreateLoad(int64Type, numHashFunction, "numHashFunc");
     Vals[1] = int32_4;
     llvm::Value* numValues = builder.CreateInBoundsGEP(bfimpl, Vals);
-    numValues = builder.CreateAlignedLoad(numValues, 8, "numValues");
+    numValues = builder.CreateLoad(int64Type, numValues, "numValues");
     Vals[1] = int32_8;
     llvm::Value* minValue = builder.CreateInBoundsGEP(bfimpl, Vals);
-    minValue = builder.CreateAlignedLoad(minValue, 8, "minValue");
+    minValue = builder.CreateLoad(int64Type, minValue, "minValue");
     Vals[1] = int32_10;
     llvm::Value* addMinMax = builder.CreateInBoundsGEP(bfimpl, Vals);
-    addMinMax = builder.CreateAlignedLoad(addMinMax, 1, "addMinMax");
+    addMinMax = builder.CreateLoad(int8Type, addMinMax, "addMinMax");
 
     /* Compute addMinMax && (1 == numValues) */
     addMinMax = builder.CreateTrunc(addMinMax, int1Type);
@@ -2655,12 +2678,12 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_includeLong(VecHashJoinSt
     /* corresponding to bitSet->get(pos) */
     Vals[1] = int32_1;
     llvm::Value* bitset = builder.CreateInBoundsGEP(bfimpl, Vals);
-    bitset = builder.CreateAlignedLoad(bitset, 8, "bitset");
+    bitset = builder.CreateLoad(bitSetPtrType, bitset, "bitset");
     llvm::Value* data = builder.CreateInBoundsGEP(bitset, Vals);
-    data = builder.CreateAlignedLoad(data, 8, "data");
+    data = builder.CreateLoad(int64PtrType, data, "data");
     llvm::Value* index1 = builder.CreateAShr(pos, 6);
     data = builder.CreateInBoundsGEP(data, index1);
-    data = builder.CreateAlignedLoad(data, 8, "fdata");
+    data = builder.CreateLoad(int64Type, data, "fdata");
     llvm::Value* index2 = builder.CreateShl(int64_1, pos);
     tmpval = builder.CreateAnd(data, index2);
     tmpval = builder.CreateICmpNE(tmpval, int64_0);
@@ -2700,7 +2723,10 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_addLong(VecHashJoinState*
     DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(bFImplPtrType, "class.filter::BloomFilterImpl");
+    DEFINE_CG_PTRTYPE(valBitPtrType, "struct.ValueBit");
+    DEFINE_CG_PTRTYPE(bitSetPtrType, "class.BitSet");
 
     DEFINE_CGVAR_INT32(int32_0, 0);
     DEFINE_CGVAR_INT32(int32_1, 1);
@@ -2744,23 +2770,23 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_addLong(VecHashJoinState*
     /* Get all the parameters that we needed */
     Vals[1] = int32_2;
     llvm::Value* numBits = builder.CreateInBoundsGEP(bfimpl, Vals);
-    numBits = builder.CreateAlignedLoad(numBits, 8, "numBits");
+    numBits = builder.CreateLoad(int64Type, numBits, "numBits");
     Vals[1] = int32_3;
     llvm::Value* num_HashFunction = builder.CreateInBoundsGEP(bfimpl, Vals);
-    num_HashFunction = builder.CreateAlignedLoad(num_HashFunction, 8, "numHashFunc");
+    num_HashFunction = builder.CreateLoad(int64Type, num_HashFunction, "numHashFunc");
     num_HashFunction = builder.CreateTrunc(num_HashFunction, int32Type);
     Vals[1] = int32_4;
     llvm::Value* ptrnumValues = builder.CreateInBoundsGEP(bfimpl, Vals);
-    llvm::Value* numValues = builder.CreateAlignedLoad(ptrnumValues, 8, "numValues");
+    llvm::Value* numValues = builder.CreateLoad(int64Type, ptrnumValues, "numValues");
     Vals[1] = int32_5;
     llvm::Value* val_numMaxValues = builder.CreateInBoundsGEP(bfimpl, Vals);
-    val_numMaxValues = builder.CreateAlignedLoad(val_numMaxValues, 8, "maxNumValues");
+    val_numMaxValues = builder.CreateLoad(int64Type, val_numMaxValues, "maxNumValues");
     Vals[1] = int32_6;
     llvm::Value* ptrvalstartup = builder.CreateInBoundsGEP(bfimpl, Vals);
-    llvm::Value* val_startup = builder.CreateAlignedLoad(ptrvalstartup, 8, "startupEntries");
+    llvm::Value* val_startup = builder.CreateLoad(int64Type, ptrvalstartup, "startupEntries");
     Vals[1] = int32_7;
     llvm::Value* valpos = builder.CreateInBoundsGEP(bfimpl, Vals);
-    valpos = builder.CreateAlignedLoad(valpos, 8, "valuePositions");
+    valpos = builder.CreateLoad(valBitPtrType, valpos, "valuePositions");
 
     /* Report error when numValues >= maxNumValues */
     tmpval = builder.CreateICmpSGE(numValues, val_numMaxValues);
@@ -2813,15 +2839,15 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_addLong(VecHashJoinState*
     /* corresponding to bitSet->set(pos) */
     Vals[1] = int32_1;
     llvm::Value* bitset = builder.CreateInBoundsGEP(bfimpl, Vals);
-    bitset = builder.CreateAlignedLoad(bitset, 8, "bitset");
+    bitset = builder.CreateLoad(bitSetPtrType, bitset, "bitset");
     llvm::Value* data = builder.CreateInBoundsGEP(bitset, Vals);
-    data = builder.CreateAlignedLoad(data, 8, "data");
+    data = builder.CreateLoad(int64PtrType, data, "data");
     llvm::Value* index1 = builder.CreateAShr(pos, 6);
     llvm::Value* pdata = builder.CreateInBoundsGEP(data, index1);
-    llvm::Value* realdata = builder.CreateAlignedLoad(pdata, 8, "pdata");
+    llvm::Value* realdata = builder.CreateLoad(int64Type, pdata, "pdata");
     llvm::Value* index2 = builder.CreateShl(int64_1, pos);
     realdata = builder.CreateOr(realdata, index2);
-    builder.CreateAlignedStore(realdata, pdata, 8);
+    builder.CreateStore(realdata, pdata);
 
     /* corresponding to valuePositions[numValues].position[i - 1] = pos */
     Vals3[0] = numValues;
@@ -2829,7 +2855,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_addLong(VecHashJoinState*
     Vals3[2] = builder.CreateSub(phi_idx, int32_1);
     llvm::Value* position = builder.CreateInBoundsGEP(valpos, Vals3);
     llvm::Value* idx = builder.CreateTrunc(pos, int16Type);
-    builder.CreateAlignedStore(idx, position, 2);
+    builder.CreateStore(idx, position);
     builder.CreateBr(for_inc);
 
     builder.SetInsertPoint(for_inc);
@@ -2838,7 +2864,7 @@ llvm::Function* VecHashJoinCodeGen::HashJoinCodeGen_bf_addLong(VecHashJoinState*
 
     builder.SetInsertPoint(for_end);
     numValues = builder.CreateAdd(numValues, int64_1);
-    builder.CreateAlignedStore(numValues, ptrnumValues, 8);
+    builder.CreateStore(numValues, ptrnumValues);
     builder.CreateRetVoid();
 
     llvmCodeGen->FinalizeFunction(jitted_bf_addLong, node->js.ps.plan->plan_node_id);

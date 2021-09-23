@@ -26,6 +26,7 @@
 #include "catalog/pg_proc.h"
 #include "commands/extension.h"
 #include "miscadmin.h"
+#include "storage/tcap.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -77,6 +78,8 @@ void recordMultipleDependencies(
 
     errno_t rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check(rc, "", "");
+
+    TrForbidAccessRbDependencies(dependDesc, depender, referenced, nreferenced);
 
     for (i = 0; i < nreferenced; i++, referenced++) {
         /*

@@ -329,7 +329,7 @@ void init_log(char* prefix_name)
             nRet = snprintf_s(log_dir, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausslog_dir, prefix_name);
             securec_check_ss_c(nRet, "\0", "\0");
             // log_dir not exist, create log_dir path
-            if (0 != mkdir(log_dir, S_IRWXU)) {
+            if (0 != pg_mkdir_p(log_dir, S_IRWXU)) {
                 if (EEXIST != errno) {
                     printf(_("could not create directory %s: %m\n"), log_dir);
                     return;

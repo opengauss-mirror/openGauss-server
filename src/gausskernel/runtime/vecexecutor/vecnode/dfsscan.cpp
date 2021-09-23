@@ -26,9 +26,9 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "access/relscan.h"
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "vecexecutor/vecnodecstorescan.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeSeqscan.h"
 #include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
 #include "optimizer/clauses.h"
@@ -38,7 +38,7 @@
 #include "utils/datum.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeSeqscan.h"
 #include "access/cstoreskey.h"
 #include "catalog/pg_operator.h"
 #include "access/genam.h"
@@ -377,7 +377,7 @@ static char* canonicalize_dfs_path(const char* path)
     lrealpath = (char*)palloc(max_realpath_len + 1);
     
     ret_val = realpath(path, lrealpath);
-    if (ret_val == NULL && lrealpath[0] == '\0') {
+    if (ret_val == NULL || lrealpath[0] == '\0') {
         ereport(
             ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("realpath failed : %s!\n", path)));
     }

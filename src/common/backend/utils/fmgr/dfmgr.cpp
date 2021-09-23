@@ -31,7 +31,7 @@
 
 /* Max size of error message of dlopen   */
 #define DLERROR_MSG_MAX_LEN 512
-/* signatures for PostgreSQL-specific library init/fini functions */
+/* signatures for openGauss library init/fini functions */
 typedef void (*PG_init_t)(void);
 typedef void (*PG_fini_t)(void);
 

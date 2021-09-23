@@ -341,7 +341,7 @@ int main(int argc, char* argv[])
 
 static void help(const char* progname_tem)
 {
-    printf(_("%s creates a new PostgreSQL role.\n\n"), progname_tem);
+    printf(_("%s creates a new openGauss role.\n\n"), progname_tem);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [ROLENAME]\n"), progname_tem);
     printf(_("\nOptions:\n"));

@@ -34,15 +34,15 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "executor/execdebug.h"
-#include "executor/nodeAppend.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeAppend.h"
 #include "vecexecutor/vecwindowagg.h"
 #include "vecexecutor/vecexecutor.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
-#include "executor/nodeWindowAgg.h"
+#include "executor/node/nodeWindowAgg.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
@@ -1430,7 +1430,8 @@ void VecWinAggRuntime::EvalWindowAgg()
         agg_rows = 0;
 
         /* means that there are remain data in last frame */
-        if (has_partition && m_window_store[winfuncno].restore == true) {
+        bool isRemainData = (has_partition && m_window_store[winfuncno].restore);
+        if (isRemainData) {
             start_idx = m_window_store[winfuncno].lastFetchIdx;
             start_rows = m_window_store[winfuncno].lastFrameRows;
             m_window_store[winfuncno].set(false, 0, 0);

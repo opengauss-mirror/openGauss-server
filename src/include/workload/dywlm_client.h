@@ -31,7 +31,7 @@
 #include "workload/gscgroup.h"
 #include "workload/statctl.h"
 #include "workload/parctl.h"
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 
 #define DYWLM_SEND_OK -5000
 #define DYWLM_SEND_FAILED -5001

@@ -15,7 +15,7 @@
  *
  * alarmchecker.cpp
  *
- * 	Postgres Alarm checker thread Implementation
+ * 	openGauss Alarm checker thread Implementation
  *
  * IDENTIFICATION
  *	  src/gausskernel/process/postmaster/alarmchecker.cpp

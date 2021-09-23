@@ -338,4 +338,9 @@ void FreeTxnItem()
     g_dispatcher->txnWorker->procTail = NULL;
 }
 
+bool TxnQueueIsEmpty(TxnRedoWorker* worker)
+{
+    return worker->procHead == NULL;
+}
+
 }  // namespace parallel_recovery

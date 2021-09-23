@@ -54,11 +54,10 @@ public:
         static bool pre_create(PGClientLogic &clientlogic, const char *function_name, const StringArgs &args,
             const GlobalHookExecutor **, size_t);
         static bool post_create(PGClientLogic &clientlogic, const char *function_name, StringArgs &args);
-        static bool set_deletion_expected(const char *object_name, bool is_schema);
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-        static bool get_key_path_by_cmk_name(GlobalHookExecutor *global_hook_executor, char *key_path_buf,
-            size_t buf_len);
-#endif
+        static bool set_deletion_expected(PGClientLogic& clientLogic, const char *object_name, bool is_schema);
+        static bool deprocess_column_setting(const unsigned char *processed_data, size_t processed_data_size, 
+            const char *key_store, const char *key_path, const char *key_algo, unsigned char **data,
+            size_t *data_size);
     };
 
     class ColumnSettings {
@@ -72,7 +71,7 @@ public:
          */
         static bool pre_create(PGClientLogic &client_logic, const GlobalHookExecutorSptr global_hook_executor,
             const char *function_name, const StringArgs &args, StringArgs &new_args);
-        static bool set_deletion_expected(const char *object_name, bool is_schema);
+        static bool set_deletion_expected(PGClientLogic& clientLogic, const char *object_name, const bool is_schema);
     };
 
     /*

@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------------
- * PostgreSQL manual configuration settings
+ * openGauss manual configuration settings
  *
  * This file contains various configuration symbols and limits.  In
  * all cases, changing them is only useful in very rare situations or
@@ -21,10 +21,8 @@
  * Changing this requires an initdb.
  */
 #define NAMEDATALEN 64
-#ifndef ENABLE_MULTIPLE_NODES
 #define BUCKETDATALEN 16384
 #define BUCKETSTRLEN 6 * BUCKETDATALEN
-#endif
 #define NODEIDLEN 4
 #define MAX_NODE_DIG 5         // datanode number <= 4096
 #define MAX_DATANODE_NUM 4096  // this value should be same as MaxDataNodes
@@ -40,7 +38,8 @@
  * Changing this does not require an initdb, but it does require a full
  * backend recompile (including any user-defined C functions).
  */
-#define FUNC_MAX_ARGS 666
+#define FUNC_MAX_ARGS 8192
+#define FUNC_MAX_ARGS_INROW 666
 
 /*
  * Maximum number of columns in an index.  There is little point in making
@@ -50,6 +49,7 @@
  * Changing this requires an initdb.
  */
 #define INDEX_MAX_KEYS 32
+#define GLOBAL_CROSSBUCKET_INDEX_MAX_KEYS (INDEX_MAX_KEYS - 2)
 
 /*
  * Set the upper and lower bounds of sequence values.
@@ -65,15 +65,15 @@
 /*
  * Define this if you want to allow the lo_import and lo_export SQL
  * functions to be executed by ordinary users.	By default these
- * functions are only available to the Postgres superuser.	CAUTION:
+ * functions are only available to the openGauss superuser.	CAUTION:
  * These functions are SECURITY HOLES since they can read and write
- * any file that the PostgreSQL server has permission to access.  If
+ * any file that the openGauss server has permission to access.  If
  * you turn this on, don't say we didn't warn you.
  * define ALLOW_DANGEROUS_LO_FUNCTIONS
  */
 
 /*
- * MAXPGPATH: standard size of a pathname buffer in PostgreSQL (hence,
+ * MAXPGPATH: standard size of a pathname buffer in openGauss (hence,
  * maximum usable pathname length is one less).
  *
  * We'd use a standard system header symbol for this, if there weren't
@@ -129,7 +129,7 @@
 #endif
 
 /*
- * USE_POSIX_FADVISE controls whether Postgres will attempt to use the
+ * USE_POSIX_FADVISE controls whether openGauss will attempt to use the
  * posix_fadvise() kernel call.  Usually the automatic configure tests are
  * sufficient, but some older Linux distributions had broken versions of
  * posix_fadvise().  If necessary you can remove the #define here.

@@ -41,7 +41,7 @@
 #include "distributelayer/streamMain.h"
 #include "miscadmin.h"
 #include "libpq/libpq-be.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/latch.h"
 #include "storage/spin.h"
 #include "storage/cstore/cstore_mem_alloc.h"
@@ -471,10 +471,8 @@ void gs_thread_exit(int code)
     /* free the locale cache */
     freeLocaleCache(true);
 
-#ifdef ENABLE_LLVM_COMPILE
     /* release llvm context memory */
     CodeGenThreadTearDown();
-#endif
 
     CancelAutoAnalyze();
 

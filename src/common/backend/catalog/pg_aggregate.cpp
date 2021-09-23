@@ -313,6 +313,7 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
      */
     procOid = ProcedureCreate(aggName,
         aggNamespace,
+        InvalidOid,
         false,                                /* A db compatible*/
         false,                                /* no replacement */
         false,                                /* doesn't return a set */
@@ -342,7 +343,8 @@ void AggregateCreate(const char* aggName, Oid aggNamespace, char aggKind, Oid* a
         false,
         false,
         false,
-        false);                               /* default value for proisprocedure */
+        false,
+        NULL);                               /* default value for proisprocedure */
 
     /*
      * Okay to create the pg_aggregate entry.

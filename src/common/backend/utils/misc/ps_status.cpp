@@ -1,7 +1,7 @@
 /* --------------------------------------------------------------------
  * ps_status.c
  *
- * Routines to support changing the ps display of PostgreSQL backends
+ * Routines to support changing the ps display of openGauss backends
  * to contain some useful information. Mechanism differs wildly across
  * platforms.
  *

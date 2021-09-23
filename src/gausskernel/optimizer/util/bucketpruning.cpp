@@ -88,7 +88,7 @@ static BucketPruningContext* makePruningContext(
     PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte, List* restrictInfo);
 static Expr* RestrictInfoGetExpr(List* restrictInfo);
 static BucketPruningResult* BucketPruningForExpr(BucketPruningContext* bpcxt, Expr* expr);
-static int getConstBucketId(Const* val);
+static int getConstBucketId(Const* val, int bucketmapsize);
 static BucketPruningResult* BucketPruningForBoolExpr(BucketPruningContext* bpcxt, BoolExpr* expr);
 static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, OpExpr* expr);
 static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params);
@@ -101,7 +101,7 @@ static int GetExecBucketId(ExecNodes* exec_nodes, ParamListInfo params);
  *  BUCKETS_EMPTY: make a pruning result contain no buckets
  *  BUCKETS_PRUNED: **not allowed**
  */
-static BucketPruningResult* makePruningResult(PruningStatus status)
+static BucketPruningResult* makePruningResult(PruningStatus status, int bucketmapsize = 0)
 {
     BucketPruningResult* result = (BucketPruningResult*)palloc0(sizeof(BucketPruningResult));
 
@@ -110,12 +110,8 @@ static BucketPruningResult* makePruningResult(PruningStatus status)
     result->buckets = NULL;
     result->status = status;
 
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     if (status == BUCKETS_FULL) {
-        for (int i = 0; i < BUCKETDATALEN; i++) {
+        for (int i = 0; i < bucketmapsize; i++) {
             result->buckets = bms_add_member(result->buckets, i);
         }
     }
@@ -130,7 +126,7 @@ static BucketPruningResult* makePruningResult(PruningStatus status)
  *  when the bitmapset is full a FULL result is returned and the bitmap set is re-used
  *  when the bitmapset is not-full a PRUNED result is returned
  */
-static BucketPruningResult* makePruningResult(Bitmapset* buckets)
+static BucketPruningResult* makePruningResult(Bitmapset* buckets, int bucketmapsize)
 {
     if (bms_is_empty(buckets)) {
         return makePruningResult(BUCKETS_EMPTY);
@@ -138,11 +134,8 @@ static BucketPruningResult* makePruningResult(Bitmapset* buckets)
 
     BucketPruningResult* result = (BucketPruningResult*)palloc0(sizeof(BucketPruningResult));
 
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
-    if (bms_num_members(buckets) == BUCKETDATALEN) {
+    if (bms_num_members(buckets) == bucketmapsize) {
+        Assert(bucketmapsize != 0);
         result->status = BUCKETS_FULL;
     } else {
         result->status = BUCKETS_PRUNED;
@@ -163,12 +156,8 @@ static BucketPruningResult* makePruningResult(Bitmapset* buckets)
 static BucketPruningResult* makePruningResult(int x, bool exclude = false)
 {
     BucketPruningResult* result = (BucketPruningResult*)palloc0(sizeof(BucketPruningResult));
-
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     if (exclude) {
+        Assert(0);
         for (int i = 0; i < BUCKETDATALEN; i++) {
             if (exclude && i == x) {
                 continue;
@@ -186,26 +175,6 @@ static BucketPruningResult* makePruningResult(int x, bool exclude = false)
 }
 
 /*
- * @Description: see if the pruning results contail all buckets
- *
- *        to see if the result list contail all bucketids
- *
- * @return true if the buckets contain all bucketids
- *         false if the buckets has pruned
- */
-bool isFullPruningResult(BucketPruningResult* result)
-{
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-    if (result->status == BUCKETS_FULL || bms_num_members(result->buckets) == BUCKETDATALEN) {
-        return true;
-    }
-
-    return false;
-}
-
-/*
  * @Description: intersect pruning result of a,b
  *
  *        given two pruning results of a b
@@ -215,7 +184,7 @@ bool isFullPruningResult(BucketPruningResult* result)
  *
  * @return a list contains the intersection result
  */
-static BucketPruningResult* intersectPruningResult(BucketPruningResult* a, BucketPruningResult* b)
+static BucketPruningResult* intersectPruningResult(BucketPruningResult* a, BucketPruningResult* b, int bucketmapsize)
 {
     if (a->status == BUCKETS_UNINITIED && b->status == BUCKETS_UNINITIED) {
         return makePruningResult(BUCKETS_UNINITIED);
@@ -233,7 +202,7 @@ static BucketPruningResult* intersectPruningResult(BucketPruningResult* a, Bucke
         return makePruningResult(BUCKETS_EMPTY);
     }
 
-    return makePruningResult(bms_intersect(a->buckets, b->buckets));
+    return makePruningResult(bms_intersect(a->buckets, b->buckets), bucketmapsize);
 }
 
 /*
@@ -246,7 +215,7 @@ static BucketPruningResult* intersectPruningResult(BucketPruningResult* a, Bucke
  *
  * @return a list contains the union result
  */
-static BucketPruningResult* unionPruningResult(BucketPruningResult* a, BucketPruningResult* b)
+static BucketPruningResult* unionPruningResult(BucketPruningResult* a, BucketPruningResult* b, int bucketmapsize)
 {
     if (a->status == BUCKETS_UNINITIED && b->status == BUCKETS_UNINITIED) {
         return makePruningResult(BUCKETS_UNINITIED);
@@ -261,10 +230,10 @@ static BucketPruningResult* unionPruningResult(BucketPruningResult* a, BucketPru
     }
 
     if (a->status == BUCKETS_FULL || b->status == BUCKETS_FULL) {
-        return makePruningResult(BUCKETS_FULL);
+        return makePruningResult(BUCKETS_FULL, bucketmapsize);
     }
 
-    return makePruningResult(bms_union(a->buckets, b->buckets));
+    return makePruningResult(bms_union(a->buckets, b->buckets), bucketmapsize);
 }
 
 /*
@@ -277,14 +246,14 @@ static BucketPruningResult* unionPruningResult(BucketPruningResult* a, BucketPru
  *
  * @return a list contains the buckets A without members of B
  */
-static BucketPruningResult* notPruningResult(BucketPruningResult* a, BucketPruningResult* b)
+static BucketPruningResult* notPruningResult(BucketPruningResult* a, BucketPruningResult* b, int bucketmapsize)
 {
     if (a->status == BUCKETS_UNINITIED && b->status == BUCKETS_UNINITIED) {
         return makePruningResult(BUCKETS_UNINITIED);
     }
 
     if (a->status == BUCKETS_UNINITIED && b->status != BUCKETS_UNINITIED) {
-        return notPruningResult(makePruningResult(BUCKETS_FULL), b);
+        return notPruningResult(makePruningResult(BUCKETS_FULL, bucketmapsize), b, bucketmapsize);
     }
 
     if (a->status != BUCKETS_UNINITIED && b->status == BUCKETS_UNINITIED) {
@@ -295,7 +264,7 @@ static BucketPruningResult* notPruningResult(BucketPruningResult* a, BucketPruni
         return makePruningResult(BUCKETS_EMPTY);
     }
 
-    return makePruningResult(bms_difference(a->buckets, b->buckets));
+    return makePruningResult(bms_difference(a->buckets, b->buckets), bucketmapsize);
 }
 
 /*
@@ -553,7 +522,7 @@ static BucketPruningResult* BucketPruningForExpr(BucketPruningContext* bpcxt, Ex
             result = BucketPruningForOpExpr(bpcxt, opExpr);
         } break;
         default: {
-            return makePruningResult(BUCKETS_FULL);
+            return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
         } break;
     }
 
@@ -581,13 +550,13 @@ static BucketPruningResult* BucketPruningForBoolExpr(BucketPruningContext* bpcxt
 
         switch (expr->boolop) {
             case AND_EXPR:
-                result = intersectPruningResult(result, childPruningResult);
+                result = intersectPruningResult(result, childPruningResult, bpcxt->rte->bucketmapsize);
                 break;
             case OR_EXPR:
-                result = unionPruningResult(result, childPruningResult);
+                result = unionPruningResult(result, childPruningResult, bpcxt->rte->bucketmapsize);
                 break;
             case NOT_EXPR:
-                result = notPruningResult(result, childPruningResult);
+                result = notPruningResult(result, childPruningResult, bpcxt->rte->bucketmapsize);
                 /* fall through */
             default:
                 break;
@@ -620,7 +589,7 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
 
     /* only handle op of 2 arguments */
     if (!PointerIsValid(expr) || list_length(expr->args) != 2 || !PointerIsValid(opName = get_opname(expr->opno))) {
-        return makePruningResult(BUCKETS_FULL);
+        return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
     }
 
     leftArg = (Expr*)list_nth(expr->args, 0);
@@ -637,7 +606,7 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
     /* we only handle var op const */
     if (!((T_Const == nodeTag(leftArg) && T_Var == nodeTag(rightArg)) ||
             (T_Var == nodeTag(leftArg) && T_Const == nodeTag(rightArg)))) {
-        return makePruningResult(BUCKETS_FULL);
+        return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
     }
 
     if (T_Const == nodeTag(leftArg)) {
@@ -654,22 +623,22 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
 
     /* var is not referencing this relation */
     if (rte->relid != bpcxt->rte->relid) {
-        return makePruningResult(BUCKETS_FULL);
+        return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
     }
 
     /* var is not referencing the distribute col */
     if (varArg->varattno != bpcxt->attno) {
-        return makePruningResult(BUCKETS_FULL);
+        return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
     }
 
     /* time for pruning */
-    int id = getConstBucketId(constArg);
+    int id = getConstBucketId(constArg, bpcxt->rte->bucketmapsize);
 
     if (pg_strcasecmp(opName, "=") == 0) {
         return makePruningResult(id);
     }
 
-    return makePruningResult(BUCKETS_FULL);
+    return makePruningResult(BUCKETS_FULL, bpcxt->rte->bucketmapsize);
 }
 
 /*
@@ -681,7 +650,7 @@ static BucketPruningResult* BucketPruningForOpExpr(BucketPruningContext* bpcxt, 
  * @in  Const: the const val which we want the bucketid of it
  * @return the bucketid index of the const val
  */
-static int getConstBucketId(Const* val)
+static int getConstBucketId(Const* val, int bucketmapsize)
 {
     uint32 hashval = 0;
     int bucketid = 0;
@@ -690,36 +659,11 @@ static int getConstBucketId(Const* val)
         return 0;
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     hashval = compute_hash(val->consttype, val->constvalue, LOCATOR_TYPE_HASH);
 
-    bucketid = compute_modulo((unsigned int)(abs((int)hashval)), BUCKETDATALEN);
+    bucketid = compute_modulo((unsigned int)(abs((int)hashval)), bucketmapsize);
 
     return bucketid;
-}
-
-/*
- * @Description: calculate the pruning ratio for cost-model
- *
- *                           len(buckets)
- *      pruning ratio =   -----------------
- *                           BUCKETDATALEN
- */
-double getBucketPruningRatio(BucketInfo* bucket_info)
-{
-    if (bucket_info == NULL || bucket_info->buckets == NIL) {
-        /* NIL means all buckets */
-        return 1.0;
-    } else {
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-        /* some buckets are pruned */
-        return (double)list_length(bucket_info->buckets) / (double)BUCKETDATALEN;
-    }
 }
 
 void setCachedPlanBucketId(CachedPlan *cplan, ParamListInfo boundParams)
@@ -738,13 +682,10 @@ void setCachedPlanBucketId(CachedPlan *cplan, ParamListInfo boundParams)
             /* set the main plan */
             setPlanBucketId(pstmt->planTree, boundParams, cplan->context);
             /* also the sub plans */
-            if (pstmt->initPlan != NIL && pstmt->subplans != NIL) {
-                ListCell* lc = NULL;
-                foreach (lc, pstmt->initPlan) {
-                    SubPlan* subPlan = (SubPlan*)lfirst(lc);
-                    Plan* plan = (Plan*)list_nth(pstmt->subplans, subPlan->plan_id - 1);
-                    setPlanBucketId(plan, boundParams, cplan->context);
-                }
+            ListCell* lc = NULL;
+            foreach (lc, pstmt->subplans) {
+                Plan* subPlan = (Plan*)lfirst(lc);
+                setPlanBucketId(subPlan, boundParams, cplan->context);
             }
         }
     }

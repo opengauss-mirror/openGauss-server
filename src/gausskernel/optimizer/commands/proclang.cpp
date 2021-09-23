@@ -114,6 +114,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
              */
             handlerOid = ProcedureCreate(pltemplate->tmplhandler,
                 PG_CATALOG_NAMESPACE,
+                InvalidOid,
                 false, /* not A db compatible */
                 false, /* replace */
                 false, /* returnsSet */
@@ -141,7 +142,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                 false,
                 false,
                 false,
-                false);
+                false,
+                NULL);
         }
 
         /*
@@ -159,6 +161,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  */
                 inlineOid = ProcedureCreate(pltemplate->tmplinline,
                     PG_CATALOG_NAMESPACE,
+                    InvalidOid,
                     false, /* not A db compatible */
                     false, /* replace */
                     false, /* returnsSet */
@@ -186,7 +189,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     false,
                     false,
                     false,
-                    false);
+                    false,
+                    NULL);
             }
         } else
             inlineOid = InvalidOid;
@@ -206,6 +210,7 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                  */
                 valOid = ProcedureCreate(pltemplate->tmplvalidator,
                     PG_CATALOG_NAMESPACE,
+                    InvalidOid,
                     false, /* not A db compatible */
                     false, /* replace */
                     false, /* returnsSet */
@@ -233,7 +238,8 @@ void CreateProceduralLanguage(CreatePLangStmt* stmt)
                     false,
                     false,
                     false,
-                    false);
+                    false,
+                    NULL);
             }
         } else
             valOid = InvalidOid;
@@ -658,4 +664,26 @@ Oid get_language_oid(const char* langname, bool missing_ok)
     if (!OidIsValid(oid) && !missing_ok)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language \"%s\" does not exist", langname)));
     return oid;
+}
+
+char* get_language_name(Oid languageOid)
+{
+    HeapTuple tup;
+    Relation rel;
+    char* languageName = NULL;
+    const int languageLength = 16;
+
+    rel = heap_open(LanguageRelationId, RowExclusiveLock);
+    tup = SearchSysCacheCopy1(LANGOID, languageOid);
+    if (!HeapTupleIsValid(tup)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("language with OID \"%d\" does not exist", languageOid)));
+    }
+    languageName = (char*)palloc0(sizeof(char) * languageLength);
+    errno_t rc = memcpy_s(languageName, languageLength, 
+        (((Form_pg_language)GETSTRUCT(tup))->lanname).data, strlen((((Form_pg_language)GETSTRUCT(tup))->lanname).data));
+    securec_check(rc, "\0", "\0");
+    heap_close(rel, NoLock);
+    heap_freetuple_ext(tup);
+    return languageName;
 }

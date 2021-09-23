@@ -32,9 +32,9 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "executor/instrument.h"
-#include "executor/nodeBitmapOr.h"
+#include "executor/node/nodeBitmapOr.h"
 #include "vecexecutor/vecnodecstoreindexor.h"
 #include "cstore.h"
 #include "vecexecutor/vecexecutor.h"

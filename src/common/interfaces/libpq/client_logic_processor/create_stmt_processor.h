@@ -44,12 +44,14 @@ public:
     static RawValue *trans_column_definition(const ColumnDef * const column_def, ExprPartsList *expr_vec,
         ICachedColumns *cached_columns, ICachedColumns *cached_columns_for_defaults, StatementData *statement_data,
         const char *column_key_name, bool &error);
-    static bool check_constraint(Constraint *constraint, const Oid type_id, char *name, ICachedColumns *cached_columns);
-    static bool transform_expr(Node *expr, char *name, ICachedColumns *cached_columns);
+    static bool check_constraint(Constraint *constraint, const Oid type_id, char *name, ICachedColumns *cached_columns,
+        StatementData* statement_data);
+    static bool transform_expr(Node *expr, char *name, ICachedColumns *cached_columns, StatementData* statement_data);
     static char *get_column_name(ColumnRef *column);
     static bool process_column_defintion(ColumnDef *column, Node *element, ExprPartsList *expr_vec,
         ICachedColumns *cached_columns, ICachedColumns *cached_columns_for_defaults, StatementData *statement_data);
-    static bool check_distributeby(const DistributeBy *distributeby, const char *colname);
+    static bool check_distributeby(const DistributeBy *distributeby, const char *colname,
+        StatementData* statement_data);
 };
 
 #endif

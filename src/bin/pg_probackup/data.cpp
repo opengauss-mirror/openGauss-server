@@ -1473,7 +1473,7 @@ check_data_file(ConnectionArgs *arguments, pgFile *file,
     {
         /*
         * If file is not found, this is not en error.
-        * It could have been deleted by concurrent postgres transaction.
+        * It could have been deleted by concurrent openGauss transaction.
         */
         if (errno == ENOENT)
         {
@@ -1971,7 +1971,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     {
         /*
         * If file is not found, this is not en error.
-        * It could have been deleted by concurrent postgres transaction.
+        * It could have been deleted by concurrent openGauss transaction.
         */
         if (errno == ENOENT)
         return FILE_MISSING;

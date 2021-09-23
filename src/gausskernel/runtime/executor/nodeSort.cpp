@@ -16,14 +16,17 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeSort.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeSort.h"
 #include "miscadmin.h"
 #include "optimizer/streamplan.h"
 #include "pgstat.h"
 #include "instruments/instr_unique_sql.h"
 #include "utils/tuplesort.h"
 #include "workload/workload.h"
+
+#include "optimizer/var.h"
+#include "optimizer/tlist.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -243,7 +246,6 @@ SortState* ExecInitSort(Sort* node, EState* estate, int eflags)
      * MARK/RESTORE.
      */
     eflags &= ~(EXEC_FLAG_REWIND | EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK);
-
     outerPlanState(sortstate) = ExecInitNode(outerPlan(node), estate, eflags);
 
     /*

@@ -980,7 +980,8 @@ CREATE VIEW dbe_perf.statement_iostat_complex_runtime AS
           WHEN T.io_priority = 50 THEN 'Medium'::text
           WHEN T.io_priority = 80 THEN 'High'::text END AS io_priority,
      S.query,
-     S.node_group
+     S.node_group,
+     T.curr_io_limits as curr_io_limits
    FROM pg_stat_activity_ng AS S, pg_stat_get_wlm_session_iostat_info(0) AS T
      WHERE S.pid = T.threadid;
 
@@ -4644,5 +4645,27 @@ CREATE VIEW DBE_PERF.global_plancache_status AS
 
 CREATE VIEW DBE_PERF.global_plancache_clean AS
   SELECT * FROM pg_catalog.plancache_clean();
+
+CREATE OR REPLACE VIEW DBE_PERF.local_active_session AS
+  WITH RECURSIVE
+	las(sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
+		tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
+		user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, wait_status, global_sessionid)
+	  AS (select t.* from get_local_active_session() as t),
+	tt(sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
+	   tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
+	   user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, wait_status, global_sessionid, final_block_sessionid, level, head)
+	  AS(SELECT las.*, las.block_sessionid AS final_block_sessionid, 1 AS level, array_append('{}', las.sessionid) AS head FROM las
+		UNION ALL
+		 SELECT tt.sampleid, tt.sample_time, tt.need_flush_sample, tt.databaseid, tt.thread_id, tt.sessionid, tt.start_time, tt.event, tt.lwtid, tt.psessionid,
+				tt.tlevel, tt.smpid, tt.userid, tt.application_name, tt.client_addr, tt.client_hostname, tt.client_port, tt.query_id, tt.unique_query_id,
+				tt.user_id, tt.cn_id, tt.unique_query, tt.locktag, tt.lockmode, tt.block_sessionid, tt.wait_status, tt.global_sessionid,                                                                                                                  las.block_sessionid AS final_block_sessionid, tt.level + 1 AS level, array_append(tt.head, las.sessionid) AS head
+		 FROM tt INNER JOIN las ON tt.final_block_sessionid = las.sessionid
+		 WHERE las.sampleid = tt.sampleid AND (las.block_sessionid IS NOT NULL OR las.block_sessionid != 0)
+		   AND las.sessionid != all(head) AND las.sessionid != las.block_sessionid)
+  SELECT sampleid, sample_time, need_flush_sample, databaseid, thread_id, sessionid, start_time, event, lwtid, psessionid,
+		 tlevel, smpid, userid, application_name, client_addr, client_hostname, client_port, query_id, unique_query_id,
+		 user_id, cn_id, unique_query, locktag, lockmode, block_sessionid, final_block_sessionid, wait_status, global_sessionid FROM tt
+	WHERE level = (SELECT MAX(level) FROM tt t1 WHERE t1.sampleid =  tt.sampleid AND t1.sessionid = tt.sessionid);
 
 grant select on all tables in schema dbe_perf to public;

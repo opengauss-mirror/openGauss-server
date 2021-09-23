@@ -84,6 +84,8 @@ struct lightProxyMsgCtl {
     lightProxyErrData* errData;
 
     int* process_count;
+    uint64 relhash;
+    bool has_relhash;
 
 #ifdef LPROXY_DEBUG
     char* stmt_name;

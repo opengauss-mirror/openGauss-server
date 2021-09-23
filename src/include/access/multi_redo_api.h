@@ -46,11 +46,12 @@ typedef enum {
 extern bool g_supportHotStandby;
 
 const static bool SUPPORT_FPAGE_DISPATCH = true; /*  support file dispatch if true, else support page dispatche */
+const static bool SUPPORT_USTORE_UNDO_WORKER = true; /* support USTORE has undo redo worker, support page dispatch */
 
 const static bool SUPPORT_DFS_BATCH = false; 
 const static bool SUPPORT_COLUMN_BATCH = true;   /* don't support column batch redo */
 
-
+static const uint32 UNDO_WORKER_FRACTION = 2;
 
 static const uint32 PAGE_REDO_WORKER_INVALID = 0;
 static const uint32 PAGE_REDO_WORKER_START = 1;
@@ -60,6 +61,11 @@ static const uint32 PAGE_REDO_WORKER_EXIT = 3;
 static inline int get_real_recovery_parallelism()
 {
     return g_instance.attr.attr_storage.real_recovery_parallelism;
+}
+
+static inline int get_recovery_undozidworkers_num()
+{
+    return 1;
 }
 
 static inline bool IsExtremeRedo()

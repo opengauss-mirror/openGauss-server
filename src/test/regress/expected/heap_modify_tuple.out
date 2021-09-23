@@ -313,7 +313,6 @@ ALTER ROLE account2 ACCOUNT UNLOCK;
 drop user account1;
 drop user account2;
 \c
-SET enforce_two_phase_commit TO off;
 CREATE VIEW street AS
    SELECT r.name, r.thepath, c.cname AS cname
    FROM ONLY road r, real_city c

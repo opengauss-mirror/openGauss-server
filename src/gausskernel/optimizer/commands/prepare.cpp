@@ -49,7 +49,7 @@
 #endif
 
 void InitQueryHashTable(void);
-static ParamListInfo EvaluateParams(PreparedStatement *pstmt, List* params, const char* queryString, EState* estate);
+static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const char* queryString, EState* estate);
 static Datum build_regtype_array(const Oid* param_types, int num_params);
 
 extern void destroy_handles();
@@ -118,11 +118,8 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
      * Because parse analysis scribbles on the raw querytree, we must make a
      * copy to ensure we don't modify the passed-in tree.
      */
-#ifdef ENABLE_MULTIPLE_NODES
+
     query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs);
-#else
-    query = parse_analyze_varparams((Node*)copyObject(stmt->query), queryString, &argtypes, &nargs, NULL);
-#endif
 
     if (ENABLE_CN_GPC && plansource->gpc.status.IsSharePlan() && contains_temp_tables(query->rtable)) {
         /* temp table unsupport shared */
@@ -227,7 +224,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
          */
         estate = CreateExecutorState();
         estate->es_param_list_info = params;
-        paramLI = EvaluateParams(entry, stmt->params, queryString, estate);
+        paramLI = EvaluateParams(psrc, stmt->params, queryString, estate);
     }
 
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
@@ -363,10 +360,10 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
  * CreateQueryDesc(), which allows the executor to make use of the parameters
  * during query execution.
  */
-static ParamListInfo EvaluateParams(PreparedStatement *pstmt, List* params, const char* queryString, EState* estate)
+static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const char* queryString, EState* estate)
 {
-    Oid* param_types = pstmt->plansource->param_types;
-    int num_params = pstmt->plansource->num_params;
+    Oid* param_types = psrc->param_types;
+    int num_params = psrc->num_params;
     int nparams = list_length(params);
     ParseState* pstate = NULL;
     ParamListInfo paramLI;
@@ -377,7 +374,7 @@ static ParamListInfo EvaluateParams(PreparedStatement *pstmt, List* params, cons
     if (nparams != num_params)
         ereport(ERROR,
             (errcode(ERRCODE_SYNTAX_ERROR),
-                errmsg("wrong number of parameters for prepared statement \"%s\"", pstmt->stmt_name),
+                errmsg("wrong number of parameters for prepared statement \"%s\"", psrc->stmt_name),
                 errdetail("Expected %d parameters but got %d.", num_params, nparams)));
 
     /* Quick exit if no parameters */
@@ -887,7 +884,7 @@ void DropPreparedStatement(const char* stmt_name, bool showError)
          * when the pooler tries to create new connections
          */
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DropPreparedStatement",
-            MEMORY_CONTEXT_OPTIMIZER);
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     }
 
 
@@ -961,7 +958,7 @@ void DropAllPreparedStatements(void)
          * when the pooler tries to create new connections
          */
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DropAllPreparedStatements",
-            MEMORY_CONTEXT_OPTIMIZER);
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     }
 
     bool failflag_dropcachedplan = false;
@@ -1129,6 +1126,33 @@ void HandlePreparedStatementsForRetry(void)
     ereport(DEBUG2, (errmodule(MOD_OPT), errmsg("Invalid all prepared statements for retry")));
 }
 
+CachedPlanSource* GetCachedPlanSourceFromExplainExecute(const char* stmt_name)
+{
+    PreparedStatement *entry = NULL;
+    CachedPlanSource* psrc = NULL;
+    if (ENABLE_DN_GPC && IsConnFromCoord()) {
+        psrc = u_sess->pcache_cxt.cur_stmt_psrc;
+        if (SECUREC_UNLIKELY(psrc == NULL)) {
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_PSTATEMENT),
+                errmsg("dn gpc's prepared statement does not exist")));
+        }
+    } else {
+        /* Look it up in the hash table */
+        entry = FetchPreparedStatement(stmt_name, true, true);
+        psrc = entry->plansource;
+    }
+    Assert(psrc != NULL);
+
+    /* Shouldn't find a non-fixed-result cached plan */
+    if (!psrc->fixed_result) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("EXPLAIN EXECUTE does not support variable-result cached plans")));
+    }
+
+    return psrc;
+}
+
 /*
  * Implements the 'EXPLAIN EXECUTE' utility statement.
  *
@@ -1141,7 +1165,6 @@ void HandlePreparedStatementsForRetry(void)
 void ExplainExecuteQuery(
     ExecuteStmt* execstmt, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params)
 {
-    PreparedStatement *entry = NULL;
     const char* query_string = NULL;
     CachedPlan* cplan = NULL;
     MemoryContext tmpCxt = NULL;
@@ -1150,19 +1173,12 @@ void ExplainExecuteQuery(
     ParamListInfo paramLI = NULL;
     EState* estate = NULL;
 
-    /* Look it up in the hash table */
-    entry = FetchPreparedStatement(execstmt->name, true, true);
+    CachedPlanSource* psrc = GetCachedPlanSourceFromExplainExecute(execstmt->name);
 
-    /* Shouldn't find a non-fixed-result cached plan */
-    if (!entry->plansource->fixed_result)
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("EXPLAIN EXECUTE does not support variable-result cached plans")));
-
-    query_string = entry->plansource->query_string;
+    query_string = psrc->query_string;
 
     /* Evaluate parameters, if any */
-    if (entry->plansource->num_params) {
+    if (psrc->num_params) {
         /*
          * Need an EState to evaluate parameters; must not delete it till end
          * of query, in case parameters are pass-by-reference.	Note that the
@@ -1171,7 +1187,7 @@ void ExplainExecuteQuery(
          */
         estate = CreateExecutorState();
         estate->es_param_list_info = params;
-        paramLI = EvaluateParams(entry, execstmt->params, queryString, estate);
+        paramLI = EvaluateParams(psrc, execstmt->params, queryString, estate);
     }
 
     /* Replan if needed, and acquire a transient refcount */
@@ -1182,7 +1198,7 @@ void ExplainExecuteQuery(
 
     u_sess->attr.attr_sql.explain_allow_multinode = true;
 
-    cplan = GetCachedPlan(entry->plansource, paramLI, true);
+    cplan = GetCachedPlan(psrc, paramLI, true);
 
     /* use shared plan here, add refcount */
     if (cplan->isShared())
@@ -1190,14 +1206,14 @@ void ExplainExecuteQuery(
 
     u_sess->attr.attr_sql.explain_allow_multinode = false;
 
-    if (ENABLE_GPC && entry->plansource->gplan) {
+    if (ENABLE_GPC && psrc->gplan) {
         plan_list = CopyLocalStmt(cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
     } else {
         plan_list = cplan->stmt_list;
     }
 
     es->is_explain_gplan = false;
-    if (entry->plansource->cplan == NULL)
+    if (psrc->cplan == NULL)
         es->is_explain_gplan = true;
 
     /* Explain each query */
@@ -1207,7 +1223,7 @@ void ExplainExecuteQuery(
 
         /* get g_RemoteQueryList by reseting sql_statement. */
         if (u_sess->attr.attr_common.max_datanode_for_plan > 0 && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-            u_sess->exec_cxt.remotequery_list == NIL) {
+            es->is_explain_gplan && psrc->gplan_is_fqs) {
             GetRemoteQuery(pstmt, queryString);
             es->isexplain_execute = true;
         }

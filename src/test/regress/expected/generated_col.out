@@ -292,6 +292,7 @@ GRANT SELECT (a, c) ON gtest12s TO regress_user11;
 SET ROLE regress_user11 PASSWORD 'Gauss_123';
 SELECT a, b FROM gtest11s;  -- not allowed
 ERROR:  permission denied for relation gtest11s
+DETAIL:  N/A
 SELECT a, c FROM gtest11s;  -- allowed
  a | c  
 ---+----
@@ -301,6 +302,7 @@ SELECT a, c FROM gtest11s;  -- allowed
 
 SELECT gf1(10);  -- not allowed
 ERROR:  permission denied for function gf1
+DETAIL:  N/A
 CONTEXT:  referenced column: gf1
 SELECT a, c FROM gtest12s;  -- allowed
  a | c  
@@ -319,7 +321,7 @@ NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtest20_pkey" fo
 INSERT INTO gtest20 (a) VALUES (10);  -- ok
 INSERT INTO gtest20 (a) VALUES (30);  -- violates constraint
 ERROR:  new row for relation "gtest20" violates check constraint "gtest20_b_check"
-DETAIL:  Failing row contains (30, 60).
+DETAIL:  N/A
 CREATE TABLE gtest20a (a int PRIMARY KEY, b int GENERATED ALWAYS AS (a * 2) STORED);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtest20a_pkey" for table "gtest20a"
 INSERT INTO gtest20a (a) VALUES (10);
@@ -471,15 +473,25 @@ INSERT INTO gtest23q VALUES (2, 5);  -- error
 ERROR:  insert or update on table "gtest23q" violates foreign key constraint "gtest23q_b_fkey"
 DETAIL:  Key (b)=(5) is not present in table "gtest23p".
 DROP TABLE gtest23q;
--- domains
+-- domains (domain is not yet supported.)
 CREATE DOMAIN gtestdomain1 AS int CHECK (VALUE < 10);
+ERROR:  domain is not yet supported.
 CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED);
-NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtest24_pkey" for table "gtest24"
+ERROR:  type "gtestdomain1" does not exist
+LINE 1: CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENE...
+                                                   ^
 INSERT INTO gtest24 (a) VALUES (4);  -- ok
+ERROR:  relation "gtest24" does not exist on datanode1
+LINE 1: INSERT INTO gtest24 (a) VALUES (4);
+                    ^
 INSERT INTO gtest24 (a) VALUES (6);  -- error
-ERROR:  value for domain gtestdomain1 violates check constraint "gtestdomain1_check"
+ERROR:  relation "gtest24" does not exist on datanode1
+LINE 1: INSERT INTO gtest24 (a) VALUES (6);
+                    ^
 DROP TABLE gtest24;
+ERROR:  table "gtest24" does not exist
 DROP DOMAIN gtestdomain1;
+ERROR:  type "gtestdomain1" does not exist
 -- typed tables (currently not supported)
 CREATE TYPE gtest_type AS (f1 integer, f2 text, f3 bigint);
 CREATE TABLE gtest28 OF gtest_type (f1 WITH OPTIONS GENERATED ALWAYS AS (f2 *2) STORED);
@@ -923,6 +935,26 @@ DROP TABLE t1;
 --cstore not support
 CREATE TABLE t2(height_cm int,height_in int GENERATED ALWAYS AS (height_cm * 2) STORED) WITH (ORIENTATION = COLUMN);
 ERROR:  column/timeseries store unsupport constraint "GENERATED COL"
+--ustore engine test
+CREATE TABLE ustoretest (a int PRIMARY KEY, b int, c int GENERATED ALWAYS AS (a * 2) STORED) WITH (STORAGE_TYPE = USTORE, init_td=32);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ustoretest_pkey" for table "ustoretest"
+INSERT INTO ustoretest(a,b) values(2,3),(4,5);
+SELECT * FROM ustoretest;
+ a | b | c 
+---+---+---
+ 2 | 3 | 4
+ 4 | 5 | 8
+(2 rows)
+
+UPDATE ustoretest SET a=7 WHERE a=2;
+SELECT * FROM ustoretest;
+ a | b | c  
+---+---+----
+ 7 | 3 | 14
+ 4 | 5 |  8
+(2 rows)
+
+DROP TABLE ustoretest;
 DROP TABLE gtest0;
 DROP TABLE gtest1;
 DROP TABLE gtest2;

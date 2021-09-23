@@ -23,7 +23,7 @@ override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC  -fstack-protector-all
 # We can't use Makefile variables here because the MSVC build system scrapes
 # OBJS from this file.
 OBJS=raw_value.o raw_values_cont.o processor_utils.o stmt_processor.o ../frontend_parser/parser.o ../client_logic_common/client_logic_utils.o where_clause_processor.o values_processor.o create_stmt_processor.o
-OBJS+=prepared_statements_list.o prepared_statement.o
+OBJS+=prepared_statements_list.o prepared_statement.o func_hardcoded_values.o
 
 include $(top_builddir)/src/Makefile.global
 include $(top_builddir)/src/Makefile.shlib

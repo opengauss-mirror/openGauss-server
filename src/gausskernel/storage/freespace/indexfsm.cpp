@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * indexfsm.cpp
- *	  POSTGRES free space map for quickly finding free pages in relations
+ *	  openGauss free space map for quickly finding free pages in relations
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.

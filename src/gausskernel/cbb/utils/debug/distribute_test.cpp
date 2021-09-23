@@ -24,7 +24,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/distribute_test.h"

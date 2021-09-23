@@ -72,7 +72,7 @@ extern void PgxcClassAlter(Oid pcrelid,
 		           char ch_redis,
 		           PgxcClassAlterType type,
 		           const char *groupname);
-extern void RemovePgxcClass(Oid pcrelid);
+extern void RemovePgxcClass(Oid pcrelid, bool canmiss = false);
 extern bool RelationRedisCheck(Relation rel);
 extern void PgxcClassAlterForReloption(Oid pcrelid, const char* reloptionstr);
 extern void PgxcClassCreateForReloption(Oid pcrelid, const char* reloptionstr);

@@ -26,13 +26,14 @@
 #include <type_traits>
 
 enum class CacheRefreshType {
-    NONE = 0x00,
+    CACHE_NONE = 0x00,
     GLOBAL_SETTING = 0x01,
     COLUMN_SETTING = 0x02,
     COLUMNS = 0x04,
     SEARCH_PATH = 0x08,
     COMPATIBILITY = 0x10,
-    ALL = GLOBAL_SETTING | COLUMN_SETTING | COLUMNS | SEARCH_PATH | COMPATIBILITY
+    PROCEDURES = 0x20,
+    CACHE_ALL = GLOBAL_SETTING | COLUMN_SETTING | COLUMNS | SEARCH_PATH | COMPATIBILITY | PROCEDURES
 };
 
 inline CacheRefreshType operator |(CacheRefreshType lhs, CacheRefreshType rhs)

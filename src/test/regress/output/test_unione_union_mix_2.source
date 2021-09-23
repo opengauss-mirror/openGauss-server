@@ -1,0 +1,477 @@
+create schema test_unione_union_mix_2;
+set current_schema='test_unione_union_mix_2';
+-- test left outer join with all supported data types
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop type if exists composite_type;
+NOTICE:  type "composite_type" does not exist, skipping
+create type composite_type as (c1 int, c2 boolean, c3 money, c4 text, c5 date);
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+-- create table for post data insertion verification
+drop table if exists t1_verification;
+NOTICE:  table "t1_verification" does not exist, skipping
+drop table if exists t2_verification;
+NOTICE:  table "t2_verification" does not exist, skipping
+drop table if exists t3_verification;
+NOTICE:  table "t3_verification" does not exist, skipping
+create table t1_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t2_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t3_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+-- case 1: empty tables
+create view union_view_case1_1 as (select * from t1 union select * from t2);
+create view union_view_case1_2 as (select * from t1 union select * from t2 union select * from t3);
+create view union_view_case1_3 as (select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2);
+create view union_view_case1_4 as (select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2 union all select * from t3 where t3.c1=3);
+select * from union_view_case1_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case1_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case1_3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case1_4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_all_view_case1_1 as (select * from t1 union all select * from t2);
+create view union_all_view_case1_2 as (select * from t1 union all select * from t2 union all select * from t3);
+create view union_all_view_case1_3 as (select * from t1 where t1.c1=1 union all select * from t2 where t2.c1=2);
+create view union_all_view_case1_4 as (select * from t1 where t1.c1=1 union all select * from t2 where t2.c1=2 union all select * from t3 where t3.c1=3);
+select * from union_all_view_case1_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_all_view_case1_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_all_view_case1_3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_all_view_case1_4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 2: one empty table
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|';
+\COPY t1_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|';
+-- t1 data verification
+create view union_t1_verification_view as (select * from t1 except select * from t1_verification);
+select * from union_t1_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_view_case2_1 as ((select * from t1 union select * from t2)
+except
+(select * from t1_verification union select * from t2_verification));
+create view union_view_case2_2 as ((select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2)
+except
+(select * from t1_verification where t1_verification.c1=1 union select * from t2_verification where t2_verification.c1=2));
+select * from union_view_case2_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case2_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_all_view_case2_1 as ((select * from t1 union all select * from t2)
+except
+(select * from t1_verification union all select * from t2_verification));
+create view union_all_view_case2_2 as ((select * from t1 where t1.c1=1 union all select * from t2 where t2.c1=2)
+except
+(select * from t1_verification where t1_verification.c1=1 union all select * from t2_verification where t2_verification.c1=2));
+select * from union_all_view_case2_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_all_view_case2_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 3: no empty table
+\COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|';
+\COPY t2_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|';
+-- t2 data verification
+create view union_t2_verification_view as (select * from t2 except select * from t2_verification);
+select * from union_t2_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_view_case3_1 as ((select * from t1 union select * from t2)
+except
+(select * from t1_verification union select * from t2_verification));
+create view union_view_case3_2 as ((select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2)
+except
+(select * from t1_verification where t1_verification.c1=1 union select * from t2_verification where t2_verification.c1=2));
+create view union_view_case3_3 as ((select * from t1 union all select * from t2)
+except
+(select * from t1_verification union all select * from t2_verification));
+create view union_view_case3_4 as ((select * from t1 where t1.c1=1 union all select * from t2 where t2.c1=2)
+except
+(select * from t1_verification where t1_verification.c1=1 union all select * from t2_verification where t2_verification.c1=2));
+select * from union_view_case3_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- insert 10k rows for t3
+\COPY t3 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data3.data' delimiter '|';
+\COPY t3_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data3.data' delimiter '|';
+-- t3 data verification
+create view union_t3_verification_view as (select * from t3 except select * from t3_verification);
+select * from union_t3_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_view_case3_5 as ((select * from t1 union select * from t2 union select * from t3)
+except
+(select * from t1_verification union select * from t2_verification union select * from t3_verification));
+create view union_view_case3_6 as ((select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2 union all select * from t3 where t3.c1=3)
+except
+(select * from t1_verification where t1_verification.c1=1 union select * from t2_verification where t2_verification.c1=2 union all select * from t3_verification where t3_verification.c1=3));
+create view union_view_case3_7 as ((select * from t1 union all select * from t2 union all select * from t3)
+except
+(select * from t1_verification union all select * from t2_verification union all select * from t3_verification));
+create view union_view_case3_8 as ((select * from t1 where t1.c1=1 union all select * from t2 where t2.c1=2 union all select * from t3 where t3.c1=3)
+except(select * from t1_verification where t1_verification.c1=1 union all select * from t2_verification where t2_verification.c1=2 union all select * from t3_verification where t3_verification.c1=3));
+select * from union_view_case3_5;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_6;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_7;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case3_8;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view union_view_case3_9 as (select * from t1 where t1.c1=1 union select * from t2 where t2.c1=2);
+create view union_view_case3_10 as (select * from t1_verification where t1_verification.c1=1 union select * from t2_verification where t2_verification.c1=2);
+create view union_view_case3_11 as (select * from union_view_case3_9 where c1=100 except select * from union_view_case3_10 where c1=100);
+select * from union_view_case3_11;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 4: union in subquery
+create view union_view_case4_1 as ((select * from
+(select * from t1 union select * from t2))
+except
+(select * from
+(select * from t1_verification union select * from t2_verification)));
+create view union_view_case4_2 as ((select * from
+(select * from t1 union select * from t2 union select * from t3))
+except
+(select * from
+(select * from t1_verification union select * from t2_verification union select * from t3)));
+create view union_view_case4_3 as ((select * from
+(select * from t1 union select * from t2) as foo)
+except
+(select * from
+(select * from t1_verification union select * from t2_verification) as foo));
+create view union_view_case4_4 as ((select * from
+(select * from t1 where t1.c1=1 union select * from t2) as foo)
+except
+(select * from
+(select * from t1_verification where t1_verification.c1=1 union select * from t2_verification) as foo));
+create view union_view_case4_5 as ((select * from
+(select * from t1 union all select * from t2))
+except
+(select * from
+(select * from t1_verification union all select * from t2_verification)));
+create view union_view_case4_6 as ((select * from
+(select * from t1 union all select * from t2 union all select * from t3))
+except
+(select * from
+(select * from t1_verification union all select * from t2_verification union all select * from t3)));
+create view union_view_case4_7 as ((select * from
+(select * from t1 union all select * from t2) as foo)
+except
+(select * from
+(select * from t1_verification union all select * from t2_verification) as foo));
+create view union_view_case4_8 as ((select * from
+(select * from t1 where t1.c1=1 union all select * from t2) as foo)
+except
+(select * from
+(select * from t1_verification where t1_verification.c1=1 union all select * from t2_verification) as foo));
+create view union_view_case4_9 as ((select * from
+(select t1.c18 from t1 union select t2.c18 from t2) as foo)
+except
+(select * from
+(select t1_verification.c18 from t1_verification union select t2_verification.c18 from t2_verification) as foo));
+create view union_view_case4_10 as ((select * from
+(select t1.c18 from t1 union all select t2.c18 from t2) as foo)
+except
+(select * from
+(select t1_verification.c18 from t1_verification union all select t2_verification.c18 from t2_verification) as foo));
+select * from union_view_case4_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_5;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_6;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_7;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_8;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from union_view_case4_9;
+ c18 
+-----
+(0 rows)
+
+select * from union_view_case4_10;
+ c18 
+-----
+(0 rows)
+
+-- drop all tables and views
+drop view union_view_case1_1 CASCADE;
+drop view union_view_case1_2 CASCADE;
+drop view union_view_case1_3 CASCADE;
+drop view union_view_case1_4 CASCADE;
+drop view union_all_view_case1_1 CASCADE;
+drop view union_all_view_case1_2 CASCADE;
+drop view union_all_view_case1_3 CASCADE;
+drop view union_all_view_case1_4 CASCADE;
+drop view union_t1_verification_view CASCADE;
+drop view union_view_case2_1 CASCADE;
+drop view union_view_case2_2 CASCADE;
+drop view union_all_view_case2_1 CASCADE;
+drop view union_all_view_case2_2 CASCADE;
+drop view union_t2_verification_view CASCADE;
+drop view union_view_case3_1 CASCADE;
+drop view union_view_case3_2 CASCADE;
+drop view union_view_case3_3 CASCADE;
+drop view union_view_case3_4 CASCADE;
+drop view union_t3_verification_view CASCADE;
+drop view union_view_case3_5 CASCADE;
+drop view union_view_case3_6 CASCADE;
+drop view union_view_case3_7 CASCADE;
+drop view union_view_case3_8 CASCADE;
+drop view union_view_case3_9 CASCADE;
+NOTICE:  drop cascades to view union_view_case3_11
+drop view union_view_case3_10 CASCADE;
+drop view union_view_case3_11 CASCADE;
+ERROR:  view "union_view_case3_11" does not exist
+drop view union_view_case4_1 CASCADE;
+drop view union_view_case4_2 CASCADE;
+drop view union_view_case4_3 CASCADE;
+drop view union_view_case4_4 CASCADE;
+drop view union_view_case4_5 CASCADE;
+drop view union_view_case4_6 CASCADE;
+drop view union_view_case4_7 CASCADE;
+drop view union_view_case4_8 CASCADE;
+drop view union_view_case4_9 CASCADE;
+drop view union_view_case4_10 CASCADE;
+drop table t1 CASCADE;
+drop table t2 CASCADE;
+drop table t3 CASCADE;
+drop table t1_verification CASCADE;
+drop table t2_verification CASCADE;
+drop table t3_verification CASCADE;

@@ -404,7 +404,7 @@ LibcommCloseConn(NODE_CONNECTION *conn)
 		(void)LibcommPutMsgEnd(conn);
 		(void)LibcommFlush(conn);
 	}
-	/* close gs socket directly in case of DN's postgres thread leaking */
+	/* close gs socket directly in case of DN's openGauss thread leaking */
 	else
 		gs_close_gsocket(&conn->libcomm_addrinfo.gs_sock);
 }
@@ -3250,10 +3250,11 @@ pgxc_node_send_execute(PGXCNodeHandle * handle, const char *portal, int fetch)
  * Send schema name down to the PGXC node
  */
 int
-pgxc_node_send_pushschema(PGXCNodeHandle *handle, bool *isPush)
+pgxc_node_send_pushschema(PGXCNodeHandle *handle, bool *isPush, bool *isCreateSchemaPush)
 {
 	*isPush = false;
 	bool inProcedure = false;
+    *isCreateSchemaPush = false;
 
 	/* Invalid connection state, return error */
 	if (handle->state != DN_CONNECTION_STATE_IDLE)
@@ -3297,6 +3298,7 @@ pgxc_node_send_pushschema(PGXCNodeHandle *handle, bool *isPush)
 		ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, NameStr(nsptup->nspname), strLenPush);
 		securec_check(ss_rc,"\0","\0");
 		handle->outEnd += strLenPush;
+		ereport(DEBUG2, (errmodule(MOD_SCHEMA), errmsg("pgxc_node_send_pushschema:%s", NameStr(nsptup->nspname))));
 		ReleaseSysCache(tuple);
 	}
 
@@ -3307,7 +3309,7 @@ pgxc_node_send_pushschema(PGXCNodeHandle *handle, bool *isPush)
  * Pop schema name from PGXC node
  */
 int
-pgxc_node_send_popschema(PGXCNodeHandle *handle)
+pgxc_node_send_popschema(PGXCNodeHandle *handle, bool isPush)
 {
 	int strLenPop = 1;
 	/* msgType + push/pop + msgLen */
@@ -3322,7 +3324,7 @@ pgxc_node_send_popschema(PGXCNodeHandle *handle)
 	securec_check(ss_rc,"\0","\0");
 	handle->outEnd += 4;
 
-	handle->outBuffer[handle->outEnd++] = 'p'; // pop
+	handle->outBuffer[handle->outEnd++] = isPush ? 'p' : 'F'; // pop
 	ss_rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, "", strLenPop);
 	securec_check(ss_rc,"\0","\0");
 	handle->outEnd += strLenPop;
@@ -3733,8 +3735,8 @@ void pgxc_node_send_gtm_mode(PGXCNodeHandle *handle)
  * Send specified statement down to the PGXC node
  */
 int
-pgxc_node_send_query(PGXCNodeHandle * handle, const char *query, bool isPush, bool trigger_ship,
-                     bool check_gtm_mode, const char* compressedPlan, int cLen)
+pgxc_node_send_query(PGXCNodeHandle * handle, const char *query, bool isPush, bool isCreateSchemaPush,
+    bool trigger_ship, bool check_gtm_mode, const char* compressedPlan, int cLen)
 {
 #ifndef ENABLE_MULTIPLE_NODES
 	Assert(false);

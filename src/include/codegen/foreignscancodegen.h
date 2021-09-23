@@ -64,7 +64,7 @@ public:
      * Notes        : None.
      */
     static llvm::Value* buildConstValue(
-        Expr* node, llvm::Value* llvm_args[], GsCodeGen::LlvmBuilder builder, StringInfo fname);
+        Expr* node, llvm::Value* llvm_args[], GsCodeGen::LlvmBuilder& builder, StringInfo fname);
 };
 }  // namespace dorado
 #endif

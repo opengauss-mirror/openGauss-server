@@ -69,12 +69,18 @@ typedef StringInfoData* StringInfo;
  */
 extern StringInfo makeStringInfo(void);
 
+/* destroy a 'StringInfoData', use this function when call makeStringInfo */
+extern void DestroyStringInfo(StringInfo str);
+
 /* ------------------------
  * initStringInfo
  * Initialize a StringInfoData struct (with previously undefined contents)
  * to describe an empty string.
  */
 extern void initStringInfo(StringInfo str);
+
+/* free a 'StringInfoData', use this function when call initStringInfo */
+extern void FreeStringInfo(StringInfo str);
 
 /* ------------------------
  * resetStringInfo

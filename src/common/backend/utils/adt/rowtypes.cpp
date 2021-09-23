@@ -251,6 +251,154 @@ Datum record_in(PG_FUNCTION_ARGS)
     PG_RETURN_HEAPTUPLEHEADER(result);
 }
 
+
+static void ProcessStr(TupleDesc tupdesc, Datum* values, bool* nulls, char** ptr, char* string)
+{
+    int nColumns = tupdesc->natts;
+    bool needComma = false;
+    int32 tupTypmod = -1;
+    int i;
+    StringInfoData buf;
+
+    initStringInfo(&buf);
+
+    for (i = 0; i < nColumns; i++) {
+        Oid columnType = tupdesc->attrs[i]->atttypid;
+        char* columnData = NULL;
+    
+        /* Ignore dropped columns in datatype, but fill with nulls */
+        if (tupdesc->attrs[i]->attisdropped) {
+            values[i] = (Datum)0;
+            nulls[i] = true;
+            continue;
+        }
+
+        if (needComma) {
+            /* Skip comma that separates prior field from this one */
+            if (**ptr == ',') {
+                (*ptr)++;
+            } else {
+                /* *ptr must be ')' */
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("malformed record literal: \"%s\"", string),
+                        errdetail("Too few columns.")));
+            }
+        }
+
+        /* Check for null: completely empty input means null */
+        if (**ptr == ',' || **ptr == ')') {
+            columnData = NULL;
+            nulls[i] = true;
+        } else {
+            /* Extract string for this column */
+            bool inQuote = false;
+
+            resetStringInfo(&buf);
+            while (inQuote || !(**ptr == ',' || **ptr == ')')) {
+                char ch = **ptr;
+
+                if (ch == '\0') {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                            errmsg("malformed record literal: \"%s\"", string),
+                            errdetail("Unexpected end of input.")));
+                }
+                if (ch == '\\') {
+                    (*ptr)++;
+                    appendStringInfoChar(&buf, **ptr);
+                    (*ptr)++;
+                } else if (ch == '\"') {
+                    (*ptr)++;
+                    if (!inQuote) {
+                        inQuote = true;
+                    } else if (**ptr == '\"') {
+                        /* doubled quote within quote sequence */
+                        appendStringInfoChar(&buf, **ptr);
+                        (*ptr)++;
+                    } else {
+                        inQuote = false;
+                    }
+                } else {
+                    int charLen = pg_mblen(*ptr);
+                    for (int i = 0; i < charLen; i++) {
+                        appendStringInfoChar(&buf, **ptr);
+                        (*ptr)++;
+                    }
+                }
+            }
+
+            columnData = buf.data;
+            nulls[i] = false;
+        }
+
+        /*
+         * Convert the column value
+         */
+        Oid typeInput;
+        Oid typeParam;
+        getTypeInputInfo(columnType, &typeInput, &typeParam);
+        values[i] = OidInputFunctionCall(typeInput, columnData, typeParam, tupTypmod);
+
+        /*
+         * Prep for next column
+         */
+        needComma = true;
+    }
+    pfree_ext(buf.data);
+}
+
+Datum RecordCstringGetDatum(TupleDesc tupdesc, char* string)
+{
+
+    HeapTuple tuple;
+    int nColumns;
+    char* ptr = NULL;
+    Datum* values = NULL;
+    bool* nulls = NULL;
+
+    nColumns = tupdesc->natts;
+    values = (Datum*)palloc(nColumns * sizeof(Datum));
+    nulls = (bool*)palloc(nColumns * sizeof(bool));
+
+    /*
+     * Scan the string.  We use "buf" to accumulate the de-quoted data for
+     * each column, which is then fed to the appropriate input converter.
+     */
+    ptr = string;
+
+    if (*ptr++ != '(') {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("malformed record literal: \"%s\"", string),
+                errdetail("Missing left parenthesis.")));
+    }
+
+    ProcessStr(tupdesc, values, nulls, &ptr, string);
+
+    if (*ptr++ != ')') {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("malformed record literal: \"%s\"", string),
+                errdetail("Too many columns.")));
+    }
+
+    if (*ptr) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("malformed record literal: \"%s\"", string),
+                errdetail("Junk after right parenthesis.")));
+    }
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+
+    pfree_ext(values);
+    pfree_ext(nulls);
+
+    return PointerGetDatum(tuple);
+
+}
+
 /*
  * record_out		- output routine for any composite type.
  */

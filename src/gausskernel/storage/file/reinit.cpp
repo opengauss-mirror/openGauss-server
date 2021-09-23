@@ -19,7 +19,7 @@
 
 #include "catalog/catalog.h"
 #include "storage/copydir.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/reinit.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"

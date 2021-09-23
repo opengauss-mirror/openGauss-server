@@ -157,6 +157,11 @@ typedef struct {
     uint32 syncEnterCount;
     uint32 syncExitCount;
 
+    volatile uint32 batchThrdEnterNum;
+    volatile uint32 batchThrdExitNum;
+    
+    volatile uint32 segpageXactDoneFlag;
+
     pg_atomic_uint32 standbyState; /* sync standbyState from trxn worker to startup */
 
     bool needImmediateCheckpoint;
@@ -237,6 +242,7 @@ void **GetXLogInvalidPagesFromWorkers();
 /* Other utility functions. */
 uint32 GetSlotId(const RelFileNode node, BlockNumber block, ForkNumber forkNum, uint32 workerCount);
 bool XactWillRemoveRelFiles(XLogReaderState *record);
+bool XactHasSegpageRelFiles(XLogReaderState *record);
 XLogReaderState *NewReaderState(XLogReaderState *readerState, bool bCopyState = false);
 void FreeAllocatedRedoItem();
 void DiagLogRedoRecord(XLogReaderState *record, const char *funcName);

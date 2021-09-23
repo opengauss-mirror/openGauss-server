@@ -46,7 +46,7 @@
 
 #define BCMElementArrayLen 8192
 #define BCMElementArrayLenHalf (BCMElementArrayLen / 2)
-#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1 })
+#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1})
 #define IsDataReplInterruptted()                                                                 \
     (InterruptPending && (t_thrd.int_cxt.QueryCancelPending || t_thrd.int_cxt.ProcDiePending) && \
      !DataSndInProgress(SNDROLE_PRIMARY_STANDBY | SNDROLE_PRIMARY_DUMMYSTANDBY))
@@ -845,8 +845,8 @@ static void PushToBCMElementArray(const RelFileNode &rnode, BlockNumber blockNum
     RelFileNodeRelCopy(t_thrd.dataqueue_cxt.BCMElementArray[array_index].rnode, rnode);
 
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].blocknum = blockNum;
-    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid = (int)((uint32)attid |
-                                                                    ((uint32)(rnode.bucketNode + 1) << 16));
+    t_thrd.dataqueue_cxt.BCMElementArray[array_index].attid =
+        (int)((uint32)attid | ((uint32)(rnode.bucketNode + 1) << 16));
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].type = type;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].offset = offset;
     t_thrd.dataqueue_cxt.BCMElementArray[array_index].data_size = data_len;
@@ -911,14 +911,16 @@ static void ClearBCMStatus(uint32 first, uint32 end)
         if (relation == NULL) {
             ereport(ERROR, (errmsg("Invalid relation while clearing BCM status: rnode[%u,%u,%u], blocknum[%u], "
                                    "pageoffset[%lu], size[%u], attid[%d]",
-                                   bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, bcmhdr.rnode.relNode, bcmhdr.blocknum,
+                                   bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, 
+                                   bcmhdr.rnode.relNode, bcmhdr.blocknum,
                                    bcmhdr.offset, bcmhdr.data_size, (int)GETATTID((uint32)bcmhdr.attid))));
         }
 
         ereport(DEBUG5, (errmsg("clear BCM status: rnode[%u,%u,%u], blocknum[%u], "
                                 "pageoffset[%lu], size[%u], attid[%d]",
-                                bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, bcmhdr.rnode.relNode, bcmhdr.blocknum,
-                                bcmhdr.offset, bcmhdr.data_size, (int)GETATTID((uint32)bcmhdr.attid))));
+                                bcmhdr.rnode.spcNode, bcmhdr.rnode.dbNode, bcmhdr.rnode.relNode, 
+                                bcmhdr.blocknum, bcmhdr.offset, bcmhdr.data_size, 
+                                (int)GETATTID((uint32)bcmhdr.attid))));
 
         if (bcmhdr.type == ROW_STORE) {
             Buffer buffer;
@@ -1012,7 +1014,7 @@ static void BCMArrayDropBlock(uint32 first, uint32 end, const RelFileNode &dropn
         int bucket_id = GETBUCKETID(t_thrd.dataqueue_cxt.BCMElementArray[first].attid);
         RelFileNodeCopy(tmp_node, t_thrd.dataqueue_cxt.BCMElementArray[first].rnode, bucket_id);
 
-        if (BucketRelFileNodeEquals(dropnode, tmp_node))
+        if (RelFileNodeEquals(dropnode, tmp_node))
             t_thrd.dataqueue_cxt.BCMElementArray[first].is_vaild = false;
 
         first++;

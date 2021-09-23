@@ -91,7 +91,7 @@
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/aiomem.h"
 #include "utils/inval.h"
 #include "commands/tablespace.h"
@@ -330,9 +330,8 @@ BlockNumber visibilitymap_count_heap(Relation rel)
          * them from the count.
          */
         mapBuffer = vm_readbuf(rel, mapBlock, false);
-        if (!BufferIsValid(mapBuffer)) {
+        if (!BufferIsValid(mapBuffer))
             break;
-        }
 
         /*
          * We choose not to lock the page, since the result is going to be
@@ -517,9 +516,8 @@ void visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
         END_CRIT_SECTION();
 
         UnlockReleaseBuffer(mapBuffer);
-    } else {
+    } else
         newnblocks = truncBlock;
-    }
 
     if (smgrnblocks(rel->rd_smgr, VISIBILITYMAP_FORKNUM) <= newnblocks) {
         /* nothing to do, the file was already smaller than requested size */
@@ -535,7 +533,8 @@ void visibilitymap_truncate(Relation rel, BlockNumber nheapblocks)
      * invalidate their copy of smgr_vm_nblocks, and this one too at the next
      * command boundary.  But this ensures it isn't outright wrong until then.
      */
-    rel->rd_smgr->smgr_vm_nblocks = newnblocks;
+    if (rel->rd_smgr)
+        rel->rd_smgr->smgr_vm_nblocks = newnblocks;
 }
 
 /*
@@ -642,9 +641,17 @@ static void vm_extend(Relation rel, BlockNumber vm_nblocks)
 
     /* Now extend the file */
     while (vm_nblocks_now < vm_nblocks) {
-        PageSetChecksumInplace(pg, vm_nblocks_now);
-
-        smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now, (char *)pg, false);
+        if (IsSegmentFileNode(rel->rd_node)) {
+            Buffer buf = ReadBufferExtended(rel, VISIBILITYMAP_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+            ReleaseBuffer(buf);
+#ifdef USE_ASSERT_CHECKING
+            BufferDesc *buf_desc = GetBufferDescriptor(buf - 1);
+            Assert(buf_desc->tag.blockNum == vm_nblocks_now);
+#endif
+        } else {
+            PageSetChecksumInplace(pg, vm_nblocks_now);
+            smgrextend(rel->rd_smgr, VISIBILITYMAP_FORKNUM, vm_nblocks_now, (char *)pg, false);
+        }
         vm_nblocks_now++;
     }
 

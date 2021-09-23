@@ -17,7 +17,7 @@
 #include "access/sysattr.h"
 #include "access/tableam.h"
 #include "executor/executor.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecexpression.h"
 #include "vecexecutor/vecexecutor.h"
@@ -25,7 +25,7 @@
 #include "nodes/makefuncs.h"
 #include "utils/lsyscache.h"
 #include "optimizer/clauses.h"
-#include "executor/nodeSubplan.h"
+#include "executor/node/nodeSubplan.h"
 
 static TupleTableSlot* GetSlotfromBatchRow(TupleTableSlot* slot, VectorBatch* batch, int n_row);
 
@@ -567,6 +567,13 @@ static ScalarVector* ExecVecScanSubplan(
     if (subPlanClause->pParamVectorTmp && subPlanClause->pParamVectorTmp[0])
         para_rows = temp_pararows;
 
+    /* skip early free for rescan subplan */
+    bool orig_early_free = plan_state->state->es_skip_early_free;
+    bool orig_early_deinit = plan_state->state->es_skip_early_deinit_consumer;
+
+    plan_state->state->es_skip_early_free = true;
+    plan_state->state->es_skip_early_deinit_consumer = true;
+
     // double loop
     // first loop the array to set the parameter;
     do {
@@ -628,16 +635,8 @@ static ScalarVector* ExecVecScanSubplan(
              * the boundary should be row to vector
              * OrigValue stores the value of the outermost sub_plan
              */
-            bool orig_early_free = plan_state->state->es_skip_early_free;
-            bool orig_early_deinit = plan_state->state->es_skip_early_deinit_consumer;
-
-            plan_state->state->es_skip_early_free = true;
-            plan_state->state->es_skip_early_deinit_consumer = true;
 
             slot = ExecProcNode(plan_state);
-
-            plan_state->state->es_skip_early_free = orig_early_free;
-            plan_state->state->es_skip_early_deinit_consumer = orig_early_deinit;
 
             if (unlikely(TupIsNull(slot)))
                 break;
@@ -834,6 +833,9 @@ static ScalarVector* ExecVecScanSubplan(
         if ((subType != ANY_SUBLINK && subType != ALL_SUBLINK) || correlated)
             res_vector_idx++;
     } while (subPlanClause->idx < para_rows);
+
+    plan_state->state->es_skip_early_free = orig_early_free;
+    plan_state->state->es_skip_early_deinit_consumer = orig_early_deinit;
 
     if (correlated) {
         // restore econtext's batch
@@ -1064,7 +1066,8 @@ SubPlanState* ExecInitVecSubPlan(SubPlan* subplan, PlanState* parent)
      * setting parent->chgParam here: indices take care about it, for others -
      * it doesn't matter...
      */
-    if (subplan->setParam != NIL && subplan->subLinkType != CTE_SUBLINK) {
+    bool isSetParam = subplan->setParam != NIL && subplan->subLinkType != CTE_SUBLINK;
+    if (isSetParam) {
         ListCell* lst = NULL;
 
         foreach (lst, subplan->setParam) {

@@ -79,6 +79,7 @@ struct PageRedoWorker {
     PGPROC *proc;
     RedoRole role;
     uint32 slotId;
+    bool isUndoSpaceWorker;
     /* ---------------------------------------------
      * Initial context
      *
@@ -182,6 +183,7 @@ bool IsPageRedoWorkerProcess(int argc, char *argv[]);
 void AdaptArgvForPageRedoWorker(char *argv[]);
 void GetThreadNameIfPageRedoWorker(int argc, char *argv[], char **threadNamePtr);
 
+extern bool RedoWorkerIsUndoSpaceWorker();
 uint32 GetMyPageRedoWorkerIdWithLock();
 PGPROC *GetPageRedoWorkerProc(PageRedoWorker *worker);
 

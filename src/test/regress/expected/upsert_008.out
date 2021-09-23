@@ -415,7 +415,6 @@ INSERT INTO products_row VALUES(100)
          Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
 (5 rows)
 
-SET enable_light_proxy=off;
 EXPLAIN (VERBOSE ON, COSTS OFF)
 INSERT INTO products_row VALUES(100)
     ON DUPLICATE KEY UPDATE total=100;
@@ -452,7 +451,6 @@ INSERT INTO products_row VALUES(100)
          Output: 100, 'null'::character varying(60), 'unknown'::character varying(60), 0
 (5 rows)
 
-RESET enable_light_proxy;
 DROP SCHEMA test_insert_update_008 CASCADE;
 NOTICE:  drop cascades to 7 other objects
 DETAIL:  drop cascades to table products_base

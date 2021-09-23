@@ -742,14 +742,38 @@ void PgxcNodeGetOids(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, 
     LWLockRelease(NodeTableLock);
 }
 
-void PgxcNodeGetStandbyOids(int* num_dns)
+void PgxcNodeGetStandbyOids(Oid** coOids, Oid** dnOids, int* numCoords, int* numStandbyDns, bool needInitPGXC)
 {
     LWLockAcquire(NodeTableLock, LW_SHARED);
 
-    if (num_dns != NULL)
-        *num_dns = *t_thrd.pgxc_cxt.shmemNumDataStandbyNodes;
+    int numCoordinators = *t_thrd.pgxc_cxt.shmemNumCoords;
+    int numStandbyDatanodes = *t_thrd.pgxc_cxt.shmemNumDataStandbyNodes;
+    if (numCoords != NULL) {
+        *numCoords = numCoordinators;
+    }
+    if (numStandbyDns != NULL) {
+        *numStandbyDns = numStandbyDatanodes;
+    }
 
-    PgxcNodeInitDnMatric();
+    if (coOids != NULL) {
+        int i;
+        *coOids = (Oid*)palloc(numCoordinators * sizeof(Oid));
+        for (i = 0; i < numCoordinators; i++) {
+            (*coOids)[i] = t_thrd.pgxc_cxt.coDefs[i].nodeoid;
+        }
+    }
+    if (dnOids != NULL) {
+        int i;
+        *dnOids = (Oid*)palloc(numStandbyDatanodes * sizeof(Oid));
+        for (i = 0; i < numStandbyDatanodes; i++) {
+            (*dnOids)[i] = t_thrd.pgxc_cxt.dnStandbyDefs[i].nodeoid;
+        }
+    }
+
+    if (needInitPGXC) {
+        /* update u_sess info using t_thrd info while in Init period */
+        PgxcNodeInitDnMatric();
+    }
     LWLockRelease(NodeTableLock);
 }
 
@@ -757,7 +781,7 @@ void PgxcNodeGetStandbyOids(int* num_dns)
  * Find node definition in the shared memory node table.
  * The structure is a copy palloc'ed in current memory context.
  */
-NodeDefinition* PgxcNodeGetDefinition(Oid node)
+NodeDefinition* PgxcNodeGetDefinition(Oid node, bool checkStandbyNodes)
 {
     NodeDefinition* result = NULL;
     int i;
@@ -779,7 +803,7 @@ NodeDefinition* PgxcNodeGetDefinition(Oid node)
         }
     }
 
-    if (IS_DN_MULTI_STANDYS_MODE()) {
+    if (IS_DN_MULTI_STANDYS_MODE() || checkStandbyNodes) {
         for (i = 0; i < *t_thrd.pgxc_cxt.shmemNumDataStandbyNodes; i++) {
             if (t_thrd.pgxc_cxt.dnStandbyDefs[i].nodeoid == node) {
                 result = (NodeDefinition*)palloc(sizeof(NodeDefinition));

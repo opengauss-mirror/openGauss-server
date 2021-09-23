@@ -191,8 +191,11 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
     TupleDesc tupDesc = ExecGetResultType(outerNode);
 
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
+    DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(MultiColumnsPtrType, "struct.MultiColumns");
     DEFINE_CG_PTRTYPE(BatchsortstatePtrType, "class.Batchsortstate");
 
@@ -253,16 +256,16 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
 
     /* get MultiColumns.m_values */
     tmpval = builder.CreateInBoundsGEP(parm1, Vals2);
-    values1 = builder.CreateAlignedLoad(tmpval, 8, "a_values");
+    values1 = builder.CreateLoad(int64PtrType, tmpval, "a_values");
     tmpval = builder.CreateInBoundsGEP(parm2, Vals2);
-    values2 = builder.CreateAlignedLoad(tmpval, 8, "b_values");
+    values2 = builder.CreateLoad(int64PtrType, tmpval, "b_values");
 
     /* get MultiColumns.m_nulls */
     Vals2[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(parm1, Vals2);
-    nulls1 = builder.CreateAlignedLoad(tmpval, 8, "a_nulls");
+    nulls1 = builder.CreateLoad(int8PtrType, tmpval, "a_nulls");
     tmpval = builder.CreateInBoundsGEP(parm2, Vals2);
-    nulls2 = builder.CreateAlignedLoad(tmpval, 8, "b_nulls");
+    nulls2 = builder.CreateLoad(int8PtrType, tmpval, "b_nulls");
     builder.CreateBr(bb_keys1[0]);
 
     /* Looping over sort keys for codegeneration of each key comparison */
@@ -283,9 +286,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
          */
         llvm::Value* colidx = llvmCodeGen->getIntConstant(INT8OID, colIdx);
         tmpval = builder.CreateInBoundsGEP(values1, colidx);
-        datum1 = builder.CreateAlignedLoad(tmpval, 8, "a_values_i");
+        datum1 = builder.CreateLoad(int64Type, tmpval, "a_values_i");
         tmpval = builder.CreateInBoundsGEP(values2, colidx);
-        datum2 = builder.CreateAlignedLoad(tmpval, 8, "b_values_i");
+        datum2 = builder.CreateLoad(int64Type, tmpval, "b_values_i");
 
         /*
          * For bpchar or numeric type key, the varlena datum is a pointer
@@ -329,9 +332,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
                     next_attr->atttypid == BPCHAROID || next_attr->atttypid == NUMERICOID) {
                     llvm::Value* next_val_colIdx = llvmCodeGen->getIntConstant(INT8OID, next_colIdx);
                     tmpval = builder.CreateInBoundsGEP(values1, next_val_colIdx);
-                    llvm::Value* next_datum1 = builder.CreateAlignedLoad(tmpval, 8, "a_values_ip1");
+                    llvm::Value* next_datum1 = builder.CreateLoad(int64Type, tmpval, "a_values_ip1");
                     tmpval = builder.CreateInBoundsGEP(values2, next_val_colIdx);
-                    llvm::Value* next_datum2 = builder.CreateAlignedLoad(tmpval, 8, "b_values_ip1");
+                    llvm::Value* next_datum2 = builder.CreateLoad(int64Type, tmpval, "b_values_ip1");
 
                     tmpval = builder.CreateIntToPtr(next_datum1, int8PtrType);
                     builder.CreateCall(fn_prefetch, {tmpval, int32_0, int32_3, int32_1});
@@ -343,9 +346,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen(VecSortState* node, bo
 
         /* get MultiColumns.m_nulls[colIdx] */
         tmpval = builder.CreateInBoundsGEP(nulls1, colidx);
-        llvm::Value* isNull1 = builder.CreateAlignedLoad(tmpval, 1, "a_nulls_i");
+        llvm::Value* isNull1 = builder.CreateLoad(int8Type, tmpval, "a_nulls_i");
         tmpval = builder.CreateInBoundsGEP(nulls2, colidx);
-        llvm::Value* isNull2 = builder.CreateAlignedLoad(tmpval, 1, "b_nulls_i");
+        llvm::Value* isNull2 = builder.CreateLoad(int8Type, tmpval, "b_nulls_i");
         isNull1 = builder.CreateAnd(isNull1, int8_1);
         isNull2 = builder.CreateAnd(isNull2, int8_1);
         isNull1 = builder.CreateTrunc(isNull1, int1Type);
@@ -536,8 +539,11 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
     llvm::Value* state = NULL;
 
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
+    DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(MultiColumnsPtrType, "struct.MultiColumns");
     DEFINE_CG_PTRTYPE(BatchsortstatePtrType, "class.Batchsortstate");
 
@@ -595,16 +601,16 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
     /* Start the codegen in entry basic block */
     /* MultiColumns.m_values */
     tmpval = builder.CreateInBoundsGEP(parm1, Vals2);
-    values1 = builder.CreateAlignedLoad(tmpval, 8, "a_values");
+    values1 = builder.CreateLoad(int64PtrType, tmpval, "a_values");
     tmpval = builder.CreateInBoundsGEP(parm2, Vals2);
-    values2 = builder.CreateAlignedLoad(tmpval, 8, "b_values");
+    values2 = builder.CreateLoad(int64PtrType, tmpval, "b_values");
 
     /* MultiColumns.m_nulls */
     Vals2[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(parm1, Vals2);
-    nulls1 = builder.CreateAlignedLoad(tmpval, 8, "a_nulls");
+    nulls1 = builder.CreateLoad(int8PtrType, tmpval, "a_nulls");
     tmpval = builder.CreateInBoundsGEP(parm2, Vals2);
-    nulls2 = builder.CreateAlignedLoad(tmpval, 8, "b_nulls");
+    nulls2 = builder.CreateLoad(int8PtrType, tmpval, "b_nulls");
     builder.CreateBr(bb_keys1[0]);
 
     /* Codegen for each sort key comparison */
@@ -626,9 +632,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
          * NOT NULL : MultiColumns->a_values[colIdx].
          */
         tmpval = builder.CreateInBoundsGEP(values1, val_colIdx);
-        datum1 = builder.CreateAlignedLoad(tmpval, 8, "a_values_i");
+        datum1 = builder.CreateLoad(int64Type, tmpval, "a_values_i");
         tmpval = builder.CreateInBoundsGEP(values2, val_colIdx);
-        datum2 = builder.CreateAlignedLoad(tmpval, 8, "b_values_i");
+        datum2 = builder.CreateLoad(int64Type, tmpval, "b_values_i");
 
         /*
          * For bpchar or numeric type key, the varlena datum is a pointer
@@ -663,9 +669,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
                     next_attr->atttypid == BPCHAROID || next_attr->atttypid == NUMERICOID) {
                     llvm::Value* next_val_colIdx = llvmCodeGen->getIntConstant(INT8OID, next_colIdx);
                     tmpval = builder.CreateInBoundsGEP(values1, next_val_colIdx);
-                    llvm::Value* next_datum1 = builder.CreateAlignedLoad(tmpval, 8, "a_values_ip1");
+                    llvm::Value* next_datum1 = builder.CreateLoad(int64Type, tmpval, "a_values_ip1");
                     tmpval = builder.CreateInBoundsGEP(values2, next_val_colIdx);
-                    llvm::Value* next_datum2 = builder.CreateAlignedLoad(tmpval, 8, "b_values_ip1");
+                    llvm::Value* next_datum2 = builder.CreateLoad(int64Type, tmpval, "b_values_ip1");
                     tmpval = builder.CreateIntToPtr(next_datum1, int8PtrType);
                     builder.CreateCall(fn_prefetch, {tmpval, int32_0, int32_3, int32_1});
                     tmpval = builder.CreateIntToPtr(next_datum2, int8PtrType);
@@ -676,9 +682,9 @@ llvm::Function* VecSortCodeGen::CompareMultiColumnCodeGen_TOPN(VecSortState* nod
 
         /* get MultiColumns.m_nulls[colIdx] */
         tmpval = builder.CreateInBoundsGEP(nulls1, val_colIdx);
-        llvm::Value* isNull1 = builder.CreateAlignedLoad(tmpval, 1, "a_nulls_i");
+        llvm::Value* isNull1 = builder.CreateLoad(int8Type, tmpval, "a_nulls_i");
         tmpval = builder.CreateInBoundsGEP(nulls2, val_colIdx);
-        llvm::Value* isNull2 = builder.CreateAlignedLoad(tmpval, 1, "b_nulls_i");
+        llvm::Value* isNull2 = builder.CreateLoad(int8Type, tmpval, "b_nulls_i");
 
         /* check if both of them are not null by 'Or' operation */
         isNull1 = builder.CreateAnd(isNull1, int8_1);
@@ -856,6 +862,8 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
     llvm::Value* value2 = NULL;
 
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -919,7 +927,7 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isExtended = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(isExtended, bb_data1, bb_untoast1);
@@ -952,7 +960,7 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isExtended = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(isExtended, bb_data2, bb_untoast2);
@@ -981,14 +989,14 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
     /* (arg1)->choice.n_header & NUMERIC_BI_MASK == NUMERIC_NAN */
     Vals4[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals4);
-    llvm::Value* n_header1 = builder.CreateAlignedLoad(tmpval, 2, "n_header1");
+    llvm::Value* n_header1 = builder.CreateLoad(int16Type, tmpval, "n_header1");
     n_header1 = builder.CreateZExt(n_header1, int32Type);
     llvm::Value* n_header_mask1 = builder.CreateAnd(n_header1, val_bi_mask);
     llvm::Value* isNAN1 = builder.CreateICmpEQ(n_header_mask1, val_sign_mask);
 
     /* (arg2)->choice.n_header & NUMERIC_BI_MASK == NUMERIC_NAN */
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals4);
-    llvm::Value* n_header2 = builder.CreateAlignedLoad(tmpval, 2, "n_header2");
+    llvm::Value* n_header2 = builder.CreateLoad(int16Type, tmpval, "n_header2");
     n_header2 = builder.CreateZExt(n_header2, int32Type);
     llvm::Value* n_header_mask2 = builder.CreateAnd(n_header2, val_bi_mask);
     llvm::Value* isNAN2 = builder.CreateICmpEQ(n_header_mask2, val_sign_mask);
@@ -1010,10 +1018,10 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen()
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* int64data1 = builder.CreateAlignedLoad(tmpval, 8, "int64data1");
+    llvm::Value* int64data1 = builder.CreateLoad(int64Type, tmpval, "int64data1");
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* int64data2 = builder.CreateAlignedLoad(tmpval, 8, "int64data2");
+    llvm::Value* int64data2 = builder.CreateLoad(int64Type, tmpval, "int64data2");
 
     /* if they have the same header, they have the same scale */
     tmpval = builder.CreateICmpEQ(n_header1, n_header2);
@@ -1134,6 +1142,8 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
     llvm::Value* value2 = NULL;
 
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -1192,7 +1202,7 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isExtended = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(isExtended, bb_data1, bb_untoast1);
@@ -1224,7 +1234,7 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isExtended = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(isExtended, bb_data2, bb_untoast2);
@@ -1253,14 +1263,14 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
     /* (arg1)->choice.n_header & NUMERIC_BI_MASK == NUMERIC_NAN */
     Vals4[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals4);
-    llvm::Value* n_header1 = builder.CreateAlignedLoad(tmpval, 2, "n_header1");
+    llvm::Value* n_header1 = builder.CreateLoad(int16Type, tmpval, "n_header1");
     n_header1 = builder.CreateZExt(n_header1, int32Type);
     llvm::Value* n_header_mask1 = builder.CreateAnd(n_header1, val_bi_mask);
     llvm::Value* isNAN1 = builder.CreateICmpEQ(n_header_mask1, val_sign_mask);
 
     /* (arg2)->choice.n_header & NUMERIC_BI_MASK == NUMERIC_NAN */
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals4);
-    llvm::Value* n_header2 = builder.CreateAlignedLoad(tmpval, 2, "n_header2");
+    llvm::Value* n_header2 = builder.CreateLoad(int16Type, tmpval, "n_header2");
     n_header2 = builder.CreateZExt(n_header2, int32Type);
     llvm::Value* n_header_mask2 = builder.CreateAnd(n_header2, val_bi_mask);
     llvm::Value* isNAN2 = builder.CreateICmpEQ(n_header_mask2, val_sign_mask);
@@ -1283,10 +1293,10 @@ llvm::Function* VecSortCodeGen::numericcmpCodeGen_fastpath()
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* int64data1 = builder.CreateAlignedLoad(tmpval, 8, "int64data1");
+    llvm::Value* int64data1 = builder.CreateLoad(int64Type, tmpval, "int64data1");
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* int64data2 = builder.CreateAlignedLoad(tmpval, 8, "int64data2");
+    llvm::Value* int64data2 = builder.CreateLoad(int64Type, tmpval, "int64data2");
 
     tmpval = builder.CreateICmpSGT(int64data1, int64data2);
     tmpval2 = builder.CreateICmpEQ(int64data1, int64data2);
@@ -1387,6 +1397,7 @@ llvm::Function* VecSortCodeGen::LLVMIRmemcmp_CMC_CodeGen()
     llvm::Value* data1 = NULL;
     llvm::Value* data2 = NULL;
 
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
 
@@ -1426,8 +1437,8 @@ llvm::Function* VecSortCodeGen::LLVMIRmemcmp_CMC_CodeGen()
     Phi_data1->addIncoming(parm1, bb_entry);
     Phi_data2->addIncoming(parm2, bb_entry);
     Phi_len->addIncoming(parm3, bb_entry);
-    data1 = builder.CreateAlignedLoad(Phi_data1, 1, "data1");
-    data2 = builder.CreateAlignedLoad(Phi_data2, 1, "data2");
+    data1 = builder.CreateLoad(int8Type, Phi_data1, "data1");
+    data2 = builder.CreateLoad(int8Type, Phi_data2, "data2");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_loopEnd, bb_loopExit);
 
@@ -1598,7 +1609,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     llvm::Value* isExternal = builder.CreateICmpEQ(value1, int8_1);
@@ -1626,7 +1637,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     isExternal = builder.CreateICmpEQ(value2, int8_1);
@@ -1648,7 +1659,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     Phi_arg2->addIncoming(untoast_value2, bb_untoast2);
 
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header1");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header1");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader1, bb_shortHeader1);
@@ -1674,7 +1685,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
 
     Vals3[2] = int64_0;
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header2");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header2");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader2, bb_shortHeader2);
@@ -1729,7 +1740,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     tmpval = builder.CreateInBoundsGEP(Phi_data1, Vals2);
     llvm::Value* val_int64 = NULL;
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    val_int64 = builder.CreateAlignedLoad(tmpval, 8, "s1_int64");
+    val_int64 = builder.CreateLoad(int64Type, tmpval, "s1_int64");
     tmpval = builder.CreateICmpEQ(val_int64, int64_2020202020202020X);
     builder.CreateCondBr(tmpval, bb_loopEnd_a1, bb_check_int32_a);
 
@@ -1770,7 +1781,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     Phi_len_a->addIncoming(len_less1, bb_loopEnd_a2);
     Vals2[1] = remaining;
     tmpval = builder.CreateInBoundsGEP(Phi_data1, Vals2);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "a_i");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "a_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);
     builder.CreateCondBr(tmpval, bb_loopBody_a2, bb_prehead_b1);
 
@@ -1800,7 +1811,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     Vals2[1] = remaining;
     tmpval = builder.CreateInBoundsGEP(Phi_data2, Vals2);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    val_int64 = builder.CreateAlignedLoad(tmpval, 8, "s2_int64");
+    val_int64 = builder.CreateLoad(int64Type, tmpval, "s2_int64");
     tmpval = builder.CreateICmpEQ(val_int64, int64_2020202020202020X);
     builder.CreateCondBr(tmpval, bb_loopEnd_b1, bb_check_int32_b);
 
@@ -1841,7 +1852,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     Vals2[1] = remaining;
     /* if (s[i] == ' ') */
     tmpval = builder.CreateInBoundsGEP(Phi_data2, Vals2);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "b_i");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "b_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);
     builder.CreateCondBr(tmpval, bb_loopBody_b2, bb_varstr_cmp);
 
@@ -2021,7 +2032,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     llvm::Value* isExternal = builder.CreateICmpEQ(value1, int8_1);
@@ -2049,7 +2060,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     isExternal = builder.CreateICmpEQ(value2, int8_1);
@@ -2071,7 +2082,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     Phi_arg2->addIncoming(untoast_value2, bb_untoast2);
 
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header1");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header1");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader1, bb_shortHeader1);
@@ -2097,7 +2108,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
 
     Vals3[2] = int64_0;
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header2");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header2");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader2, bb_shortHeader2);
@@ -2149,7 +2160,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     Vals2[1] = remaining;
     /* if s[i] == ' ' */
     tmpval = builder.CreateInBoundsGEP(Phi_data1, Vals2);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "a_i");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "a_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);
     builder.CreateCondBr(tmpval, bb_loopBody_a, bb_prehead_b);
 
@@ -2174,7 +2185,7 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     Vals2[1] = remaining;
     /* if (s[i] == ' ') */
     tmpval = builder.CreateInBoundsGEP(Phi_data2, Vals2);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "b_i");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "b_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);
     builder.CreateCondBr(tmpval, bb_loopBody_b, bb_varstr_cmp);
 
@@ -2334,7 +2345,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     llvm::Value* isExternal = builder.CreateICmpEQ(value1, int8_1);
@@ -2362,7 +2373,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     isExternal = builder.CreateICmpEQ(value2, int8_1);
@@ -2383,7 +2394,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     Phi_arg2->addIncoming(untoast_value2, bb_untoast2);
 
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals3);
-    llvm::Value* header1 = builder.CreateAlignedLoad(tmpval, 1, "header1");
+    llvm::Value* header1 = builder.CreateLoad(int8Type, tmpval, "header1");
     tmpval = builder.CreateAnd(header1, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader1, bb_shortHeader1);
@@ -2404,7 +2415,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     Vals2[1] = int32_0;
     llvm::Value* len1_long = builder.CreateInBoundsGEP(Phi_arg1, Vals2);
     len1_long = builder.CreateBitCast(len1_long, int32PtrType);
-    len1_long = builder.CreateAlignedLoad(len1_long, 4);
+    len1_long = builder.CreateLoad(int32Type, len1_long);
     len1_long = builder.CreateLShr(len1_long, 2);
     len1_long = builder.CreateSub(len1_long, int32_4);
     builder.CreateBr(bb_data2);
@@ -2420,7 +2431,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
 
     Vals3[2] = int64_0;
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals3);
-    llvm::Value* header2 = builder.CreateAlignedLoad(tmpval, 1, "header2");
+    llvm::Value* header2 = builder.CreateLoad(int8Type, tmpval, "header2");
     tmpval = builder.CreateAnd(header2, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader2, bb_shortHeader2);
@@ -2441,7 +2452,7 @@ llvm::Function* VecSortCodeGen::textcmpCodeGen()
     Vals2[1] = int32_0;
     llvm::Value* len2_long = builder.CreateInBoundsGEP(Phi_arg2, Vals2);
     len2_long = builder.CreateBitCast(len2_long, int32PtrType);
-    len2_long = builder.CreateAlignedLoad(len2_long, 4);
+    len2_long = builder.CreateLoad(int32Type, len2_long);
     len2_long = builder.CreateLShr(len2_long, 2);
     len2_long = builder.CreateSub(len2_long, int32_4);
     builder.CreateBr(bb_varstr_cmp);
@@ -2598,8 +2609,11 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     llvm::Value* data1 = NULL;
     llvm::Value* data2 = NULL;
 
-    DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
+    DEFINE_CG_TYPE(int32Type, INT4OID);
+    DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_NINTTYP(int128Type, 128);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int16PtrType, INT2OID);
     DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
@@ -2663,9 +2677,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     Phi_data2->addIncoming(parm2, bb_entry);
     Phi_len->addIncoming(len, bb_entry);
     data1 = builder.CreateBitCast(Phi_data1, int128PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 16, "data1_i128");
+    data1 = builder.CreateLoad(int128Type, data1, "data1_i128");
     data2 = builder.CreateBitCast(Phi_data2, int128PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 16, "data2_i128");
+    data2 = builder.CreateLoad(int128Type, data2, "data2_i128");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_loopEnd, bb_ret);
 
@@ -2697,9 +2711,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     /* int64 comparison : compare 8 byte every time */
     builder.SetInsertPoint(bb_cmpInt64);
     data1 = builder.CreateBitCast(Phi_data1_tryInt64, int64PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 8, "data1_i64");
+    data1 = builder.CreateLoad(int64Type, data1, "data1_i64");
     data2 = builder.CreateBitCast(Phi_data2_tryInt64, int64PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 8, "data2_i64");
+    data2 = builder.CreateLoad(int64Type, data2, "data2_i64");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt64, bb_ret);
 
@@ -2726,9 +2740,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     /* int32 comparison */
     builder.SetInsertPoint(bb_cmpInt32);
     data1 = builder.CreateBitCast(Phi_data1_tryInt32, int32PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 4, "data1_i32");
+    data1 = builder.CreateLoad(int32Type, data1, "data1_i32");
     data2 = builder.CreateBitCast(Phi_data2_tryInt32, int32PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 4, "data2_i32");
+    data2 = builder.CreateLoad(int32Type, data2, "data2_i32");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt32, bb_ret);
 
@@ -2755,9 +2769,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
     /* int16 comparison */
     builder.SetInsertPoint(bb_cmpInt16);
     data1 = builder.CreateBitCast(Phi_data1_tryInt16, int16PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 2, "data1_i16");
+    data1 = builder.CreateLoad(int16Type, data1, "data1_i16");
     data2 = builder.CreateBitCast(Phi_data2_tryInt16, int16PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 2, "data2_i16");
+    data2 = builder.CreateLoad(int16Type, data2, "data2_i16");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt16, bb_ret);
 
@@ -2783,8 +2797,8 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_long()
 
     /* int8 (char) comparison */
     builder.SetInsertPoint(bb_cmpInt8);
-    data1 = builder.CreateAlignedLoad(Phi_data1_tryInt8, 1, "data1_i8");
-    data2 = builder.CreateAlignedLoad(Phi_data2_tryInt8, 1, "data2_i8");
+    data1 = builder.CreateLoad(int8Type, Phi_data1_tryInt8, "data1_i8");
+    data2 = builder.CreateLoad(int8Type, Phi_data2_tryInt8, "data2_i8");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_retTrue, bb_ret);
 
@@ -2873,8 +2887,10 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
     llvm::Value* data1 = NULL;
     llvm::Value* data2 = NULL;
 
-    DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
+    DEFINE_CG_TYPE(int32Type, INT4OID);
+    DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int16PtrType, INT2OID);
     DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
@@ -2927,9 +2943,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
     /* uint64 t1 = *((uint64*)a); */
     builder.SetInsertPoint(bb_cmpInt64);
     data1 = builder.CreateBitCast(parm1, int64PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 8, "data1_i64");
+    data1 = builder.CreateLoad(int64Type, data1, "data1_i64");
     data2 = builder.CreateBitCast(parm2, int64PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 8, "data2_i64");
+    data2 = builder.CreateLoad(int64Type, data2, "data2_i64");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt64, bb_ret);
 
@@ -2955,9 +2971,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
     /* length is less than 7 greate than 3 */
     builder.SetInsertPoint(bb_cmpInt32);
     data1 = builder.CreateBitCast(Phi_data1_tryInt32, int32PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 4, "data1_i32");
+    data1 = builder.CreateLoad(int32Type, data1, "data1_i32");
     data2 = builder.CreateBitCast(Phi_data2_tryInt32, int32PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 4, "data2_i32");
+    data2 = builder.CreateLoad(int32Type, data2, "data2_i32");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt32, bb_ret);
 
@@ -2982,9 +2998,9 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
 
     builder.SetInsertPoint(bb_cmpInt16);
     data1 = builder.CreateBitCast(Phi_data1_tryInt16, int16PtrType);
-    data1 = builder.CreateAlignedLoad(data1, 2, "data1_i16");
+    data1 = builder.CreateLoad(int16Type, data1, "data1_i16");
     data2 = builder.CreateBitCast(Phi_data2_tryInt16, int16PtrType);
-    data2 = builder.CreateAlignedLoad(data2, 2, "data2_i16");
+    data2 = builder.CreateLoad(int16Type, data2, "data2_i16");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_adjustInt16, bb_ret);
 
@@ -3008,8 +3024,8 @@ llvm::Function* VecSortCodeGen::SortAggMemcmpCodeGen_short()
     builder.CreateCondBr(tmpval, bb_cmpInt8, bb_retTrue);
 
     builder.SetInsertPoint(bb_cmpInt8);
-    data1 = builder.CreateAlignedLoad(Phi_data1_tryInt8, 1, "data1_i8");
-    data2 = builder.CreateAlignedLoad(Phi_data2_tryInt8, 1, "data2_i8");
+    data1 = builder.CreateLoad(int8Type, Phi_data1_tryInt8, "data1_i8");
+    data2 = builder.CreateLoad(int8Type, Phi_data2_tryInt8, "data2_i8");
     tmpval = builder.CreateICmpEQ(data1, data2);
     builder.CreateCondBr(tmpval, bb_retTrue, bb_ret);
 
@@ -3120,7 +3136,7 @@ llvm::Function* VecSortCodeGen::SortAggBpchareqCodeGen(int length)
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     llvm::Value* isExternal = builder.CreateICmpEQ(value1, int8_1);
@@ -3148,7 +3164,7 @@ llvm::Function* VecSortCodeGen::SortAggBpchareqCodeGen(int length)
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     isExternal = builder.CreateICmpEQ(value2, int8_1);
@@ -3170,7 +3186,7 @@ llvm::Function* VecSortCodeGen::SortAggBpchareqCodeGen(int length)
     Phi_arg2->addIncoming(untoast_value2, bb_untoast2);
 
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header1");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header1");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader1, bb_shortHeader1);
@@ -3193,7 +3209,7 @@ llvm::Function* VecSortCodeGen::SortAggBpchareqCodeGen(int length)
 
     Vals3[2] = int64_0;
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals3);
-    tmpval = builder.CreateAlignedLoad(tmpval, 1, "header2");
+    tmpval = builder.CreateLoad(int8Type, tmpval, "header2");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader2, bb_shortHeader2);
@@ -3352,7 +3368,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
      */
     value1 = builder.CreateIntToPtr(parm1, varattrib_1bPtrType);
     value1 = builder.CreateInBoundsGEP(value1, Vals2);
-    value1 = builder.CreateAlignedLoad(value1, 1, "header1");
+    value1 = builder.CreateLoad(int8Type, value1, "header1");
     tmpval = builder.CreateAnd(value1, int8_3);
     llvm::Value* isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     llvm::Value* isExternal = builder.CreateICmpEQ(value1, int8_1);
@@ -3380,7 +3396,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
 
     value2 = builder.CreateIntToPtr(parm2, varattrib_1bPtrType);
     value2 = builder.CreateInBoundsGEP(value2, Vals2);
-    value2 = builder.CreateAlignedLoad(value2, 1, "header2");
+    value2 = builder.CreateLoad(int8Type, value2, "header2");
     tmpval = builder.CreateAnd(value2, int8_3);
     isCompressed = builder.CreateICmpEQ(tmpval, int8_2);
     isExternal = builder.CreateICmpEQ(value2, int8_1);
@@ -3402,7 +3418,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
     Phi_arg2->addIncoming(untoast_value2, bb_untoast2);
 
     tmpval = builder.CreateInBoundsGEP(Phi_arg1, Vals3);
-    llvm::Value* header1 = builder.CreateAlignedLoad(tmpval, 1, "header1");
+    llvm::Value* header1 = builder.CreateLoad(int8Type, tmpval, "header1");
     tmpval = builder.CreateAnd(header1, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader1, bb_shortHeader1);
@@ -3423,7 +3439,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
     Vals2[1] = int32_0;
     llvm::Value* len1_long = builder.CreateInBoundsGEP(Phi_arg1, Vals2);
     len1_long = builder.CreateBitCast(len1_long, int32PtrType);
-    len1_long = builder.CreateAlignedLoad(len1_long, 4);
+    len1_long = builder.CreateLoad(int32Type, len1_long);
     len1_long = builder.CreateLShr(len1_long, 2);
     len1_long = builder.CreateSub(len1_long, int32_4);
     builder.CreateBr(bb_data2);
@@ -3439,7 +3455,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
 
     Vals3[2] = int64_0;
     tmpval = builder.CreateInBoundsGEP(Phi_arg2, Vals3);
-    llvm::Value* header2 = builder.CreateAlignedLoad(tmpval, 1, "header2");
+    llvm::Value* header2 = builder.CreateLoad(int8Type, tmpval, "header2");
     tmpval = builder.CreateAnd(header2, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, bb_longHeader2, bb_shortHeader2);
@@ -3460,7 +3476,7 @@ llvm::Function* VecSortCodeGen::SortAggTexteqCodeGen()
     Vals2[1] = int32_0;
     llvm::Value* len2_long = builder.CreateInBoundsGEP(Phi_arg2, Vals2);
     len2_long = builder.CreateBitCast(len2_long, int32PtrType);
-    len2_long = builder.CreateAlignedLoad(len2_long, 4);
+    len2_long = builder.CreateLoad(int32Type, len2_long);
     len2_long = builder.CreateLShr(len2_long, 2);
     len2_long = builder.CreateSub(len2_long, int32_4);
     builder.CreateBr(bb_lencmp);
@@ -3567,7 +3583,11 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
     DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
-    DEFINE_CG_PTRTYPE(VectorBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
+    DEFINE_CG_PTRTYPE(vecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
     DEFINE_CG_PTRTYPE(sortAggRunnerPtrType, "class.SortAggRunner");
 
@@ -3594,7 +3614,7 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
      */
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "JittedSortAggMatchKey", int8Type);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("sortAggRunner", sortAggRunnerPtrType));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", VectorBatchPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vecBatchPtrType));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("batchIdx", int32Type));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("cell", hashCellPtrType));
     llvm::Function* jitted_matchkey = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
@@ -3626,32 +3646,32 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
     /* SortAggRunner.BaseAggRunner.hashBasedOperator.m_key */
     Vals4[3] = int32_pos_hBOper_mkey;
     tmpval = builder.CreateInBoundsGEP(sAggRunner, Vals4);
-    mkey = builder.CreateAlignedLoad(tmpval, 4, "vec_m_key");
+    mkey = builder.CreateLoad(int32Type, tmpval, "vec_m_key");
 
-    /* SortAggRunner.BaseAggRunner.hashBasedOperator.m_keyIdx */
+    /* SortAggRunner.BaseAggRunner.hashBasedOperator::m_keyIdx */
     Vals4[3] = int32_pos_hBOper_keyIdx;
     tmpval = builder.CreateInBoundsGEP(sAggRunner, Vals4);
-    llvm::Value* keyIdxVal = builder.CreateAlignedLoad(tmpval, 8, "vec_m_keyIdx");
+    llvm::Value* keyIdxVal = builder.CreateLoad(int32PtrType, tmpval, "vec_m_keyIdx");
 
-    /* sortAggRunner.BaseAggRunner.m_keyIdxInCell */
+    /* sortAggRunner.BaseAggRunner::m_keyIdxInCell */
     Vals3[2] = int32_pos_bAggR_keyIdxInCell;
     tmpval = builder.CreateInBoundsGEP(sAggRunner, Vals3);
-    llvm::Value* keyIdxInCellVal = builder.CreateAlignedLoad(tmpval, 8, "vec_m_keyIdxInCell");
+    llvm::Value* keyIdxInCellVal = builder.CreateLoad(int32PtrType, tmpval, "vec_m_keyIdxInCell");
 
     for (i = 0; i < numKeys; i++) {
         tmpval = llvmCodeGen->getIntConstant(INT4OID, i);
         keyIdx[i] = builder.CreateInBoundsGEP(keyIdxVal, tmpval);
-        keyIdx[i] = builder.CreateAlignedLoad(keyIdx[i], 4, "m_key");
+        keyIdx[i] = builder.CreateLoad(int32Type, keyIdx[i], "m_key");
         tmpval = builder.CreateSExt(tmpval, int64Type);
         keyIdxInCell[i] = builder.CreateInBoundsGEP(keyIdxInCellVal, tmpval);
-        keyIdxInCell[i] = builder.CreateAlignedLoad(keyIdxInCell[i], 4, "m_key");
+        keyIdxInCell[i] = builder.CreateLoad(int32Type, keyIdxInCell[i], "m_key");
     }
 
     /* Start the codegen in entry basic block */
     /* VectorBatch.m_arr */
     Vals2[1] = int32_pos_batch_marr;
     llvm::Value* batch_arr = builder.CreateInBoundsGEP(batch, Vals2);
-    batch_arr = builder.CreateAlignedLoad(batch_arr, 8, "m_arr");
+    batch_arr = builder.CreateLoad(scalarVecPtrType, batch_arr, "m_arr");
     builder.CreateBr(bb_keyStart[0]);
 
     /* Codegen for each key comparison */
@@ -3666,9 +3686,9 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
         Vals2[0] = keyIdx[i];
         Vals2[1] = int32_pos_scalvec_flag;
         llvm::Value* batch_flag = builder.CreateInBoundsGEP(batch_arr, Vals2);
-        batch_flag = builder.CreateAlignedLoad(batch_flag, 8, "m_flag");
+        batch_flag = builder.CreateLoad(int8PtrType, batch_flag, "m_flag");
         batch_flag = builder.CreateInBoundsGEP(batch_flag, batch_Idx);
-        batch_flag = builder.CreateAlignedLoad(batch_flag, 1, "batch_flag");
+        batch_flag = builder.CreateLoad(int8Type, batch_flag, "batch_flag");
 
         /* hshCell.m_val[kdyIdxInCell].flag */
         Vals4[0] = int64_0;
@@ -3676,7 +3696,7 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
         Vals4[2] = keyIdxInCell[i];
         Vals4[3] = int32_pos_hval_flag;
         llvm::Value* cell_flag = builder.CreateInBoundsGEP(hcell, Vals4);
-        cell_flag = builder.CreateAlignedLoad(cell_flag, 1, "cell_flag");
+        cell_flag = builder.CreateLoad(int8Type, cell_flag, "cell_flag");
         tmpval = builder.CreateOr(batch_flag, cell_flag);
         tmpval = builder.CreateAnd(tmpval, int8_1);
         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -3687,15 +3707,15 @@ llvm::Function* VecSortCodeGen::SortAggMatchKeyCodeGen(VecAggState* node)
         Vals2[0] = keyIdx[i];
         Vals2[1] = int32_pos_scalvec_vals;
         llvm::Value* batch_val = builder.CreateInBoundsGEP(batch_arr, Vals2);
-        batch_val = builder.CreateAlignedLoad(batch_val, 8, "m_vals");
+        batch_val = builder.CreateLoad(int64PtrType, batch_val, "m_vals");
         batch_val = builder.CreateInBoundsGEP(batch_val, batch_Idx);
-        batch_val = builder.CreateAlignedLoad(batch_val, 8, "batch_val");
+        batch_val = builder.CreateLoad(int64Type, batch_val, "batch_val");
         Vals4[0] = int64_0;
         Vals4[1] = int32_pos_hcell_mval;
         Vals4[2] = keyIdxInCell[i];
         Vals4[3] = int32_pos_hval_val;
         llvm::Value* cell_val = builder.CreateInBoundsGEP(hcell, Vals4);
-        cell_val = builder.CreateAlignedLoad(cell_val, 8, "cell_val");
+        cell_val = builder.CreateLoad(int64Type, cell_val, "cell_val");
         llvm::Value* compare = NULL;
         switch (opno) {
             case INT4EQOID: {

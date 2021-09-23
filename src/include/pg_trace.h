@@ -1,7 +1,7 @@
 /* ----------
  *	pg_trace.h
  *
- *	Definitions for the PostgreSQL tracing framework
+ *	Definitions for the openGauss tracing framework
  *
  *	Copyright (c) 2006-2012, PostgreSQL Global Development Group
  *

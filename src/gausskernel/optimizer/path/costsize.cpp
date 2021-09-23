@@ -18,7 +18,7 @@
  * database is fully cached in RAM, it is reasonable to set them equal.)
  *
  * We also use a rough estimate "g_instance.cost_cxt.effective_cache_size" of the number of
- * disk pages in Postgres + OS-level disk cache.  (We can't simply use
+ * disk pages in openGauss + OS-level disk cache.  (We can't simply use
  * NBuffers for this purpose because that would ignore the effects of
  * the kernel's disk cache.)
  *
@@ -73,7 +73,7 @@
 #include "catalog/pg_proc.h"
 #include "executor/executor.h"
 #include "executor/hashjoin.h"
-#include "executor/nodeHash.h"
+#include "executor/node/nodeHash.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/bucketpruning.h"
@@ -91,13 +91,14 @@
 #include "parser/parsetree.h"
 #include "utils/dynahash.h"
 #include "utils/guc.h"
-#include "hll.h"
+#include "utils/hll_mpp.h"
 #include "utils/lsyscache.h"
 #include "utils/selfuncs.h"
 #include "utils/spccache.h"
 #include "utils/tuplesort.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_operator.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
 #include "vectorsonic/vsonichash.h"
 #include "pgxc/pgxc.h"
@@ -646,6 +647,39 @@ static void set_parallel_path_rows(Path* path)
 }
 
 /*
+ * cost_resultscan
+ *       Determines and returns the cost of scanning an RTE_RESULT relation.
+ */
+void cost_resultscan(Path *path, PlannerInfo *root,
+    RelOptInfo *baserel, ParamPathInfo *param_info)
+{
+    Cost            startup_cost = 0;
+    Cost            run_cost = 0;
+    QualCost        qpqual_cost;
+    Cost            cpu_per_tuple;
+
+    /* Should only be applied to RTE_RESULT base relations */
+    Assert(baserel->relid > 0);
+    Assert(baserel->rtekind == RTE_RESULT);
+
+    /* Mark the path with the correct row estimate */
+    if (param_info)
+        path->rows = param_info->ppi_rows;
+    else
+        path->rows = baserel->rows;
+
+    /* We charge qual cost plus cpu_tuple_cost */
+    get_restriction_qual_cost(root, baserel, param_info, &qpqual_cost);
+
+    startup_cost += qpqual_cost.startup;
+    cpu_per_tuple = DEFAULT_CPU_TUPLE_COST + qpqual_cost.per_tuple;
+    run_cost += cpu_per_tuple * baserel->tuples;
+
+    path->startup_cost = startup_cost;
+    path->total_cost = startup_cost + run_cost;
+}
+
+/*
  * cost_seqscan
  *	  Determines and returns the cost of scanning a relation sequentially.
  *	  The pruning ration for Partitioned table will be considered in set_plain_rel_size().
@@ -946,7 +980,7 @@ void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel)
  *
  * This mod will help the planner promotes index scan paths better.
  */
-double apply_random_page_cost_mod(double rand_page_cost, double seq_page_cost, int num_of_page)
+double apply_random_page_cost_mod(double rand_page_cost, double seq_page_cost, double num_of_page)
 {
     /*
      * Smooth out at num_of_page = 1000
@@ -1245,6 +1279,13 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         } else {
             min_IO_cost = 0;
         }
+        
+        /*
+         * When database keep running without vacuum, the number of relpages may inflate quickly 
+         * and finally cause min_IO_cost overestimated. So, adjust min_IO_cost to ensure 
+         * min_IO_cost < max_IO_cost.
+         */
+        min_IO_cost = Min(min_IO_cost, max_IO_cost);
 
         ereport(DEBUG2,
             (errmodule(MOD_OPT),
@@ -1488,10 +1529,9 @@ void cost_bitmap_heap_scan(
     double pages_fetched;
     double spc_seq_page_cost, spc_random_page_cost;
     double T;
-    bool ispartitionedindex = path->parent->isPartitionedTable;
-    bool partition_index_unusable = false;
-    bool containGlobalOrLocalIndex = false;
-    bool disable_path = enable_parametrized_path(root, baserel, (Path*)path);
+    bool disable_path = (!u_sess->attr.attr_sql.enable_bitmapscan) ||
+        enable_parametrized_path(root, baserel, (Path*)path);
+    bool canCrossBucket = (baserel->bucketInfo == NULL);
 
     /* Should only be applied to base relations */
     AssertEreport(IsA(baserel, RelOptInfo),
@@ -1515,18 +1555,24 @@ void cost_bitmap_heap_scan(
      * Here not support bitmap index unusable.If the bitmap path contains unusable index paths, set enable_bitmapscan to
      * off. So it will go partition full/partial unusable index scan ,if index path is selected.
      */
-    if (ispartitionedindex) {
-        if (!check_bitmap_heap_path_index_unusable(bitmapqual, baserel))
-            partition_index_unusable = true;
+    if (path->parent->isPartitionedTable) {
+        if (!check_bitmap_heap_path_index_unusable(bitmapqual, baserel)) {
+            disable_path = true;
+        }
         
-        /* If the bitmap path contains Global partition index OR local partition index, set enable_bitmapscan to off */
+        /* If the bitmap path contains both global and local partition index, set enable_bitmapscan to off */
         if (CheckBitmapHeapPathContainGlobalOrLocal(bitmapqual)) {
-            containGlobalOrLocalIndex = true;
+            disable_path = true;
         }
     }
 
-    if (!u_sess->attr.attr_sql.enable_bitmapscan || partition_index_unusable || containGlobalOrLocalIndex ||
-        baserel->bucketInfo != NULL || disable_path) {
+    /* If the bitmap path contains both crossbucket and non-crossbucket index, set enable_bitmapscan to off */
+    if (baserel->bucketInfo != NULL && CheckBitmapHeapPathIsCrossbucket(bitmapqual)) {
+        canCrossBucket = true;
+    }
+    disable_path |= (!canCrossBucket);  /* Disable path if cannot crossbucket */
+
+    if (disable_path) {
         startup_cost += g_instance.cost_cxt.disable_cost;
     }
 
@@ -1559,7 +1605,7 @@ void cost_bitmap_heap_scan(
             (BlockNumber)baserel->pages,
             get_indexpath_pages(bitmapqual),
             root,
-            ispartitionedindex);
+            path->parent->isPartitionedTable);
 
         pages_fetched /= loop_count;
     } else {
@@ -1610,9 +1656,10 @@ void cost_bitmap_heap_scan(
     path->total_cost = startup_cost + run_cost;
     path->stream_cost = 0;
 
-    if (!u_sess->attr.attr_sql.enable_bitmapscan || partition_index_unusable || disable_path)
+    if (disable_path) {
         path->total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
+    }
 }
 
 /*
@@ -3041,7 +3088,7 @@ void initial_cost_mergejoin(PlannerInfo* root, JoinCostWorkspace* workspace, Joi
         opathkey = (PathKey*)linitial(opathkeys);
         ipathkey = (PathKey*)linitial(ipathkeys);
         /* debugging check */
-        if (opathkey->pk_opfamily != ipathkey->pk_opfamily ||
+        if (!OpFamilyEquals(opathkey->pk_opfamily, ipathkey->pk_opfamily) ||
             opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation ||
             opathkey->pk_strategy != ipathkey->pk_strategy || opathkey->pk_nulls_first != ipathkey->pk_nulls_first)
             ereport(ERROR,
@@ -3446,7 +3493,8 @@ MergeScanSelCache* cached_scansel(PlannerInfo* root, RestrictInfo* rinfo, PathKe
     /* Do we have this result already? */
     foreach (lc, rinfo->scansel_cache) {
         cache = (MergeScanSelCache*)lfirst(lc);
-        if (cache->opfamily == pathkey->pk_opfamily && cache->collation == pathkey->pk_eclass->ec_collation &&
+        if (OpFamilyEquals(cache->opfamily, pathkey->pk_opfamily) &&
+            cache->collation == pathkey->pk_eclass->ec_collation &&
             cache->strategy == pathkey->pk_strategy && cache->nulls_first == pathkey->pk_nulls_first)
             return cache;
     }
@@ -5070,6 +5118,28 @@ void set_baserel_size_estimates(PlannerInfo* root, RelOptInfo* rel)
     cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
 
     set_rel_width(root, rel);
+}
+
+/*
+ * set_result_size_estimates
+ *             Set the size estimates for an RTE_RESULT base relation
+ *
+ * The rel's targetlist and restrictinfo list must have been constructed
+ * already.
+ *
+ * We set the same fields as set_baserel_size_estimates.
+ */
+void set_result_size_estimates(PlannerInfo *root, RelOptInfo *rel)
+{
+    /* Should only be applied to RTE_RESULT base relations */
+    Assert(rel->relid > 0);
+    Assert(planner_rt_fetch(rel->relid, root)->rtekind == RTE_RESULT);
+
+    /* RTE_RESULT always generates a single row, natively */
+    rel->tuples = 1;
+
+    /* Now estimate number of output rows, etc */
+    set_baserel_size_estimates(root, rel);
 }
 
 /*

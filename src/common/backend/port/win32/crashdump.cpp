@@ -1,13 +1,13 @@
 /* -------------------------------------------------------------------------
  *
  * win32_crashdump.c
- *       Automatic crash dump creation for PostgreSQL on Windows
+ *       Automatic crash dump creation for openGauss on Windows
  *
  * The crashdump feature traps unhandled win32 exceptions produced by the
  * backend, and tries to produce a Windows MiniDump crash
  * dump for later debugging and analysis. The machine performing the dump
  * doesn't need any special debugging tools; the user only needs to send
- * the dump to somebody who has the same version of PostgreSQL and has debugging
+ * the dump to somebody who has the same version of openGauss and has debugging
  * tools.
  *
  * crashdump module originally by Craig Ringer <ringerc@ringerc.id.au>
@@ -72,13 +72,13 @@ typedef BOOL(WINAPI* MINIDUMPWRITEDUMP)(HANDLE hProcess, DWORD dwPid, HANDLE hFi
  *
  * This function is run under the unhandled exception handler, effectively
  * in a crash context, so it should be careful with memory and avoid using
- * any PostgreSQL functions.
+ * any openGauss functions.
  */
 static LONG WINAPI crashDumpHandler(struct _EXCEPTION_POINTERS* pExceptionInfo)
 {
     /*
      * We only write crash dumps if the "crashdumps" directory within the
-     * postgres data directory exists.
+     * openGauss data directory exists.
      */
     DWORD attribs = GetFileAttributesA("crashdumps");
 

@@ -83,18 +83,14 @@ void SPSCBlockingQueueDestroy(SPSCBlockingQueue *queue)
 
 bool SPSCBlockingQueuePut(SPSCBlockingQueue *queue, void *element)
 {
-    uint32 head;
-    uint32 tail;
-    uint32 tmpCnt;
-
-    head = pg_atomic_read_u32(&queue->writeHead);
-    do {
-        tail = pg_atomic_read_u32(&queue->readTail);
-
+    uint32 head = pg_atomic_read_u32(&queue->writeHead);
+    uint32 tail = pg_atomic_read_u32(&queue->readTail);
+    while (SPACE(head, tail, queue->mask) == 0) {
         if (queue->callBackFunc != NULL) {
             queue->callBackFunc();
         }
-    } while (SPACE(head, tail, queue->mask) == 0);
+        tail = pg_atomic_read_u32(&queue->readTail);
+    }
 
     /*
      * Make sure the following write to the buffer happens after the read
@@ -104,7 +100,7 @@ bool SPSCBlockingQueuePut(SPSCBlockingQueue *queue, void *element)
      * been read.
      */
     pg_memory_barrier();
-    tmpCnt = COUNT(head, tail, queue->mask);
+    uint32 tmpCnt = COUNT(head, tail, queue->mask);
     if (tmpCnt > queue->maxUsage) {
         pg_atomic_write_u32(&queue->maxUsage, tmpCnt);
     }
@@ -132,8 +128,8 @@ void *SPSCBlockingQueueTake(SPSCBlockingQueue *queue)
     uint32 count = 0;
     long sleeptime;
     tail = pg_atomic_read_u32(&queue->readTail);
-    do {
-        head = pg_atomic_read_u32(&queue->writeHead);
+    head = pg_atomic_read_u32(&queue->writeHead);
+    while (COUNT(head, tail, queue->mask) == 0) {
         ++count;
         /* here we sleep, let the cpu to do other important work */
         if ((count & SLEEP_COUNT_QUE_TAKE) == SLEEP_COUNT_QUE_TAKE) {
@@ -146,7 +142,8 @@ void *SPSCBlockingQueueTake(SPSCBlockingQueue *queue)
         if (queue->callBackFunc != NULL) {
             queue->callBackFunc();
         }
-    } while (COUNT(head, tail, queue->mask) == 0);
+        head = pg_atomic_read_u32(&queue->writeHead);
+    }
 
     t_thrd.page_redo_cxt.sleep_long = false;
     /* Make sure the buffer is read after the index. */
@@ -169,10 +166,9 @@ bool SPSCBlockingQueueGetAll(SPSCBlockingQueue *queue, void ***eleArry, uint32 *
     long sleeptime;
 
     tail = pg_atomic_read_u32(&queue->readTail);
-    do {
-        head = pg_atomic_read_u32(&queue->writeHead);
+    head = pg_atomic_read_u32(&queue->writeHead);
+    while (COUNT(head, tail, queue->mask) == 0) {
         ++count;
-
         /* here we sleep, let the cpu to do other important work */
         if ((count & SLEEP_COUNT_QUE_TAKE) == SLEEP_COUNT_QUE_TAKE) {
             if (t_thrd.page_redo_cxt.sleep_long)
@@ -184,7 +180,8 @@ bool SPSCBlockingQueueGetAll(SPSCBlockingQueue *queue, void ***eleArry, uint32 *
         if (queue->callBackFunc != NULL) {
             queue->callBackFunc();
         }
-    } while (COUNT(head, tail, queue->mask) == 0);
+        head = pg_atomic_read_u32(&queue->writeHead);
+    }
     t_thrd.page_redo_cxt.sleep_long = false;
     /* Make sure the buffer is read after the index. */
     pg_read_barrier();
@@ -239,8 +236,8 @@ void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue)
     uint32 count = 0;
     long sleeptime;
     tail = pg_atomic_read_u32(&queue->readTail);
-    do {
-        head = pg_atomic_read_u32(&queue->writeHead);
+    head = pg_atomic_read_u32(&queue->writeHead);
+    while (COUNT(head, tail, queue->mask) == 0) {
         ++count;
         /* here we sleep, let the cpu to do other important work */
         if ((count & SLEEP_COUNT_QUE_TAKE) == SLEEP_COUNT_QUE_TAKE) {
@@ -253,7 +250,8 @@ void *SPSCBlockingQueueTop(SPSCBlockingQueue *queue)
         if (queue->callBackFunc != NULL) {
             queue->callBackFunc();
         }
-    } while (COUNT(head, tail, queue->mask) == 0);
+        head = pg_atomic_read_u32(&queue->writeHead);
+    }
     t_thrd.page_redo_cxt.sleep_long = false;
     pg_read_barrier();
     void *elem = queue->buffer[tail];

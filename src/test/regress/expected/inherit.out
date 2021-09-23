@@ -2,7 +2,6 @@
 -- Test inheritance features
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 CREATE TABLE a (aa TEXT) distribute by round robin;
 CREATE TABLE b (bb TEXT) INHERITS (a) distribute by round robin;
 CREATE TABLE c (cc TEXT) INHERITS (a) distribute by round robin;
@@ -1051,7 +1050,6 @@ SELECT * from ONLY d ORDER BY d.aa;
 (0 rows)
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 -- Confirm PRIMARY KEY adds NOT NULL constraint to child table
 CREATE TEMP TABLE z (b TEXT, PRIMARY KEY(aa, b)) inherits (a);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "z_pkey" for table "z"

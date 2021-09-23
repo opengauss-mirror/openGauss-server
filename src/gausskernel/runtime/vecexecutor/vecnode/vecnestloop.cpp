@@ -23,8 +23,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeNestloop.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeNestloop.h"
 #include "utils/memutils.h"
 #include "utils/memprot.h"
 #include "vecexecutor/vecnodes.h"
@@ -473,7 +473,6 @@ VecNestLoopState* ExecInitVecNestLoop(VecNestLoop* node, EState* estate, int efl
     nlstate->js.joinqual = (List*)ExecInitVecExpr((Expr*)node->join.joinqual, (PlanState*)nlstate);
     Assert(node->join.nulleqqual == NIL);
 
-#ifdef ENABLE_LLVM_COMPILE
     /*
      * Check if nlstate->js.joinqual and nlstate->js.ps.qual expr list could be
      * codegened or not.
@@ -493,7 +492,6 @@ VecNestLoopState* ExecInitVecNestLoop(VecNestLoop* node, EState* estate, int efl
         if (nl_joinqual != NULL)
             llvm_code_gen->addFunctionToMCJit(nl_joinqual, reinterpret_cast<void**>(&(nlstate->jitted_joinqual)));
     }
-#endif
 
     /*
      * initialize child nodes

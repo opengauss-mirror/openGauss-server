@@ -18,7 +18,7 @@ import sys
 from configparser import ConfigParser
 
 from algorithm.diag import SQLDiag
-from utils import ResultSaver
+from utils import ResultSaver, is_valid_conf
 from preprocessing import LoadData, split_sql
 
 __version__ = '2.0.0'
@@ -58,6 +58,10 @@ def get_config(filepath):
 
 def main(args):
     logging.basicConfig(level=logging.WARNING)
+    if not is_valid_conf(args.config_file):
+        logging.fatal('The [--config-file] parameter is incorrect')
+        sys.exit(1)
+
     model = SQLDiag(args.model, get_config(args.config_file))
     if args.mode in ('train', 'finetune'):
         if not args.csv_file:

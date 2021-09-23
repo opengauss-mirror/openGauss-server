@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * fetch.c
- *    Functions for fetching files from PostgreSQL data directory
+ *    Functions for fetching files from openGauss data directory
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group

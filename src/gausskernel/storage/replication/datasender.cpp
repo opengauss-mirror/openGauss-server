@@ -58,7 +58,7 @@
 #include "replication/datasyncrep.h"
 #include "replication/catchup.h"
 #include "replication/walsender.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
@@ -145,11 +145,11 @@ int DataSenderMain(void)
 
     /* Set up resource owner */
     t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL,
-        "datasender top-level resource owner", MEMORY_CONTEXT_STORAGE);
+        "datasender top-level resource owner", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Let postmaster know that we're streaming. Once we've declared us as a
-     * Data sender process, postmaster will let us outlive the postgres and
+     * Data sender process, postmaster will let us outlive the openGauss and
      * kill us last in the shutdown sequence, so we get a chance to stream all
      * remaining data at shutdown.
      */

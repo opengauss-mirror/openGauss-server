@@ -71,11 +71,9 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define NUM_INSTANCE_REALTIME_PARTITIONS 32
 
 /* CSN log partitions */
-#define MAX_NUM_CSNLOG_PARTITIONS (LWLockPartInfo[CSNLOG_PART].maxNumPartition)
 #define NUM_CSNLOG_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[CSNLOG_PART])
 
-/* Clog partitions */
-#define MAX_NUM_CLOG_PARTITIONS (LWLockPartInfo[CLOG_PART].maxNumPartition)
+/* CLOG log paritions */
 #define NUM_CLOG_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[CLOG_PART])
 
 /* Twophase State partitions */
@@ -83,8 +81,7 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 
 /* Number of partitions the shared lock tables are divided into */
 #define LOG2_NUM_LOCK_PARTITIONS (g_instance.attr.attr_storage.num_internal_lock_partitions[LOG2_LOCKTABLE_PART])
-
-#define NUM_LOCK_PARTITIONS (1 << LOG2_NUM_LOCK_PARTITIONS)
+#define NUM_LOCK_PARTITIONS (1 << ((uint32)LOG2_NUM_LOCK_PARTITIONS))
 
 /* Number of partitions the shared predicate lock tables are divided into */
 #define LOG2_NUM_PREDICATELOCK_PARTITIONS 4
@@ -125,8 +122,11 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* Number of partions of the segment head buffer */
 #define NUM_SEGMENT_HEAD_PARTITIONS 128
 
+/* Number of partions the session roleid hashtable */
+#define NUM_SESSION_ROLEID_PARTITIONS 128
+
 #ifdef WIN32
-#define NUM_INDIVIDUAL_LWLOCKS           113
+#define NUM_INDIVIDUAL_LWLOCKS           113 /* num should be same as lwlockname.txt */
 #endif
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
@@ -167,9 +167,10 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 /* segment head */
 #define FirstSegmentHeadLock (FirstStartBlockMappingLock + NUM_STARTBLOCK_PARTITIONS)
 #define FirstTwoPhaseStateLock (FirstSegmentHeadLock + NUM_SEGMENT_HEAD_PARTITIONS)
-
+/* session roleid */
+#define FirstSessRoleIdLock (FirstTwoPhaseStateLock + NUM_SESSION_ROLEID_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstTwoPhaseStateLock + NUM_TWOPHASE_PARTITIONS)
+#define NumFixedLWLocks (FirstSessRoleIdLock + NUM_TWOPHASE_PARTITIONS)
 
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
@@ -222,6 +223,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_DW_SINGLE_WRITE,
     LWTRANCHE_REDO_POINT_QUEUE,
     LWTRANCHE_PRUNE_DIRTY_QUEUE,
+    LWTRANCHE_UNLINK_REL_TBL,
     LWTRANCHE_ACCOUNT_TABLE,
     LWTRANCHE_EXTEND, // For general 3rd plugin
     LWTRANCHE_MPFL,
@@ -235,6 +237,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_WAL_INIT_SEGMENT,
     LWTRANCHE_SEGHEAD_PARTITION,
     LWTRANCHE_TWOPHASE_STATE,
+    LWTRANCHE_ROLEID_PARTITION,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

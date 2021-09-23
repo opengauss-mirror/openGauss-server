@@ -53,6 +53,8 @@ extern bool yesno_prompt(const char* question);
 extern void setup_cancel_handler(void);
 
 extern char* pg_strdup(const char* string);
+extern char* GetEnvStr(const char* env);
+
 
 #endif /* COMMON_H */
 

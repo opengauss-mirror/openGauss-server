@@ -26,7 +26,7 @@
 
 #include <string.h>
 #include "client_logic/cstrings_map.h"
-#include "libpq-fe.h"
+#include "libpq/libpq-fe.h"
 
 /*
  * This class provides a basic framework for both the ColumnHookExecutor and the GlobalHookExecutor

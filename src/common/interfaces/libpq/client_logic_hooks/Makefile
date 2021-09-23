@@ -20,7 +20,8 @@ override CPPFLAGS := -DFRONTEND -DFRONTEND_PARSER -DPGXC -fstack-protector-all -
 override CPPFLAGS += -I$(top_builddir)/src/common/interfaces/libpq/ -I$(top_builddir)/src/include/libpq/ -I$(top_builddir)/src/include/libpq/client_logic_cache
 override CPPFLAGS += -I$(top_builddir)/src/common/interfaces/libpq/client_logic_hooks -I$(encryption_hooks_dir)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -lcjson -lcurl
 endif
 override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -shared
 override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -shared
@@ -31,17 +32,10 @@ OBJS=column_hook_executor.o hooks_manager.o global_hook_executor.o hooks_factory
 
 OBJS += $(hooks_files:.cpp=.o)
 encryption_hooks_files := $(shell find $(encryption_hooks_dir) -name '*.cpp' | sort)
-
 OBJS += $(encryption_hooks_files:.cpp=.o)
 
 include $(top_builddir)/src/Makefile.global
 include $(top_builddir)/src/Makefile.shlib
-
-ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-OBJS := $(filter-out localkms_gen_cmk.o, $(OBJS))
-else
-OBJS := $(filter-out gs_ktool_interface.o, $(OBJS))
-endif
 
 override CPPFLAGS := -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS)
 

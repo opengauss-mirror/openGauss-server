@@ -10,7 +10,7 @@
 #ifdef WIN32
 #define MAX_PATH 256
 #endif
-
+#ifndef _MINGW32
 struct dirent {
     long d_ino;
     unsigned short d_reclen;
@@ -23,5 +23,5 @@ typedef struct DIR DIR;
 DIR* opendir(const char*);
 struct dirent* readdir(DIR*);
 int closedir(DIR*);
-
+#endif
 #endif

@@ -982,8 +982,7 @@ List* AlterTableSetRedistribute(Relation rel, RedisRelAction action, char *merge
     isCUFormat = RelationIsCUFormat(rel);
 
     switch (action) {
-        case REDIS_REL_APPEND:
-        case REDIS_REL_END_CATCHUP: {
+        case REDIS_REL_APPEND: {
             if (RELATION_IS_PARTITIONED(rel)) {
                 rel_options =
                     lappend(rel_options, makeDefElem(pstrdup("append_mode_internal"), (Node*)makeInteger(action)));
@@ -1071,27 +1070,6 @@ List* AlterTableSetRedistribute(Relation rel, RedisRelAction action, char *merge
                 lappend(rel_options, makeDefElem(pstrdup("append_mode_internal"), (Node*)makeInteger(action)));
             break;
         }
-        case REDIS_REL_REFRESH: {
-            /* start_ctid = (0,0) */
-            if (isCUFormat)
-                ItemPointerSet(&start_ctid, FirstCUID + 1, 0);
-            else
-                ItemPointerSet(&start_ctid, 0, 0);
-
-            /*  end_ctid = max_ctid; */
-            if (IS_PGXC_DATANODE) {
-                if (isCUFormat)
-                    col_get_max_tid(rel, &end_ctid);
-                else
-                    heap_get_max_tid(rel, &end_ctid);
-            } else {
-                ItemPointerSet(&end_ctid, 0, 0);
-            }
-
-            rel_options = add_ctid_string_to_reloptions(rel_options, "start_ctid_internal", &start_ctid);
-            rel_options = add_ctid_string_to_reloptions(rel_options, "end_ctid_internal", &end_ctid);
-            break;
-        }
         case REDIS_REL_RESET_CTID: {
             /*
              * 1. start_ctid = (0,0)
@@ -1104,7 +1082,6 @@ List* AlterTableSetRedistribute(Relation rel, RedisRelAction action, char *merge
                 ItemPointerSet(&start_ctid, 0, 0);
                 ItemPointerSet(&end_ctid, 0, 0);
             }
-
             rel_options = add_ctid_string_to_reloptions(rel_options, "start_ctid_internal", &start_ctid);
             rel_options = add_ctid_string_to_reloptions(rel_options, "end_ctid_internal", &end_ctid);
             break;
@@ -1161,14 +1138,10 @@ void CheckRedistributeOption(List* options, Oid* rel_cn_oid, RedisHtlAction* act
             char* mode_options = defGetString(def);
             if (pg_strcasecmp(mode_options, "on") == 0)
                 *action = REDIS_REL_APPEND;
-            else if (pg_strcasecmp(mode_options, "refresh") == 0)
-                *action = REDIS_REL_REFRESH;
             else if (pg_strcasecmp(mode_options, "off") == 0)
                 *action = REDIS_REL_NORMAL;
             else if (pg_strcasecmp(mode_options, "read_only") == 0)
                 *action = REDIS_REL_READ_ONLY;
-            else if (pg_strcasecmp(mode_options, "end_catchup") == 0)
-                *action = REDIS_REL_END_CATCHUP;
             else
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -1312,3 +1285,9 @@ ItemPointer eval_redis_func_direct_slice(ItemPointer start_ctid, ItemPointer end
     return NULL;
 }
 
+void reset_merge_list_on_pgxc_class(Relation rel) 
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return;
+}

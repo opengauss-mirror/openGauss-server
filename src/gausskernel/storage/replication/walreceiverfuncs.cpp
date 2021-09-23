@@ -28,12 +28,14 @@
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
 #include "access/xlog_internal.h"
+#include "access/multi_redo_api.h"
 #include "postmaster/startup.h"
 #include "postmaster/postmaster.h"
 #include "replication/dataqueue.h"
 #include "replication/replicainternal.h"
 #include "replication/walreceiver.h"
 #include "replication/slot.h"
+#include "replication/dcf_replication.h"
 #include "storage/pmsignal.h"
 #include "storage/shmem.h"
 #include "utils/guc.h"
@@ -53,6 +55,7 @@
  */
 extern bool dummyStandbyMode;
 
+
 static void SetWalRcvConninfo(ReplConnTarget conn_target);
 static void SetFailoverFailedState(void);
 extern void SetDataRcvDummyStandbySyncPercent(int percent);
@@ -63,6 +66,36 @@ extern void SetDataRcvDummyStandbySyncPercent(int percent);
  */
 #define WALRCV_STARTUP_TIMEOUT 3
 #define FAILOVER_HOST_FOR_DUMMY "failover_host_for_dummy"
+
+bool walRcvCtlBlockIsEmpty(void)
+{
+    volatile WalRcvCtlBlock *walrcb = NULL;
+
+    LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
+    walrcb = getCurrentWalRcvCtlBlock();
+
+    if (walrcb == NULL) {
+        LWLockRelease(WALWriteLock);
+        return true;
+    }
+
+    bool retState = false;
+
+    SpinLockAcquire(&walrcb->mutex);
+    if (IsExtremeRedo()) {
+        if (walrcb->walFreeOffset == walrcb->walReadOffset) {
+            retState = true;
+        }
+    } else {
+        if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
+            retState = true;
+        }
+    }
+
+    SpinLockRelease(&walrcb->mutex);
+    LWLockRelease(WALWriteLock);
+    return retState;
+}
 
 /*
  * reference SetWalRcvConninfo
@@ -179,8 +212,6 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         walrcv->conninfo[MAXCONNINFO - 1] = '\0';
         walrcv->conn_errno = NONE_ERROR;
         walrcv->conn_target = conn_target;
-        walrcv->conn_channel.localservice = conninfo->localservice;
-        walrcv->conn_channel.remoteservice = conninfo->remoteservice;
         SpinLockRelease(&walrcv->mutex);
 
         SpinLockAcquire(&hashmdata->mutex);
@@ -335,6 +366,7 @@ void KillWalRcvWriter(void)
     volatile WalRcvData *walRcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     ThreadId writerPid;
     int i = 1;
+
     /*
      * Shutdown WalRcvWriter thread.
      */
@@ -345,11 +377,13 @@ void KillWalRcvWriter(void)
         (void)gs_signal_send(writerPid, SIGTERM);
     }
     ereport(LOG, (errmsg("waiting walrcvwriter: %lu terminate", writerPid)));
+
     while (writerPid) {
         pg_usleep(10000L);    /* sleep 0.01s */
         SpinLockAcquire(&walRcv->mutex);
         writerPid = walRcv->writerPid;
         SpinLockRelease(&walRcv->mutex);
+
         if ((writerPid != 0) && (i % 2000 == 0)) {
             if (gs_signal_send(writerPid, SIGTERM) != 0) {
                 ereport(WARNING, (errmsg("walrcvwriter:%lu may be terminated", writerPid)));
@@ -394,6 +428,11 @@ void ShutdownWalRcv(void)
     }
     SpinLockRelease(&walrcv->mutex);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf && t_thrd.dcf_cxt.dcfCtxInfo != nullptr)
+        t_thrd.dcf_cxt.dcfCtxInfo->isWalRcvReady = false;
+#endif
+
     ereport(LOG, (errmsg("startup shut down walreceiver.")));
     /*
      * Signal walreceiver process if it was still running.
@@ -435,7 +474,8 @@ void ShutdownWalRcv(void)
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
     knl_g_disconn_node_context_data disconn_node =
-        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+	g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
         ereport(LOG, (errmsg("Stop to start walreceiver in disable connect mode")));
         return;

@@ -118,7 +118,7 @@ create unique index on hw_partition_index_ip (logdate) local
 );
 
 create unique index on hw_partition_index_ip (logdate);
---fail wrong syntax
+--succeed
 
 drop table hw_partition_index_ip;
 

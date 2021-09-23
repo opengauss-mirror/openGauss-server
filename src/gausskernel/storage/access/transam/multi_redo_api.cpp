@@ -110,6 +110,10 @@ void DispatchRedoRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz
     } else if (IsParallelRedo()) {
         parallel_recovery::DispatchRedoRecordToFile(record, expectedTLIs, recordXTime);
     } else {
+        uint32 term = XLogRecGetTerm(record);
+        if (term > g_instance.comm_cxt.localinfo_cxt.term_from_xlog) {
+            g_instance.comm_cxt.localinfo_cxt.term_from_xlog = term;
+        }
         parallel_recovery::ApplyRedoRecord(record, t_thrd.xlog_cxt.redo_oldversion_xlog);
         if (XLogRecGetRmid(record) == RM_XACT_ID)
             SetLatestXTime(recordXTime);

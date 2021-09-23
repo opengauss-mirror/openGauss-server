@@ -54,6 +54,7 @@
 #include "utils/resowner.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "libpq/md5.h"
 
 /*
  * Given a hash value and the size of the hash table, find the bucket
@@ -376,7 +377,6 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
             v4 = (cc_keyno[3] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &isNull);
             Assert(!isNull);
-            /* FALLTHROUGH */
         case 3:
             v3 = (cc_keyno[2] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[2], cc_tupdesc, &isNull);
@@ -1046,7 +1046,6 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
 {
     if (cache->cc_tupdesc == NULL)
         CatalogCacheInitializeCache(cache);
-
     /*
      * If the relcache of the underneath catalog has not been built,
      * nor can that of its index.
@@ -1128,7 +1127,6 @@ static bool IndexScanOK(CatCache* cache, ScanKey cur_skey)
             if (!u_sess->relcache_cxt.criticalSharedRelcachesBuilt)
                 return false;
             break;
-
         default:
             break;
     }
@@ -1945,6 +1943,7 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     namestrcpy(&procname, func->funcName);
     values[Anum_pg_proc_proname - 1] = NameGetDatum(&procname);
     values[Anum_pg_proc_pronamespace - 1] = ObjectIdGetDatum(func->pronamespace);
+    values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(func->propackageid);
     values[Anum_pg_proc_proowner - 1] = ObjectIdGetDatum(func->proowner);
     values[Anum_pg_proc_prolang - 1] = ObjectIdGetDatum(func->prolang);
     values[Anum_pg_proc_procost - 1] = Float4GetDatum(func->procost);
@@ -1961,8 +1960,22 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
     values[Anum_pg_proc_pronargs - 1] = UInt16GetDatum(parameterCount);
     values[Anum_pg_proc_pronargdefaults - 1] = UInt16GetDatum(func->pronargdefaults);
     values[Anum_pg_proc_prorettype - 1] = ObjectIdGetDatum(func->rettype);
-    values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(parameterTypes);
+    if (parameterCount <= FUNC_MAX_ARGS_INROW) {
+        nulls[Anum_pg_proc_proargtypesext - 1] = true;
+        values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(parameterTypes);
+    } else {
+        char hex[MD5_HASH_LEN + 1];
+        if (!pg_md5_hash((void*)parameterTypes->values, parameterTypes->dim1 * sizeof(Oid), hex)) {
+            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        }
+
+        /* Build a dummy oidvector using the hash value and use it as proargtypes field value. */
+        oidvector* dummy = buildoidvector((Oid*)hex, MD5_HASH_LEN / sizeof(Oid));
+        values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(dummy);
+        values[Anum_pg_proc_proargtypesext - 1] = PointerGetDatum(parameterTypes);
+    }
     values[Anum_pg_proc_prokind - 1] = CharGetDatum(func->prokind);
+    values[Anum_pg_proc_proisprivate - 1] = BoolGetDatum(func->proisprivate);
 
     if (allParameterTypes != PointerGetDatum(NULL)) {
         values[Anum_pg_proc_proallargtypes - 1] = allParameterTypes;
@@ -1984,10 +1997,17 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
 
     if (func->proargdefaults != NULL) {
         values[Anum_pg_proc_proargdefaults - 1] = CStringGetTextDatum(func->proargdefaults);
-        values[Anum_pg_proc_prodefaultargpos - 1] = PointerGetDatum(defargpos);
+        if (parameterCount <= FUNC_MAX_ARGS_INROW) {
+            values[Anum_pg_proc_prodefaultargpos - 1] = PointerGetDatum(defargpos);
+            nulls[Anum_pg_proc_prodefaultargposext - 1] = true;
+        } else {
+            values[Anum_pg_proc_prodefaultargposext - 1] = PointerGetDatum(defargpos);
+            nulls[Anum_pg_proc_prodefaultargpos - 1] = true;
+        }
     } else {
         nulls[Anum_pg_proc_proargdefaults - 1] = true;
         nulls[Anum_pg_proc_prodefaultargpos - 1] = true;
+        nulls[Anum_pg_proc_prodefaultargposext - 1] = true;
     }
 
     values[Anum_pg_proc_prosrc - 1] = CStringGetTextDatum(func->prosrc);
@@ -2034,6 +2054,12 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
         Relation rel = heap_open(ProcedureRelationId, AccessShareLock);
         tupDesc = RelationGetDescr(rel);
         heap_close(rel, AccessShareLock);
+    }
+
+    if (func->proargsrc != NULL) {
+        values[Anum_pg_proc_proargsrc - 1] = CStringGetTextDatum(func->proargsrc);
+    } else {
+        nulls[Anum_pg_proc_proargsrc - 1] = true;
     }
 
     /* create tuple */
@@ -2219,7 +2245,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(33, false, TAM_HEAP);
+    TupleDesc tupdesc = CreateTemplateTupleDesc(38, false, TAM_HEAP);
 
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
@@ -2253,7 +2279,12 @@ TupleDesc CreateTupDesc4BuiltinFuncWithOid()
     TupleDescInitEntry(tupdesc, (AttrNumber)30, "proshippable", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)31, "propackage", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)32, "prokind", CHAROID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)33, "oid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)33, "proargsrc", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)34, "propackageid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)35, "proisprivate", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)36, "proargtypesext", OIDVECTOREXTENDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)37, "prodefaultargposext", INT2VECTOREXTENDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)38, "oid", OIDOID, -1, 0);
 
     return tupdesc;
 }
@@ -2706,7 +2737,7 @@ static CatCTup* CatalogCacheCreateEntry(
             bool isnull = false;
 
             atp = heap_getattr(&ct->tuple, cache->cc_keyno[i], cache->cc_tupdesc, &isnull);
-            Assert(!isnull);
+            Assert(!isnull); 
             ct->keys[i] = atp;
         }
     } else {

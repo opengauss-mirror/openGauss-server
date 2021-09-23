@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * gininsert.cpp
- *	  insert routines for the postgres inverted index access method.
+ *	  insert routines for the openGauss inverted index access method.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -26,7 +26,7 @@
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/indexfsm.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -391,7 +391,7 @@ Datum ginbuild(PG_FUNCTION_ARGS)
      * Do the heap scan.  We disallow sync scan here because dataPlaceToPage
      * prefers to receive tuples in TID order.
      */
-    reltuples = tableam_index_build_scan(heap, index, indexInfo, false, ginBuildCallback, (void*)&buildstate);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, false, ginBuildCallback, (void*)&buildstate, NULL);
 
     /* dump remaining entries to the index */
     oldCtx = MemoryContextSwitchTo(buildstate.tmpCtx);

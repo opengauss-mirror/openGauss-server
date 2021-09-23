@@ -40,7 +40,6 @@
 #include <time.h>
 #include "securec.h"
 #include "securec_check.h"
-
 /******************************* declare macro **********************************/
 #define TARGET_EXTENTION_NAME_CPP "cpp"
 #define TARGET_EXTENTION_NAME_L "l"
@@ -51,8 +50,14 @@
 #define ERRMSG_COMP_RESULT_FILENAME "errmsg_result.txt"
 #define ERRMSG_FORMAT_OUTPUT_FILENAME_EXT "errmsg_distinct.txt"
 #define ERRMSG_LOG_FILENAME "errmsg.log"
-#define INFOMSG_FORMAT_OUTPUT_FILENAME "infomsg.txt"
-
+#define ERRMSG_FORMAT_OUTPUT_FILENAME_DISTRIBUTE "distribute_errmsg.txt"
+#define ERRMSG_NEW_FILENAME_DISTRIBUTE "distribute_errmsg_new.txt"
+#define ERRMSG_OLD_FILENAME_DISTRIBUTE "distribute_errmsg_old.txt"
+#define ERRMSG_COMP_RESULT_FILENAME_DISTRIBUTE "distribute_errmsg_result.txt"
+#define ERRMSG_FORMAT_OUTPUT_FILENAME_EXT_DISTRIBUTE "distribute_errmsg_distinct.txt"
+#define ERRMSG_LOG_FILENAME_DISTRIBUTE "distribute_errmsg.log"
+#define EREPORT_SCAN_NAME "ereport scan"
+#define DISTRIBUTE_EREPORT_SCAN_NAME "distribute ereport scan"
 #define STATE_DIR_TYPE ((int)(1))
 #define STATE_FILE_TYPE ((int)(2))
 #define STATE_OTHER_TYPE ((int)(0))
@@ -70,6 +75,8 @@
 #define ERPARA_TYPE_ERRDETAIL "errdetail"
 #define ERPARA_TYPE_ERRDETAILLOG "errdetail_log"
 #define ERPARA_TYPE_ERRHINT "errhint"
+#define ERPARA_TYPE_ERRCAUSE "errcause"
+#define ERPARA_TYPE_ERRACTION "erraction"
 
 #define ERRPROC_FUNC_EREPORT ((int)(1))
 #define ERRPROC_FUNC_ELOG ((int)(2))
@@ -80,9 +87,30 @@
 #define OP_TYPE_UPDATE ((int)(3))
 #define OP_TYPE_INCOMPLETE ((int)(4))
 
+#define MSG_NO_ERRMODULE ((int)(1))
+#define MSG_NO_ERRCODE ((int)(2))
+#define MSG_NO_ERRDETAIL ((int)(4))
+#define MSG_NO_ERRCAUSE ((int)(8))
+#define MSG_NO_ERRACTION ((int)(16))
+
 #define GAUSSDB_HEADERFILE_FLAG ((int)(1))
 #define GSQLERR_HEADERFILE_FLAG ((int)(2))
-
+#define ENABLE_PRINT_FILE_NAME ((int)(1))
+#define INVALID_ERROR_CAUSE "\"invalid\""
+#define INVALID_ERROR_ACTION "\"invalid\""
+#define IS_IMCOMPLETE_MESSAGE(errMsgItem) \
+    (errMsgItem->cSqlState == NULL || errMsgItem->stErrmsg.cause == NULL || \
+    errMsgItem->stErrmsg.action == NULL || errMsgItem->stErrmsg.cause == NULL || \
+    strcmp(errMsgItem->stErrmsg.action, INVALID_ERROR_ACTION) == 0 || \
+    strcmp(errMsgItem->stErrmsg.cause, INVALID_ERROR_CAUSE) ==0)
+#define IS_EMPTY_STRING(str) \
+    (str == NULL || str[0] == '\0')
+#define ENABLE_SCAN 0
+#define IS_EQUAL_STR(str1, str2) \
+    (strcmp(str1, str2) == 0)
+#define IS_ERROR_MESSAGE(errLevel) \
+    (errLevel != NULL && (strcmp(errLevel, "ERROR") == 0 || \
+    strcmp(errLevel, "FATAL") == 0 || strcmp(errLevel, "PANIC") == 0))
 /******************************* type define **************************/
 typedef struct ERPARA {
     char EpLevel[STRING_MAX_LEN];
@@ -92,6 +120,8 @@ typedef struct ERPARA {
     char EpDetail[STRING_MAX_LEN];
     char EpDetailLog[STRING_MAX_LEN];
     char EpHint[STRING_MAX_LEN];
+    char EpCause[STRING_MAX_LEN];
+    char EpAction[STRING_MAX_LEN];
 } ERPARA_INFO_T;
 
 /* the location of generate error message */
@@ -116,7 +146,7 @@ typedef struct {
     mppdb_detail_errmsg_t stErrmsg;                            /* detail error message of the error code */
     char ucOpFlag;
 } mppdb_err_msg_t;
-
+int checkErrMsgIncomplete(const char* parent, const char *input_file_path);
 /******************************* delare and init global variable *************************/
 /* read line from file to buffer */
 static char g_acBuf[16384] = {0};
@@ -132,14 +162,14 @@ long g_lErrMsgFileLineNum = 0;
 unsigned long g_ulErrMsgNum = 0;
 unsigned long g_ulErrMsgOldNum = 0;
 unsigned long g_ulErrMsgReadOldNum = 0;
-static int g_CheckFlag = 0;
 
 mppdb_err_msg_t* g_stErrMsg = NULL;
 mppdb_err_msg_t* g_stErrMsgOld = NULL;
 
 static char* g_scGaussdbHdfile = (char*)"errmsg.h";
 static char* g_scGsqlerrHdfile = (char*)"gsqlerr_errmsg.h";
-
+int g_Check_ErrMsgCompare = 0;
+int g_Check_ErrMsgStandard = 0;
 /******************************* declare function prototype ****************************/
 extern void getProgdir(const char* argv0);
 extern int getStatType(char* fileName);
@@ -147,7 +177,7 @@ extern int scanDir(const char* parent, const char* input_file_path, const char* 
 extern int fileprocess(char* dir, char* szFileName, int check_flag);
 extern int parseEpPara(char* szLine, ERPARA_INFO_T* pstOutErPara, int funcflag, int check_flag);
 extern int parseEreport(char* szLine, ERPARA_INFO_T* pstOutErPara, int check_flag);
-extern int parseElog(char* szLine, ERPARA_INFO_T* pstOutErPara);
+extern int parseElog(char* szLine, ERPARA_INFO_T* pstOutErPara, int check_flag);
 extern char* getSqlStateByMacro(char* ErrnoMacro);
 extern int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno);
 extern int readErrmsgFile();
@@ -158,7 +188,20 @@ extern int compareErrmsg();
 extern int outputCompResult();
 void releaseMem(void);
 int outputLog(FILE* logfile, bool isCloseFd, const char* format, ...) __attribute__((format(printf, 3, 4)));
-
+int outputLogAndScreen(FILE* logfile, bool isCloseFd, const char* format, ...) __attribute__((format(printf, 3, 4)));
+static char* input_path_check = NULL;
+static char* parent = NULL;
+static char* input_path = NULL;
+static char errmsg_format_output_filename[FILE_NAME_MAX_LEN];
+static char errmsg_new_filename[FILE_NAME_MAX_LEN];
+static char errmsg_old_filename[FILE_NAME_MAX_LEN];
+static char errmsg_comp_results_filename[FILE_NAME_MAX_LEN];
+static char errmsg_format_output_filename_ext[FILE_NAME_MAX_LEN];
+static char errmsg_log_filename[FILE_NAME_MAX_LEN];
+static char app_name[FILE_NAME_MAX_LEN];
+void parseOutputParam(int argc,  char* argv[]);
+int checkErrMsgItem(const char* errmodule, ERPARA_INFO_T* pstOutErPara);
+int checkDebugMsgItem(const char* errmodule);
 /******************************* realize function ************************************/
 int main(int argc, char* argv[])
 {
@@ -175,14 +218,14 @@ int main(int argc, char* argv[])
     int rc = -1;
     int rc_check = -1;
 
-    if (1 >= argc) {
+    if (4 > argc) {
         return outputLog(NULL, false, "argc error.\n");
     }
 
     if ((NULL == argv) || (NULL == argv[1]) || (NULL == argv[2]) || (NULL == argv[4])) {
         return outputLog(NULL, false, "argv[1] or argv[2] or argv[4] is null.\n");
     }
-
+    parseOutputParam(argc, argv);
     /* get program directory */
     getProgdir(argv[0]);
     if (NULL == g_sProgDir) {
@@ -209,7 +252,7 @@ int main(int argc, char* argv[])
     }
 
     /* create the log file  */
-    rc = sprintf_s(logfilename, sizeof(logfilename), "%s/%s", g_sCurDir, ERRMSG_LOG_FILENAME);
+    rc = sprintf_s(logfilename, sizeof(logfilename), "%s/%s", g_sCurDir, errmsg_log_filename);
     securec_check_ss_c(rc, "\0", "\0");
     logfile = fopen(logfilename, "w");
     if (logfile == NULL) {
@@ -256,7 +299,7 @@ int main(int argc, char* argv[])
     }
 
     /* get scan dir */
-    char *parent = realpath(argv[1], NULL);
+    parent = realpath(argv[1], NULL);
     if (NULL == parent) {
         return outputLog(NULL, false, "call resolved_path:%s get resolved_name error.\n", argv[1]);
     }
@@ -264,7 +307,7 @@ int main(int argc, char* argv[])
     char tmp_str[MAXPATH];
     rc = sprintf_s(tmp_str, sizeof(tmp_str), "%s/%s", argv[1], argv[2]);
     securec_check_ss_c(rc, "\0", "\0");
-    char *input_path = realpath(tmp_str, NULL);
+    input_path = realpath(tmp_str, NULL);
     if (NULL == input_path) {
         return outputLog(NULL, false, "call resolved_path:%s/%s get resolved_name error.\n", argv[1], argv[2]);
     }
@@ -272,16 +315,12 @@ int main(int argc, char* argv[])
     char tmp_str_check[MAXPATH];
     rc_check = sprintf_s(tmp_str_check, sizeof(tmp_str_check), "%s/%s", argv[1], argv[4]);
     securec_check_ss_c(rc_check, "\0", "\0");
-    char *input_path_check = realpath(tmp_str_check, NULL);
+    input_path_check = realpath(tmp_str_check, NULL);
     if (NULL == input_path_check) {
         return outputLog(NULL, false, "call resolved_path:%s/%s get resolved_name error.\n", argv[1], argv[4]);
     }
-
     /* scan all files from root recursive */
     lRet = scanDir(parent, input_path, input_path_check);
-    free(input_path_check);
-    free(parent);
-    free(input_path);
     if (0 != lRet) {
         releaseMem();
         return outputLog(logfile, true, "call scanDir scan file:%s fail.\n", input_path);
@@ -293,7 +332,6 @@ int main(int argc, char* argv[])
         releaseMem();
         return outputLog(logfile, true, "call compareErrmsg fail.\n");
     }
-
     /* output the compare result */
     lRet = outputCompResult();
     if (0 != lRet) {
@@ -325,15 +363,54 @@ int main(int argc, char* argv[])
     lRet = getErrmsgResult();
     if (0 != lRet) {
         releaseMem();
-        return outputLog(logfile, true, "call getErrmsgResult fail.\n");
+        return outputLogAndScreen(logfile, true, "call getErrmsgResult fail.\n");
     }
-
-    fprintf(logfile, "\nScan have finished! \n");
+    if (g_Check_ErrMsgStandard) {
+        (void)outputLogAndScreen(logfile, false, "%s detect unstandarded message in code file!\n", app_name);
+    }
+    if ((g_Check_ErrMsgStandard != 0) && ENABLE_SCAN) {
+        releaseMem();
+        return outputLogAndScreen(logfile, true, "%s has failed!\n", app_name);
+    }
+    outputLogAndScreen(logfile, false, "%s has finished!\n", app_name);
     fclose(logfile);
     releaseMem();
     return 0;
 }
-
+void parseOutputParam(int argc,  char* argv[]) {
+    int rc = 0;
+    if (argv[5] == NULL) {
+        rc = sprintf_s(errmsg_format_output_filename, sizeof(errmsg_format_output_filename), "%s", ERRMSG_FORMAT_OUTPUT_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_new_filename, sizeof(errmsg_new_filename), "%s", ERRMSG_NEW_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_old_filename, sizeof(errmsg_old_filename), "%s", ERRMSG_OLD_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_comp_results_filename, sizeof(errmsg_comp_results_filename), "%s", ERRMSG_COMP_RESULT_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_format_output_filename_ext, sizeof(errmsg_format_output_filename_ext), "%s", ERRMSG_FORMAT_OUTPUT_FILENAME_EXT);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_log_filename, sizeof(errmsg_log_filename), "%s", ERRMSG_LOG_FILENAME);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(app_name, sizeof(app_name), "%s", EREPORT_SCAN_NAME);
+        securec_check_ss_c(rc, "\0", "\0");
+    } else {
+        rc = sprintf_s(errmsg_format_output_filename, sizeof(errmsg_format_output_filename), "./../../../../%s", ERRMSG_FORMAT_OUTPUT_FILENAME_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_new_filename, sizeof(errmsg_new_filename), "%s", ERRMSG_NEW_FILENAME_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_old_filename, sizeof(errmsg_old_filename), "%s", ERRMSG_OLD_FILENAME_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_comp_results_filename, sizeof(errmsg_comp_results_filename), "%s", ERRMSG_COMP_RESULT_FILENAME_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_format_output_filename_ext, sizeof(errmsg_format_output_filename_ext), "%s", ERRMSG_FORMAT_OUTPUT_FILENAME_EXT_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(errmsg_log_filename, sizeof(errmsg_log_filename), "%s", ERRMSG_LOG_FILENAME_DISTRIBUTE);
+        securec_check_ss_c(rc, "\0", "\0");
+        rc = sprintf_s(app_name, sizeof(app_name), "%s", DISTRIBUTE_EREPORT_SCAN_NAME);
+        securec_check_ss_c(rc, "\0", "\0");
+    }
+}
 void releaseMem(void)
 {
     if (NULL != g_stErrMsg) {
@@ -361,7 +438,18 @@ void releaseMem(void)
         free(g_stErrMsgOld);
         g_stErrMsgOld = NULL;
     }
-
+    if (input_path_check != NULL) {
+        free(input_path_check);
+        input_path_check = NULL;
+    }
+    if (parent != NULL) {
+        free(parent);
+        parent = NULL;
+    }
+    if (input_path != NULL) {
+        free(input_path);
+        input_path = NULL;
+    }
     return;
 }
 
@@ -388,6 +476,22 @@ int outputLog(FILE* logfd, bool isCloseFd, const char* format, ...)
     return -1;
 }
 
+int outputLogAndScreen(FILE* logfd, bool isCloseFd, const char* format, ...) {
+    char msg[MSGLEN] = {'0'};
+    va_list args;
+    (void)va_start(args, format);
+    int ss_rc = vsprintf_s(msg, MSGLEN, format, args);
+    securec_check_ss_c(ss_rc, "\0", "\0");
+    va_end(args);
+    if (NULL != logfd) {
+        fprintf(logfd, "%s", msg);
+        if (true == isCloseFd)
+            fclose(logfd);
+    }
+    printf("%s", msg);
+    return -1;
+
+}
 /*
  * Extracts the actual name of the program as called -
  * stripped of .exe suffix if any
@@ -597,28 +701,36 @@ static FileInfo *leadSortedScanFiles(const char* parent, const char *input_file_
     return file_infos;
 }
 
+void releaseFileInfos(FileInfo *file_infos, int size)
+{
+    for (int i = 0; i < size; i++) {
+        FileInfo *file_info = file_infos + i;
+        char *file_name = file_info->file;
+        char *dir = file_info->dir;
+        free(file_name);
+        free(dir);
+    }
+    free(file_infos);
+}
+
 /* scan directory recursive, find *.cpp and *.l file */
 int scanDir(const char* parent, const char* input_file_path, const char* input_path_check)
-{   
+{
     int size = 0;
     int size_check = 0;
-    int is_failed = 0;
     FileInfo *file_infos = leadSortedScanFiles(parent, input_file_path, &size);
     if (file_infos == NULL) {
         return -1;
     }
-
+    FileInfo *file_check_infos = leadSortedScanFiles(parent, input_path_check, &size_check);
+    if (file_check_infos == NULL) {
+        releaseFileInfos(file_infos, size);
+        return -1;
+    }
     /* scan sub directory recursive */
     for (int i = 0; i < size; i++) {
-        FileInfo * file_info = file_infos + i;
-        FileInfo *file_check_infos = leadSortedScanFiles(parent, input_path_check, &size_check);
-        if (file_check_infos == NULL) {
-            free(file_info->file);
-            free(file_info->dir);
-            is_failed = 1;
-            continue;
-        }
         int check_flag = 1;
+        FileInfo * file_info = file_infos + i;
         char *file_name = file_info->file;
         char *dir = file_info->dir;
         /* entry current dir */
@@ -627,50 +739,53 @@ int scanDir(const char* parent, const char* input_file_path, const char* input_p
         int rc = sprintf_s(path, sizeof(path), "%s/%s", dir, file_name);
         securec_check_ss_c(rc, "\0", "\0");
         if (STATE_FILE_TYPE != getStatType(path)) {
-            free(file_name);
-            free(dir);
             continue;
         }
         for (int j = 0; j < size_check; j++) {
             FileInfo *file_check_info = file_check_infos + j;
             char *file_check_name = file_check_info->file;
             char *dir_check = file_check_info->dir;
-            if (check_flag == 0) {
-                free(file_check_name);
-                free(dir_check);
-                continue;
-            }
-            (void)chdir(dir_check);
             char path_check[MAXPATH] = {0};
             int rc_check = sprintf_s(path_check, sizeof(path_check), "%s/%s", dir_check, file_check_name);
             securec_check_ss_c(rc_check, "\0", "\0");
             if (STATE_FILE_TYPE != getStatType(path_check)) {
-                free(file_check_name);
-                free(dir_check);
                 continue;
             }
             if (0 == strcmp(path, path_check)) {
                 check_flag = 0;
+                break;
             }
-            free(file_check_name);
-            free(dir_check);
         }
         /* open file/parse file */
         if (0 == fileprocess(dir, file_name, check_flag)) {
             (void)fprintf(logfile, "Scan and process file:%s/%s success.\n", dir, file_name);
         }
-        free(file_name);
-        free(dir);
-        free(file_check_infos);
     }
-    free(file_infos);
-    if (is_failed == 1) {
-        return -1;
-    } else {
-        return 0;
-    }
+    releaseFileInfos(file_infos, size);
+    releaseFileInfos(file_check_infos, size_check);
+    return 0;
 }
+void checkErrMsg(const char* fileName, int lineno, const ERPARA_INFO_T* errInfo, int checkFlag) {
+    if (checkFlag == 0) {
+        return;
+    }
+    if (checkFlag & MSG_NO_ERRMODULE) {
+        outputLog(logfile, false, "The errmsg: %s has no errmodule file: %s lineo: %d\n", errInfo->EpMsg, fileName, lineno);
+    }
+    if (checkFlag & MSG_NO_ERRCODE) {
+        outputLog(logfile, false, "The errmsg: %s has no errcode file: %s lineo: %d\n", errInfo->EpMsg, fileName, lineno);
+    }
+    if (checkFlag & MSG_NO_ERRDETAIL) {
+        outputLog(logfile, false, "The errmsg: %s has no errdetail file: %s lineo: %d \n", errInfo->EpMsg, fileName, lineno);
+    }
+    if (checkFlag & MSG_NO_ERRCAUSE) {
+        outputLog(logfile, false, "The errmsg: %s has no errcause file: %s lineo: %d \n", errInfo->EpMsg, fileName, lineno);
+    }
+    if (checkFlag & MSG_NO_ERRACTION) {
+        outputLog(logfile, false, "The errmsg: %s has no erraction file: %s lineo: %d \n", errInfo->EpMsg, fileName, lineno);
+    }
 
+}
 /* process function ereport or elog */
 int fileprocess(char* dir, char* szFileName, int check_flag)
 {
@@ -805,13 +920,11 @@ int fileprocess(char* dir, char* szFileName, int check_flag)
         }
 
         /* parse error msg in ereport or elog */
-        if (0 == (parseEpPara(acTmpBuf, &stErPara, funcflag, check_flag))) {
+        int checkFlag = parseEpPara(acTmpBuf, &stErPara, funcflag, check_flag); 
+        if (checkFlag != -1) {
             /* save new scan errmsg */
-            if (g_CheckFlag) {
-                fclose(file);
-                return -1;
-            }
             (void)saveErrMsg((char*)&stErPara, dir, szFileName, lineno);
+            checkErrMsg(szFileName, lineno, &stErPara, checkFlag);
         }
 
         len = 0;
@@ -906,19 +1019,86 @@ void optimize_mutiblock(char* pErrmsg)
     return;
 }
 
+int parseContent(char* szLine, char *content, char * contentType) {
+    errno_t rc = memset_s(content, STRING_MAX_LEN, 0, STRING_MAX_LEN);
+    securec_check_c(rc, "\0", "\0");
+    char* pStart = strstr(szLine, contentType);
+    char* pEnd = NULL;
+    int msglen = 0;
+    /* only parse errmsg except errmsg_internel/errmsg_plural */
+    if ((pStart != NULL) && (*(pStart + strlen(contentType) + 1) != '_')) {
+        /* there has no string in errmsg */
+        if (0 != memcmp(pStart + strlen(contentType), "(\"", strlen("(\""))) {
+            return -1;
+        }
+        pStart = strchr(pStart, '(');
+        if ((pStart != NULL) && ((pStart + 1) != NULL)) {
+            /* optimize muti block */
+            optimize_mutiblock(pStart);
+
+            /* the errmsg has some parameter */
+            pEnd = strstr(pStart, "\",");
+            if (pEnd != NULL) {
+                rc = memcpy_s(content, STRING_MAX_LEN, pStart + 1, pEnd - (pStart + 1) + 1);
+                securec_check_c(rc, "\0", "\0");
+
+                pStart = content;
+                pEnd = strstr(pStart, "\")");
+                if (pEnd != NULL) {
+                    msglen = (pEnd - pStart) + 1;
+                    rc = memset_s((void*)&content[msglen],
+                        STRING_MAX_LEN - msglen,
+                        0,
+                        strlen(content) - (pEnd - pStart));
+                    securec_check_c(rc, "\0", "\0");
+                }
+            } else if ((pEnd = strstr(pStart, "\")")) != NULL) /* the errmsg has no parameter */
+            {
+                rc = memset_s(content, STRING_MAX_LEN, 0, STRING_MAX_LEN);
+                securec_check_c(rc, "\0", "\0");
+
+                rc = memcpy_s(content, STRING_MAX_LEN, pStart + 1, pEnd - (pStart + 1) + 1);
+                securec_check_c(rc, "\0", "\0");
+            } else /* other case */
+            {
+                pEnd = strchr(pStart, ',');
+                if (pEnd != NULL) {
+                    if (*(pEnd - 1) == ')') {
+                        rc = memcpy_s(
+                            content, STRING_MAX_LEN, pStart + 1, pEnd - 1 - (pStart + 1));
+                    } else {
+                        rc =
+                            memcpy_s(content, STRING_MAX_LEN, pStart + 1, pEnd - (pStart + 1));
+                    }
+                    securec_check_c(rc, "\0", "\0");
+                } else {
+                    pEnd = strchr(pStart, ')');
+                    if (pEnd != NULL) {
+                        rc =
+                            memcpy_s(content, STRING_MAX_LEN, pStart + 1, pEnd - (pStart + 1));
+                        securec_check_c(rc, "\0", "\0");
+                    }
+                }
+            }
+
+            /* if errmsg has mutipile line, merge mutipile line */
+            while (mergeMutiLine(content)) {
+            }
+        }
+    }
+    return 0;
+}
+
 /* parse error msg in ereport */
 int parseEreport(char* szLine, ERPARA_INFO_T* pstOutErPara, int check_flag)
 {
     char* pStart = NULL;
     char* pEnd = NULL;
-    char* pStart_sqlcode = NULL;
     char* pStart_module = NULL;
     char* pEnd_module = NULL;
-    char* pStart_detail = NULL;
     char errmodule_tmp[512] = {0};
-    int msglen = 0;
     errno_t rc = EOK;
-
+    int res = 0;
     if ((NULL == pstOutErPara) || (NULL == szLine))
         return -1;
 
@@ -950,116 +1130,98 @@ int parseEreport(char* szLine, ERPARA_INFO_T* pstOutErPara, int check_flag)
         }
     }
 
-    /* get ErrMsg */
-    rc = memset_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), 0, sizeof(pstOutErPara->EpMsg));
-    securec_check_c(rc, "\0", "\0");
-    pStart = strstr(szLine, ERPARA_TYPE_ERRMSG);
-
-    /* only parse errmsg except errmsg_internel/errmsg_plural */
-    if ((pStart != NULL) && (*(pStart + strlen(ERPARA_TYPE_ERRMSG) + 1) != '_')) {
-        /* there has no string in errmsg */
-        if (0 != memcmp(pStart + strlen("errmsg"), "(\"", strlen("(\""))) {
-            return -1;
-        }
-
-        pStart = strchr(pStart, '(');
-        if ((pStart != NULL) && ((pStart + 1) != NULL)) {
-            /* optimize muti block */
-            optimize_mutiblock(pStart);
-
-            /* the errmsg has some parameter */
-            pEnd = strstr(pStart, "\",");
-            if (pEnd != NULL) {
-                rc = memcpy_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), pStart + 1, pEnd - (pStart + 1) + 1);
-                securec_check_c(rc, "\0", "\0");
-
-                pStart = pstOutErPara->EpMsg;
-                pEnd = strstr(pStart, "\")");
-                if (pEnd != NULL) {
-                    msglen = (pEnd - pStart) + 1;
-                    rc = memset_s((void*)&pstOutErPara->EpMsg[msglen],
-                        sizeof(pstOutErPara->EpMsg) - msglen,
-                        0,
-                        strlen(pstOutErPara->EpMsg) - (pEnd - pStart));
-                    securec_check_c(rc, "\0", "\0");
-                }
-            } else if ((pEnd = strstr(pStart, "\")")) != NULL) /* the errmsg has no parameter */
-            {
-                rc = memset_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), 0, strlen(pstOutErPara->EpMsg));
-                securec_check_c(rc, "\0", "\0");
-
-                rc = memcpy_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), pStart + 1, pEnd - (pStart + 1) + 1);
-                securec_check_c(rc, "\0", "\0");
-            } else /* other case */
-            {
-                pEnd = strchr(pStart, ',');
-                if (pEnd != NULL) {
-                    if (*(pEnd - 1) == ')') {
-                        rc = memcpy_s(
-                            pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), pStart + 1, pEnd - 1 - (pStart + 1));
-                    } else {
-                        rc =
-                            memcpy_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), pStart + 1, pEnd - (pStart + 1));
-                    }
-                    securec_check_c(rc, "\0", "\0");
-                } else {
-                    pEnd = strchr(pStart, ')');
-                    if (pEnd != NULL) {
-                        rc =
-                            memcpy_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), pStart + 1, pEnd - (pStart + 1));
-                        securec_check_c(rc, "\0", "\0");
-                    }
-                }
-            }
-
-            /* if errmsg has mutipile line, merge mutipile line */
-            while (mergeMutiLine(pstOutErPara->EpMsg)) {
-            }
-        }
+    /* parse error message */
+    if (parseContent(szLine, pstOutErPara->EpMsg, ERPARA_TYPE_ERRMSG) < 0) {
+        return -1;
     }
+
+    /* parse error cause */
+    (void)parseContent(szLine, pstOutErPara->EpCause, ERPARA_TYPE_ERRCAUSE);
+
+    /* parse action cause */
+    (void)parseContent(szLine, pstOutErPara->EpAction, ERPARA_TYPE_ERRACTION);
 
     if (check_flag) {
-        if (pstOutErPara->EpMsg) {
-            pStart_sqlcode = strstr(szLine, ERPARA_TYPE_ERRCODE);
-            pStart_detail = strstr(szLine, ERPARA_TYPE_ERRDETAIL);
-            if (pStart_sqlcode == NULL) {
-                g_CheckFlag = 1;
-                return outputLog(logfile, false, "The errmsg: %s has no errcode \n", pstOutErPara->EpMsg);
-            }
-            if (pStart_module == NULL) {
-                g_CheckFlag = 1;
-                return outputLog(logfile, false, "The errmsg: %s has no module \n", pstOutErPara->EpMsg);
-            } else {
-                if (strcmp(errmodule_tmp, "MOD_ALL") == 0) {
-                    g_CheckFlag = 1;
-                    return outputLog(logfile, false, "The errmodule of the errmsg:%s could not be MOD_ALL \n", pstOutErPara->EpMsg);
-                }
-            }
-            if (pStart_detail == NULL) {
-                g_CheckFlag = 1;
-                return outputLog(logfile, false, "The errmsg: %s has no detail \n", pstOutErPara->EpMsg);
-            }
+        if(IS_ERROR_MESSAGE(pstOutErPara->EpLevel)) {
+            res = checkErrMsgItem(errmodule_tmp, pstOutErPara); 
+        } else {
+            res = checkDebugMsgItem(errmodule_tmp);
         }
     }
 
-    return 0;
+    return res;
 }
 
-/* parse error msg in elog */
-int parseElog(char* szLine, ERPARA_INFO_T* pstOutErPara)
+int checkErrMsgItem(const char* errmodule, ERPARA_INFO_T* pstOutErPara)
 {
-    char* pStart = NULL;
-    char* pEnd = NULL;
-    errno_t rc = EOK;
+    int res = 0;
+    if (IS_EMPTY_STRING(errmodule) || strcmp(errmodule, "MOD_ALL") == 0) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRMODULE;
+    }
 
-    if ((NULL == pstOutErPara) || (NULL == szLine))
-        return -1;
+    if (IS_EMPTY_STRING(pstOutErPara->EpCode)) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRCODE;
+    }
+    if (IS_EMPTY_STRING(pstOutErPara->EpDetail)) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRDETAIL;
+    }
+    if (IS_EMPTY_STRING(pstOutErPara->EpCause)) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRCAUSE;
+    }
+    if (IS_EMPTY_STRING(pstOutErPara->EpAction)) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRACTION;
+    }
+    return res;
+}
+
+int checkDebugMsgItem(const char* errmodule)
+{
+    int res = 0;
+    if (IS_EMPTY_STRING(errmodule) || strcmp(errmodule, "MOD_ALL") == 0) {
+        g_Check_ErrMsgStandard = 1;
+        res |= MSG_NO_ERRMODULE;
+    }   
+    return res;
+}
+
+void InitElogStruct(ERPARA_INFO_T* pstOutErPara)
+{
+    errno_t rc = EOK;
 
     /* elog has no errno, set ERRCODE_INTERNAL_ERROR */
     rc = memset_s(pstOutErPara->EpCode, sizeof(pstOutErPara->EpCode), 0, sizeof(pstOutErPara->EpCode));
     securec_check_c(rc, "\0", "\0");
     rc = strncpy_s(pstOutErPara->EpCode, STRING_MAX_LEN, "ERRCODE_INTERNAL_ERROR", STRING_MAX_LEN - 1);
     securec_check_c(rc, "\0", "\0");
+
+    /* elog has no errcause, set INVALID_ERROR_CAUSE */
+    rc = memset_s(pstOutErPara->EpCause, sizeof(pstOutErPara->EpCause), 0, sizeof(pstOutErPara->EpCause));
+    securec_check_c(rc, "\0", "\0");
+    rc = strncpy_s(pstOutErPara->EpCause, STRING_MAX_LEN, INVALID_ERROR_CAUSE, STRING_MAX_LEN - 1);
+    securec_check_c(rc, "\0", "\0");
+
+    /* elog has no erraction, set INVALID_ERROR_ACTION */
+    rc = memset_s(pstOutErPara->EpAction, sizeof(pstOutErPara->EpAction), 0, sizeof(pstOutErPara->EpAction));
+    securec_check_c(rc, "\0", "\0");
+    rc = strncpy_s(pstOutErPara->EpAction, STRING_MAX_LEN, INVALID_ERROR_ACTION, STRING_MAX_LEN - 1);
+    securec_check_c(rc, "\0", "\0");
+}
+
+/* parse error msg in elog */
+int parseElog(char* szLine, ERPARA_INFO_T* pstOutErPara, int check_flag)
+{
+    char* pStart = NULL;
+    char* pEnd = NULL;
+    errno_t rc = EOK;
+    int res = 0;
+    if ((NULL == pstOutErPara) || (NULL == szLine))
+        return -1;
+    InitElogStruct(pstOutErPara);
 
     /* get ErrMsg */
     rc = memset_s(pstOutErPara->EpMsg, sizeof(pstOutErPara->EpMsg), 0, sizeof(pstOutErPara->EpMsg));
@@ -1092,8 +1254,7 @@ int parseElog(char* szLine, ERPARA_INFO_T* pstOutErPara)
     /* if errmsg has mutipile line, merge mutipile line */
     while (mergeMutiLine(pstOutErPara->EpMsg)) {
     }
-
-    return 0;
+    return res;
 }
 
 /* parse the line in function ereport or elog */
@@ -1129,7 +1290,7 @@ int parseEpPara(char* szLine, ERPARA_INFO_T* pstOutErPara, int funcflag, int che
         ret = parseEreport(szLine, pstOutErPara, check_flag);
     } else /* parse elog function context */
     {
-        ret = parseElog(szLine, pstOutErPara);
+        ret = parseElog(szLine, pstOutErPara, check_flag);
     }
 
     return ret;
@@ -1216,13 +1377,14 @@ int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno)
         sqlstate = csqlstate;
         *sqlstate = '\0';
     }
-
     /* save the error message item into g_stErrMsg */
     for (i = 0; i < g_ulErrMsgNum; i++) {
         pstErrMsgItem = &g_stErrMsg[i];
 
         /* the same error message report in many different files, save the location */
-        if (0 == memcmp(pstErPara->EpMsg, pstErrMsgItem->stErrmsg.msg, strlen(pstErPara->EpMsg))) {
+        if (memcmp(pstErPara->EpMsg, pstErrMsgItem->stErrmsg.msg, strlen(pstErPara->EpMsg)) == 0 &&
+            IS_EQUAL_STR(pstErrMsgItem->stErrmsg.action, pstErPara->EpAction) &&
+            IS_EQUAL_STR(pstErrMsgItem->stErrmsg.cause, pstErPara->EpCause)) {
             for (j = 0; j < pstErrMsgItem->mppdb_err_msg_locnum; j++) {
                 if (0 == strcmp(pstErrMsgItem->astErrLocate[j]->szFileName, scanfile) &&
                     (pstErrMsgItem->astErrLocate[j]->ulLineno == (unsigned int)lineno)) {
@@ -1277,6 +1439,10 @@ int saveErrMsg(char* errmsg, char* dir, char* scanfile, int lineno)
     pstErrMsgItem->mppdb_err_msg_locnum = 1;
     rc = memcpy_s(pstErrMsgItem->stErrmsg.msg, sizeof(pstErrMsgItem->stErrmsg.msg), pstErPara->EpMsg, STRING_MAX_LEN);
     securec_check_c(rc, "\0", "\0");
+    rc = memcpy_s(pstErrMsgItem->stErrmsg.cause, sizeof(pstErrMsgItem->stErrmsg.cause), pstErPara->EpCause, STRING_MAX_LEN);
+    securec_check_c(rc, "\0", "\0");
+    rc = memcpy_s(pstErrMsgItem->stErrmsg.action, sizeof(pstErrMsgItem->stErrmsg.action), pstErPara->EpAction, STRING_MAX_LEN);
+    securec_check_c(rc, "\0", "\0");
     pstErrMsgItem->ucOpFlag = OP_TYPE_INSERT;
 
     g_ulErrMsgNum++;
@@ -1300,7 +1466,7 @@ int readErrmsgFile()
     int causeLineFlag = 0;
     int actionLineFlag = 0;
 
-    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, ERRMSG_FORMAT_OUTPUT_FILENAME);
+    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, errmsg_format_output_filename);
     securec_check_ss_c(rc, "\0", "\0");
     if (access(acOutput, F_OK)) {
         return outputLog(logfile,
@@ -1308,7 +1474,7 @@ int readErrmsgFile()
             "FUNC:[%s] LINE[%d]: readErrmsgFile: accss file %s fail.\n",
             __func__,
             __LINE__,
-            ERRMSG_FORMAT_OUTPUT_FILENAME);
+            errmsg_format_output_filename);
     }
 
     rc = memset_s(acOutput, sizeof(acOutput), 0, sizeof(acOutput));
@@ -1317,9 +1483,9 @@ int readErrmsgFile()
         sizeof(acOutput),
         "cp %s/%s %s/%s",
         g_sProgDir,
-        ERRMSG_FORMAT_OUTPUT_FILENAME,
+        errmsg_format_output_filename,
         g_sProgDir,
-        ERRMSG_OLD_FILENAME);
+        errmsg_old_filename);
     securec_check_ss_c(rc, "\0", "\0");
     /* backup errmsg.txt as old */
     int ret = system(acOutput);
@@ -1330,12 +1496,12 @@ int readErrmsgFile()
 
     rc = memset_s(acOutput, sizeof(acOutput), 0, sizeof(acOutput));
     securec_check_c(rc, "\0", "\0");
-    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, ERRMSG_OLD_FILENAME);
+    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, errmsg_old_filename);
     securec_check_ss_c(rc, "\0", "\0");
     errcodesOldFile = fopen(acOutput, "r");
     if (errcodesOldFile == NULL) {
         return outputLog(
-            logfile, false, "FUNC:[%s] LINE[%d]: fopen file %s fail.\n", __func__, __LINE__, ERRMSG_OLD_FILENAME);
+            logfile, false, "FUNC:[%s] LINE[%d]: fopen file %s fail.\n", __func__, __LINE__, errmsg_old_filename);
     }
 
     rc = memset_s(g_acBuf, sizeof(g_acBuf), 0, sizeof(g_acBuf));
@@ -1415,6 +1581,7 @@ int readErrmsgFile()
 
         if ((bIsScanFlag[1] == 1) && (bIsScanFlag[2] == 1) && bIsScanFlag[3] == 1 && actionLineFlag == 1) {
             if (bIsScanFlag[4] == 0) {
+                fclose(errcodesOldFile);
                 return outputLog(logfile, false, "The errmsg : %s has no action\n", pstErrMsgItem->stErrmsg.msg); 
             }
             actionLineFlag = 0;
@@ -1422,6 +1589,7 @@ int readErrmsgFile()
 
         if ((bIsScanFlag[1] == 1) && (bIsScanFlag[2] == 1) && causeLineFlag == 1) {
             if (bIsScanFlag[3] == 0) {
+                fclose(errcodesOldFile);
                 return outputLog(logfile, false, "The errmsg : %s has no cause\n", pstErrMsgItem->stErrmsg.msg);
             }
             if (bIsScanFlag[3] == 1 && bIsScanFlag[4] == 0) {
@@ -1458,7 +1626,7 @@ int readErrmsgFile()
 }
 
 /* output one errmsg item */
-void outputErrmsgItem(FILE* outFile, mppdb_err_msg_t* pstErrMsgItem)
+void outputErrmsgItem(FILE* outFile, mppdb_err_msg_t* pstErrMsgItem, int printFileName = 0)
 {
     if (NULL == pstErrMsgItem)
         return;
@@ -1468,17 +1636,18 @@ void outputErrmsgItem(FILE* outFile, mppdb_err_msg_t* pstErrMsgItem)
     fprintf(outFile, "SQLSTATE: %s\n", pstErrMsgItem->cSqlState);
 
     if (0 == strlen(pstErrMsgItem->stErrmsg.cause))
-        fprintf(outFile, "CAUSE: \"%s\"\n", "This is an internal error");
+        fprintf(outFile, "CAUSE: %s\n", INVALID_ERROR_CAUSE);
     else
         fprintf(outFile, "CAUSE: %s\n", pstErrMsgItem->stErrmsg.cause);
 
     if (0 == strlen(pstErrMsgItem->stErrmsg.action))
-        fprintf(outFile, "ACTION: \"%s\"\n", "Please contact engineer to support.");
+        fprintf(outFile, "ACTION: %s\n", INVALID_ERROR_ACTION);
     else
         fprintf(outFile, "ACTION: %s\n", pstErrMsgItem->stErrmsg.action);
-
+    if (printFileName == ENABLE_PRINT_FILE_NAME) {
+        fprintf(outFile, "\n\nFile: %s", pstErrMsgItem->astErrLocate[0]->szFileName);
+    }
     fprintf(outFile, "\n");
-
     return;
 }
 
@@ -1491,13 +1660,13 @@ int errmsg_format_output_ext()
     mppdb_err_msg_t* pstErrMsgItem = NULL;
     int rc = -1;
 
-    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, ERRMSG_NEW_FILENAME);
+    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, errmsg_new_filename);
     securec_check_ss_c(rc, "\0", "\0");
     if (!access(acOutput, F_OK)) {
         /* rm ERRMSG_FORMAT_OUTPUT_FILENAME */
         rc = memset_s(acOutput, sizeof(acOutput), 0, sizeof(acOutput));
         securec_check_c(rc, "\0", "\0");
-        rc = sprintf_s(acOutput, sizeof(acOutput), "rm %s/%s", g_sProgDir, ERRMSG_NEW_FILENAME);
+        rc = sprintf_s(acOutput, sizeof(acOutput), "rm %s/%s", g_sProgDir, errmsg_new_filename);
         securec_check_ss_c(rc, "\0", "\0");
         int ret = system(acOutput);
         if (ret == -1 || WIFEXITED(ret) == 0)
@@ -1507,7 +1676,7 @@ int errmsg_format_output_ext()
 
     rc = memset_s(acOutput, sizeof(acOutput), 0, sizeof(acOutput));
     securec_check_c(rc, "\0", "\0");
-    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, ERRMSG_NEW_FILENAME);
+    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, errmsg_new_filename);
     securec_check_ss_c(rc, "\0", "\0");
     outFile = fopen(acOutput, "w+");
     if (outFile == NULL) {
@@ -1535,6 +1704,36 @@ int errmsg_format_output_ext()
     return 0;
 }
 
+int checkErrMsgIncomplete(const char* parent, const char *input_file_path) {
+    int res = 0;
+    int size = 0;
+    FileInfo *file_infos = leadSortedScanFiles(parent, input_file_path, &size);
+    for (int i = 0; i < (int)g_ulErrMsgOldNum; i++) {
+        mppdb_err_msg_t* pstErrMsgItem = &g_stErrMsgOld[i];
+        if (OP_TYPE_INCOMPLETE == (pstErrMsgItem->ucOpFlag & OP_TYPE_INCOMPLETE)){
+            int checked = 1;
+            for(int j = 0; j < size; j++) {
+                for (int k = 0; k < ERROR_LOCATION_NUM && pstErrMsgItem->astErrLocate[k]->szFileName[0] != '\0'; k++) {
+                    if (strcmp(file_infos[j].file, pstErrMsgItem->astErrLocate[k]->szFileName) == 0) {
+                        checked = 0;
+                        break;
+                     }
+                }
+                if (checked == 0) {
+                    break;
+                }
+            }
+            if (checked) {
+                res = -1;
+                (void)outputLog(logfile, false, "fileName: %s incomplete message: %s\n", pstErrMsgItem->astErrLocate[0]->szFileName, pstErrMsgItem->stErrmsg.msg);
+            }
+        }
+    }
+    releaseFileInfos(file_infos, size);
+    return res;
+
+}
+
 /* process compare errmsg between new errmsg and old errmsg,
      and record insert/update/delete/incomplete of errmsg */
 int compareErrmsg()
@@ -1550,7 +1749,6 @@ int compareErrmsg()
         return outputLog(
             logfile, false, "g_ulErrMsgNum:%lu or g_ulErrMsgOldNum:%lu is 0.\n", g_ulErrMsgNum, g_ulErrMsgOldNum);
     }
-
     /* compare the old and new errmsg list item */
     for (lOldLoop = 0; lOldLoop < g_ulErrMsgOldNum; lOldLoop++) {
         pstErrMsgItemOld = &g_stErrMsgOld[lOldLoop];
@@ -1558,11 +1756,12 @@ int compareErrmsg()
             pstErrMsgItemNew = &g_stErrMsg[lNewLoop];
 
             /* there are same with errmsg and sqlstate between old and new errmsg list item */
-            if (0 == memcmp(pstErrMsgItemOld->stErrmsg.msg,
-                         pstErrMsgItemNew->stErrmsg.msg,
-                         strlen(pstErrMsgItemOld->stErrmsg.msg))) {
-                /*
-                 * update location info of old errmsg using new errmsg.
+            if ((memcmp(pstErrMsgItemOld->stErrmsg.msg,
+                     pstErrMsgItemNew->stErrmsg.msg,
+                     strlen(pstErrMsgItemOld->stErrmsg.msg)) == 0) &&
+                 IS_EQUAL_STR(pstErrMsgItemOld->stErrmsg.action, pstErrMsgItemNew->stErrmsg.action) &&
+                 IS_EQUAL_STR(pstErrMsgItemOld->stErrmsg.cause,  pstErrMsgItemNew->stErrmsg.cause))  {
+                /* update location info of old errmsg using new errmsg
                  * 1. if pstErrMsgItemOld->mppdb_err_msg_locnum >= pstErrMsgItemNew->mppdb_err_msg_locnum,
                  *    copy all new location to old one, there must be enough slot for copy.
                  * 2. else need to malloc memory for old msg item before copy.
@@ -1578,14 +1777,12 @@ int compareErrmsg()
                         pstErrMsgItemNew->astErrLocate[i], sizeof(mppdb_err_msg_location_t));
                     securec_check_c(rc, "\0", "\0");
                 }
-
                 pstErrMsgItemOld->mppdb_err_msg_locnum = pstErrMsgItemNew->mppdb_err_msg_locnum;
 
                 pstErrMsgItemNew->ucOpFlag = OP_TYPE_EXIST;
                 ExistCount++;
-                if ((0 == strlen(pstErrMsgItemOld->stErrmsg.cause)) ||
-                    (0 == strlen(pstErrMsgItemOld->stErrmsg.action)) || (0 == strlen(pstErrMsgItemOld->cSqlState))) {
-                    pstErrMsgItemOld->ucOpFlag = OP_TYPE_INCOMPLETE;
+                if (IS_IMCOMPLETE_MESSAGE(pstErrMsgItemOld)) {
+                    pstErrMsgItemOld->ucOpFlag |= OP_TYPE_INCOMPLETE;
                 }
 
                 break;
@@ -1627,12 +1824,9 @@ int compareErrmsg()
 
             pstErrMsgItemOld->ulSqlErrcode = g_stErrMsgOld[g_ulErrMsgOldNum - 1].ulSqlErrcode + 1;
             pstErrMsgItemOld->ucOpFlag = OP_TYPE_INSERT;
-            
-            if ((0 == strlen(pstErrMsgItemOld->stErrmsg.cause)) || (0 == strlen(pstErrMsgItemOld->stErrmsg.action)) ||
-                (0 == strlen(pstErrMsgItemOld->cSqlState))) {
+            if (IS_IMCOMPLETE_MESSAGE(pstErrMsgItemOld)) {
                 pstErrMsgItemOld->ucOpFlag |= OP_TYPE_INCOMPLETE;
             }
-
             g_ulErrMsgOldNum++;
         }
     }
@@ -1652,7 +1846,7 @@ int outputCompResult()
     mppdb_err_msg_t* pstErrMsgItemOld = NULL;
     int rc = -1;
 
-    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, ERRMSG_COMP_RESULT_FILENAME);
+    rc = sprintf_s(acOutput, sizeof(acOutput), "%s/%s", g_sProgDir, errmsg_comp_results_filename);
     securec_check_ss_c(rc, "\0", "\0");
     outFile = fopen(acOutput, "w+");
     if (outFile == NULL) {
@@ -1664,7 +1858,7 @@ int outputCompResult()
         pstErrMsgItemOld = &g_stErrMsgOld[ulLoop];
 
         if (OP_TYPE_INSERT == (pstErrMsgItemOld->ucOpFlag & OP_TYPE_INSERT)) {
-            outputErrmsgItem(outFile, pstErrMsgItemOld);
+            outputErrmsgItem(outFile, pstErrMsgItemOld, ENABLE_PRINT_FILE_NAME);
             ulInsertNum++;
         }
     }
@@ -1684,7 +1878,7 @@ int outputCompResult()
         pstErrMsgItemOld = &g_stErrMsgOld[ulLoop];
 
         if (OP_TYPE_INCOMPLETE == (pstErrMsgItemOld->ucOpFlag & OP_TYPE_INCOMPLETE)) {
-            outputErrmsgItem(outFile, pstErrMsgItemOld);
+            outputErrmsgItem(outFile, pstErrMsgItemOld, ENABLE_PRINT_FILE_NAME);
             ulUpdateNum++;
         }
     }
@@ -1811,13 +2005,13 @@ int create_header_files(int iFileType)
             if (0 != strlen(pstErrMsgItem->stErrmsg.cause)) {
                 fprintf(outFile, "	   %s,\n", pstErrMsgItem->stErrmsg.cause);
             } else {
-                fprintf(outFile, "	   \"This is an internal error.\",\n");
+                fprintf(outFile, "	   %s,\n", INVALID_ERROR_CAUSE);
             }
 
             if (0 != strlen(pstErrMsgItem->stErrmsg.action)) {
                 fprintf(outFile, "	   %s}", pstErrMsgItem->stErrmsg.action);
             } else {
-                fprintf(outFile, "	   \"Please contact engineer to support.\"}");
+                fprintf(outFile, "	   %s}", INVALID_ERROR_ACTION);
             }
         }
 
@@ -1847,7 +2041,7 @@ int getErrmsgResult()
     int i;
     int ret = 0;
 
-    ret = snprintf_s(srcfile, MAXPATH, MAXPATH - 1, "%s/%s", g_sProgDir, ERRMSG_COMP_RESULT_FILENAME);
+    ret = snprintf_s(srcfile, MAXPATH, MAXPATH - 1, "%s/%s", g_sProgDir, errmsg_comp_results_filename);
     securec_check_ss_c(ret, "\0", "\0");
 
     fHandle = fopen(srcfile, "r");
@@ -1933,9 +2127,9 @@ int getErrmsgResult()
             "The change of the error message in current version can be view in the file \"%s/%s\". \n"
             "You should be check modify the error message in the file \"%s/%s\".\n\n",
             g_sProgDir,
-            ERRMSG_COMP_RESULT_FILENAME,
+            errmsg_comp_results_filename,
             g_sProgDir,
-            ERRMSG_NEW_FILENAME);
+            errmsg_new_filename);
     }
 
     fclose(fHandle);

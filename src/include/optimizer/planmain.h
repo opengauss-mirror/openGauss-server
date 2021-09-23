@@ -36,12 +36,24 @@ typedef enum AggOrientation {
 /* row threshold to apply having filter */
 #define HAVING_THRESHOLD 1e6
 
+/* query_planner callback to compute query_pathkeys */
+typedef void (*query_pathkeys_callback) (PlannerInfo *root, void *extra);
+
 /*
  * prototypes for plan/planmain.c
  */
-extern void query_planner(PlannerInfo* root, List* tlist, double tuple_fraction, double limit_tuples,
-    Path** cheapest_path, Path** sorted_path, double* num_groups, List* rollup_groupclauses = NULL,
-    List* rollup_lists = NULL);
+extern RelOptInfo* query_planner(PlannerInfo* root, List* tlist,
+                    query_pathkeys_callback qp_callback, void *qp_extra);
+
+extern bool get_number_of_groups(PlannerInfo* root, RelOptInfo* final_rel, double* num_groups, 
+    List* rollup_groupclauses = NULL, List* rollup_lists = NULL);
+
+extern void update_tuple_fraction(PlannerInfo* root, RelOptInfo* final_rel, double* numdistinct);
+
+extern void generate_cheapest_and_sorted_path(PlannerInfo* root, RelOptInfo* final_rel, Path** cheapest_path, 
+    Path** sorted_path, double* num_groups, bool has_groupby);
+
+
 
 /*
  * prototypes for plan/planagg.c

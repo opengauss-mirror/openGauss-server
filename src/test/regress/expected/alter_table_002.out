@@ -8,7 +8,7 @@ alter table atacc1 add constraint atacc_test1 check (test>3);
 -- should fail
 insert into atacc1 (test) values (2);
 ERROR:  new row for relation "atacc1" violates check constraint "atacc_test1"
-DETAIL:  Failing row contains (2).
+DETAIL:  N/A
 -- should succeed
 insert into atacc1 (test) values (4);
 drop table atacc1;
@@ -34,7 +34,7 @@ alter table atacc1 add constraint atacc_test1 check (test+test2<test3*4);
 -- should fail
 insert into atacc1 (test,test2,test3) values (4,4,2);
 ERROR:  new row for relation "atacc1" violates check constraint "atacc_test1"
-DETAIL:  Failing row contains (4, 4, 2).
+DETAIL:  N/A
 -- should succeed
 insert into atacc1 (test,test2,test3) values (4,4,5);
 drop table atacc1;
@@ -44,7 +44,7 @@ alter table atacc1 add check (test2>test);
 -- should fail for $2
 insert into atacc1 (test2, test) values (3, 4);
 ERROR:  new row for relation "atacc1" violates check constraint "atacc1_check"
-DETAIL:  Failing row contains (4, 3).
+DETAIL:  N/A
 drop table atacc1;
 -- inheritance related tests
 create table atacc1 (test int);
@@ -55,7 +55,7 @@ alter table atacc2 add constraint foo check (test2>0);
 -- fail and then succeed on atacc2
 insert into atacc2 (test2) values (-3);
 ERROR:  new row for relation "atacc2" violates check constraint "foo"
-DETAIL:  Failing row contains (-3).
+DETAIL:  N/A
 insert into atacc2 (test2) values (3);
 -- fail and then succeed on atacc3
 insert into atacc3 (test2) values (-3);
@@ -147,7 +147,7 @@ LINE 1: insert into atacc2 (test) values (-3);
 -- check constraint is there on parent
 insert into atacc1 (test) values (-3);
 ERROR:  new row for relation "atacc1" violates check constraint "foo"
-DETAIL:  Failing row contains (-3).
+DETAIL:  N/A
 insert into atacc1 (test) values (3);
 -- fail, violating row:
 alter table atacc2 add constraint foo check (test>0) no inherit;
@@ -799,12 +799,12 @@ NOTICE:  CREATE TABLE will create implicit sequence "atacc1_id_seq" for serial c
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "atacc1_pkey" for table "atacc1"
 insert into atacc1(value) values (100);
 ERROR:  new row for relation "atacc1" violates check constraint "atacc1_value_check"
-DETAIL:  Failing row contains (1, 100).
+DETAIL:  N/A
 alter table atacc1 drop column value;
 alter table atacc1 add column value int check (value < 10);
 insert into atacc1(value) values (100);
 ERROR:  new row for relation "atacc1" violates check constraint "atacc1_value_check"
-DETAIL:  Failing row contains (2, 100).
+DETAIL:  N/A
 insert into atacc1(id, value) values (null, 0);
 ERROR:  null value in column "id" violates not-null constraint
 DETAIL:  Failing row contains (null, 0).

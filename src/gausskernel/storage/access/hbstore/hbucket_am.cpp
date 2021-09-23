@@ -39,6 +39,8 @@
 #include "pgxc/groupmgr.h"
 #include "catalog/pgxc_class.h"
 #include "optimizer/bucketpruning.h"
+#include "executor/node/nodeSeqscan.h"
+
 
 TableScanDesc GetTableScanDesc(TableScanDesc scan, Relation rel)
 {
@@ -58,17 +60,11 @@ IndexScanDesc GetIndexScanDesc(IndexScanDesc scan)
     }
 }
 
-static char *get_child_string_from_merge_list(char *merge_list, int merge_list_length, int bucketid);
-
 List *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
 {
     ListCell *bktIdCell = NULL;
     List *bucketList = NULL;
     oidvector *blist = searchHashBucketByOid(relation->rd_bucketoid);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
 
     if (bktInfo == NULL || bktInfo->buckets == NIL) {
         // load all buckets
@@ -95,9 +91,10 @@ List *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
 
 static void free_hbucket_scan(TableScanDesc bktScan, Relation bktRel)
 {
-    Assert(bktRel != NULL);
     tableam_scan_end(bktScan);
-    bucketCloseRelation(bktRel);
+    if (bktRel != NULL) {
+        bucketCloseRelation(bktRel);
+    }
 }
 
 static TableScanDesc hbkt_tbl_create_scan(Relation relation, ScanState *state)
@@ -129,15 +126,27 @@ static TableScanDesc hbkt_tbl_create_scan(Relation relation, ScanState *state)
     hpScan->scanState = (ScanState *)state;
     hpScan->hBktList = bucketlist;
 
-    /* Step 3: open first bucketed relation */
-    hpScan->curr_slot = 0;
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
-    hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
+    if (RelationIsPartitioned(hpScan->rs_rd)) {
+        /*
+         * It is a partition-hashbucket table, just set the
+         * parent relation as the target initially.
+         * The reason why we are here is only because we are
+         * going to do cross-partition and cross-bucket
+         * indexscan in underlying layer.
+         */
+        hpScan->currBktRel = hpScan->rs_rd;
+    } else {
+        /* Step 3: open first bucketed relation */
+        hpScan->curr_slot = 0;
+        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
+    }
+
     return (TableScanDesc)hpScan;
 }
 
 static TableScanDesc hbkt_tbl_beginscan(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
-                                   ScanState *state /* = NULL */)
+                                   ScanState *state, bool isRangeScanInRedis)
 {
     HBktTblScanDesc hpScan = (HBktTblScanDesc)hbkt_tbl_create_scan(relation, state);
 
@@ -150,7 +159,7 @@ static TableScanDesc hbkt_tbl_beginscan(Relation relation, Snapshot snapshot, in
     }
 
     /* Step 4: open a bucketed AbsTblScanDesc */
-    RangeScanInRedis rangeScanInRedis = reset_scan_qual(hpScan->currBktRel, state);
+    RangeScanInRedis rangeScanInRedis = reset_scan_qual(hpScan->currBktRel, state, isRangeScanInRedis);
     hpScan->currBktScan = tableam_scan_begin(hpScan->currBktRel, snapshot, nkeys, key, rangeScanInRedis);
 
 #ifdef MEMORY_CONTEXT_CHECKING
@@ -230,21 +239,37 @@ static void hbkt_tbl_end_tidscan(TableScanDesc scan)
     pfree(hpScan);
 }
 
-static void hbkt_tbl_rescan(TableScanDesc scan, ScanKey key)
+static void hbkt_tbl_rescan(TableScanDesc scan, ScanKey key, bool is_bitmap_rescan)
 {
     HBktTblScanDesc hpScan = (HBktTblScanDesc)scan;
 
     Snapshot snapshot = hpScan->currBktScan->rs_snapshot;
     int nkeys = hpScan->currBktScan->rs_nkeys;
+    Relation bktHeapRel = (hpScan->rs_rd == hpScan->currBktRel) ? NULL : hpScan->currBktRel;
+    free_hbucket_scan(hpScan->currBktScan, bktHeapRel);
 
-    free_hbucket_scan(hpScan->currBktScan, hpScan->currBktRel);
-
-    hpScan->curr_slot = 0;
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
-    hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
+    if (RelationIsPartitioned(hpScan->rs_rd)) {
+        /*
+         * It is a partition-hashbucket table, just set the
+         * parent relation as the target initially.
+         * The reason why we are here is only because we are
+         * going to do cross-partition and cross-bucket
+         * indexscan in underlying layer.
+         */
+        hpScan->currBktRel = hpScan->rs_rd;
+    } else {
+        /* Step 3: open first bucketed relation */
+        hpScan->curr_slot = 0;
+        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
+    }
 
     RangeScanInRedis rangeScanInRedis = reset_scan_qual(hpScan->currBktRel, hpScan->scanState);
-    hpScan->currBktScan = tableam_scan_begin(hpScan->currBktRel, snapshot, nkeys, key, rangeScanInRedis);
+    if (!is_bitmap_rescan) {
+        hpScan->currBktScan = tableam_scan_begin(hpScan->currBktRel, snapshot, nkeys, key, rangeScanInRedis);
+    } else {
+        hpScan->currBktScan = tableam_scan_begin_bm(hpScan->currBktRel, snapshot, nkeys, key);
+    }
     tableam_scan_rescan(hpScan->currBktScan, key);
 }
 
@@ -374,6 +399,66 @@ bool hbkt_bitmapheap_scan_nextbucket(HBktTblScanDesc hpScan)
     return true;
 }
 
+bool cbi_bitmapheap_scan_nextbucket(HBktTblScanDesc hpscan, GPIScanDesc gpiscan, CBIScanDesc cbiscan)
+{
+    Assert(hpscan != NULL);
+    Assert(cbiscan != NULL);
+
+    Relation targetheap;
+    TableScanDesc currbktscan, nextbktscan;
+
+    /* vailidation check */
+    if (!list_member_int(hpscan->hBktList, cbiscan->bucketid)) {
+        cbiscan->bucketid = InvalidBktId;
+        return false;
+    }
+
+    currbktscan = hpscan->currBktScan;
+    if (gpiscan != NULL && gpiscan->partition != NULL) { /* partition is not NULL indicates this is a global index */
+        Assert(gpiscan->parentRelation != NULL);
+        targetheap = bucketGetRelation(gpiscan->parentRelation, gpiscan->partition, cbiscan->bucketid);
+    } else {
+        targetheap = bucketGetRelation(hpscan->rs_rd, NULL, cbiscan->bucketid);
+    }
+    nextbktscan = tableam_scan_begin_bm(targetheap, currbktscan->rs_snapshot, currbktscan->rs_nkeys,
+        currbktscan->rs_key);
+    if (hpscan->currBktRel != hpscan->rs_rd && RelationIsBucket(hpscan->currBktRel)) {
+        free_hbucket_scan(currbktscan, hpscan->currBktRel);
+    }
+    hpscan->currBktRel = targetheap;
+    hpscan->currBktScan = nextbktscan;
+
+    return true;
+}
+
+Relation cbi_bitmapheap_scan_getbucket(const HBktTblScanDesc hpscan, const GPIScanDesc gpiscan,
+    const CBIScanDesc cbiscan, int2 bucketid)
+{
+    Relation targetheap = NULL;
+
+    Assert(hpscan != NULL);
+    Assert(cbiscan != NULL);
+
+    /* vailidation check */
+    if (!list_member_int(hpscan->hBktList, bucketid)) {
+        return NULL;
+    } 
+
+    if (cbi_scan_need_change_bucket(cbiscan, bucketid)) {
+        if (gpiscan != NULL && gpiscan->partition != NULL) {
+            /* for cross-partition and cross-bucket */
+            Assert(gpiscan->parentRelation != NULL);
+            targetheap = bucketGetRelation(gpiscan->parentRelation, gpiscan->partition, bucketid);
+        } else {
+            /* for cross-bucket */
+            targetheap = bucketGetRelation(hpscan->rs_rd, NULL, bucketid);
+        }
+    } else {
+        targetheap = hpscan->currBktRel;
+    }
+
+    return targetheap;
+}
 
 /*
  * Switch the HbktScan to next bucket for Tid Scan
@@ -402,120 +487,204 @@ bool hbkt_tbl_tid_nextbucket(HBktTblScanDesc hpScan)
     return true;
 }
 
-/**
- * fill the item by given str, str structure is "bucketid:startctid:endctid"
- * if bucketid is InvalidBktId,decode cell directly, else compare single_item.bucketid and input bucketid
- */
-static bool hbkt_decode_merge_item_from_str(char *single_item, int single_item_length, RedisMergeItem *item,
-                                            int2 bucketid)
+static bool hbkt_parse_one_item(char* startPtr, char** endPtr,
+    RedisMergeItem* curItem)
 {
-#define MAXINT64LENGTH 20
-    List *datalist = NIL;
-    char tmp[MAXINT64LENGTH] = {0};
-    int idx = 0;
-    int j = 0;
-    for (int i = 0; i < single_item_length; i++) {
-        if (single_item[i] == ':') {
-            tmp[j] = 0;
-            if (idx == 0) {
-                item->bktid = int2(atoi(tmp));
-            }
-            if (idx == 1) {
-                item->start = strtoull(tmp, NULL, 10);
-            }
-            j = 0;
-            idx++;
-            continue;
-        }
-        if (i == (single_item_length - 1)) {
-            tmp[j++] = single_item[i];
-            tmp[j] = 0;
-            if (idx == 2) {
-                item->end = strtoull(tmp, NULL, 10);
-            }
-            j = 0;
-            idx++;
-        }
+    bool parser_finish = false;
 
-        tmp[j] = single_item[i];
-        j++;
-        /* max length of int64 */
-        if (j >= MAXINT64LENGTH) {
-            ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("error format single item string %s", single_item)));
-        }
+#define BASE 10
+
+    /* 1. parse bucketid */
+    Assert(startPtr);
+    errno = 0;
+    curItem->bktid = (int2)strtoll(startPtr, endPtr, BASE);
+    if ((errno == ERANGE && (curItem->bktid == LLONG_MAX || curItem->bktid == LLONG_MIN)) || startPtr == *endPtr ||
+        **endPtr == '\0') {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to parse bucketid from merge_list: %m")));
     }
-    if (idx != 3) {
-        list_free_ext(datalist);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("error format single item string %s", single_item)));
+
+    if (curItem->bktid < InvalidBktId || curItem->bktid > BUCKETDATALEN) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("bucketid parsed from merge_list is inivalid: %d", curItem->bktid)));
     }
-    return true;
+
+    /* 2. parse start ctid */
+    startPtr = *endPtr + 1; /* add 1 delimiter */
+    Assert(startPtr);
+    curItem->start = strtoll(startPtr, endPtr, BASE);
+    if ((errno == ERANGE && ((int64)curItem->start == LLONG_MAX || (int64)curItem->start == LLONG_MIN)) ||
+        startPtr == *endPtr || **endPtr == '\0') {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to parse start ctid from merge_list: %m")));
+    }
+
+    /* 3. parse end ctid */
+    startPtr = *endPtr + 1; /* add 1 delimiter */
+    Assert(startPtr);
+    curItem->end = strtoll(startPtr, endPtr, BASE);
+    if ((errno == ERANGE && ((int64)curItem->end == LLONG_MAX || (int64)curItem->end == LLONG_MIN)) ||
+        startPtr == *endPtr) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("failed to parse end ctid from merge_list: %m")));
+    }
+
+    if (**endPtr == '\0') {
+        parser_finish = true;
+    }
+
+    return parser_finish;
 }
 
-RedisMergeItemOrderArray *hbkt_get_merge_list_from_str(char *merge_list, int merge_list_length)
+/*
+ * Parse all merge items from merge_list.
+ */
+RedisMergeItem *hbkt_get_merge_item_internal(char* merge_list,
+    int merge_list_length, RedisMergeItemOrderArray *result, int2 bucketid)
 {
-    RedisMergeItemOrderArray *result = NULL;
-    int start_pos = 0;
-    char *start_pointer = merge_list;
-    int idx = 0;
-    bool error_decode = false;
+    char* startPtr = merge_list;
+    char* endPtr;
+    int curItemIdx = 0;
+    char* last_item_str = NULL;
+    RedisMergeItem* targetItem = NULL;
+    bool found = false;
 
-    int i = 0;
-    int length = 0;
-    if (merge_list == NULL || merge_list_length == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("empty merge_list string")));
+    Assert(merge_list);
+    Assert(merge_list_length > 0);
+    Assert(result);
+    Assert(bucketid < SegmentBktId);
+
+    if (strncmp(merge_list, NOT_EXIST_MERGE_LIST, strlen(NOT_EXIST_MERGE_LIST)) == 0) {
         return NULL;
     }
+    /* only get one item */
+    if (bucketid > InvalidBktId) {
+        targetItem = (RedisMergeItem*)palloc0(sizeof(RedisMergeItem));
+    }
+
+    while (true) {
+        /*
+         * Parse merge items one by one. The format of merge_list
+         * is "bucketid:start:end;bucketid:start:end;....". For example,
+         * "0:0:10;1:0:100;2:100:1000".
+         */
+        RedisMergeItem *curItem;
+        Assert(curItemIdx < result->length);
+
+        if (bucketid > InvalidBktId) { /* for get one item with target bucketid */
+            curItem = targetItem;
+        } else {
+            curItem = &result->itemarray[curItemIdx];
+        }
+
+        /* parse one item from merge_list */
+        bool parse_finish = hbkt_parse_one_item(startPtr, &endPtr, curItem);
+        curItemIdx++;
+
+        /* find the target bucketid */
+        if (bucketid > InvalidBktId && curItem->bktid == bucketid) {
+            found = true;
+            break;
+        }
+
+        /* already parsed all itms */
+        if (parse_finish || curItemIdx == result->length) {
+            break;
+        }
+
+        /* sanity check */
+        if (endPtr - merge_list > merge_list_length) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                errmsg("failed to parse merge list, out of boundary")));
+        }
+
+        /* prepare for parsing next item */
+        startPtr = endPtr + 1; /* add 1 delimiter */
+
+        /*
+         * merge_list may be not end with '\0', we have to
+         * palloc another space to copy the origin string
+         * of last item to make sure end with '\0'.
+         */
+        if (curItemIdx == result->length - 1) {
+            int remain_len = merge_list_length - (startPtr - merge_list);
+            last_item_str = (char*)palloc0(remain_len + 1);
+
+            errno_t rc = memcpy_s(last_item_str, remain_len, startPtr, remain_len);
+            securec_check(rc, "\0", "\0");
+            startPtr = last_item_str;
+        }
+    }
+
+    pfree_ext(last_item_str);
+
+    /* return null and free memory if not match bucketid */
+    if (bucketid > InvalidBktId && !found) {
+        pfree_ext(targetItem);
+    }
+
+    return targetItem;
+}
+
+
+RedisMergeItemOrderArray *hbkt_get_all_merge_item(char* merge_list,
+    int merge_list_length)
+{
+    RedisMergeItemOrderArray *result = NULL;
+    int length = 0;
+    int i;
+
+    if (merge_list == NULL || merge_list_length == 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("merge_list could not be NULL")));
+        return NULL;
+    }
+
+    /* get length of item array */
     for (i = 0; i < merge_list_length; i++) {
         if (merge_list[i] == ';' || i == (merge_list_length - 1)) {
             length++;
         }
     }
-    result = (RedisMergeItemOrderArray *)palloc0(sizeof(RedisMergeItemOrderArray));
+    result = (RedisMergeItemOrderArray *)palloc(sizeof(RedisMergeItemOrderArray));
     result->length = length;
     result->itemarray = (RedisMergeItem *)palloc(result->length * sizeof(RedisMergeItem));
-    for (i = 0; i < merge_list_length; i++) {
-        if (merge_list[i] == ';' || i == (merge_list_length - 1)) {
-            int single_item_length = merge_list[i] == ';' ? (i - start_pos) : (i - start_pos + 1);
-            error_decode = hbkt_decode_merge_item_from_str(start_pointer, single_item_length, &result->itemarray[idx],
-                                                           InvalidBktId);
-            if (error_decode == false) {
-                freeRedisMergeItemOrderArray(result);
-                result = NULL;
-                goto ret;
-            }
-            idx++;
-            /* add 1 to skip ';' */
-            start_pointer = merge_list + i + 1;
-            start_pos = i + 1;
-        }
-    }
-ret:
+    (void)hbkt_get_merge_item_internal(merge_list, merge_list_length, result, InvalidBktId);
     return result;
 }
 
-RedisMergeItem *hbkt_get_merge_item_from_str(char *merge_list, int merge_list_length, int2 bucketid)
+RedisMergeItem *hbkt_get_one_merge_item(char* merge_list,
+    int merge_list_length, int2 bucketid)
 {
-    char *merge_list_str = NULL;
-    RedisMergeItem *item = NULL;
-    bool found = false;
+    int i;
+    int length = 0;
+    RedisMergeItemOrderArray array;
 
-    if (merge_list == NULL || strlen(merge_list) == 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("empty merge_list string")));
+    if (merge_list == NULL || merge_list_length == 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INTERNAL_ERROR),
+            errmsg("merge_list could not be NULL")));
         return NULL;
     }
-    merge_list_str = get_child_string_from_merge_list(merge_list, merge_list_length, bucketid);
-    if (merge_list_str == NULL) {
-        goto ret;
+
+    /* get length of item array */
+    for (i = 0; i < merge_list_length; i++) {
+        if (merge_list[i] == ';' || i == (merge_list_length - 1)) {
+            length++;
+        }
     }
-    item = (RedisMergeItem *)palloc(sizeof(RedisMergeItem));
-    found = hbkt_decode_merge_item_from_str(merge_list_str, strlen(merge_list_str), item, bucketid);
-    /* return null and free memory if not match bucketid */
-    if (found == false) {
-        pfree_ext(item);
-    }
-    pfree_ext(merge_list_str);
-ret:
-    return item;
+
+    array.length = length;
+    /* array.itemarray will not be used in get one item mode */
+    array.itemarray = NULL; 
+    return hbkt_get_merge_item_internal(merge_list, merge_list_length,
+                                        &array, bucketid);
 }
 
 void hbkt_set_merge_list_to_pgxc_class_option(Oid pcrelid, RedisMergeItemOrderArray *merge_items, bool first_set)
@@ -545,7 +714,7 @@ void hbkt_set_merge_list_to_pgxc_class_option(Oid pcrelid, RedisMergeItemOrderAr
     /* remove the last ';' */
     merge_str[strlen(merge_str) - 1] = 0;
 update:
-    (void)searchMergeListByRelid(pcrelid, &find, false);
+    (void)searchMergeListByRelid(pcrelid, &find, false, false);
     if (find == true) {
         if (first_set == true) {
             Assert(0);
@@ -629,13 +798,12 @@ RedisMergeItem *search_redis_merge_item(const RedisMergeItemOrderArray *merge_it
 /* Create HBktTblScanDesc with scan state. For hash-bucket table, it scans the
  * specified buckets in ScanState */
 TableScanDesc scan_handler_tbl_beginscan(Relation relation, Snapshot snapshot,
-    int nkeys, ScanKey key, ScanState* sstate)
+    int nkeys, ScanKey key, ScanState* sstate, bool isRangeScanInRedis)
 {
     if (RELATION_CREATE_BUCKET(relation)) {
-        return (TableScanDesc)hbkt_tbl_beginscan(relation, snapshot, nkeys, key, sstate);
+        return (TableScanDesc)hbkt_tbl_beginscan(relation, snapshot, nkeys, key, sstate, isRangeScanInRedis);
     }
-    
-    RangeScanInRedis rangeScanInRedis = reset_scan_qual(relation, sstate);
+    RangeScanInRedis rangeScanInRedis = reset_scan_qual(relation, sstate, isRangeScanInRedis);
     return tableam_scan_begin(relation, snapshot, nkeys, key, rangeScanInRedis);
 }
 
@@ -716,6 +884,7 @@ TableScanDesc scan_handler_tbl_beginscan_sampling(Relation relation, Snapshot sn
 
 Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel)
 {
+    Assert(scan != NULL);
     if (unlikely(RELATION_CREATE_BUCKET(scan->rs_rd))) {
         Tuple htup = tableam_scan_getnexttuple(((HBktTblScanDesc)scan)->currBktScan, direction);
         if (htup != NULL) {
@@ -727,64 +896,25 @@ Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Rela
     }
 }
 
-void scan_handler_tbl_endscan(TableScanDesc scan, Relation rel)
+void scan_handler_tbl_endscan(TableScanDesc scan)
 {
-    if (unlikely(RELATION_CREATE_BUCKET(scan->rs_rd))) {
+    if (unlikely(RELATION_OWN_BUCKET(scan->rs_rd))) {
         HBktTblScanDesc hp_scan = (HBktTblScanDesc)scan;
-        free_hbucket_scan(hp_scan->currBktScan, hp_scan->currBktRel);
+        if (hp_scan->currBktRel != NULL && RelationIsBucket(hp_scan->currBktRel)) {
+            free_hbucket_scan(hp_scan->currBktScan, hp_scan->currBktRel);
+        }
         list_free_ext(hp_scan->hBktList);
-        pfree(scan);
+        pfree(hp_scan);
     } else {
         tableam_scan_end(scan);
     }
 }
 
-void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel)
+void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel, bool is_bitmap_rescan)
 {
-    if (unlikely(RELATION_CREATE_BUCKET(scan->rs_rd))) {
-        hbkt_tbl_rescan(scan, key);
+    if (unlikely(RELATION_OWN_BUCKET(scan->rs_rd))) {
+        hbkt_tbl_rescan(scan, key, is_bitmap_rescan);
     } else {
         tableam_scan_rescan(scan, key);
     }
-}
-
-/*
- * get child string from merge_list of assignation bucketid
- */
-static char *get_child_string_from_merge_list(char *merge_list, int merge_list_length, int bucketid)
-{
-    char *result = NULL;
-    errno_t errorno = EOK;
-    char tmp[6] = {0};
-    char *strtemp = merge_list;
-    int used_length = 0;
-    while (strtemp != NULL) {
-        int i = 0;
-        for (i = 0; i < (merge_list_length - used_length) && strtemp[i] != ':'; i++) {
-            tmp[i] = strtemp[i];
-        }
-        tmp[i] = 0;
-        if (bucketid == atoi(tmp)) {
-            for (i = 0; i < (merge_list_length - used_length) && strtemp[i] != ';'; i++) {
-            }
-            result = (char *)palloc(i + 1);
-            errorno = memcpy_s(result, i, strtemp, i);
-            securec_check(errorno, "\0", "\0");
-            result[i] = 0;
-            break;
-        }
-        if (bucketid < atoi(tmp)) {
-            break;
-        }
-        strtemp = strchr(strtemp, ';');
-        if (strtemp != NULL) {
-            /* skip the char ';' */
-            strtemp = strtemp + 1;
-            used_length = int(strtemp - merge_list);
-            if (used_length == merge_list_length) {
-                break;
-            }
-        }
-    }
-    return result;
 }

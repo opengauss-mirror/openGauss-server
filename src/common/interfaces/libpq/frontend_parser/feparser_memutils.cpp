@@ -26,9 +26,9 @@
 #include "libpq-int.h"
 #include <algorithm>
 
-static void **g_vec = NULL;
-static size_t g_vec_size = 0;
-static const size_t g_resize_factor = 256;
+thread_local void **g_vec = NULL;
+thread_local size_t g_vec_size = 0;
+thread_local const size_t g_resize_factor = 256;
 void insert_into_vector(void *tmp)
 {
     if (!g_vec) {
@@ -65,6 +65,25 @@ char *feparser_strdup(const char *string)
     return tmp;
 }
 
+/*
+ * "Safe" wrapper around strndup()
+ */
+char *feparser_strndup(const char *string, const size_t n)
+{
+    char *tmp = NULL;
+    if (NULL == string) {
+        printf("feparser_strndup: cannot duplicate null pointer (internal error)\n");
+        exit(EXIT_FAILURE);
+    }
+    tmp = strndup(string, n);
+    if (NULL == tmp) {
+        printf("out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    insert_into_vector(tmp);
+    return tmp;
+}
+
 void *feparser_malloc(size_t size)
 {
     void *tmp = NULL;
@@ -90,23 +109,6 @@ void *feparser_malloc0(size_t size)
     tmp = feparser_malloc(size);
     rc = memset_s(tmp, size, 0, size);
     check_memset_s(rc);
-    return tmp;
-}
-
-void *feparser_calloc(size_t nmemb, size_t size)
-{
-    void *tmp = NULL;
-
-    if (nmemb == 0 || size == 0) {
-        printf("out of memory\n");
-        exit(EXIT_FAILURE);
-    }
-    tmp = calloc(nmemb, size);
-    if (NULL == tmp) {
-        printf("out of memory\n");
-        exit(EXIT_FAILURE);
-    }
-    insert_into_vector(tmp);
     return tmp;
 }
 

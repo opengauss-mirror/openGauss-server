@@ -48,6 +48,7 @@ create unique index CONCURRENTLY rp_index_global18 on hw_global_index_rp (c1) gl
 ERROR:  cannot create concurrent partitioned indexes 
 --fail ERROR: not support CONCURRENTLY
 create unique index rp_index_global19 on hw_global_index_rp (c1);
+ERROR:  Global and local partition index should not be on same column
 select class.relname, class.reltuples, class.parttype from pg_class class, pg_index ind where class.relname = 'rp_index_global1' and ind.indexrelid = class.oid;
      relname      | reltuples | parttype 
 ------------------+-----------+----------

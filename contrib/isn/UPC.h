@@ -1,6 +1,6 @@
 /*
  * UPC.h
- *	  PostgreSQL type definitions for ISNs (ISBN, ISMN, ISSN, EAN13, UPC)
+ *	  openGauss type definitions for ISNs (ISBN, ISMN, ISSN, EAN13, UPC)
  *
  * No information available for UPC prefixes
  *

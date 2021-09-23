@@ -695,7 +695,7 @@ static List* GetVerifyRelidList(VacuumStmt* stmt)
          * Scan pg_class to build a list of the relations we need to reindex.
          *
          * We only consider plain relations here (toast rels will be processed
-         * indirectly by reindex_relation).
+         * indirectly by ReindexRelation).
          */
         relationRelation = heap_open(RelationRelationId, AccessShareLock);
         scan = tableam_scan_begin(relationRelation, GetActiveSnapshot(), 0, NULL);
@@ -1223,7 +1223,6 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
     char* buf = (char*)palloc(BLCKSZ);
     BlockNumber nblocks;
     BlockNumber blkno;
-    Page page = (Page)buf;
     ForkNumber forkNum = MAIN_FORKNUM;
     bool isValidRelationPage = true;
 
@@ -1237,9 +1236,9 @@ static bool VerifyRowRelFast(Relation rel, VerifyDesc* checkCudesc)
     for (blkno = 0; blkno < nblocks; blkno++) {
         /* If we got a cancel signal during the copy of the data, quit */
         CHECK_FOR_INTERRUPTS();
-        smgrread(src, forkNum, blkno, buf);
+        SMGR_READ_STATUS rdStatus = smgrread(src, forkNum, blkno, buf);
         /* check the page & crc */
-        if (!PageIsVerified(page, blkno)) {
+        if (rdStatus == SMGR_RD_CRC_ERROR) {
             isValidRelationPage = false;
             /*
              * check the cudesc table|cudesc-toast| cudesc_index. If one of them is damaged, we will have to
@@ -1282,7 +1281,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
     }
 
     TableScanDesc scandesc;
-    HeapTuple tuple;
+    Tuple tuple;
     TupleDesc tupleDesc;
     Datum* values = NULL;
     bool* nulls = NULL;
@@ -1314,7 +1313,7 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
 
     NEXT_TUPLE:
         CHECK_FOR_INTERRUPTS();
-        tuple = heapGetNextForVerify(scandesc, ForwardScanDirection, isValidRelationPageComplete);
+        tuple = tableam_scan_gettuple_for_verify(scandesc, ForwardScanDirection, isValidRelationPageComplete);
         if (tuple == NULL) {
             tableam_scan_end(scandesc);
             pfree_ext(values);
@@ -1323,14 +1322,14 @@ static bool VerifyRowRelComplete(Relation rel, VerifyDesc* checkCudesc)
             (void)MemoryContextSwitchTo(oldMemContext);
             MemoryContextDelete(verifyRowMemContext);
             return (isValidRelationPageFast && isValidRelationPageComplete);
-        } else if (tuple != NULL && tuple->t_data != NULL) {
+        } else if (tuple != NULL && ((HeapTuple)tuple)->t_data != NULL) {
             PG_TRY();
             {
                 /*
                  * deform the passed heap tuple. call heap_deform_tuple() if it's not compressed,
                  * otherwise call heap_deform_cmprs_tuple().
                  */
-                if (!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data)) {
+                if (!HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)tuple)->t_data)) {
                     tableam_tops_deform_tuple(tuple, tupleDesc, values, nulls);
                 } else {
                     Page page = BufferGetPage(scandesc->rs_cbuf);

@@ -32,7 +32,7 @@
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
 #include "access/xlogproc.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/proc.h"
 #ifdef USE_ASSERT_CHECKING
 #include "utils/builtins.h"
@@ -48,6 +48,7 @@ XLogRecParseState *ClogXlogDdlParseToBlock(XLogReaderState *record, uint32 *bloc
     int64 pageno = 0;
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
     int ddltype = BLOCK_DDL_TYPE_NONE;
 
@@ -71,7 +72,8 @@ XLogRecParseState *ClogXlogDdlParseToBlock(XLogReaderState *record, uint32 *bloc
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
 
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, false,
                             (char *)XLogRecGetData(record));
@@ -104,6 +106,7 @@ XLogRecParseState *XactXlogClogParseToBlock(XLogReaderState *record, XLogRecPars
     XLogRecParseState *blockstate = NULL;
     BlockNumber lowblknum;
     ForkNumber forknum;
+    RelFileNodeForkNum filenode;
     uint16 offset[MAX_BLOCK_XID_NUMS];
     uint16 xidnum;
     TransactionId pagestartxid;
@@ -116,7 +119,8 @@ XLogRecParseState *XactXlogClogParseToBlock(XLogReaderState *record, XLogRecPars
     forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
     lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_CLOG_TYPE, forknum, lowblknum, NULL, blockstate);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_CLOG_TYPE, filenode, blockstate);
     xidnum = 0;
     pagestartxid = CLogPageNoToStartXactId(pageno);
 
@@ -137,7 +141,8 @@ XLogRecParseState *XactXlogClogParseToBlock(XLogReaderState *record, XLogRecPars
 
             forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
             lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
-            XLogRecSetBlockCommonState(record, BLOCK_DATA_CLOG_TYPE, forknum, lowblknum, NULL, blockstate);
+            filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+            XLogRecSetBlockCommonState(record, BLOCK_DATA_CLOG_TYPE, filenode, blockstate);
         }
 
         offset[xidnum] = (subxids[i] - pagestartxid);

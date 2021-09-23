@@ -26,7 +26,7 @@
  * and hours/minutes/seconds separately since the elapsed time spanned is
  * unknown until instantiated relative to an absolute time.
  *
- * Note that Postgres uses "time interval" to mean a bounded interval,
+ * Note that openGauss uses "time interval" to mean a bounded interval,
  * consisting of a beginning and ending time, not a time span - thomas 97/03/20
  *
  * We have two implementations, one that uses int64 values with units of
@@ -176,7 +176,7 @@ typedef struct {
 
 #define JULIAN_MAX (2147483494) /* == date2j(JULIAN_MAXYEAR, 1, 1) */
 
-/* Julian-date equivalents of Day 0 in Unix and Postgres reckoning */
+/* Julian-date equivalents of Day 0 in Unix and openGauss reckoning */
 #define UNIX_EPOCH_JDATE 2440588     /* == date2j(1970, 1, 1) */
 #define POSTGRES_EPOCH_JDATE 2451545 /* == date2j(2000, 1, 1) */
 

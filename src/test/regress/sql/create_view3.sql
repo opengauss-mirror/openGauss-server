@@ -2,7 +2,6 @@
 -- CREATE_VIEW3
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 CREATE VIEW view_const AS SELECT 'abc';
 SELECT * FROM view_const;

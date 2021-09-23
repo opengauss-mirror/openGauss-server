@@ -56,7 +56,7 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -94,6 +94,20 @@ void gs_set_ackchk_time(int mod)
 {
     g_ackchk_time = mod;
 }
+
+void gs_set_working_version_num(int num)
+{
+    if (!IsConnFromCoord()) {
+        return;
+    }
+    if (u_sess && u_sess->proc_cxt.MyProcPort) {
+        u_sess->proc_cxt.MyProcPort->SessionVersionNum = (uint32)num;
+    }
+
+    if (t_thrd.proc) {
+        t_thrd.proc->workingVersionNum = (uint32)num;
+    }
+} // gs_set_working_version_num
 
 void gs_set_libcomm_used_rate(int rate)
 {

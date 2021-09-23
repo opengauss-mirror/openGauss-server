@@ -2,7 +2,7 @@
  *
  * c.h
  *	  Fundamental C definitions.  This is included by every .c file in
- *	  PostgreSQL (via either postgres.h or postgres_fe.h, as appropriate).
+ *	  openGauss (via either postgres.h or postgres_fe.h, as appropriate).
  *
  *	  Note that the definitions here are not intended to be exposed to clients
  *	  of the frontend interface libraries --- so we don't worry much about
@@ -172,6 +172,19 @@
 
 #ifndef __GNUC__
 #define __attribute__(_arg_)
+#endif
+
+/*
+ * Mark a point as unreachable in a portable fashion.  This should preferably
+ * be something that the compiler understands, to aid code generation.
+ * In assert-enabled builds, we prefer abort() for debugging reasons.
+ */
+#if defined(HAVE__BUILTIN_UNREACHABLE) && !defined(USE_ASSERT_CHECKING)
+#define pg_unreachable() __builtin_unreachable()
+#elif defined(_MSC_VER) && !defined(USE_ASSERT_CHECKING)
+#define pg_unreachable() __assume(0)
+#else
+#define pg_unreachable() abort()
 #endif
 
 /* ----------------------------------------------------------------
@@ -356,7 +369,7 @@ typedef unsigned int Index;
 typedef signed int Offset;
 
 /*
- * Common Postgres datatype names (as used in the catalogs)
+ * Common openGauss datatype names (as used in the catalogs)
  */
 
 typedef int8 int1;
@@ -532,6 +545,8 @@ typedef struct {
     int lbound1;
     int2 values[FLEXIBLE_ARRAY_MEMBER];
 } int2vector;
+
+typedef int2vector int2vector_extend;
 
 typedef struct {
     int32 vl_len_;    /* these fields must match ArrayType! */
@@ -1180,5 +1195,7 @@ const T& min(const T& a, const T& b)
 #define INT2SIZET(val) (Size)((unsigned int)(val))
 
 #define isIntergratedMachine false  // not work for now, adapt it later
+
+typedef void* Tuple;
 
 #endif /* C_H */

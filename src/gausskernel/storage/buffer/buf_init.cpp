@@ -24,26 +24,10 @@
 #include "storage/cucache_mgr.h"
 #include "pgxc/pgxc.h"
 #include "postmaster/pagewriter.h"
+#include "postmaster/bgwriter.h"
 #include "utils/palloc.h"
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
-
-void MemsetHugeMem(char *buffer, Size len, int num)
-{
-    int rc;
-    while (len > 0) {
-        if (len < SECUREC_MEM_MAX_LEN) {
-            rc = memset_s(buffer, len, num, len);
-            securec_check(rc, "", "");
-            return;
-        } else {
-            rc = memset_s(buffer, SECUREC_MEM_MAX_LEN, num, SECUREC_MEM_MAX_LEN);
-            securec_check(rc, "", "");
-            len -= SECUREC_MEM_MAX_LEN;
-            buffer += SECUREC_MEM_MAX_LEN;
-        }
-    }
-}
 
 /*
  * Data Structures:
@@ -91,25 +75,26 @@ void InitBufferPool(void)
 
     t_thrd.storage_cxt.BufferDescriptors = (BufferDescPadded *)CACHELINEALIGN(
         ShmemInitStruct("Buffer Descriptors",
-                        g_instance.attr.attr_storage.NBuffers * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
+                        TOTAL_BUFFER_NUM * sizeof(BufferDescPadded) + PG_CACHE_LINE_SIZE,
                         &found_descs));
 
     /* Init candidate buffer list and candidate buffer free map */
     candidate_buf_init();
 
 #ifdef __aarch64__
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
+    buffer_size = TOTAL_BUFFER_NUM * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
     t_thrd.storage_cxt.BufferBlocks =
         (char *)CACHELINEALIGN(ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs));
 #else
-    buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
+    buffer_size = TOTAL_BUFFER_NUM * (Size)BLCKSZ;
     t_thrd.storage_cxt.BufferBlocks = (char *)ShmemInitStruct("Buffer Blocks", buffer_size, &found_bufs);
 #endif
 
     if (BBOX_BLACKLIST_SHARE_BUFFER) {
-        bbox_blacklist_add(SHARED_BUFFER, t_thrd.storage_cxt.BufferBlocks, buffer_size);
+        /* Segment Buffer is exclued from the black list, as it contains many critical information for debug */
+        bbox_blacklist_add(SHARED_BUFFER, t_thrd.storage_cxt.BufferBlocks, NORMAL_SHARED_BUFFER_NUM * (Size)BLCKSZ);
     }
-    
+
     /*
      * The array used to sort to-be-checkpointed buffer ids is located in
      * shared memory, to avoid having to allocate significant amounts of
@@ -119,10 +104,10 @@ void InitBufferPool(void)
      */
     g_instance.ckpt_cxt_ctl->CkptBufferIds =
         (CkptSortItem *)ShmemInitStruct("Checkpoint BufferIds",
-                                        g_instance.attr.attr_storage.NBuffers * sizeof(CkptSortItem), &found_buf_ckpt);
+                                        TOTAL_BUFFER_NUM * sizeof(CkptSortItem), &found_buf_ckpt);
 
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
-        g_instance.ckpt_cxt_ctl->dirty_page_queue_size = g_instance.attr.attr_storage.NBuffers *
+        g_instance.ckpt_cxt_ctl->dirty_page_queue_size = TOTAL_BUFFER_NUM *
                                                          PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
 
@@ -133,8 +118,13 @@ void InitBufferPool(void)
             ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
         }
 
-        MemsetHugeMem((char *)g_instance.ckpt_cxt_ctl->dirty_page_queue, queue_mem_size);
+        /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
+        MemSet((char*)g_instance.ckpt_cxt_ctl->dirty_page_queue, 0, queue_mem_size);
         (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    if (g_instance.bgwriter_cxt.unlink_rel_hashtbl == NULL) {
+        g_instance.bgwriter_cxt.unlink_rel_hashtbl = relfilenode_hashtbl_create("unlink_rel_hashtbl", true);
     }
 
     if (found_descs || found_bufs || found_buf_ckpt) {
@@ -147,7 +137,7 @@ void InitBufferPool(void)
         /*
          * Initialize all the buffer headers.
          */
-        for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+        for (i = 0; i < TOTAL_BUFFER_NUM; i++) {
             BufferDesc *buf = GetBufferDescriptor(i);
             CLEAR_BUFFERTAG(buf->tag);
 
@@ -159,7 +149,9 @@ void InitBufferPool(void)
             buf->content_lock = LWLockAssign(LWTRANCHE_BUFFER_CONTENT);
             pg_atomic_init_u64(&buf->rec_lsn, InvalidXLogRecPtr);
             buf->dirty_queue_loc = PG_UINT64_MAX;
+            buf->encrypt = false;
         }
+        g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);
     }
 
     /* Init other shared buffer-management stuff */
@@ -186,11 +178,11 @@ Size BufferShmemSize(void)
     Size size = 0;
 
     /* size of buffer descriptors */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(BufferDescPadded)));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(BufferDescPadded)));
     size = add_size(size, PG_CACHE_LINE_SIZE);
 
     /* size of data pages */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, BLCKSZ));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, BLCKSZ));
 #ifdef __aarch64__
     size = add_size(size, PG_CACHE_LINE_SIZE);
 #endif
@@ -198,7 +190,7 @@ Size BufferShmemSize(void)
     size = add_size(size, StrategyShmemSize());
 
     /* size of checkpoint sort array in bufmgr.c */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(CkptSortItem)));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(CkptSortItem)));
 
     /* size of candidate buffers */
     size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(Buffer)));
@@ -208,3 +200,4 @@ Size BufferShmemSize(void)
 
     return size;
 }
+

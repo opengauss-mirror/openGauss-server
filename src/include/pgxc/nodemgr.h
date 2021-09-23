@@ -64,8 +64,8 @@ extern Size NodeTablesShmemSize(void);
 
 extern void PgxcNodeListAndCount(void);
 extern void PgxcNodeGetOids(Oid** coOids, Oid** dnOids, int* num_coords, int* num_dns, bool update_preferred);
-extern void PgxcNodeGetStandbyOids(int* num_dns);
-extern NodeDefinition* PgxcNodeGetDefinition(Oid node);
+extern void PgxcNodeGetStandbyOids(Oid** coOids, Oid** dnOids, int* numCoords, int* numDns, bool needInitPGXC);
+extern NodeDefinition* PgxcNodeGetDefinition(Oid node, bool checkStandbyNodes = false);
 extern void PgxcNodeAlter(AlterNodeStmt* stmt);
 extern void PgxcNodeCreate(CreateNodeStmt* stmt);
 extern char PgxcNodeRemove(DropNodeStmt* stmt);

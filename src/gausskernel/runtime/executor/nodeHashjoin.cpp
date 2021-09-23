@@ -17,10 +17,10 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "executor/hashjoin.h"
-#include "executor/nodeHash.h"
-#include "executor/nodeHashjoin.h"
+#include "executor/node/nodeHash.h"
+#include "executor/node/nodeHashjoin.h"
 #include "miscadmin.h"
 #include "utils/anls_opt.h"
 #include "utils/memutils.h"

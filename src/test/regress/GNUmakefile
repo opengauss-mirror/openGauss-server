@@ -13,7 +13,7 @@
 subdir = src/test/regress
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
-
+server_topdir = ../../../..
 # get  string from script get_PlatForm_str.sh
 PLAT_FORM_STR = $(shell sh $(top_builddir)/src/get_PlatForm_str.sh)
 ifeq ($(PLAT_FORM_STR), Failed)
@@ -77,8 +77,26 @@ MAXCONNOPT += --max-connections=$(MAX_CONNECTIONS)
 endif
 
 ifeq ($(SUPPORT_HOTPATCH), yes)
+ifeq ($(PART)_, _)
+hotpatch_dir=$(realpath $(server_topdir)/distribute/lib/hotpatch/)
+define hotpatch_error_out
+    $(info "Can not find hotpatch fastcheck tool in $(hotpatch_dir)/tool/fastcheck/:")
+    $(info "Please clone hotpatch repo and create soft link:")
+    $(info "git clone ssh://git@lfg-y.codehub.huawei.com:2222/Gauss/GaussDBKernel/GaussDBKernel-hotpatch.git")
+    $(info "ln -s GaussDBKernel-hotpatch/samples/ $(hotpatch_dir)/sample ")
+    $(info "ln -s GaussDBKernel-hotpatch/tool/ $(hotpatch_dir)/tool ")
+    $(error "Can not find hotpatch tools")
+endef
+define hotpatch_check_func
+	$(if $(wildcard $(hotpatch_dir)/tool/fastcheck/patch_tool_llt.sh),,$(call hotpatch_error_out))
+endef
+else
+define hotpatch_check_func
+endef
+endif
+
 define hotpatch_setup_func
-    export CODE_BASE=$(realpath $(top_builddir)) && \
+    export SERVER_CODE_BASE=$(realpath $(server_topdir)) && \
     export PATCHLIB_HOME=$(realpath $(LIBHOTPATCH_HOME))
 endef
 else
@@ -214,6 +232,7 @@ REG_CONF = --regconf=regress.conf
 
 check: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --single_node --schedule=$(srcdir)/parallel_schedule$(PART) $(MAXCONNOPT) $(TEMP_CONF) $(EXTRA_TESTS) $(REG_CONF)
 2pccheck: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
@@ -225,7 +244,7 @@ redischeck: all tablespace-setup
 
 decodecheck: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
-	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 1 -p $(p) -r $(runtest) -b $(dir) --schedule=$(srcdir)/parallel_schedule$(PART).decode --keep_last_data=${keep_last_data} $(MAXCONNOPT) $(TEMP_CONF) $(EXTRA_TESTS) $(REG_CONF)
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule$(PART).decode -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 wlmcheck: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	export TMP_USR=`whoami`; \
@@ -250,30 +269,40 @@ redochecksmall: all tablespace-setup
 	$(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r $(runtest) -s $(s) -b $(dir) --schedule=$(srcdir)/parallel_schedule.redosmall $(MAXCONNOPT)  --temp-config=$(srcdir)/make_redocheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
 fastcheck_initdb: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(call exception_arm_cases) && \
         $(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r 0 -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/parallel_schedule$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --init_database $(EXTRA_TESTS) $(REG_CONF)
 
 fastcheck_inplace: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
         $(call hotpatch_setup_func) && \
         $(call exception_arm_cases) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d $(d) -c $(c) -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --schedule=$(srcdir)/parallel_schedule$(PART) --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --inplace_upgrade --data_base_dir=$(data_base_dir) --platform=$(PLAT_FORM_STR) --upgrade_script_dir=$(upgrade_script_dir) $(EXTRA_TESTS) $(REG_CONF) --upgrade_from=$(upgrade_from)
 
 fastcheck_single: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
+fastcheck_single_segment: all tablespace-setup
+	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
+	$(call hotpatch_setup_func) && \
+	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule0$(PART) -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf --enable-segment $(EXTRA_TESTS) $(REG_CONF)
+
 fastcheck_single_db4ai: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule.db4ai -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
+
 fastcheck_single_mot: all tablespace-setup
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(pg_regress_check) $(REGRESS_OPTS) -d 1 -c 0 -p $(p) -r $(runtest) -b $(dir) -n $(n) --abs_gausshome=$(abs_gausshome) --single_node --schedule=$(srcdir)/parallel_schedule20 -w --keep_last_data=${keep_last_data} $(MAXCONNOPT) --temp-config=$(srcdir)/make_fastcheck_single_mot_postgresql.conf $(EXTRA_TESTS) $(REG_CONF)
 
 fastcheck_parallel_initdb: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(call exception_arm_cases) && \
@@ -329,6 +358,7 @@ installcheck: all tablespace-setup
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/serial_schedule $(EXTRA_TESTS) $(REG_CONF)
 
 installcheck-parallel: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(call exception_arm_cases) && \
@@ -352,6 +382,7 @@ bigtest: all tablespace-setup
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/serial_schedule numeric_big $(REG_CONF)
 
 bigcheck: all tablespace-setup
+	$(call hotpatch_check_func)
 	export LD_LIBRARY_PATH=$(SSL_LIB_PATH):$(LD_LIBRARY_PATH) && \
 	$(call hotpatch_setup_func) && \
 	$(call exception_arm_cases) && \

@@ -75,7 +75,7 @@ STDAPI DllRegisterServer(void)
     }
 
     /*
-     * Add PostgreSQL source name as a subkey under the Application key in the
+     * Add openGauss source name as a subkey under the Application key in the
      * EventLog registry key.
      */
     _snprintf(
@@ -111,7 +111,7 @@ STDAPI DllUnregisterServer(void)
     char key_name[400];
 
     /*
-     * Remove PostgreSQL source name as a subkey under the Application key in
+     * Remove openGauss source name as a subkey under the Application key in
      * the EventLog registry key.
      */
 

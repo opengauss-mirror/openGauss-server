@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * sinval.cpp
- *	  POSTGRES shared cache invalidation communication code.
+ *	  openGauss shared cache invalidation communication code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

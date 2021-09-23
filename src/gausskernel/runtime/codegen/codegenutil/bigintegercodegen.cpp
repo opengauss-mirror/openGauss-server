@@ -117,13 +117,13 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     Vals4[2] = int32_0;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
     llvm::Value* lvalscale = builder.CreateAnd(tmpval, val_scalemask);
     lvalscale = builder.CreateSExt(lvalscale, int32Type, "lscale");
 
     /* get rvalsacle : NUMERIC_BI_SCALE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
     llvm::Value* rvalscale = builder.CreateAnd(tmpval, val_scalemask);
     rvalscale = builder.CreateSExt(rvalscale, int32Type, "rscale");
 
@@ -131,12 +131,12 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* leftval = builder.CreateAlignedLoad(tmpval, 8, "lval");
+    llvm::Value* leftval = builder.CreateLoad(int64Type, tmpval, "lval");
 
     /* get rightval : NUMERIC_64VALUE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* rightval = builder.CreateAlignedLoad(tmpval, 8, "rval");
+    llvm::Value* rightval = builder.CreateLoad(int64Type, tmpval, "rval");
 
     /* Adjust leftval and rightval to the same scale */
     DEFINE_BLOCK(delta_large, jitted_bi64add64);
@@ -203,7 +203,6 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
     resscale->addIncoming(resscale2, delta_small);
 
     /* do bi64 add bi64, need to check if there is any overflow */
-    /* in llvm10 sadd_with_overflow is define as uint value 229 */
     llvm::Function* func_sadd_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
     if (func_sadd_overflow == NULL) {
@@ -222,7 +221,7 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
         Vals[0] = int64_0;
         Vals[1] = int32_0;
         llvm::Value* store_pos = builder.CreateInBoundsGEP(ctl, Vals);
-        store_pos = builder.CreateAlignedLoad(store_pos, 8, "store_pos");
+        store_pos = builder.CreateLoad(int64Type, store_pos, "store_pos");
         llvm::Value* resnum = builder.CreateIntToPtr(store_pos, numericPtrType);
 
         /* set result scale */
@@ -233,14 +232,14 @@ llvm::Function* bi64add64_codegen(bool use_ctl)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         llvm::Value* res_header = builder.CreateInBoundsGEP(resnum, Vals4);
-        builder.CreateAlignedStore(tmpval, res_header, 2);
+        builder.CreateStore(tmpval, res_header);
 
         /* set result value */
         Vals4[3] = int32_1;
         llvm::Value* res_data = builder.CreateInBoundsGEP(resnum, Vals4);
         res_data = builder.CreateBitCast(res_data, int64PtrType);
         llvm::Value* result = builder.CreateExtractValue(res, 0);
-        builder.CreateAlignedStore(result, res_data, 8);
+        builder.CreateStore(result, res_data);
         res1 = int64_0;
     } else {
         res1 = builder.CreateExtractValue(res, 0);
@@ -321,6 +320,7 @@ llvm::Function* bi64sub64_codegen()
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_NINTTYP(int128Type, 128);
@@ -371,13 +371,13 @@ llvm::Function* bi64sub64_codegen()
     Vals4[2] = int32_0;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
     llvm::Value* lvalscale = builder.CreateAnd(tmpval, val_scalemask);
     lvalscale = builder.CreateSExt(lvalscale, int32Type, "lscale");
 
     /* get rvalsacle : NUMERIC_BI_SCALE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
     llvm::Value* rvalscale = builder.CreateAnd(tmpval, val_scalemask);
     rvalscale = builder.CreateSExt(rvalscale, int32Type, "rscale");
 
@@ -385,12 +385,12 @@ llvm::Function* bi64sub64_codegen()
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* leftval = builder.CreateAlignedLoad(tmpval, 8, "lval");
+    llvm::Value* leftval = builder.CreateLoad(int64Type, tmpval, "lval");
 
     /* get rightval : NUMERIC_64VALUE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* rightval = builder.CreateAlignedLoad(tmpval, 8, "rval");
+    llvm::Value* rightval = builder.CreateLoad(int64Type, tmpval, "rval");
 
     /* Adjust leftval and rightval to the same scale */
     DEFINE_BLOCK(delta_large, jitted_bi64sub64);
@@ -457,7 +457,6 @@ llvm::Function* bi64sub64_codegen()
     resscale->addIncoming(resscale2, delta_small);
 
     /* do bi64 add bi64, need to check if there is any overflow */
-    /* in llvm10 sasub_with_overflow is define as uint value 241 */
     llvm::Function* func_ssub_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_ssub_with_overflow, Intrinsic_Tys);
     if (func_ssub_overflow == NULL) {
@@ -536,6 +535,7 @@ llvm::Function* bi64mul64_codegen()
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_NINTTYP(int128Type, 128);
@@ -569,13 +569,13 @@ llvm::Function* bi64mul64_codegen()
     /* get lvalsacle : NUMERIC_BI_SCALE(larg) */
     Vals4[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
     llvm::Value* lvalscale = builder.CreateAnd(tmpval, val_scalemask);
     lvalscale = builder.CreateSExt(lvalscale, int32Type, "lscale");
 
     /* get rvalsacle : NUMERIC_BI_SCALE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
     llvm::Value* rvalscale = builder.CreateAnd(tmpval, val_scalemask);
     rvalscale = builder.CreateSExt(rvalscale, int32Type, "rscale");
 
@@ -583,12 +583,12 @@ llvm::Function* bi64mul64_codegen()
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(larg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* leftval = builder.CreateAlignedLoad(tmpval, 8, "lval");
+    llvm::Value* leftval = builder.CreateLoad(int64Type, tmpval, "lval");
 
     /* get rightval : NUMERIC_64VALUE(rarg) */
     tmpval = builder.CreateInBoundsGEP(rarg, Vals4);
     tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-    llvm::Value* rightval = builder.CreateAlignedLoad(tmpval, 8, "rval");
+    llvm::Value* rightval = builder.CreateLoad(int64Type, tmpval, "rval");
 
     llvm::Value* result_scale = builder.CreateAdd(lvalscale, rvalscale, "resullt_scale");
 
@@ -600,7 +600,6 @@ llvm::Function* bi64mul64_codegen()
     cmpval = builder.CreateICmpSLE(result_scale, maxInt64digitsNum, "cmp_delta_scale");
 
     /* do bi64 mul bi64, need to check if there is any overflow */
-    /* in llvm10 smul_with_overflow is define as uint value 236 */
     llvm::Function* func_smul_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_smul_with_overflow, Intrinsic_Tys);
     if (func_smul_overflow == NULL) {
@@ -687,13 +686,13 @@ llvm::Value* GetInt64MulOutofBoundCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, ll
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CGVAR_INT64(int64_0, 0);
 
-    /* get the global Int64MultiOutOfBound array from current module */
+    /* get the global Int64MultiOutOfBound array (int64) from current module */
     llvm::GlobalVariable* global_mbound = llvmCodeGen->module()->getNamedGlobal("Int64MultiOutOfBound");
     llvm::Value* Vals[2] = {int64_0, int64_0};
 
     Vals[1] = ptrbuilder->CreateSExt(deltascale, int64Type);
     llvm::Value* tmpval = ptrbuilder->CreateInBoundsGEP(global_mbound, Vals);
-    llvm::Value* multi_bound = ptrbuilder->CreateAlignedLoad(tmpval, 8, "multibound");
+    llvm::Value* multi_bound = ptrbuilder->CreateLoad(int64Type, tmpval, "multibound");
     return multi_bound;
 }
 
@@ -710,13 +709,13 @@ llvm::Value* ScaleMultiCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* 
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CGVAR_INT64(int64_0, 0);
 
-    /* get the global ScaleMultiplier array from current module */
+    /* get the global ScaleMultiplier array (int64) from current module */
     llvm::GlobalVariable* global_smul = llvmCodeGen->module()->getNamedGlobal("ScaleMultipler");
     llvm::Value* Vals[2] = {int64_0, int64_0};
 
     Vals[1] = ptrbuilder->CreateSExt(deltascale, int64Type);
     llvm::Value* tmpval = ptrbuilder->CreateInBoundsGEP(global_smul, Vals);
-    llvm::Value* scalemul = ptrbuilder->CreateAlignedLoad(tmpval, 8, "scalemul");
+    llvm::Value* scalemul = ptrbuilder->CreateLoad(int64Type, tmpval, "scalemul");
     return scalemul;
 }
 
@@ -729,17 +728,19 @@ llvm::Value* ScaleMultiCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* 
 llvm::Value* GetScaleMultiCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* deltascale)
 {
     GsCodeGen* llvmCodeGen = (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj;
+    llvm::LLVMContext& context = llvmCodeGen->context();
 
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_NINTTYP(int128Type, 128);
     DEFINE_CGVAR_INT64(int64_0, 0);
 
-    /* get the global getScaleMultiplier array from current module */
+    /* get the global getScaleMultiplier array (int128) from current module */
     llvm::GlobalVariable* global_gsmul = llvmCodeGen->module()->getNamedGlobal("_ZZ18getScaleMultiplieriE6values");
     llvm::Value* Vals[2] = {int64_0, int64_0};
 
     Vals[1] = ptrbuilder->CreateSExt(deltascale, int64Type);
     llvm::Value* tmpval = ptrbuilder->CreateInBoundsGEP(global_gsmul, Vals);
-    llvm::Value* gscalemul = ptrbuilder->CreateAlignedLoad(tmpval, 8, "getscalemul");
+    llvm::Value* gscalemul = ptrbuilder->CreateLoad(int128Type, tmpval, "getscalemul");
     return gscalemul;
 }
 

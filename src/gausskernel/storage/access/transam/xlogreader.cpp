@@ -25,11 +25,13 @@
 #include "access/xlogrecord.h"
 #include "access/xlog_internal.h"
 #include "access/xlogreader.h"
+#include "access/xlog_basic.h"
 #include "catalog/pg_control.h"
 #include "securec_check.h"
 #include "replication/logical.h"
 #include "access/parallel_recovery/redo_item.h"
 #include "utils/memutils.h"
+#include "utils/elog.h"
 
 typedef struct XLogPageReadPrivate {
     const char *datadir;
@@ -154,19 +156,6 @@ XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_d
  */
 void XLogReaderFree(XLogReaderState *state)
 {
-    int block_id;
-
-    for (block_id = 0; block_id <= XLR_MAX_BLOCK_ID; block_id++) {
-        if (state->blocks[block_id].data) {
-            pfree(state->blocks[block_id].data);
-            state->blocks[block_id].data = NULL;
-        }
-    }
-    if (state->main_data) {
-        pfree(state->main_data);
-        state->main_data = NULL;
-    }
-
     pfree(state->errormsg_buf);
     state->errormsg_buf = NULL;
     if (state->readRecordBuf) {
@@ -793,6 +782,7 @@ static int ReadPageInternal(XLogReaderState *state, XLogRecPtr pageptr, int reqL
     state->readSegNo = targetSegNo;
     state->readOff = targetPageOff;
     state->readLen = readLen;
+    state->isTde = false;
 
     return readLen;
 
@@ -1201,6 +1191,10 @@ void ResetDecoder(XLogReaderState *state)
         state->blocks[block_id].has_image = false;
         state->blocks[block_id].has_data = false;
         state->blocks[block_id].data_len = 0;
+        if (state->blocks[block_id].tdeinfo != NULL) {
+            pfree(state->blocks[block_id].tdeinfo);
+            state->blocks[block_id].tdeinfo = NULL;
+        }
 #ifdef USE_ASSERT_CHECKING
         state->blocks[block_id].replayed = 0;
 #endif
@@ -1209,6 +1203,18 @@ void ResetDecoder(XLogReaderState *state)
 }
 
 /*
+ * This macro can be only used in DecodeXLogRecord to decode one variable from each time
+ */
+#define DECODE_XLOG_ONE_ITEM(variable, type) \
+    do { \
+        if (remaining < sizeof(type)) \
+            goto shortdata_err; \
+        variable = *(type *)ptr; \
+        ptr += sizeof(type); \
+        remaining -= sizeof(type); \
+    } while (0)
+
+/*  
  * Decode the previously read record.
  *
  * On error, a human-readable error message is returned in *errormsg, and
@@ -1221,7 +1227,6 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
     uint32 datatotal;
     DecodedBkpBlock *lastBlock = NULL;
     uint8 block_id;
-    errno_t rc = EOK;
 
     ResetDecoder(state);
 
@@ -1275,9 +1280,10 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             /* XLogRecordBlockHeader */
             DecodedBkpBlock *blk = NULL;
             uint8 fork_flags;
-            bool hasbucket = (block_id & BKID_HAS_BUCKET) != 0;
+            bool hasbucket_segpage = (block_id & BKID_HAS_BUCKET_OR_SEGPAGE) != 0;
+            state->isTde = (block_id & BKID_HAS_TDE_PAGE) != 0;
             block_id = BKID_GET_BKID(block_id);
-
+            
             if (block_id <= state->max_block_id) {
                 report_invalid_record(state, "out-of-order block_id %u at %X/%X", block_id,
                                       (uint32)(state->ReadRecPtr >> 32), (uint32)state->ReadRecPtr);
@@ -1296,16 +1302,12 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             remaining -= sizeof(uint8);
 
             blk->forknum = fork_flags & BKPBLOCK_FORK_MASK;
+
             blk->flags = fork_flags;
             blk->has_image = ((fork_flags & BKPBLOCK_HAS_IMAGE) != 0);
             blk->has_data = ((fork_flags & BKPBLOCK_HAS_DATA) != 0);
 
-            if (remaining < sizeof(uint16))
-                goto shortdata_err;
-            blk->data_len = *(uint16 *)ptr;
-            securec_check(rc, "\0", "\0");
-            ptr += sizeof(uint16);
-            remaining -= sizeof(uint16);
+            DECODE_XLOG_ONE_ITEM(blk->data_len, uint16);
 
             /* cross-check that the HAS_DATA flag is set iff data_length > 0 */
             if (blk->has_data && blk->data_len == 0) {
@@ -1322,23 +1324,12 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             datatotal += blk->data_len;
 
             if (blk->has_image) {
-                if (remaining < sizeof(uint16))
-                    goto shortdata_err;
-                blk->hole_offset = *(uint16 *)ptr;
-                ptr += sizeof(uint16);
-                remaining -= sizeof(uint16);
-
-                if (remaining < sizeof(uint16))
-                    goto shortdata_err;
-
-                blk->hole_length = *(uint16 *)ptr;
-                ptr += sizeof(uint16);
-                remaining -= sizeof(uint16);
-
+                DECODE_XLOG_ONE_ITEM(blk->hole_offset, uint16);
+                DECODE_XLOG_ONE_ITEM(blk->hole_length, uint16);
                 datatotal += BLCKSZ - blk->hole_length;
             }
             if (!(fork_flags & BKPBLOCK_SAME_REL)) {
-                uint32 filenodelen = (hasbucket ? sizeof(RelFileNode) : sizeof(RelFileNodeOld));
+                uint32 filenodelen = (hasbucket_segpage ? sizeof(RelFileNode) : sizeof(RelFileNodeOld));
                 if (remaining < filenodelen)
                     goto shortdata_err;
                 blk->rnode.bucketNode = InvalidBktId;
@@ -1347,12 +1338,12 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
                 ptr += filenodelen;
                 remaining -= filenodelen;
 
-                if (remaining < sizeof(uint16))
-                    goto shortdata_err;
+                if (state->isTde) {
+                    blk->tdeinfo = (TdeInfo*)palloc_extended(sizeof(TdeInfo), MCXT_ALLOC_NO_OOM);
+                    DECODE_XLOG_ONE_ITEM(*(blk->tdeinfo), TdeInfo);
+                }
 
-                blk->extra_flag = *(uint16 *)ptr;
-                ptr += sizeof(uint16);
-                remaining -= sizeof(uint16);
+                DECODE_XLOG_ONE_ITEM(blk->extra_flag, uint16);
 
                 lastBlock = blk;
             } else {
@@ -1366,17 +1357,31 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
                 blk->extra_flag = lastBlock->extra_flag;
             }
 
-            if (remaining < sizeof(BlockNumber))
-                goto shortdata_err;
-            blk->blkno = *(BlockNumber *)ptr;
-            ptr += sizeof(BlockNumber);
-            remaining -= sizeof(BlockNumber);
+            DECODE_XLOG_ONE_ITEM(blk->blkno, BlockNumber);
+            if (XLOG_NEED_PHYSICAL_LOCATION(blk->rnode)) {
+                DECODE_XLOG_ONE_ITEM(blk->seg_fileno, uint8);
+                DECODE_XLOG_ONE_ITEM(blk->seg_blockno, BlockNumber);
 
-            if (remaining < sizeof(XLogRecPtr))
-                goto shortdata_err;
-            blk->last_lsn = *(XLogRecPtr *)ptr;
-            ptr += sizeof(XLogRecPtr);
-            remaining -= sizeof(XLogRecPtr);
+                if (blk->seg_fileno & BKPBLOCK_HAS_VM_LOC) {
+                    blk->has_vm_loc = true;
+                    blk->seg_fileno = BKPBLOCK_GET_SEGFILENO(blk->seg_fileno);
+                    
+                    DECODE_XLOG_ONE_ITEM(blk->vm_seg_fileno, uint8);
+                    DECODE_XLOG_ONE_ITEM(blk->vm_seg_blockno, BlockNumber);
+                } else {
+                    blk->has_vm_loc = false;
+                    blk->vm_seg_fileno = InvalidOid;
+                    blk->vm_seg_blockno = InvalidBlockNumber;
+                }
+            } else {
+                blk->seg_fileno = InvalidOid;
+                blk->seg_blockno = InvalidBlockNumber;
+                blk->vm_seg_fileno = InvalidOid;
+                blk->vm_seg_blockno = InvalidBlockNumber;
+                blk->has_vm_loc = false;
+            }
+            
+            DECODE_XLOG_ONE_ITEM(blk->last_lsn, XLogRecPtr);
         } else {
             report_invalid_record(state, "invalid block_id %u at %X/%X", block_id, (uint32)(state->ReadRecPtr >> 32),
                                   (uint32)state->ReadRecPtr);
@@ -1407,34 +1412,15 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
             ptr += BLCKSZ - blk->hole_length;
         }
         if (blk->has_data) {
-            if (!blk->data || blk->data_len > blk->data_bufsz) {
-                if (blk->data) {
-                    pfree(blk->data);
-                    blk->data = NULL;
-                }
-                blk->data_bufsz = blk->data_len;
-                blk->data = (char *)palloc(blk->data_bufsz);
-                Assert(blk->data != NULL);
-            }
-            rc = memcpy_s(blk->data, blk->data_len, ptr, blk->data_len);
-            securec_check(rc, "\0", "\0");
+            blk->data = ptr;
             ptr += blk->data_len;
         }
     }
 
     /* and finally, the main data */
     if (state->main_data_len > 0) {
-        if (!state->main_data || state->main_data_len > state->main_data_bufsz) {
-            if (state->main_data) {
-                pfree(state->main_data);
-                state->main_data = NULL;
-            }
-            state->main_data_bufsz = state->main_data_len;
-            state->main_data = (char *)palloc(state->main_data_bufsz);
-            Assert(state->main_data != NULL);
-        }
-        rc = memcpy_s(state->main_data, state->main_data_len, ptr, state->main_data_len);
-        securec_check(rc, "\0", "\0");
+        state->main_data_bufsz = state->main_data_len;
+        state->main_data = ptr;
         ptr += state->main_data_len;
     }
 

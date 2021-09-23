@@ -764,7 +764,7 @@ bool pg_sha256_encrypt_for_md5(const char* password, const char* salt, size_t sa
     return true;
 }
 
-bool gs_sm3_encrypt(
+bool GsSm3Encrypt(
     const char* password, const char* salt_s, size_t salt_len, char* buf, char* client_key_buf, int iteration_count)
 {
     size_t password_len = 0;
@@ -773,7 +773,7 @@ bool gs_sm3_encrypt(
     char sever_key[HMAC_LENGTH + 1] = {0};
     char stored_key[STORED_KEY_LENGTH + 1] = {0};
     char salt[SALT_LENGTH + 1] = {0};
-    char server_key_string[HMAC_LENGTH * 2 + 1] = {0};
+    char serverKeyString[HMAC_LENGTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
     char stored_key_string[STORED_KEY_LENGTH * 2 + 1] = {0};
     int pkcs_ret;
     int sever_ret;
@@ -786,8 +786,9 @@ bool gs_sm3_encrypt(
     char client_string[CLIENT_STRING_LENGTH] = "Client Key";
     errno_t rc = 0;
 
-    if (NULL == password || NULL == buf)
+    if (NULL == password || NULL == buf) {
         return false;
+    }
 
     password_len = strlen(password);
     sha_hex_to_bytes32(salt, (char*)salt_s);
@@ -879,7 +880,7 @@ bool gs_sm3_encrypt(
 
     total_encrypt_length = SALT_LENGTH * 2 + HMAC_LENGTH * 2 + STORED_KEY_LENGTH * 2;
 
-    sha_bytes_to_hex64((uint8*)sever_key, server_key_string);
+    sha_bytes_to_hex64((uint8*)sever_key, serverKeyString);
     sha_bytes_to_hex64((uint8*)stored_key, stored_key_string);
 
     rc = snprintf_s(buf + SM3_LENGTH,
@@ -887,7 +888,7 @@ bool gs_sm3_encrypt(
         total_encrypt_length,
         "%s%s%s",
         salt_s,
-        server_key_string,
+        serverKeyString,
         stored_key_string);
     SECUREC_CHECK_SS(rc);
 

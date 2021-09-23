@@ -27,6 +27,7 @@
 #include "catalog/pg_collation.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_enum.h"
+#include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_operator.h"
@@ -74,6 +75,7 @@
 #include "utils/acl.h"
 #include "streaming/planner.h"
 #include "catalog/pgxc_group.h"
+#include "catalog/pg_proc_fn.h"
 
 /*				---------- AMOP CACHES ----------						 */
 
@@ -231,7 +233,7 @@ bool get_ordering_op_properties(Oid opno, Oid* opfamily, Oid* opcintype, int16* 
         HeapTuple tuple = &catlist->members[i]->tuple;
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree */
-        if (aform->amopmethod != BTREE_AM_OID) {
+        if (!OID_IS_BTREE(aform->amopmethod)) {
             continue;
         }
         if (aform->amopstrategy == BTLessStrategyNumber || aform->amopstrategy == BTGreaterStrategyNumber) {
@@ -402,7 +404,7 @@ Oid get_ordering_op_for_equality_op(Oid opno, bool use_lhs_type)
         HeapTuple tuple = &catlist->members[i]->tuple;
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree */
-        if (aform->amopmethod != BTREE_AM_OID) {
+        if (!OID_IS_BTREE(aform->amopmethod)) {
             continue;
         }
         if (aform->amopstrategy == BTEqualStrategyNumber) {
@@ -454,7 +456,7 @@ List* get_mergejoin_opfamilies(Oid opno)
         HeapTuple tuple = &catlist->members[i]->tuple;
         Form_pg_amop aform = (Form_pg_amop)GETSTRUCT(tuple);
         /* must be btree equality */
-        if (aform->amopmethod == BTREE_AM_OID && aform->amopstrategy == BTEqualStrategyNumber) {
+        if (OID_IS_BTREE(aform->amopmethod) && aform->amopstrategy == BTEqualStrategyNumber) {
             result = lappend_oid(result, aform->amopfamily);
         }
     }
@@ -652,7 +654,7 @@ List* get_op_btree_interpretation(Oid opno)
         Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
         StrategyNumber op_strategy;
         /* must be btree */
-        if (op_form->amopmethod != BTREE_AM_OID) {
+        if (!OID_IS_BTREE(op_form->amopmethod)) {
             continue;
         }
         /* Get the operator's btree strategy number */
@@ -679,7 +681,7 @@ List* get_op_btree_interpretation(Oid opno)
                 Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
                 StrategyNumber op_strategy;
                 /* must be btree */
-                if (op_form->amopmethod != BTREE_AM_OID) {
+                if (!OID_IS_BTREE(op_form->amopmethod)) {
                     continue;
                 }
                 /* Get the operator's btree strategy number */
@@ -732,7 +734,7 @@ bool equality_ops_are_compatible(Oid opno1, Oid opno2)
         HeapTuple op_tuple = &catlist->members[i]->tuple;
         Form_pg_amop op_form = (Form_pg_amop)GETSTRUCT(op_tuple);
         /* must be btree or hash */
-        if (op_form->amopmethod == BTREE_AM_OID || op_form->amopmethod == HASH_AM_OID) {
+        if (OID_IS_BTREE(op_form->amopmethod) || op_form->amopmethod == HASH_AM_OID) {
             if (op_in_opfamily(opno2, op_form->amopfamily)) {
                 result = true;
                 break;
@@ -790,6 +792,28 @@ char* get_attname(Oid relid, AttrNumber attnum)
         return result;
     } else {
         return NULL;
+    }
+}
+
+/*
+ * get_kvtype
+ *      Given the relation id and the attribute number,
+ *      return the field type(ATT_KV_UNDEFINED/ATT_KV_TAG/ATT_KV_FIELD/ATT_KV_TIME/ATT_KV_HIDE)
+ *      from the attribute relation.
+ *
+ * Note: -1 if no such attribute.
+ */
+int get_kvtype(Oid relid, AttrNumber attnum)
+{
+    HeapTuple tp;
+    tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relid), Int16GetDatum(attnum));
+    if (HeapTupleIsValid(tp)) {
+        Form_pg_attribute att_tup = (Form_pg_attribute)GETSTRUCT(tp);
+        int kvtype = att_tup->attkvtype;
+        ReleaseSysCache(tp);
+        return kvtype;
+    } else {
+        return -1;
     }
 }
 
@@ -1394,10 +1418,11 @@ Oid get_func_signature(Oid funcid, Oid** argtypes, int* nargs)
     procstruct = (Form_pg_proc)GETSTRUCT(tp);
     result = procstruct->prorettype;
     *nargs = (int)procstruct->pronargs;
-    Assert(*nargs == procstruct->proargtypes.dim1);
+    oidvector* proargs = ProcedureGetArgTypes(tp);
+    Assert(*nargs == proargs->dim1);
     *argtypes = (Oid*)palloc(*nargs * sizeof(Oid));
     if (*nargs > 0) {
-        int rc = memcpy_s(*argtypes, *nargs * sizeof(Oid), procstruct->proargtypes.values, *nargs * sizeof(Oid));
+        int rc = memcpy_s(*argtypes, *nargs * sizeof(Oid), proargs->values, *nargs * sizeof(Oid));
         securec_check(rc, "\0", "\0");
     }
     ReleaseSysCache(tp);
@@ -1469,6 +1494,46 @@ char func_volatile(Oid funcid)
     }
     result = ((Form_pg_proc)GETSTRUCT(tp))->provolatile;
     ReleaseSysCache(tp);
+    return result;
+}
+
+/*
+ * get_func_langname
+ *		Given procedure id, return the function's language.
+ *      Caller is responsible to free the returned string.
+ */
+char* get_func_langname(Oid funcid)
+{
+    HeapTuple tp;
+    Oid langoid;
+    bool isNull = true;
+    char* result = NULL;
+    /* get language oid */
+    Relation relation = heap_open(ProcedureRelationId, NoLock);
+    tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
+    }
+    Datum datum = heap_getattr(tp, Anum_pg_proc_prolang, RelationGetDescr(relation), &isNull);
+    langoid = DatumGetInt16(datum);
+    heap_close(relation, NoLock);
+    ReleaseSysCache(tp);
+
+    /* get language name */
+    relation = heap_open(LanguageRelationId, NoLock);
+    tp = SearchSysCache1(LANGOID, ObjectIdGetDatum(langoid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for language %u", langoid)));
+    }
+    datum = heap_getattr(tp, Anum_pg_language_lanname, RelationGetDescr(relation), &isNull);
+    if (isNull) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for language name %u", langoid)));
+    }
+    result = pstrdup(NameStr(*DatumGetName(datum)));
+    heap_close(relation, NoLock);
+    ReleaseSysCache(tp);
+
     return result;
 }
 
@@ -3181,6 +3246,91 @@ Oid get_pgxc_groupoid(const char* groupname, bool missing_ok)
     return groupoid;
 }
 
+int get_pgxc_group_bucketcnt(Oid group_oid)
+{
+    HeapTuple tuple;
+    bool is_null = false;
+    Datum group_datum;
+    int bucketcnt = 0;
+    tuple = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(group_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("get_pgxc_group_bucketcnt lookup failed for group %u", group_oid)));
+    }
+    group_datum = SysCacheGetAttr(PGXCGROUPOID, tuple, Anum_pgxc_group_buckets, &is_null);
+    if (is_null) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("get_pgxc_group_bucketcnt invalid bucketcnt for group %u", group_oid)));
+    }
+    text_to_bktmap((text*)group_datum, NULL, &bucketcnt);
+    ReleaseSysCache(tuple);
+    return bucketcnt;
+}
+
+bool is_pgxc_group_bucketcnt_exists(Oid parentOid, int bucketCnt, char **groupName, Oid *groupOid)
+{
+    HeapTuple tuple;
+    bool ret = false;
+
+    Relation rel = heap_open(PgxcGroupRelationId, AccessShareLock);
+    TableScanDesc scan = heap_beginscan(rel, SnapshotNow, 0, NULL);
+
+    while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+        bool isnull;
+        int  bucketlen;
+        Datum val = heap_getattr(tuple, Anum_pgxc_group_parent, RelationGetDescr(rel), &isnull);
+        /* We only check child of node group with OID parentOid */
+        if (isnull || parentOid != DatumGetObjectId(val)) {
+            continue;
+        }
+
+        val = heap_getattr(tuple, Anum_pgxc_group_buckets, RelationGetDescr(rel), &isnull);
+        if (isnull) {
+            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("is_pgxc_group_bucketcnt_exists invalid bucketcnt")));
+        }
+        text_to_bktmap((text*)val, NULL, &bucketlen);
+        if (bucketlen == bucketCnt) {
+            ret = true;
+            if (groupName) {
+                Datum group_name_datum = heap_getattr(tuple, Anum_pgxc_group_name, RelationGetDescr(rel), &isnull);
+                *groupName = (char*)pstrdup((const char*)DatumGetCString(group_name_datum));
+            }
+            if (groupOid) {
+                *groupOid = HeapTupleGetOid(tuple);
+            }
+            break;
+        }
+    }
+    heap_endscan(scan);
+    heap_close(rel, AccessShareLock);
+    return ret;
+}
+
+char* get_pgxc_groupparent(Oid group_oid)
+{
+    HeapTuple tuple;
+    bool is_null = false;
+    Datum group_datum;
+    char *parent = NULL;
+
+    Relation rel = heap_open(PgxcGroupRelationId, AccessShareLock);
+    tuple = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(group_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("get_pgxc_group_parentcache lookup failed for group %u", group_oid)));
+    }
+    group_datum = SysCacheGetAttr(PGXCGROUPOID, tuple, Anum_pgxc_group_parent, &is_null);
+    if (!is_null) {
+        Oid parentOid = DatumGetObjectId(group_datum);
+        parent = get_pgxc_groupname(parentOid);
+    }
+    ReleaseSysCache(tuple);
+    heap_close(rel, AccessShareLock);
+
+    return parent;
+}
+
 /*
  * get_pgxc_groupkind
  *		Obtain PGXC groupkind for given group name
@@ -3384,17 +3534,8 @@ static List* GetSliceBoundary(Relation rel, Datum boundaries, List* distKeyPosLi
     List* boundaryValueList = NIL;
     List* resultBoundaryList = NIL;
     ListCell* boundaryCell = NULL;
-    ListCell* distKeyCell = NULL;
     Value* boundaryValue = NULL;
-    Datum boundaryDatum = (Datum)0;
     Node* boundaryNode = NULL;
-    Form_pg_attribute* relation_atts = NULL;
-    Form_pg_attribute att = NULL;
-    int16 typlen = 0;
-    bool typbyval = false;
-    char typalign, typdelim;
-    Oid typioparam, func, typid, typelem, typcollation;
-    int32 typmod = -1;
     bool isFirstDefault = true;
         
     if (attIsNull) {
@@ -3402,38 +3543,24 @@ static List* GetSliceBoundary(Relation rel, Datum boundaries, List* distKeyPosLi
     } else {
         /* unstransform string items to Value list */
         boundaryValueList = untransformPartitionBoundary(boundaries);
-        relation_atts = rel->rd_att->attrs;
-        forboth(boundaryCell, boundaryValueList, distKeyCell, distKeyPosList) {
+        foreach(boundaryCell, boundaryValueList) {
             boundaryValue = (Value*)lfirst(boundaryCell);
-            att = relation_atts[(int)lfirst_int(distKeyCell) - 1];
-            /* get the oid/mod/collation/ of partition key */
-            typid = att->atttypid;
-            typmod = att->atttypmod;
-            typcollation = att->attcollation;
             /* deal with null */
             if (!PointerIsValid(boundaryValue->val.str)) {
                 if (isRangeSlice) {
-                    boundaryNode = (Node*)makeMaxConst(typid, typmod, typcollation);
+                    boundaryNode = (Node*)makeMaxConst(UNKNOWNOID, -1, InvalidOid);
                 } else {
                     /* when it's list slice, we just append one DEFAULT */
                     if (isFirstDefault) {
-                        boundaryNode = (Node*)makeMaxConst(typid, typmod, typcollation);
+                        boundaryNode = (Node*)makeMaxConst(UNKNOWNOID, -1, InvalidOid);
                         isFirstDefault = false;
                     } else {
                         continue;
                     }
                 }
             } else {
-                /* get the typein function's oid of current type */
-                get_type_io_data(typid, IOFunc_input, &typlen, &typbyval, &typalign, &typdelim, &typioparam, &func);
-                typelem = get_element_type(typid);
-
-                /* now call the typein function with collation,string, element_type, typemod
-                 * as it's parameters.
-                 */
-                boundaryDatum = OidFunctionCall3Coll(func, typcollation, CStringGetDatum(boundaryValue->val.str),
-                    ObjectIdGetDatum(typelem), Int32GetDatum(typmod));
-                boundaryNode = (Node*)makeConst(typid, typmod, typcollation, typlen, boundaryDatum, false, typbyval);
+                /* To keep same with original text, we don't do type in function here, just keep the original string */
+                boundaryNode = (Node*)make_const(NULL, makeString(boundaryValue->val.str), 0);
             }
             resultBoundaryList = lappend(resultBoundaryList, boundaryNode);
         }
@@ -4328,8 +4455,6 @@ int32 get_attavgwidth(Oid relid, AttrNumber attnum, bool ispartition)
     int32 stawidth;
     char stakind = ispartition ? STARELKIND_PARTITION : STARELKIND_CLASS;
 
-    if (u_sess->attr.attr_common.upgrade_mode != 0)
-        return 0;
     if (!ispartition && get_rel_persistence(relid) == RELPERSISTENCE_GLOBAL_TEMP) {
         tp = get_gtt_att_statistic(relid, attnum);
         if (!HeapTupleIsValid(tp)) {
@@ -4361,9 +4486,7 @@ double get_attstadndistinct(HeapTuple statstuple)
 {
     Datum val;
     bool isnull = false;
-    if (u_sess->attr.attr_common.upgrade_mode != 0) {
-        return 0;
-    }
+
     val = SysCacheGetAttr(STATRELKINDATTINH, statstuple, Anum_pg_statistic_stadndistinct, &isnull);
     if (isnull) {
         return 0;
@@ -4448,9 +4571,7 @@ bool get_attstatsslot(HeapTuple statstuple, Oid atttype, int32 atttypmod, int re
     Oid arrayelemtype;
     HeapTuple typeTuple;
     Form_pg_type typeForm;
-    if (u_sess->attr.attr_common.upgrade_mode != 0) {
-        return false;
-    }
+
     for (i = 0; i < STATISTIC_NUM_SLOTS; ++i) {
         if ((&stats->stakind1)[i] == reqkind && (reqop == InvalidOid || (&stats->staop1)[i] == reqop)) {
             break;
@@ -4945,8 +5066,9 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             int j = 0;
             bool matched = true;
 
+            oidvector* proargs = ProcedureGetArgTypes(proctup);
             for (j = 0; j < nargs; j++) {
-                if (!CompareRetType(procform->proargtypes.values[j], argtypes[j])) {
+                if (!CompareRetType(proargs->values[j], argtypes[j])) {
                     matched = false;
                     break;
                 }
@@ -4987,8 +5109,9 @@ Oid get_func_oid_ext(const char* funcname, Oid funcnamespace, Oid funcrettype, i
         /*
          * Support the same function name, same number of arguments and different argument type
          */
+        oidvector* proargs = ProcedureGetArgTypes(proctup);
         for (j = 0; j < funcnargs; j++) {
-            if (funcargstype[j] != procform->proargtypes.values[j]) {
+            if (funcargstype[j] != proargs->values[j]) {
                 break;
             }
         }

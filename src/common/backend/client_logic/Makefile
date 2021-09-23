@@ -24,6 +24,6 @@ copy_cstrings:
 	$(MAKE) -C $(top_builddir)/src/common/interfaces/libpq/client_logic_common cstrings_map.o
 	cp $(top_builddir)/src/common/interfaces/libpq/client_logic_common/cstrings_map.o . 
 cstrings_map.o: copy_cstrings
-OBJS= client_logic.o cache.o cstrings_map.o
+OBJS= client_logic.o cache.o cstrings_map.o client_logic_proc.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

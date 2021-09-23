@@ -23,6 +23,7 @@
 #include "miscadmin.h"
 #include "parser/parse_clause.h"
 #include "storage/lmgr.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
@@ -73,6 +74,8 @@ void LockTableCommand(LockStmt* lockstmt)
             false,
             RangeVarCallbackForLockTable,
             (void*)&lockstmt->mode);
+
+        TrForbidAccessRbObject(RelationRelationId, reloid, rv->relname);
 
         if (recurse)
             LockTableRecurse(reloid, lockstmt->mode, lockstmt->nowait);

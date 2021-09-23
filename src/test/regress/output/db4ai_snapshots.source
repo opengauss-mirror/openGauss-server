@@ -1,0 +1,20 @@
+--run
+\! @abs_srcdir@/snapshots_test/test.sh -r -p @portstring@ -d regression
+[1;33m## SETTING UP ##[0m harness: SetupTestHarness.sql ..... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 00 CreateSnapshotAPI.sql .... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 01 PrepareSnapshotAPI.sql ... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 02 PublishSnapshotAPI.sql ... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 03 ArchiveSnapshotAPI.sql ... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 04 SampleSnapshotAPI.sql .... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 05 PurgeSnapshotAPI.sql ..... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 06 RAWvsMSS.sql ............. [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 07 RAWvsCSS.sql ............. [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 08 MSSvsCSS.sql ............. [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 09 SQLTokenizer.sql ......... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 10 UserInteraction-1.sql .... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 11 UserInteraction-2.sql .... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 12 SQLSplitter.sql .......... [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 13 TrueSQL.sql .............. [1;32mPASS
+[0m[1;33m# RUNNING TEST #[0m case: 14 SQLSyntax.sql ............ [1;32mPASS
+[0m[1;33m### TEARDOWN ###[0m harness: TeardownTestHarness.sql .. [1;32mPASS
+[0m[1;32m##### DONE #####[0m DB4AI Snapshots regression test complete

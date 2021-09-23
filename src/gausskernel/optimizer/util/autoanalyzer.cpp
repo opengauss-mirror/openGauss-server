@@ -24,7 +24,7 @@
 #include "knl/knl_variable.h"
 
 #include "commands/dbcommands.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "miscadmin.h"
 #include "optimizer/autoanalyzer.h"
 #include "postmaster/postmaster.h"

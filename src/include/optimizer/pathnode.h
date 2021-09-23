@@ -51,6 +51,7 @@ extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
 
 extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop = 1);
+extern Path *create_resultscan_path(PlannerInfo *root, RelOptInfo *rel, Relids required_outer);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 #ifdef ENABLE_MULTIPLE_NODES
 extern Path *create_tsstorescan_path(PlannerInfo * root,RelOptInfo * rel, int dop = 1);
@@ -61,6 +62,7 @@ extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List
 extern Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path);
 extern bool CheckBitmapQualIsGlobalIndex(Path* bitmapqual);
 extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);
+extern bool CheckBitmapHeapPathIsCrossbucket(Path* bitmapqual);
 extern bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel);
 extern bool is_partitionIndex_Subpath(Path* subpath);
 extern bool is_pwj_path(Path* pwjpath);
@@ -206,6 +208,12 @@ extern Path* get_redist_unique_redist_unique(PlannerInfo* root, Path* path, Stre
 extern bool equivalence_class_overlap(PlannerInfo* root, Relids outer_relids, Relids inner_relids);
 
 extern void debug3_print_two_relids(Relids first_relids, Relids second_relids, PlannerInfo* root, StringInfoData* buf);
+
+extern RemoteQueryExecType SetExectypeForJoinPath(Path* inner_path, Path* outer_path);
+extern bool CheckJoinExecType(PlannerInfo *root, Path *outer_path, Path *inner_path);
+extern bool IsSameJoinExecType(PlannerInfo *root, Path *outer_path, Path *inner_path);
+
+extern bool is_diskey_and_joinkey_compatible(Node* diskey, Node* joinkey);
 
 #endif
 #endif /* PATHNODE_H */

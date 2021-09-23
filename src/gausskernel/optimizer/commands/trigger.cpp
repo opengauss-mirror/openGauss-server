@@ -25,6 +25,7 @@
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_constraint.h"
+#include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_trigger.h"
 #include "catalog/pg_type.h"
@@ -33,7 +34,7 @@
 #include "commands/proclang.h"
 #include "commands/trigger.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "nodes/bitmapset.h"
@@ -49,6 +50,7 @@
 #include "rewrite/rewriteManip.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/lmgr.h"
+#include "storage/tcap.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -167,7 +169,7 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     if (OidIsValid(relOid))
         rel = heap_open(relOid, AccessExclusiveLock);
     else
-        rel = heap_openrv_extended(stmt->relation, AccessExclusiveLock, false, true);
+        rel = HeapOpenrvExtended(stmt->relation, AccessExclusiveLock, false, true);
 
     /*
      * Triggers must be on tables or views, and there are additional
@@ -771,6 +773,10 @@ Oid CreateTrigger(CreateTrigStmt* stmt, const char* queryString, Oid relOid, Oid
     /* Post creation hook for new trigger */
     InvokeObjectAccessHook(OAT_POST_CREATE, TriggerRelationId, trigoid, 0, NULL);
 
+    if (!isInternal) {
+        UpdatePgObjectChangecsn(rel->rd_id, rel->rd_rel->relkind);
+    }
+
     /* Keep lock on target rel until end of xact */
     heap_close(rel, NoLock);
 
@@ -1091,6 +1097,9 @@ void RemoveTriggerById(Oid trigOid)
      */
     CacheInvalidateRelcache(rel);
 
+    /* Record the changecsn of table the trigger belongs to */
+    UpdatePgObjectChangecsn(relid, rel->rd_rel->relkind);
+
     /* Keep lock on trigger's rel until end of xact */
     heap_close(rel, NoLock);
 }
@@ -1193,6 +1202,8 @@ void renametrig(RenameStmt* stmt)
      */
     relid = RangeVarGetRelidExtended(
         stmt->relation, AccessExclusiveLock, false, false, false, false, RangeVarCallbackForRenameTrigger, NULL);
+
+    TrForbidAccessRbObject(RelationRelationId, relid, stmt->relation->relname);
 
     /* Have lock already, so just need to build relcache entry. */
     targetrel = relation_open(relid, NoLock);
@@ -2622,7 +2633,7 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
 {
     Relation relation = relinfo->ri_RelationDesc;
     HeapTupleData tuple;
-    HeapTuple result;
+    HeapTuple result = NULL;
     Buffer buffer;
 
     Partition part = NULL;
@@ -2637,155 +2648,281 @@ static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRe
         fakeRelation = bucketGetRelation(relation, NULL, bucketid);
     }
 
-    if (newSlot != NULL) {
-        TM_Result test;
-        TM_FailureData tmfd;
+    if (RelationIsUstoreFormat(relation)) {
+        TupleTableSlot *slot = MakeSingleTupleTableSlot(relation->rd_att, false, TAM_USTORE);
+        UHeapTuple utuple;
 
-        *newSlot = NULL;
+        UHeapTupleData uheaptupdata;
+        utuple = &uheaptupdata;
+        struct {
+            UHeapDiskTupleData hdr;
+            char data[MaxPossibleUHeapTupleSize];
+        } tbuf;
 
-        /* caller must pass an epqstate if EvalPlanQual is possible */
-        Assert(epqstate != NULL);
+        errno_t errorNo = EOK;
+        errorNo = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
+        securec_check(errorNo, "\0", "\0");
 
-        /*
-         * lock tuple for update
-         */
-    ltrmark:;
-        tuple.t_self = *tid;
-        test = tableam_tuple_lock(fakeRelation,
-            &tuple,
-            &buffer,
-            estate->es_output_cid,
-            LockTupleExclusive,
-            false,
-            &tmfd,
-            false,       // fake params below are for uheap implementation
-            false, false, NULL, NULL, false);
-        switch (test) {
-            case TM_SelfModified:
-                if (tmfd.cmax != estate->es_output_cid)
-                    ereport(ERROR,
-                            (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
-                             errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
-                             errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
+        utuple->disk_tuple = &tbuf.hdr;
+        utuple->ctid = *tid;
 
-                /* treat it as deleted; do not process */
-                ReleaseBuffer(buffer);
-                if (RELATION_IS_PARTITIONED(relation)) {
-                    partitionClose(relation, part, NoLock);
-                }
-                if (RELATION_OWN_BUCKET(relation)) {
-                    releaseDummyRelation(&fakeRelation);
-                }
-                return NULL;
-            case TM_SelfCreated:
-                ReleaseBuffer(buffer);
-                ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-                    errmsg("attempted to lock invisible tuple")));
-                break;
-            case TM_SelfUpdated:
-                /* treat it as deleted; do not process */
-                ReleaseBuffer(buffer);
-                ReleaseFakeRelation(relation, part, &fakeRelation);
-                return NULL;
 
-            case TM_Ok:
-                break;
+        ExecSetSlotDescriptor(slot, relation->rd_att);
+        if (newSlot != NULL) {
+            TM_Result inplacetest;
+            TM_FailureData tmfd;
 
-            case TM_Updated: {
-                ReleaseBuffer(buffer);
-                if (IsolationUsesXactSnapshot())
-                    ereport(ERROR,
-                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-                            errmsg("could not serialize access due to concurrent update")));
-                Assert(!ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
-                /* it was updated, so look at the updated version */
-                TupleTableSlot* epqslot = NULL;
+            *newSlot = NULL;
 
-                epqslot = EvalPlanQual(
-                    estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
-                if (!TupIsNull(epqslot)) {
-                    *tid = tmfd.ctid;
-                    *newSlot = epqslot;
+            /* caller must pass an epqstate if EvalPlanQual is possible */
+            Assert(epqstate != NULL);
+
+            /*
+             * lock inplacetuple for update
+             */
+            inplacetest = tableam_tuple_lock(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation, utuple,
+                &buffer, estate->es_output_cid, LockTupleExclusive, false, &tmfd, false, false, false,
+                estate->es_snapshot, tid, false);
+
+            switch (inplacetest) {
+                case TM_SelfUpdated:
+                case TM_SelfModified:
 
                     /*
-                     * EvalPlanQual already locked the tuple, but we
-                     * re-call heap_lock_tuple anyway as an easy way of
-                     * re-fetching the correct tuple.  Speed is hardly a
-                     * criterion in this path anyhow.
+                     * The target tuple was already updated or deleted by the
+                     * current command, or by a later command in the current
+                     * transaction.  We ignore the tuple in the former case, and
+                     * throw error in the latter case, for the same reasons
+                     * enumerated in ExecUpdate and ExecDelete in
+                     * nodeModifyTable.c.
                      */
-                    goto ltrmark;
-                }
+                    if (tmfd.cmax != estate->es_output_cid)
+                        ereport(ERROR, (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                            errmsg("tuple to be updated was already modified by an operation triggered by the current "
+                                   "command"),
+                            errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes "
+                                    "to other rows.")));
 
-                /*
-                 * if tuple was deleted or PlanQual failed for updated tuple -
-                 * we must not process this tuple!
-                 */
-                if (RELATION_IS_PARTITIONED(relation)) {
-                    partitionClose(relation, part, NoLock);
-                }
-                if (RELATION_OWN_BUCKET(relation)) {
-                    releaseDummyRelation(&fakeRelation);
-                }
-                return NULL;
-            }
+                    /* treat it as deleted; do not process */
+                    return NULL;
 
-            case TM_Deleted:
-                ReleaseBuffer(buffer);
-                if (IsolationUsesXactSnapshot())
-                    ereport(ERROR,
-                        (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                case TM_Ok:
+                    *newSlot = NULL;
+                    ExecStoreTuple(utuple, slot, InvalidBuffer, false);
+                    result = ExecCopySlotTuple(slot);
+                    ReleaseBuffer(buffer);
+
+                    break;
+
+                case TM_Updated:
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                             errmsg("could not serialize access due to concurrent update")));
-                Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
-                /*
-                 * if tuple was deleted or PlanQual failed for updated tuple -
-                 * we must not process this tuple!
-                 */
-                ReleaseFakeRelation(relation, part, &fakeRelation);
-                return NULL;
+                    elog(ERROR, "unexpected table_tuple_lock status: %u", inplacetest);
+                    break;
 
-            default:
-                ReleaseBuffer(buffer);
-                ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unrecognized heap_lock_tuple status: %u", test)));
-                return NULL; /* keep compiler quiet */
+                case TM_Deleted:
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                            errmsg("could not serialize access due to concurrent delete")));
+                    /* tuple was deleted */
+                    return NULL;
+
+                case TM_Invisible:
+                    elog(ERROR, "attempted to lock invisible tuple");
+                    break;
+
+                default:
+                    elog(ERROR, "unrecognized table_tuple_lock status: %u", inplacetest);
+                    return NULL; /* keep compiler quiet */
+            }
+        } else {
+            Page        page;
+            buffer =
+                ReadBuffer(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation, ItemPointerGetBlockNumber(tid));
+
+            /*
+            * Although we already know this tuple is valid, we must lock the
+            * buffer to ensure that no one has a buffer cleanup lock; otherwise
+            * they might move the tuple while we try to copy it.  But we can
+            * release the lock before actually doing the heap_copytuple call,
+            * since holding pin is sufficient to prevent anyone from getting a
+            * cleanup lock they don't already hold.
+            */
+            LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
+            page = BufferGetPage(buffer);
+            RowPtr      *rp = UPageGetRowPtr(page, ItemPointerGetOffsetNumber(tid));
+
+            Assert(RowPtrIsUsed(rp));
+
+            uheaptupdata.disk_tuple = (UHeapDiskTuple) UPageGetRowData(page, rp);
+            uheaptupdata.ctid = *tid;
+            uheaptupdata.table_oid = RelationGetRelid(RELATION_IS_PARTITIONED(relation) ? fakeRelation : relation);
+
+            uheaptupdata.xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
+
+            uheaptupdata.disk_tuple_size = rp->len;
+            uheaptupdata.t_xid_base = ((UHeapPageHeaderData*)page)->pd_xid_base;
+
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+            ExecStoreTuple(&uheaptupdata, slot, buffer, false);
+            result = ExecCopySlotTuple(slot);
+            ReleaseBuffer(buffer);
         }
+
+        if (RELATION_IS_PARTITIONED(relation)) {
+            partitionClose(relation, part, NoLock);
+            releaseDummyRelation(&fakeRelation);
+        }
+
+        ExecDropSingleTupleTableSlot(slot);
     } else {
-        Page page;
-        ItemId lp;
+        if (newSlot != NULL) {
+            TM_Result test;
+            TM_FailureData tmfd;
 
-        buffer = ReadBuffer(fakeRelation, ItemPointerGetBlockNumber(tid));
+            *newSlot = NULL;
 
-        /*
-         * Although we already know this tuple is valid, we must lock the
-         * buffer to ensure that no one has a buffer cleanup lock; otherwise
-         * they might move the tuple while we try to copy it.  But we can
-         * release the lock before actually doing the (HeapTuple)tableam_tops_copy_tuple call,
-         * since holding pin is sufficient to prevent anyone from getting a
-         * cleanup lock they don't already hold.
-         */
-        LockBuffer(buffer, BUFFER_LOCK_SHARE);
+            /* caller must pass an epqstate if EvalPlanQual is possible */
+            Assert(epqstate != NULL);
 
-        page = BufferGetPage(buffer);
-        lp = PageGetItemId(page, ItemPointerGetOffsetNumber(tid));
+            /*
+             * lock tuple for update
+             */
+ltrmark:;
+            tuple.t_self = *tid;
+            test = tableam_tuple_lock(fakeRelation,
+                &tuple,
+                &buffer,
+                estate->es_output_cid,
+                LockTupleExclusive,
+                false,
+                &tmfd,
+                false,       // fake params below are for uheap implementation
+                false, false, NULL, NULL, false);
+            switch (test) {
+                case TM_SelfUpdated:
+                case TM_SelfModified:
+                    if (tmfd.cmax != estate->es_output_cid)
+                        ereport(ERROR,
+                                (errcode(ERRCODE_TRIGGERED_DATA_CHANGE_VIOLATION),
+                                 errmsg("tuple to be updated was already modified by an operation triggered by the current command"),
+                                 errhint("Consider using an AFTER trigger instead of a BEFORE trigger to propagate changes to other rows.")));
 
-        Assert(ItemIdIsNormal(lp));
+                    /* treat it as deleted; do not process */
+                    ReleaseBuffer(buffer);
+                    if (RELATION_IS_PARTITIONED(relation)) {
+                        partitionClose(relation, part, NoLock);
+                    }
+                    if (RELATION_OWN_BUCKET(relation)) {
+                        releaseDummyRelation(&fakeRelation);
+                    }
+                    return NULL;
+                case TM_SelfCreated:
+                    ReleaseBuffer(buffer);
+                    ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                        errmsg("attempted to lock invisible tuple")));
+                    break;
+                case TM_Ok:
+                    break;
 
-        tuple.t_data = (HeapTupleHeader)PageGetItem(page, lp);
-        tuple.t_len = ItemIdGetLength(lp);
-        tuple.t_self = *tid;
-        tuple.t_tableOid = RelationGetRelid(fakeRelation);
-        tuple.t_bucketId = RelationGetBktid(fakeRelation);
-        HeapTupleCopyBaseFromPage(&tuple, page);
+                case TM_Updated: {
+                    ReleaseBuffer(buffer);
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR,
+                            (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("could not serialize access due to concurrent update")));
+                    Assert(!ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+                    /* it was updated, so look at the updated version */
+                    TupleTableSlot* epqslot = NULL;
+
+                    epqslot = EvalPlanQual(
+                        estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
+                    if (!TupIsNull(epqslot)) {
+                        *tid = tmfd.ctid;
+                        *newSlot = epqslot;
+
+                        /*
+                         * EvalPlanQual already locked the tuple, but we
+                         * re-call heap_lock_tuple anyway as an easy way of
+                         * re-fetching the correct tuple.  Speed is hardly a
+                         * criterion in this path anyhow.
+                         */
+                        goto ltrmark;
+                    }
+
+                    /*
+                     * if tuple was deleted or PlanQual failed for updated tuple -
+                     * we must not process this tuple!
+                     */
+                    if (RELATION_IS_PARTITIONED(relation)) {
+                        partitionClose(relation, part, NoLock);
+                    }
+                    if (RELATION_OWN_BUCKET(relation)) {
+                        releaseDummyRelation(&fakeRelation);
+                    }
+                    return NULL;
+                }
+
+                case TM_Deleted:
+                    ReleaseBuffer(buffer);
+                    if (IsolationUsesXactSnapshot())
+                        ereport(ERROR,
+                            (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                                errmsg("could not serialize access due to concurrent update")));
+                    Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+                    /*
+                     * if tuple was deleted or PlanQual failed for updated tuple -
+                     * we must not process this tuple!
+                     */
+                    ReleaseFakeRelation(relation, part, &fakeRelation);
+                    return NULL;
+
+                default:
+                    ReleaseBuffer(buffer);
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("unrecognized heap_lock_tuple status: %u", test)));
+                    return NULL; /* keep compiler quiet */
+            }
+        } else {
+            Page page;
+            ItemId lp;
+
+            buffer = ReadBuffer(fakeRelation, ItemPointerGetBlockNumber(tid));
+
+            /*
+             * Although we already know this tuple is valid, we must lock the
+             * buffer to ensure that no one has a buffer cleanup lock; otherwise
+             * they might move the tuple while we try to copy it.  But we can
+             * release the lock before actually doing the (HeapTuple)tableam_tops_copy_tuple call,
+             * since holding pin is sufficient to prevent anyone from getting a
+             * cleanup lock they don't already hold.
+             */
+            LockBuffer(buffer, BUFFER_LOCK_SHARE);
+
+            page = BufferGetPage(buffer);
+            lp = PageGetItemId(page, ItemPointerGetOffsetNumber(tid));
+
+            Assert(ItemIdIsNormal(lp));
+
+            tuple.t_data = (HeapTupleHeader)PageGetItem(page, lp);
+            tuple.t_len = ItemIdGetLength(lp);
+            tuple.t_self = *tid;
+            tuple.t_tableOid = RelationGetRelid(fakeRelation);
+            tuple.t_bucketId = RelationGetBktid(fakeRelation);
+            HeapTupleCopyBaseFromPage(&tuple, page);
 #ifdef PGXC
-        tuple.t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
+            tuple.t_xc_node_id = u_sess->pgxc_cxt.PGXCNodeIdentifier;
 #endif
 
-        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-    }
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        }
 
-    result = heapCopyTuple(&tuple, RelationGetDescr(relation), BufferGetPage(buffer));
-    ReleaseBuffer(buffer);
-    ReleaseFakeRelation(relation, part, &fakeRelation);
+        result = heapCopyTuple(&tuple, RelationGetDescr(relation), BufferGetPage(buffer));
+        ReleaseBuffer(buffer);
+        ReleaseFakeRelation(relation, part, &fakeRelation);
+    }
     return result;
 }
 
@@ -3968,7 +4105,7 @@ void AfterTriggerBeginQuery(void)
  */
 bool IsAfterTriggerBegin(void)
 {
-    return (u_sess->tri_cxt.afterTriggers->query_depth == -1 ? false : true);
+    return ((u_sess->tri_cxt.afterTriggers == NULL || u_sess->tri_cxt.afterTriggers->query_depth == -1) ? false : true);
 }
 
 #ifdef PGXC
@@ -4508,12 +4645,13 @@ void AfterTriggerSetState(ConstraintsSetStmt* stmt)
 
                 while (HeapTupleIsValid(tup = systable_getnext(conscan))) {
                     Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tup);
-                    if (con->condeferrable)
+                    if (con->condeferrable) {
+                        TrForbidAccessRbObject(ConstraintRelationId, HeapTupleGetOid(tup), constraint->relname);
                         conoidlist = lappend_oid(conoidlist, HeapTupleGetOid(tup));
-                    else if (stmt->deferred)
-                        ereport(ERROR,
-                            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                                errmsg("constraint \"%s\" is not deferrable", constraint->relname)));
+                    } else if (stmt->deferred) {
+                        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("constraint \"%s\" is not deferrable", constraint->relname)));
+                    }
                     found = true;
                 }
 

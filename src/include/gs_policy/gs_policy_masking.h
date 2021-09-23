@@ -23,6 +23,7 @@
 #ifndef _PG_POLICY_MASKING_H
 #define _PG_POLICY_MASKING_H
 
+#include "gs_policy/gs_string.h"
 #include "postgres.h"
 #include "nodes/parsenodes.h"
 
@@ -31,8 +32,10 @@ extern void create_masking_policy(CreateMaskingPolicyStmt *stmt);
 extern void alter_masking_policy(AlterMaskingPolicyStmt *stmt);
 
 extern void drop_masking_policy(DropMaskingPolicyStmt *stmt);
+extern void parse_function_name(const char* func_name, char** parsed_funcname, Oid& schemaid);
 extern bool IsMaskingFunctionOid(Oid funcid);
-extern bool is_masked_relation(Oid relid);
+extern bool IsUDF(const char *funcname, Oid nspid);
+extern bool is_masked_relation(Oid relid, const char *column = NULL);
 extern bool is_masked_relation_enabled(Oid relid);
 #endif
 

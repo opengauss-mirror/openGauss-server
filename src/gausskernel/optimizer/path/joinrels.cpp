@@ -72,8 +72,9 @@ void join_search_one_level(PlannerInfo* root, int level)
      */
     foreach (r, joinrels[level - 1]) {
         RelOptInfo* old_rel = (RelOptInfo*)lfirst(r);
-
-        if (old_rel->joininfo != NIL || old_rel->has_eclass_joins || has_join_restriction(root, old_rel)) {
+        bool isTrue = old_rel->joininfo != NIL || old_rel->has_eclass_joins 
+                                               || has_join_restriction(root, old_rel);
+        if (isTrue) {
             /*
              * There are join clauses or join order restrictions relevant to
              * this rel, so consider joins between this rel and (only) those
@@ -767,7 +768,8 @@ RelOptInfo* make_join_rel(PlannerInfo* root, RelOptInfo* rel1, RelOptInfo* rel2)
          * We remove the useless RelOptInfo and then try other join path if the current level 
          * is not the top level.
          */
-        if (ENABLE_PRED_PUSH_ALL(root) && root->join_cur_level < list_length(root->join_rel_level[1])) {
+        if (ENABLE_PRED_PUSH_ALL(root) && root->join_rel_level && 
+            root->join_cur_level < list_length(root->join_rel_level[1])) {
             remove_join_rel(root, joinrel);
             return NULL;
         } else {

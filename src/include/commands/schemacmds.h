@@ -22,6 +22,7 @@ extern void CreateSchemaCommand(CreateSchemaStmt* parsetree, const char* querySt
 #else
 extern void CreateSchemaCommand(CreateSchemaStmt* parsetree, const char* queryString);
 #endif
+void AlterSchemaCommand(AlterSchemaStmt* parsetree);
 extern void RemoveSchemaById(Oid schemaOid);
 
 extern void RenameSchema(const char* oldname, const char* newname);

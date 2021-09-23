@@ -529,7 +529,7 @@ START TRANSACTION;
 SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO unique_tbl VALUES (3, 'Three'); -- should succeed for now
 SET CONSTRAINTS ALL IMMEDIATE; -- should fail
-ERROR:  Postgres-XC: ERROR SET query
+ERROR:  openGauss: ERROR SET query
 COMMIT;
 reset client_min_messages;
 reset comm_stat_mode;

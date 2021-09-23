@@ -34,7 +34,7 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/catalog.h"
 #include "commands/tablespace.h"
-#include "service/rpc_client.h"
+#include "service/remote_read_client.h"
 #include "storage/cstore/cstorealloc.h"
 #include "storage/cu.h"
 #include "storage/custorage.h"
@@ -355,7 +355,7 @@ void CUStorage::SaveCU(char* write_buf, _in_ uint64 offset, _in_ int size, bool 
     errno_t rc = 0;
 
     if (append_only)
-        TableSpaceUsageManager::IsExceedMaxsize(tableSpaceOid, size);
+        TableSpaceUsageManager::IsExceedMaxsize(tableSpaceOid, size, false);
 
     while (write_size > 0) {
         GetFileName(tmpFileName, MAXPGPATH, writeFileId);
@@ -788,7 +788,7 @@ void CUStorage::RemoteLoadCU(_in_ CU* cuPtr, _in_ uint64 offset, _in_ int size, 
     char remote_address2[MAXPGPATH] = { 0 }; /* remote_address2[0] = '\0'; */
     GetRemoteReadAddress(remote_address1, remote_address2, MAXPGPATH);
 
-    const char* remote_address = remote_address1;
+    char* remote_address = remote_address1;
     int retry_times = 0;
 
 retry:
@@ -805,7 +805,7 @@ retry:
 
     PROFILING_REMOTE_START();
 
-    int ret_code = ::RemoteGetCU(remote_address,
+    int ret_code = RemoteGetCU(remote_address,
                                  m_cnode.m_rnode.spcNode,
                                  m_cnode.m_rnode.dbNode,
                                  m_cnode.m_rnode.relNode,

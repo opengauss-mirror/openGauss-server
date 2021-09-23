@@ -29,30 +29,112 @@
 #include "cached_column.h"
 #include "cached_columns.h"
 #include "client_logic_common/client_logic_utils.h"
+#include "client_logic_expressions/column_ref_data.h"
 #include "client_logic_expressions/expr_processor.h"
 #include "client_logic_expressions/expr_parts_list.h"
 #include "client_logic_hooks/hooks_manager.h"
 #include "libpq-int.h"
-
+#include "cached_type.h"
 #define CHK_PARAM(p) Assert(p && p->relation);
+
+CachedColumnManager::CachedColumnManager()
+{
+    m_cache_loader = new CacheLoader;
+}
+
+CachedColumnManager::~CachedColumnManager()
+{
+    m_cache_loader->clear();
+    delete m_cache_loader;
+}
+
+void CachedColumnManager::clear()
+{
+    m_cache_loader->clear();
+}
 
 bool CachedColumnManager::has_global_setting()
 {
-    return CacheLoader::get_instance().has_global_setting();
+    return m_cache_loader->has_global_setting();
+}
+
+const GlobalHookExecutor** CachedColumnManager::get_global_hook_executors(size_t& global_hook_executors_size) const
+{
+    return m_cache_loader->get_global_hook_executors(global_hook_executors_size);
+}
+
+size_t CachedColumnManager::get_object_fqdn(const char* object_name, bool is_global_setting, char* object_fqdn) const
+{
+    return m_cache_loader->get_object_fqdn(object_name, is_global_setting, object_fqdn);
+}
+
+const CachedGlobalSetting* CachedColumnManager::get_global_setting_by_fqdn(const char* globalSettingFqdn) const
+{
+    return m_cache_loader->get_global_setting_by_fqdn(globalSettingFqdn);
+}
+
+const CachedColumnSetting** CachedColumnManager::get_column_setting_by_global_setting_fqdn(
+    const char* global_setting_fqdn, size_t& column_settings_list_size) const
+{
+    return m_cache_loader->get_column_setting_by_global_setting_fqdn(global_setting_fqdn, column_settings_list_size);
+}
+
+bool CachedColumnManager::remove_schema(const char* schema_name)
+{
+    return m_cache_loader->remove_schema(schema_name);
+}
+
+void CachedColumnManager::set_user_schema(const char* user_name) 
+{ 
+    m_cache_loader->set_user_schema(user_name);
+}
+
+void CachedColumnManager::load_search_path(const char* search_path, const char* username)
+{
+    m_cache_loader->load_search_path(search_path, username);
+}
+
+const CachedGlobalSetting** CachedColumnManager::get_global_settings_by_schema_name(const char* schema_name, 
+    size_t& global_settings_list_size) const 
+{
+    return m_cache_loader->get_global_settings_by_schema_name(schema_name, global_settings_list_size);
 }
 
 /* retrieve column by table oid and column oid */
 const ICachedColumn *CachedColumnManager::get_cached_column(unsigned int table_oid, unsigned int column_index) const
 {
-    return CacheLoader::get_instance().get_cached_column(table_oid, column_index);
+    return m_cache_loader->get_cached_column(table_oid, column_index);
+}
+
+/* retrieve column by cached col oid */
+const ICachedColumn* CachedColumnManager::get_cached_column(const Oid oid) const
+{
+    return m_cache_loader->get_cached_column(oid);
 }
 
 /* get  CacheColumns with database,schema ,tablename and columnname by cacheloader */
 const ICachedColumn *CachedColumnManager::get_cached_column(const char *db_name, const char *schema_name,
     const char *table_name, const char *column_name) const
 {
-    return CacheLoader::get_instance().get_cached_column(db_name, schema_name, table_name, column_name);
+    return m_cache_loader->get_cached_column(db_name, schema_name, table_name, column_name);
 }
+
+ColumnHookExecutor* CachedColumnManager::get_column_hook_executor(Oid columnSettingOid) const
+{
+    return m_cache_loader->get_column_hook_executor(columnSettingOid);
+}
+
+const CachedColumnSetting** CachedColumnManager::get_column_setting_by_schema_name(const char* schemaName,
+    size_t& column_settings_list_size) const
+{
+    return m_cache_loader->get_column_setting_by_schema_name(schemaName, column_settings_list_size);
+}
+
+const CachedColumnSetting* CachedColumnManager::get_column_setting_by_fqdn(const char* columnSettingFqdn) const
+{
+    return m_cache_loader->get_column_setting_by_fqdn(columnSettingFqdn);
+}
+
 
 bool CachedColumnManager::get_cached_columns(const char *db_name, const char *schema_name, const char *table_name,
     ICachedColumns *cached_columns_list) const
@@ -65,7 +147,7 @@ bool CachedColumnManager::get_cached_columns(const char *db_name, const char *sc
 
     size_t columns_list_size(0);
     const ICachedColumn **cached_columns =
-        CacheLoader::get_instance().get_cached_columns(db_name, schema_name, table_name, columns_list_size);
+        m_cache_loader->get_cached_columns(db_name, schema_name, table_name, columns_list_size);
     for (size_t i = 0; i < columns_list_size; ++i) {
         cached_columns_list->push(cached_columns[i]);
     }
@@ -86,7 +168,7 @@ const bool CachedColumnManager::has_cached_columns(const char *db_name, const ch
 /* judge if schema in CacheLoader */
 const bool CachedColumnManager::is_schema_contains_objects(const char *schema_name)
 {
-    return CacheLoader::get_instance().is_schema_exists(schema_name);
+    return m_cache_loader->is_schema_exists(schema_name);
 }
 
 /*
@@ -147,7 +229,7 @@ bool CachedColumnManager::get_cached_columns(const CopyStmt *copy_stmt, ICachedC
          * so return all of them from the cache
          * columns order is assumed to be corect in the cache
          */
-        return CachedColumnManager::get_cached_columns(copy_stmt->relation->catalogname,
+        return get_cached_columns(copy_stmt->relation->catalogname,
             copy_stmt->relation->schemaname, copy_stmt->relation->relname, cached_columns);
     } else {
         /* specific columns requested in the insert statement */
@@ -177,15 +259,15 @@ bool CachedColumnManager::get_cached_columns(const CopyStmt *copy_stmt, ICachedC
  */
 const bool CachedColumnManager::is_cache_empty() const
 {
-    if (!CacheLoader::get_instance().has_global_setting()) {
+    if (!m_cache_loader->has_global_setting()) {
         return true;
     }
 
-    if (!CacheLoader::get_instance().has_column_setting()) {
+    if (!m_cache_loader->has_column_setting()) {
         return true;
     }
 
-    if (!CacheLoader::get_instance().has_cached_columns()) {
+    if (!m_cache_loader->has_cached_columns()) {
         return true;
     }
 
@@ -199,7 +281,7 @@ const bool CachedColumnManager::is_cache_empty() const
 const Oid CachedColumnManager::get_cached_column_key_id(const char *column_key_name)
 {
     const CachedColumnSetting *column_setting =
-        CacheLoader::get_instance().get_column_setting_by_fqdn(column_key_name);
+        m_cache_loader->get_column_setting_by_fqdn(column_key_name);
     if (column_setting) {
         return column_setting->get_oid();
     }
@@ -208,7 +290,7 @@ const Oid CachedColumnManager::get_cached_column_key_id(const char *column_key_n
 
 const CachedColumnSetting *CachedColumnManager::get_cached_column_setting_metadata(const Oid oid)
 {
-    return CacheLoader::get_instance().get_column_setting_by_oid(oid);
+    return m_cache_loader->get_column_setting_by_oid(oid);
 }
 
 /*
@@ -224,7 +306,7 @@ ICachedColumn *CachedColumnManager::create_cached_column(const char *column_key_
      */
     CachedColumn *cached_column(NULL);
     const CachedColumnSetting *column_setting =
-        CacheLoader::get_instance().get_column_setting_by_fqdn(column_key_name);
+        m_cache_loader->get_column_setting_by_fqdn(column_key_name);
     if (column_setting) {
         cached_column = new (std::nothrow) CachedColumn();
         if (cached_column == NULL) {
@@ -298,31 +380,33 @@ bool CachedColumnManager::filter_cached_columns(const ICachedColumns *cached_col
     /* iterate over the columns that are present in the query */
     size_t where_exprs_list_size = where_exprs_list->size();
     for (size_t i = 0; i < where_exprs_list_size; ++i) {
+        bool is_found(false);
         const ExprParts *expr_part = where_exprs_list->at(i);
 
-        /* get column definiation from [where a.col1 = ...] */
-        ColumnRefData column_ref_data;
-        if (!exprProcessor::expand_column_ref(expr_part->column_ref, column_ref_data)) {
-            return false;
-        }
+        if (expr_part->column_ref != NULL) { 
+            /* get column definiation from [where a.col1 = ...] */
+            ColumnRefData column_ref_data;
+            if (!exprProcessor::expand_column_ref(expr_part->column_ref, column_ref_data)) {
+                return false;
+            }
 
-        /*
-         * iterate the CacehColumns to find the target CacheColumn for a.col1
-         * jugde the target CacheColumn support the operation or not
-         */
-        bool is_found(false);
-        size_t cached_columns_size = cached_columns->size();
-        for (size_t i = 0; i < cached_columns_size; ++i) {
-            const ICachedColumn *cached_column = cached_columns->at(i);
-            if (cached_column &&
-                (pg_strcasecmp(cached_column->get_col_name(), column_ref_data.m_column_name.data) == 0)) {
-                is_operator_forbidden = !expand_op(expr_part->operators, cached_column);
-                if (is_operator_forbidden) {
-                    return new_cached_columns; /* stopping early */
+            /*
+            * iterate the CacehColumns to find the target CacheColumn for a.col1
+            * jugde the target CacheColumn support the operation or not
+            */
+            size_t cached_columns_size = cached_columns->size();
+            for (size_t i = 0; i < cached_columns_size; ++i) {
+                const ICachedColumn *cached_column = cached_columns->at(i);
+                if (cached_column &&
+                    (pg_strcasecmp(cached_column->get_col_name(), column_ref_data.m_column_name.data) == 0)) {
+                    is_operator_forbidden = !expand_op(expr_part->operators, cached_column);
+                    if (is_operator_forbidden) {
+                        return new_cached_columns; /* stopping early */
+                    }
+                    new_cached_columns->push(cached_column);
+                    is_found = true;
+                    break;
                 }
-                new_cached_columns->push(cached_column);
-                is_found = true;
-                break;
             }
         }
         if (!is_found) {
@@ -440,15 +524,31 @@ bool CachedColumnManager::get_cached_columns(const SelectStmt *select_stmt, cons
 
 DatabaseType CachedColumnManager::get_sql_compatibility() const
 {
-    return CacheLoader::get_instance().get_sql_compatibility();
+    return m_cache_loader->get_sql_compatibility();
 }
 
 const char *CachedColumnManager::get_current_database() const
 {
-    return CacheLoader::get_instance().get_database_name();
+    return m_cache_loader->get_database_name();
 }
 
 bool CachedColumnManager::load_cache(PGconn *conn)
 {
-    return CacheLoader::get_instance().fetch_catalog_tables(conn);
+    return m_cache_loader->fetch_catalog_tables(conn);
+}
+
+CachedProc* CachedColumnManager::get_cached_proc(const char* dbName, const char* schemaName,
+    const char* functionName) const
+{
+    return m_cache_loader->get_proc_by_details(dbName, schemaName, functionName);
+}
+
+const CachedProc* CachedColumnManager::get_cached_proc(Oid funcOid) const
+{
+    return m_cache_loader->get_proc_by_oid(funcOid);
+}
+
+const CachedType* CachedColumnManager::get_cached_type(Oid typid) const
+{
+    return m_cache_loader->get_type_by_oid(typid);
 }

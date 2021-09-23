@@ -176,7 +176,6 @@ enable_mot			= @enable_mot@
 enable_llvm			= @enable_llvm@
 enable_mysql_fdw 		= @enable_mysql_fdw@
 enable_oracle_fdw		= @enable_oracle_fdw@
-enable_pldebugger		= @enable_pldebugger@
 enable_memory_check		= @enable_memory_check@
 enable_memory_check_core	= @enable_memory_check_core@
 enable_thread_check		= @enable_thread_check@
@@ -189,6 +188,7 @@ enable_llt	= @enable_llt@
 enable_ut	= @enable_ut@
 enable_qunit      = @enable_qunit@
 enable_gstrace  = @enable_gstrace@
+enable_libnet  = @enable_libnet@
 
 python_includespec	= @python_includespec@
 python_libdir		= @python_libdir@
@@ -239,19 +239,7 @@ SUPPORT_HOTPATCH = @SUPPORT_HOTPATCH@
 ifeq ($(PLAT_FORM_STR), suse11_sp1_x86_64)
     SUPPORT_HOTPATCH = yes
 else
-    ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
-        ifeq ($(CC_VERSION), 7.3.0)
-            SUPPORT_HOTPATCH = yes
-        else
-            SUPPORT_HOTPATCH = no
-        endif
-    else ifeq ($(PLAT_FORM_STR), euleros2.0_sp5_x86_64)
-        ifeq ($(CC_VERSION), 7.3.0)
-            SUPPORT_HOTPATCH = yes
-        else
-            SUPPORT_HOTPATCH = no
-        endif
-    else ifeq ($(PLAT_FORM_STR), euleros2.0_sp8_aarch64)
+    ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 euleros2.0_sp2_x86_64 euleros2.0_sp5_x86_64 kylin_aarch64),)
         ifeq ($(CC_VERSION), 7.3.0)
             SUPPORT_HOTPATCH = yes
         else
@@ -280,13 +268,13 @@ ifeq ($(with_3rd), NONE)
   BINARYPATH = binarylibs/dependency/$(PLAT_FORM_STR)
   PLATFORMPATH = binarylibs/platform/$(PLAT_FORM_STR)
   BUILD_TOOLS_PATH = binarylibs/buildtools/$(PLAT_FORM_STR)
-  INSTALL_TOOLS_PATH = dependency/install_tools_$(PLAT_FORM_STR)
+  INSTALL_TOOLS_PATH = dependency/$(PLAT_FORM_STR)
 
   JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   MEMCHECK_HOME = $(top_builddir)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
   LIBOBS_HOME = $(top_builddir)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
   ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)  
-    INSTALL_TOOLS_PATH = dependency/install_tools_euleros2.0_sp5_x86_64
+    INSTALL_TOOLS_PATH = dependency/euleros2.0_sp5_x86_64
     LIBODBC_HOME = $(top_builddir)/$(INSTALL_TOOLS_PATH)/unixodbc
   else
     LIBODBC_HOME = $(top_builddir)/$(INSTALL_TOOLS_PATH)/unixodbc
@@ -296,7 +284,6 @@ ifeq ($(with_3rd), NONE)
   LIBCGROUP_HOME = $(top_builddir)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBLLVM_HOME = $(top_builddir)/$(BINARYPATH)/llvm/comm
   EVENT_HOME = $(top_builddir)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
-  LIBEDIT_HOME = $(top_builddir)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(top_builddir)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(top_builddir)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(top_builddir)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
@@ -312,42 +299,32 @@ ifeq ($(with_3rd), NONE)
   LIBSTD_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(top_builddir)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
-  GRPC_HOME = $(top_builddir)/$(BINARYPATH)/grpc/$(LIB_SUPPORT_LLT)
   LIBPARQUET_HOME = $(top_builddir)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
   NUMA_HOME = $(top_builddir)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(top_builddir)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
   LIBTHRIFT_HOME = $(top_builddir)/$(BINARYPATH)/thrift
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nanomsg/comm
-  HLL_HOME = $(top_builddir)/$(BINARYPATH)/postgresql-hll/$(LIB_SUPPORT_LLT)
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
   ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
-  PLDBG_HOME    = $(top_builddir)/dependency/pldebugger
-  POSTGIS_HOME  = $(top_builddir)/dependency/postgis
+  DCF_HOME = $(top_builddir)/$(BINARYPATH)/dcf
 else
   BINARYPATH = dependency/$(PLAT_FORM_STR)
   PLATFORMPATH = platform/$(PLAT_FORM_STR)
   BUILD_TOOLS_PATH = buildtools/$(PLAT_FORM_STR)
-  INSTALL_TOOLS_PATH = dependency/install_tools_$(PLAT_FORM_STR)
 
   JEMALLOC_HOME = $(with_3rd)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   MEMCHECK_HOME = $(with_3rd)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
   LIBOBS_HOME = $(with_3rd)/$(BINARYPATH)/libobs/$(LIB_NOT_SUPPORT_LLT)
-  ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
-    INSTALL_TOOLS_PATH = dependency/install_tools_euleros2.0_sp5_x86_64
-    LIBODBC_HOME = $(with_3rd)/$(INSTALL_TOOLS_PATH)/unixodbc
-  else
-    LIBODBC_HOME = $(with_3rd)/$(INSTALL_TOOLS_PATH)/unixodbc
-  endif
+  LIBODBC_HOME = $(with_3rd)/$(BINARYPATH)/unixodbc
 
   LIBXML_HOME = $(with_3rd)/$(BINARYPATH)/libxml2/$(LIB_SUPPORT_LLT)
   LIBCGROUP_HOME = $(with_3rd)/$(BINARYPATH)/libcgroup/$(LIB_SUPPORT_LLT)
   LIBHOTPATCH_HOME = $(with_3rd)/$(PLATFORMPATH)/hotpatch
   LIBLLVM_HOME = $(with_3rd)/$(BINARYPATH)/llvm/comm
   EVENT_HOME = $(with_3rd)/$(BINARYPATH)/event/$(LIB_SUPPORT_LLT)
-  LIBEDIT_HOME = $(with_3rd)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
   ZLIB_HOME = $(with_3rd)/$(BINARYPATH)/zlib1.2.11/$(LIB_SUPPORT_LLT)
   LZ4_HOME  = $(with_3rd)/$(BINARYPATH)/lz4/$(LIB_SUPPORT_LLT)
   CJSON_HOME = $(with_3rd)/$(BINARYPATH)/cjson/$(LIB_SUPPORT_LLT)
@@ -366,23 +343,20 @@ endif
   LIBSTD_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/libstd/gcc$(CC_VERSION)/$(LIB_NOT_SUPPORT_LLT)
   GTEST_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/gtest/$(LIB_NOT_SUPPORT_LLT)
   MOCKCPP_HOME = $(with_3rd)/$(BUILD_TOOLS_PATH)/mockcpp/$(LIB_NOT_SUPPORT_LLT)
-  GRPC_HOME = $(with_3rd)/$(BINARYPATH)/grpc/$(LIB_SUPPORT_LLT)
   LIBPARQUET_HOME = $(with_3rd)/$(BINARYPATH)/libparquet/$(LIB_SUPPORT_LLT)
   NUMA_HOME = $(with_3rd)/$(BINARYPATH)/numactl/$(LIB_SUPPORT_LLT)
   LIBCURL_HOME = $(with_3rd)/$(BINARYPATH)/libcurl/$(LIB_SUPPORT_LLT)
   LIBTHRIFT_HOME = $(with_3rd)/$(BINARYPATH)/thrift
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nanomsg/comm
-  HLL_HOME = $(with_3rd)/$(BINARYPATH)/postgresql-hll/$(LIB_SUPPORT_LLT)
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/dependency/mysql_fdw
   ORCFDW_HOME = $(with_3rd)/dependency/oracle_fdw
-  PLDBG_HOME = $(with_3rd)/dependency/pldebugger
-  POSTGIS_HOME = $(with_3rd)/dependency/postgis
+  DCF_HOME = $(with_3rd)/$(BINARYPATH)/dcf
 endif
 
-LIBCARBONDATA_HOME = $(top_builddir)/contrib/carbondata
+LIBCARBONDATA_HOME = $(top_builddir)/../contrib/carbondata
 
 ##############################################################################
 # jemalloc component 
@@ -528,12 +502,6 @@ else
 endif
 
 #############################################################################
-# libedit component
-#############################################################################
-LIBEDIT_INCLUDE_PATH = $(LIBEDIT_HOME)/include
-LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
-
-#############################################################################
 # zlib component
 #############################################################################
 ZLIB_INCLUDE_PATH = $(ZLIB_HOME)/include
@@ -546,12 +514,6 @@ ZLIB_LIB_PATH = $(ZLIB_HOME)/lib
 LZ4_INCLUDE_PATH = $(LZ4_HOME)/include
 LZ4_LIB_PATH = $(LZ4_HOME)/lib
 LZ4_BIN_PATH = $(LZ4_HOME)/bin
-
-#############################################################################
-# hll component
-#############################################################################
-HLL_INCLUDE_PATH = $(HLL_HOME)/include
-HLL_LIB_PATH = $(HLL_HOME)/lib
 
 #############################################################################
 # cjson component
@@ -595,6 +557,7 @@ LIBORC_LIB_PATH = $(LIBORC_HOME)/lib
 #############################################################################
 LIBPARQUET_INCLUDE_PATH = $(LIBPARQUET_HOME)/include
 LIBPARQUET_LIB_PATH = $(LIBPARQUET_HOME)/lib
+LIBPARQUET_ARROW_LIB_PATH = $(LIBPARQUET_HOME)/lib
 
 #############################################################################
 # libcarbondata component
@@ -659,12 +622,6 @@ GTEST_LIB_PATH = $(GTEST_HOME)/lib
 MPCKCPP_LIB_PATH = $(MOCKCPP_HOME)/lib
 
 #############################################################################
-# grpc component
-############################################################################# 
-GRPC_INCLUDE_PATH = $(GRPC_HOME)/include
-GRPC_LIB_PATH = $(GRPC_HOME)/lib
-
-#############################################################################
 # zstd component
 #############################################################################
 ZSTD_INCLUDE_PATH = $(ZSTD_HOME)/include
@@ -693,6 +650,12 @@ LIBCURL_LIB_PATH = $(LIBCURL_HOME)/lib
 #############################################################################
 MASSTREE_INCLUDE_PATH = $(MASSTREE_HOME)/include
 MASSTREE_LIB_PATH = $(MASSTREE_HOME)/lib
+
+#############################################################################
+# dcf component
+#############################################################################
+DCF_INCLUDE_PATH = $(DCF_HOME)/include
+DCF_LIB_PATH = $(DCF_HOME)/lib
 
 ############################################################################
 #
@@ -723,9 +686,20 @@ endif
 
 ifeq ($(enable_multiple_nodes), yes)
 ifeq ($(enable_qunit), yes)
-  override CPPFLAGS := -I$(top_srcdir)/src/distribute/test/QUnit/src/include  $(CPPFLAGS)
+  override CPPFLAGS := -I$(top_srcdir)/../distribute/test/QUnit/src/include  $(CPPFLAGS)
 endif
-override CPPFLAGS := -I$(top_srcdir)/src/distribute/include  $(CPPFLAGS)
+override CPPFLAGS := -I$(top_srcdir)/../distribute/include  $(CPPFLAGS)
+else
+ifeq ($(enable_qunit), yes)
+  override CPPFLAGS := -I$(top_srcdir)/src/test/QUnit/src/include  $(CPPFLAGS)
+endif
+endif
+
+ifeq ($(enable_privategauss), yes)
+ifeq ($(enable_qunit), yes)
+  override CPPFLAGS := -I$(top_srcdir)/../distribute/test/QUnit/src/include  $(CPPFLAGS)
+endif
+override CPPFLAGS := -I$(top_srcdir)/../distribute/include  $(CPPFLAGS)
 else
 ifeq ($(enable_qunit), yes)
   override CPPFLAGS := -I$(top_srcdir)/src/test/QUnit/src/include  $(CPPFLAGS)
@@ -741,11 +715,15 @@ else # not PGXS
   endif  
 endif
 
-override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${GRPC_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(HLL_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBEDIT_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH)
+override CPPFLAGS := $(CPPFLAGS) -I$(LIBODBC_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(LIBCGROUP_INCLUDE_PATH) -I$(LIBOPENSSL_INCLUDE_PATH) -I${LIBORC_INCLUDE_PATH} -I${LIBPARQUET_INCLUDE_PATH} -I${PROTOBUF_INCLUDE_PATH} -I${BOOST_INCLUDE_PATH} -I$(LIBLLVM_INCLUDE_PATH) -I$(KERBEROS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(NUMA_INCLUDE_PATH) -I$(ZLIB_INCLUDE_PATH) -I$(LZ4_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -I$(DCF_INCLUDE_PATH)
 
+# GDS links to libevent
 ifeq ($(enable_multiple_nodes), yes)
-  # GDS links to libevent
   override CPPFLAGS := $(CPPFLAGS) -I$(EVENT_INCLUDE_PATH)
+else 
+ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_yes)
+  override CPPFLAGS := $(CPPFLAGS) -I$(EVENT_INCLUDE_PATH)
+endif
 endif
 
 ifeq ($(SUPPORT_HOTPATCH), yes)
@@ -828,7 +806,7 @@ DLLTOOL = @DLLTOOL@
 DLLWRAP = @DLLWRAP@
 LIBS = @LIBS@
 # append linking lib for OPENSSL
-LIBS += -ledit -lssl -lcrypto # append linking lib from Huawei_Secure_C
+LIBS += -lssl -lcrypto # append linking lib from Huawei_Secure_C
 LIBS += -lsecurec
 # append linking lib for threading
 ifeq ($(enable_debug), no)
@@ -872,7 +850,6 @@ endif
 # append zlib for compression: zlib
 LDFLAGS += -L$(ZLIB_LIB_PATH) -I$(ZLIB_INCLUDE_PATH)
 
-LDFLAGS += -L$(LIBEDIT_LIB_PATH)
 LDFLAGS += -L$(SECURE_LIB_PATH)
 LDFLAGS += -L$(LIBOPENSSL_LIB_PATH)
 LDFLAGS += -L$(LIBSTD_LIB_PATH)
@@ -1084,7 +1061,7 @@ endif
 libpq = -L$(libpq_builddir) -lpq
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
+libpq_ce = -L$(libpq_builddir) -lpq_ce -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -lkmc
 else
 libpq_ce = -L$(libpq_builddir) -lpq_ce
 endif
@@ -1111,7 +1088,7 @@ endif
 
 
 submake-libpq_ce:
-	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) ENABLE_CE=1
+	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) ENABLE_CE=1 && $(MAKE) -C $(libpq_builddir)/jdbc
 submake-libpq:
 	flock $(libpq_builddir)/libpq.lock $(MAKE) -C $(libpq_builddir) all
 
@@ -1125,7 +1102,7 @@ submake-libalarmclient:
 	$(MAKE) -C $(top_builddir)/src/lib/alarm
 
 submake-libcarbondata:
-	$(MAKE) -C $(top_builddir)/contrib/carbondata all
+	$(MAKE) -C $(top_builddir)/../contrib/carbondata all
 
 .PHONY: submake-libpq submake-libpgport  submake-libplpgsql submake-libalarmclient submake-libcarbondata
 
@@ -1156,21 +1133,21 @@ pg_regress_locale_flags = $(if $(ENCODING),--encoding=$(ENCODING)) $(NOLOCALE)
 ifeq ($(enable_memory_check), yes)
 pg_regress_check = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
                    export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/Tools/memory_check/memleak_ignore' && \
-                   $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+                   $(root_builddir)/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
 pg_regress_installcheck = export ASAN_OPTIONS='unmap_shadow_on_exit=1:abort_on_error=1:detect_leaks=1:force_check_leak=1:halt_on_error=0:alloc_dealloc_mismatch=0:fast_unwind_on_fatal=1:log_path=$(HOME)/memchk/asan/runlog' && \
                           export LSAN_OPTIONS='exitcode=0:suppressions=$(abs_top_srcdir)/Tools/memory_check/memleak_ignore' && \
-                          $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+                          $(root_builddir)/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
 EXTRA_REGRESS_OPTS = --ignore-exitcode --keep-run
 else
-  pg_regress_check = $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
-  pg_regress_installcheck = $(top_builddir)/src/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
+  pg_regress_check = $(root_builddir)/distribute/test/regress/pg_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+  pg_regress_installcheck = $(root_builddir)/distribute/test/regress/pg_regress --inputdir=$(srcdir) --psqldir='$(PSQLDIR)' $(pg_regress_locale_flags)
 endif
 
 pg_regress_clean_files = regression.diffs regression.out tmp_check/ log/
 
 
-pg_isolation_regress_check = $(top_builddir)/src/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
-pg_isolation_regress_installcheck = $(top_builddir)/src/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_isolation_regress_check = $(root_builddir)/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --temp-install=./tmp_check --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
+pg_isolation_regress_installcheck = $(root_builddir)/distribute/test/isolation/pg_isolation_regress --inputdir=$(srcdir) --top-builddir=$(top_builddir) $(pg_regress_locale_flags)
 
 else
 
@@ -1233,6 +1210,17 @@ endif
 ifdef PROFILE
    CXXFLAGS += $(PROFILE)
    LDFLAGS += $(PROFILE)
+endif
+
+ifeq ($(enable_libnet), yes)
+   LIBNET_HOME =/usr
+   LIBNET_INCLUDE_PATH = $(LIBNET_HOME)/include
+   LIBNET_LIB_PATH = $(LIBNET_HOME)/lib64
+   LIBNET_BIN_PATH = $(LIBNET_HOME)/bin
+   LIBNET_LIBS = -L$(SECURE_LIB_PATH) -lsecurec -L$(LIBNET_LIB_PATH) -llstack -lrte_eal -lrte_kvargs -ldl
+   override CPPFLAGS := $(CPPFLAGS) -DUSE_LIBNET
+   override CXXFLAGS := $(CXXFLAGS) -DUSE_LIBNET
+   override CFLAGS := $(CFLAGS) -DUSE_LIBNET
 endif
 
 

@@ -911,7 +911,6 @@ reset client_min_messages;
 -- constraint exclusion
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 create temp table t1 (a integer primary key) distribute by replication;
 

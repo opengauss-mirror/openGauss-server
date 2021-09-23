@@ -28,7 +28,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeExtensible.h"
+#include "executor/node/nodeExtensible.h"
 #include "nodes/execnodes.h"
 #include "nodes/plannodes.h"
 #include "parser/parsetree.h"

@@ -29,7 +29,6 @@
 class TypesMap {
 public:
     static CStringOidMap typesTextToOidMap;
-    static void fill_types_map();
 };
 
 #endif

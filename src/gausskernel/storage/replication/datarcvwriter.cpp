@@ -31,7 +31,7 @@
 #include "storage/ipc.h"
 #include "storage/proc.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "postmaster/alarmchecker.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
@@ -120,7 +120,8 @@ void DataRcvWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DataReceive Writer", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "DataReceive Writer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -407,7 +408,7 @@ static void DummyStandbyDoDataWrite(char *buf, uint32 nbytes)
  */
 uint32 DoDataWrite(char *buf, uint32 nbytes)
 {
-#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1 })
+#define InvalidRelFileNode ((RelFileNode){ 0, 0, 0, -1})
 
     RelFileNode curnode = InvalidRelFileNode;
     RelFileNode prevnode = InvalidRelFileNode;
@@ -453,9 +454,10 @@ uint32 DoDataWrite(char *buf, uint32 nbytes)
         }
         ereport(DEBUG5, (errmsg("DoDataWrite write page: rnode[%u,%u,%u], blocknum[%u], "
                                 "pageoffset[%lu], size[%u], queueoffset[%u/%u], attid[%d]",
-                                datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
-                                datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
-                                datahdr.queue_offset.queueoff, (int)GETATTID((uint32)datahdr.attid))));
+                                datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode,
+                                datahdr.blocknum, datahdr.offset, datahdr.data_size, 
+                                datahdr.queue_offset.queueid, datahdr.queue_offset.queueoff,
+                                (int)GETATTID((uint32)datahdr.attid))));
 
 #ifdef DATA_DEBUG
         INIT_CRC32(crc);
@@ -466,9 +468,9 @@ uint32 DoDataWrite(char *buf, uint32 nbytes)
             ereport(PANIC, (errmsg("writing incorrect data page checksum at: "
                                    "rnode[%u,%u,%u], blocknum[%u], "
                                    "pageoffset[%u], size[%u], queueoffset[%u/%u]",
-                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
-                                   datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
-                                   datahdr.queue_offset.queueoff)));
+                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode,
+                                   datahdr.blocknum, datahdr.offset, datahdr.data_size,
+                                   datahdr.queue_offset.queueid, datahdr.queue_offset.queueoff)));
         }
 #endif
         /* when enable_mix_replication is on, the ROW_STORE type is not supported now! */
@@ -479,9 +481,9 @@ uint32 DoDataWrite(char *buf, uint32 nbytes)
                                    "Tracking the data header info: "
                                    "rnode[%u/%u/%u] blocknum[%u] pageoffset[%lu] "
                                    "size[%u] queueoffset[%u/%u].",
-                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode, datahdr.blocknum,
-                                   datahdr.offset, datahdr.data_size, datahdr.queue_offset.queueid,
-                                   datahdr.queue_offset.queueoff)));
+                                   datahdr.rnode.spcNode, datahdr.rnode.dbNode, datahdr.rnode.relNode,
+                                   datahdr.blocknum, datahdr.offset, datahdr.data_size,
+                                   datahdr.queue_offset.queueid, datahdr.queue_offset.queueoff)));
             return nbytes;
         }
 
@@ -572,7 +574,7 @@ uint32 DoDataWrite(char *buf, uint32 nbytes)
                  * manager would just allocate a zero buffer rather than read the
                  * page from smgr. See more in ReadBuffer_common() comments inside.
                  */
-                buffer = XLogReadBufferExtended(curnode, MAIN_FORKNUM, datahdr.blocknum, RBM_ZERO_ON_ERROR);
+                buffer = XLogReadBufferExtended(curnode, MAIN_FORKNUM, datahdr.blocknum, RBM_ZERO_ON_ERROR, NULL);
                 Assert(BufferIsValid(buffer));
                 LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
                 page = (Page)BufferGetPage(buffer);
@@ -608,7 +610,8 @@ uint32 DoDataWrite(char *buf, uint32 nbytes)
                     goto retry;
                 }
                 ereport(WARNING, (errmsg("HA-DoDataWrite: No File Write(file not exists), rnode %u/%u/%u, blockno %u ",
-                                         curnode.spcNode, curnode.dbNode, curnode.relNode, datahdr.blocknum)));
+                                         curnode.spcNode, curnode.dbNode, curnode.relNode,
+                                         datahdr.blocknum)));
             }
 #ifdef ENABLE_MULTIPLE_NODES
             UnlockRelFileNode(curnode, AccessShareLock);

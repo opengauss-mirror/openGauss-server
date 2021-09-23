@@ -1,0 +1,940 @@
+create schema test_unione_insert_select_mix_2;
+set current_schema='test_unione_insert_select_mix_2';
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop type if exists composite_type;
+NOTICE:  type "composite_type" does not exist, skipping
+create type composite_type as (c1 int, c2 boolean, c3 money, c4 text, c5 date);
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+-- create table for post data insertion verification
+drop table if exists t1_v;
+NOTICE:  table "t1_v" does not exist, skipping
+drop table if exists t2_v;
+NOTICE:  table "t2_v" does not exist, skipping
+drop table if exists t3_v;
+NOTICE:  table "t3_v" does not exist, skipping
+create table t1_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t2_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t3_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+-- insert data to t1
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+\COPY t1_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+-- t1 post data insertion v
+create view t1_data_v as (select * from t1 except select * from t1_v);
+select * from t1_data_v;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- insert data to t2
+\COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+\COPY t2_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+-- t2 post data insertion v
+create view t2_data_v as (select * from t2 except select * from t2_v);
+select * from t2_data_v;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 1: insert select into empty table
+insert into t3 select * from t2;
+insert into t3_v select * from t2_v;
+create view view1 as (select * from t3 except select * from t3_v);
+select * from view1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 2: insert select to non-empty table
+insert into t2 select * from t1;
+insert into t2_v select * from t1_v;
+create view view2 as (select * from t2 except select * from t2_v);
+select * from view2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t1 set c11='text', c16=time'00:00:01' where c6=false and c1=1;
+update t1_v set c11='text', c16=time'00:00:01' where c6=false and c1=1;
+create view view3 as (select * from t1 except select * from t1_v);
+select * from view3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t2 set c6=false, c2=10 where c1=1 and c3>500;
+update t2_v set c6=false, c2=10 where c1=1 and c3>500;
+create view view4 as (select * from t2 except select * from t2_v);
+select * from view4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 3: insert select with group by + having
+drop table if exists t4;
+NOTICE:  table "t4" does not exist, skipping
+create table t4
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+drop table if exists t4_v;
+NOTICE:  table "t4_v" does not exist, skipping
+create table t4_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+insert into t4 select * from t1 group by t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 having t1.c6=false;
+insert into t4_v select * from t1_v group by t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 having t1_v.c6=false;
+create view view5 as (select * from t4 except select * from t4_v);
+select * from view5;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t3 select * from t2 group by t2.c1, t2.c2, t2.c3, t2.c4, t2.c5, t2.c6, t2.c7, t2.c8, t2.c9, t2.c10, t2.c11, t2.c12, t2.c13, t2.c14, t2.c15, t2.c16, t2.c17, t2.c18 having t2.c6=true;
+insert into t3_v select * from t2_v group by t2_v.c1, t2_v.c2, t2_v.c3, t2_v.c4, t2_v.c5, t2_v.c6, t2_v.c7, t2_v.c8, t2_v.c9, t2_v.c10, t2_v.c11, t2_v.c12, t2_v.c13, t2_v.c14, t2_v.c15, t2_v.c16, t2_v.c17, t2_v.c18 having t2_v.c6=true;
+create view view6 as (select * from t3 except select * from t3_v);
+select * from view6;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t3 set c1=1, c2=2, c3=3 where c6=true and c4>5000;
+update t3_v set c1=1, c2=2, c3=3 where c6=true and c4>5000;
+create view view7 as (select * from t3 except select * from t3_v);
+select * from view7;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t3 set c6=false where c4=100;
+update t3_v set c6=false where c4=100;
+create view view8 as (select * from t3 except select * from t3_v);
+select * from view8;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+delete from t4 where c1=5;
+delete from t4_v where c1=5;
+create view view9 as (select * from t4 except select * from t4_v);
+select * from view9;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+delete from t4 where c4<10 and c6=false;
+delete from t4_v where c4<10 and c6=false;
+create view view10 as (select * from t4 except select * from t4_v);
+select * from view10;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 4: insert into join subquery select
+drop table if exists t5;
+NOTICE:  table "t5" does not exist, skipping
+create table t5
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+drop table if exists t5_v;
+NOTICE:  table "t5_v" does not exist, skipping
+create table t5_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 left outer join t2 on t1.c2=t2.c2) as foo;
+insert into t5_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v left outer join t2_v on t1_v.c2=t2_v.c2) as foo;
+create view view11 as (select * from t5 except select * from t5_v);
+select * from view11;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false) as foo;
+insert into t5_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v left outer join t2_v on t1_v.c2=t2_v.c2 where t1_v.c6=false) as foo;
+create view view12 as (select * from t5 except select * from t5_v);
+select * from view12;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+start transaction;
+create view view13 as (select count(*) from t5 except select count(*) from t5_v);
+select * from view13;
+ count 
+-------
+(0 rows)
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false order by t1.c1) as foo;
+insert into t5_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v left outer join t2_v on t1_v.c2=t2_v.c2 where t1_v.c6=false order by t1_v.c1) as foo;
+create view view14 as (select * from t5 except select * from t5_v);
+select * from view14;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false group by t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 having t1.c2>5000 order by t1.c1) as foo;
+insert into t5_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v left outer join t2_v on t1_v.c2=t2_v.c2 where t1_v.c6=false group by t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18  having t1_v.c2>5000 order by t1_v.c1) as foo;
+create view view15 as (select * from t5 except select * from t5_v);
+select * from view15;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view view16 as (select count(*) from t5 except select count(*) from t5_v);
+select * from view16;
+ count 
+-------
+(0 rows)
+
+rollback;
+create view view17 as (select count(*) from t5);
+select * from view17;
+ count 
+-------
+  2991
+(1 row)
+
+create view view18 as (select count(*) from t5_v);
+select * from view18;
+ count 
+-------
+  2991
+(1 row)
+
+create view view19 as (select count(*) from t5 except select count(*) from t5_v);
+select * from view19;
+ count 
+-------
+(0 rows)
+
+start transaction;
+delete from t4 where c1<20;
+delete from t4_v where c1<20;
+create view view20 as (select count(*) from t4);
+select * from view20;
+ count 
+-------
+   453
+(1 row)
+
+create view view21 as (select count(*) from t4_v);
+select * from view21;
+ count 
+-------
+   453
+(1 row)
+
+create view view22 as (select count(*) from t4 except select count(*) from t4_v);
+select * from view22;
+ count 
+-------
+(0 rows)
+
+delete from t4 where c6=false and c4>20;
+delete from t4_v where c6=false and c4>20;
+create view view23 as (select count(*) from t4);
+select * from view23;
+ count 
+-------
+     0
+(1 row)
+
+create view view24 as (select count(*) from t4_v);
+select * from view24;
+ count 
+-------
+     0
+(1 row)
+
+create view view25 as (select count(*) from t4 except select count(*) from t4_v);
+select * from view25;
+ count 
+-------
+(0 rows)
+
+commit;
+create view view26 as (select count(*) from t4);
+select * from view26;
+ count 
+-------
+     0
+(1 row)
+
+create view view27 as (select count(*) from t4_v);
+select * from view27;
+ count 
+-------
+     0
+(1 row)
+
+create view view28 as (select count(*) from t4 except select count(*) from t4_v);
+select * from view28;
+ count 
+-------
+(0 rows)
+
+start transaction;
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 union select * from t2) as foo;
+insert into t4_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v union select * from t2_v) as foo;
+create view view29 as (select * from t4 except select * from t4_v);
+select * from view29;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t4 select * from ((select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 where t1.c6=false) union (select * from t2 where t2.c2>5000)) as foo;
+insert into t4_v select * from ((select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v where t1_v.c6=false) union (select * from t2_v where t2_v.c2>5000)) as foo;
+create view view30 as (select * from t4 except select * from t4_v);
+select * from view30;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view view31 as (select count(*) from t4);
+select * from view31;
+ count 
+-------
+  2496
+(1 row)
+
+create view view32 as (select count(*) from t4_v);
+select * from view32;
+ count 
+-------
+  2496
+(1 row)
+
+create view view33 as (select count(*) from t4 except select count(*) from t4_v);
+select * from view33;
+ count 
+-------
+(0 rows)
+
+rollback;
+create view view34 as (select count(*) from t4);
+select * from view34;
+ count 
+-------
+     0
+(1 row)
+
+create view view35 as (select count(*) from t4_v);
+select * from view35;
+ count 
+-------
+     0
+(1 row)
+
+create view view36 as (select count(*) from t4 except select count(*) from t4_v);
+select * from view36;
+ count 
+-------
+(0 rows)
+
+insert into t4 select * from ((select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 where t1.c6=false) union all (select * from t2 where t2.c2>5000)) as foo;
+insert into t4_v select * from ((select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v where t1_v.c6=false) union all (select * from t2_v where t2_v.c2>5000)) as foo;
+create view view37 as (select * from t4 except select * from t4_v);
+select * from view37;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 intersect select * from t4) as foo where foo.c6=false;
+insert into t4_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v intersect select * from t4_v) as foo where foo.c6=false;
+create view view38 as (select * from t4 except select * from t4_v);
+select * from view38;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 intersect all select * from t4) as foo where foo.c6=false;
+insert into t4_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v intersect all select * from t4_v) as foo where foo.c6=false;
+create view view39 as (select * from t4 except select * from t4_v);
+select * from view39;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c13, t1.c14, t1.c15, t1.c16, t1.c17, t1.c18 from t1 except select * from t3) as foo;
+insert into t4_v select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c13, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17, t1_v.c18 from t1_v except select * from t3_v) as foo;
+create view view40 as (select * from t4 except select * from t4_v);
+select * from view40;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 5: test with temp table
+drop table if exists t1_temp;
+NOTICE:  table "t1_temp" does not exist, skipping
+drop table if exists t2_temp;
+NOTICE:  table "t2_temp" does not exist, skipping
+drop table if exists t1_temp;
+NOTICE:  table "t1_temp" does not exist, skipping
+drop table if exists t2_temp;
+NOTICE:  table "t2_temp" does not exist, skipping
+create temp table t1_temp (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+) with (storage_type=USTORE);
+create temp table t2_temp (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+) with (storage_type=USTORE);
+drop table if exists t1_temp_v;
+NOTICE:  table "t1_temp_v" does not exist, skipping
+drop table if exists t2_temp_v;
+NOTICE:  table "t2_temp_v" does not exist, skipping
+create temp table t1_temp_v (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+) with (storage_type=ASTORE);
+create temp table t2_temp_v (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+) with (storage_type=ASTORE);
+insert into t1_temp select * from t1;
+insert into t1_temp_v select * from t1_v;
+create view view41 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view41" will be a temporary view
+select * from view41;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t1_temp (select * from t1 where t1.c1<100);
+insert into t1_temp_v (select * from t1_v where t1_v.c1<100);
+create view view42 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view42" will be a temporary view
+select * from view42;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t1_temp set c1=0 where c6=true;
+update t1_temp_v set c1=0 where c6=true;
+create view view43 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view43" will be a temporary view
+select * from view43;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+delete from t1_temp where c6=true;
+delete from t1_temp_v where c6=true;
+create view view44 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view44" will be a temporary view
+select * from view44;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view view45 as (select count(*) from t1_temp);
+NOTICE:  view "view45" will be a temporary view
+select * from view45;
+ count 
+-------
+   699
+(1 row)
+
+create view view46 as (select count(*) from t1_temp_v);
+NOTICE:  view "view46" will be a temporary view
+select * from view46;
+ count 
+-------
+   699
+(1 row)
+
+create view view47 as (select count(*) from t1_temp except select count(*) from t1_temp_v);
+NOTICE:  view "view47" will be a temporary view
+select * from view47;
+ count 
+-------
+(0 rows)
+
+create view view48 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view48" will be a temporary view
+select * from view48;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+start transaction;
+savepoint sp1;
+create temp table temp1 (c1 integer, c2 text, c3 boolean, c4 money, c5 date, c6 clob);
+create view view49 as (select count(*) from t1_temp except select count(*) from t1_temp_v);
+NOTICE:  view "view49" will be a temporary view
+select * from view49;
+ count 
+-------
+(0 rows)
+
+create view view50 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view50" will be a temporary view
+select * from view50;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+rollback to savepoint sp1;
+create view view51 as (select count(*) from t1_temp except select count(*) from t1_temp_v);
+NOTICE:  view "view51" will be a temporary view
+select * from view51;
+ count 
+-------
+(0 rows)
+
+create view view52 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view52" will be a temporary view
+select * from view52;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create temp table temp2 (c1 integer, c2 text, c3 boolean, c4 money, c5 date, c6 clob);
+rollback to savepoint sp1;
+end;
+create view view53 as (select count(*) from t1_temp except select count(*) from t1_temp_v);
+NOTICE:  view "view53" will be a temporary view
+select * from view53;
+ count 
+-------
+(0 rows)
+
+create view view54 as (select * from t1_temp except select * from t1_temp_v);
+NOTICE:  view "view54" will be a temporary view
+select * from view54;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+start transaction isolation level read uncommitted;
+insert into t3 select * from t1 where c1=2;
+insert into t3_v select * from t1_v where c1=2;
+create view view55 as (select * from t3 except select * from t3_v);
+select * from view55;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t3 set c1=1 where c4<5000 and c6=false;
+update t3_v set c1=1 where c4<5000 and c6=false;
+create view view56 as (select * from t3 except select * from t3_v);
+select * from view56;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+update t3 set c12='clob' where c6=true;
+update t3_v set c12='clob' where c6=true;
+create view view57 as (select * from t3 except select * from t3_v);
+select * from view57;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t5 (select * from t1 intersect all select * from t3 where t3.c3>500);
+insert into t5_v (select * from t1_v intersect all (select * from t3_v where t3_v.c3>500));
+create view view58 as (select * from t5 except select * from t5_v);
+select * from view58;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+insert into t5 (select * from t1 intersect all select * from t3 where t3.c3>500);
+insert into t5_v (select * from t1_v intersect all select * from t3_v where t3_v.c3>500);
+create view view59 as (select * from t5 except select * from t5_v);
+select * from view59;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+end;
+create view view60 as (select * from t3 except select * from t3_v);
+select * from view60;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view view61 as (select * from t5 except select * from t5_v);
+select * from view61;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+start transaction isolation level read committed;
+delete from t2 where c17 < reltime '@ 500 days';
+delete from t2_v where c17 < reltime '@ 500 days';
+create view view62 as (select * from t2 except select * from t2_v); 
+select * from view62;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+delete from t2 where c8 < 'zzazaa';
+delete from t2_v where c8 < 'zzazaa';
+create view view63 as (select * from t2 except select * from t2_v);
+select * from view63;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+rollback;
+create view view64 as (select * from t2 except select * from t2_v);
+select * from view64;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+start transaction isolation level serializable;
+insert into t3 (select * from t2 where c6=false);
+insert into t3_v (select * from t2_v where c6=false);
+create view view65 as (select * from t3 except select * from t3_v);
+select * from view65;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+end;
+create view view66 as (select * from t3 except select * from t3_v);
+select * from view66;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- drop all tables and views
+drop view t1_data_v CASCADE;
+drop view t2_data_v CASCADE;
+drop view view1 CASCADE;
+drop view view2 CASCADE;
+drop view view3 CASCADE;
+drop view view4 CASCADE;
+drop view view5 CASCADE;
+drop view view6 CASCADE;
+drop view view7 CASCADE;
+drop view view8 CASCADE;
+drop view view9 CASCADE;
+drop view view10 CASCADE;
+drop view view11 CASCADE;
+drop view view12 CASCADE;
+drop view view17 CASCADE;
+drop view view18 CASCADE;
+drop view view19 CASCADE;
+drop view view20 CASCADE;
+drop view view21 CASCADE;
+drop view view22 CASCADE;
+drop view view23 CASCADE;
+drop view view24 CASCADE;
+drop view view25 CASCADE;
+drop view view26 CASCADE;
+drop view view27 CASCADE;
+drop view view28 CASCADE;
+drop view view34 CASCADE;
+drop view view35 CASCADE;
+drop view view36 CASCADE;
+drop view view37 CASCADE;
+drop view view38 CASCADE;
+drop view view39 CASCADE;
+drop view view40 CASCADE;
+drop view view41 CASCADE;
+drop view view42 CASCADE;
+drop view view43 CASCADE;
+drop view view44 CASCADE;
+drop view view45 CASCADE;
+drop view view46 CASCADE;
+drop view view47 CASCADE;
+drop view view48 CASCADE;
+drop view view53 CASCADE;
+drop view view54 CASCADE;
+drop view view55 CASCADE;
+drop view view56 CASCADE;
+drop view view57 CASCADE;
+drop view view58 CASCADE;
+drop view view59 CASCADE;
+drop view view60 CASCADE;
+drop view view61 CASCADE;
+drop view view64 CASCADE;
+drop view view65 CASCADE;
+drop view view66 CASCADE;
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+drop table t1_v;
+drop table t2_v;
+drop table t3_v;
+drop table t4_v;
+drop table t5_v;
+drop table t1_temp;
+drop table t2_temp;
+drop table t1_temp_v;
+drop table t2_temp_v;

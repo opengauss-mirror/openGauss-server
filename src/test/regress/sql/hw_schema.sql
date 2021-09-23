@@ -133,7 +133,6 @@ select 1 from pg_user where USENAME = 'fvt_obj_define_function_use_00004';
 --insert into mctable values (6, 'ax', 'one', '?longlong', 'f'); -- good
 --select c3, i, c2, c1, count(*), max(i) from mctable group by i, c1, c2, c3, c4 order by 1;
 --
---SET enforce_two_phase_commit TO off;
 --create temp table fullname (first text, last text);
 --create temp table people (fn fullname, bd date, c myschema.bpchar, c3 "char");
 --insert into people values ('(Joe,Blow)', '1984-01-10', 'good', 'h');

@@ -3,7 +3,7 @@
  * extension.cpp
  *	  Commands to manipulate extensions
  *
- * Extensions in PostgreSQL allow management of collections of SQL objects.
+ * Extensions in openGauss allow management of collections of SQL objects.
  *
  * All we need internally to manage an extension is an OID so that the
  * dependent objects can be associated with it.  An extension is created by
@@ -175,7 +175,7 @@ char* get_extension_name(Oid ext_oid)
  *
  * Returns InvalidOid if no such extension.
  */
-static Oid get_extension_schema(Oid ext_oid)
+Oid get_extension_schema(Oid ext_oid)
 {
     Oid result;
     Relation rel;
@@ -185,7 +185,13 @@ static Oid get_extension_schema(Oid ext_oid)
 
     rel = heap_open(ExtensionRelationId, AccessShareLock);
 
-    ScanKeyInit(&entry[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
+    ScanKeyInit(&entry[0],
+#if PG_VERSION_NUM >= 120000
+        Anum_pg_extension_oid,
+#else
+        ObjectIdAttributeNumber,
+#endif
+        BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(ext_oid));
 
     scandesc = systable_beginscan(rel, ExtensionOidIndexId, true, NULL, 1, entry);
 

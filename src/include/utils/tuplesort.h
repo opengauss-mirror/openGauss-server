@@ -25,11 +25,74 @@
 #include "fmgr.h"
 #include "utils/relcache.h"
 #include "utils/tuplestore.h"
+#include "utils/logtape.h"
+
 
 /* Tuplesortstate is an opaque type whose details are not known outside
  * tuplesort.c.
  */
+
+/*
+ * Private mutable state of tuplesort-parallel-operation.  This is allocated
+ * in shared memory.
+ */
+
+struct Sharedsort {
+    /* mutex protects all fields prior to tapes */
+    slock_t mutex;
+
+    /*
+     * currentWorker generates ordinal identifier numbers for parallel sort
+     * workers.  These start from 0, and are always gapless.
+     *
+     * Workers increment workersFinished to indicate having finished.  If this
+     * is equal to state.nParticipants within the leader, leader is ready to
+     * merge worker runs.
+     */
+
+    int currentWorker;
+    int workersFinished;
+
+    /* Temporary file space */
+    SharedFileSet fileset;
+
+    /* Size of tapes flexible array */
+    int nTapes;
+
+    /* actual number of participants */
+    int actualParticipants;
+
+    /*
+     * Tapes array used by workers to report back information needed by the
+     * leader to concatenate all worker tapes into one for merging
+     */
+    TapeShare tapes[FLEXIBLE_ARRAY_MEMBER];
+};
+
 typedef struct Tuplesortstate Tuplesortstate;
+typedef struct Sharedsort Sharedsort;
+
+/*
+ * Tuplesort parallel coordination state, allocated by each participant in
+ * local memory.  Participant caller initializes everything.  See usage notes
+ * below.
+ */
+typedef struct SortCoordinateData {
+    /* Worker process?  If not, must be leader. */
+    bool        isWorker;
+
+    /*
+     * Leader-process-passed number of participants known launched (workers
+     * set this to -1).  Includes state within leader needed for it to
+     * participate as a worker, if any.
+     */
+    int         nParticipants;
+
+    /* Private opaque state (points to shared memory) */
+    Sharedsort *sharedsort;
+} SortCoordinateData;
+
+typedef struct SortCoordinateData *SortCoordinate;
 
 /*
  * We provide multiple interfaces to what is essentially the same code,
@@ -62,9 +125,9 @@ extern Tuplesortstate* tuplesort_begin_heap(TupleDesc tupDesc, int nkeys, AttrNu
     Oid* sortCollations, const bool* nullsFirstFlags, int64 workMem, bool randomAccess, int64 maxMem = 0,
     int planId = 0, int dop = 1);
 extern Tuplesortstate* tuplesort_begin_cluster(
-    TupleDesc tupDesc, Relation indexRel, int workMem, bool randomAccess, int maxMem);
+    TupleDesc tupDesc, Relation indexRel, int workMem, bool randomAccess, int maxMem, bool relIsUstore);
 extern Tuplesortstate* tuplesort_begin_index_btree(
-    Relation indexRel, bool enforceUnique, int workMem, bool randomAccess, int maxMem);
+    Relation indexRel, bool enforceUnique, int workMem, SortCoordinate coordinate, bool randomAccess, int maxMem);
 extern Tuplesortstate* tuplesort_begin_index_hash(
     Relation heapRel, Relation indexRel, uint32 high_mask, uint32 low_mask, uint32 max_buckets, 
     int workMem, bool randomAccess, int maxMem);
@@ -78,9 +141,10 @@ extern void tuplesort_remoteread_end(Tuplesortstate* state);
 extern void tuplesort_set_bound(Tuplesortstate* state, int64 bound);
 
 extern void tuplesort_puttupleslot(Tuplesortstate* state, TupleTableSlot* slot);
-extern void tuplesort_putheaptuple(Tuplesortstate* state, HeapTuple tup);
+extern void TuplesortPutheaptuple(Tuplesortstate* state, HeapTuple tup);
 extern void tuplesort_putindextuplevalues(
-    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values, const bool* isnull);
+    Tuplesortstate* state, Relation rel, ItemPointer self, Datum* values,
+    const bool* isnull, IndexTransInfo* transInfo = NULL);
 extern void tuplesort_putdatum(Tuplesortstate* state, Datum val, bool isNull);
 
 extern void tuplesort_performsort(Tuplesortstate* state);
@@ -88,7 +152,7 @@ extern void tuplesort_performsort(Tuplesortstate* state);
 extern bool tuplesort_gettupleslot(Tuplesortstate* state, bool forward, TupleTableSlot* slot, Datum* abbrev);
 extern bool tuplesort_gettupleslot_into_tuplestore(
     Tuplesortstate* state, bool forward, TupleTableSlot* slot, Datum* abbrev, Tuplestorestate* tstate);
-extern HeapTuple tuplesort_getheaptuple(Tuplesortstate* state, bool forward, bool* should_free);
+extern void* tuplesort_getheaptuple(Tuplesortstate* state, bool forward, bool* should_free);
 extern IndexTuple tuplesort_getindextuple(Tuplesortstate* state, bool forward, bool* should_free);
 extern bool tuplesort_getdatum(Tuplesortstate* state, bool forward, Datum* val, bool* isNull);
 
@@ -97,6 +161,10 @@ extern void tuplesort_end(Tuplesortstate* state);
 extern void tuplesort_get_stats(Tuplesortstate* state, int* sortMethodId, int* spaceTypeId, long* spaceUsed);
 
 extern int tuplesort_merge_order(double allowedMem);
+extern Size tuplesort_estimate_shared(int nworkers);
+extern void tuplesort_initialize_shared(Sharedsort *shared, int nWorkers);
+extern void tuplesort_attach_shared(Sharedsort *shared);
+
 
 /*
  * These routines may only be called if randomAccess was specified 'true'.
@@ -120,5 +188,7 @@ extern void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_t
  * Return the int64 value of tuplesortstate->peakMemorySize
  */
 extern int64 tuplesort_get_peak_memory(Tuplesortstate* state);
+
+extern void tuplesort_workerfinish(Sharedsort *shared);
 
 #endif /* TUPLESORT_H */

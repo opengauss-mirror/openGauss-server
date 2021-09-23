@@ -30,12 +30,22 @@
 #include "expr_processor.h"
 #include "client_logic_processor/processor_utils.h"
 #include "client_logic_common/statement_data.h"
+#include "client_logic_cache/cached_proc.h"
 #include "expr_parts_list.h"
+#include "func_name_data.h"
+
+static bool HandleCachedFuncCall(const FuncCall* funccall, ExprPartsList* expr_parts_list,
+    StatementData* statement_data);
 
 bool handle_func_call(const FuncCall *funccall, ExprPartsList *expr_parts_list, StatementData *statement_data)
 {
+    if (!funccall) {
+        return false;
+    }
+
     if (funccall->funcname != NULL && strcmp(strVal(linitial(funccall->funcname)), "repeat") == 0) {
-        if (funccall->args == NULL || list_length(funccall->args) != 2) {
+        const int repeat_args_num = 2;
+        if (funccall->args == NULL || list_length(funccall->args) != repeat_args_num) {
             return true;
         }
         if (nodeTag(linitial(funccall->args)) != T_A_Const || nodeTag(lsecond(funccall->args)) != T_A_Const) {
@@ -102,9 +112,61 @@ bool handle_func_call(const FuncCall *funccall, ExprPartsList *expr_parts_list, 
         expr_parts_list->add(&expr_parts);
         return true;
     } else {
-        /* function is not supported on client logic
-         * columns yet function is not supported on client logic columns yet. 
-         */
+        return HandleCachedFuncCall(funccall, expr_parts_list, statement_data);
+    }
+}
+
+bool HandleCachedFuncCall(const FuncCall* funccall, ExprPartsList* expr_parts_list, StatementData* statement_data)
+{
+    if (!funccall || !funccall->args) {
         return true;
     }
+    func_name_data func_name;
+    exprProcessor::expand_function_name(funccall, func_name);
+    const CachedProc* cached_proc = statement_data->GetCacheManager()->get_cached_proc(
+        NameStr(func_name.m_catalogName), NameStr(func_name.m_schemaName), NameStr(func_name.m_functionName));
+    if (!cached_proc) {
+        return true;
+    }
+    ListCell* arg = NULL;
+    int argnum = 0;
+    foreach (arg, funccall->args) {
+        Node* n = (Node*)lfirst(arg);
+        A_Const* ac = NULL;
+        ParamRef* pr = NULL;
+        if (nodeTag(n) == T_NamedArgExpr) {
+            NamedArgExpr* na = (NamedArgExpr*)n;
+            for (argnum = 0; argnum < cached_proc->m_pronargs; argnum++) {
+                if (pg_strcasecmp(cached_proc->m_proargnames[argnum], na->name) == 0)
+                    break;
+            }
+            if (argnum >= cached_proc->m_pronargs) {
+                continue;
+            }
+            if (nodeTag(na->arg) == T_A_Const) {
+                ac = (A_Const*)na->arg;
+            }
+            if (nodeTag(na->arg) == T_ParamRef) {
+                pr = (ParamRef*)na->arg;
+            }
+        }
+        if (nodeTag(n) == T_A_Const) {
+            ac = (A_Const*)n;
+        }
+        if (nodeTag(n) == T_ParamRef) {
+            pr = (ParamRef*)n;
+        }
+        if (ac || pr) {
+            if (cached_proc->m_proargcachedcol && cached_proc->m_proargcachedcol[argnum] != InvalidOid) {
+                ExprParts exprParts;
+                exprParts.param_ref = pr;
+                exprParts.column_ref = NULL;
+                exprParts.aconst = ac;
+                exprParts.cl_column_oid = cached_proc->m_proargcachedcol[argnum];
+                expr_parts_list->add(&exprParts);
+            }
+            argnum++;
+        }
+    }
+    return true;
 }

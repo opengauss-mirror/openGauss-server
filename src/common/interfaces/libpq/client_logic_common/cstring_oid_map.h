@@ -47,6 +47,7 @@ public:
     {
         return size;
     }
+    void fill_types_map();
 
 private:
     size_t size;

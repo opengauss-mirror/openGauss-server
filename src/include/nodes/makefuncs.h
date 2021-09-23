@@ -81,6 +81,7 @@ extern RangeVar *makeRangeVar(char *schemaname, char *relname, int location);
 extern TypeName *makeTypeName(char *typnam);
 extern TypeName *makeTypeNameFromNameList(List *names);
 extern DefElem *makeDefElem(char *name, Node *arg);
+extern DefElem *MakeDefElemWithLoc(char *name, Node *arg, int begin_loc, int end_loc);
 extern DefElem *makeDefElemExtended(char *nameSpace, char *name, Node *arg, DefElemAction defaction);
 extern GroupingSet *makeGroupingSet(GroupingSetKind kind, List *content, int location);
 

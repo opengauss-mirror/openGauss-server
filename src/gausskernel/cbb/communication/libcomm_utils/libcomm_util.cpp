@@ -31,6 +31,8 @@
 #include "pgtime.h"
 #include "libpq/libpq-be.h"
 
+#define INVALID_FD (-1)
+
 extern long libpq_used_memory;
 extern long libcomm_used_memory;
 extern long comm_peak_used_memory;
@@ -373,9 +375,11 @@ void mc_elog(int elevel, const char* format, ...)
 #define TIMELEN 128
 #define MSGLEN 8192
 
-    if (g_instance.comm_cxt.commutil_cxt.ut_libcomm_test) {
+    if (g_instance.comm_cxt.commutil_cxt.ut_libcomm_test || 
+        elevel < u_sess->attr.attr_common.log_min_messages) {
         return;
     }
+
     char msg[MSGLEN] = {'0'};
     va_list args;
     va_start(args, format);
@@ -392,6 +396,12 @@ void mc_elog(int elevel, const char* format, ...)
 
     (void)gettimeofday(&tv, NULL);
     stamp_time = (pg_time_t)tv.tv_sec;
+
+    /* Session initialization status, which may be empty. */
+    log_timezone = log_timezone ? log_timezone : g_instance.comm_cxt.libcomm_log_timezone;
+    if (log_timezone == NULL) {
+        return;
+    }
     localtime = pg_localtime(&stamp_time, log_timezone);
     if (localtime != NULL) {
         (void)pg_strftime(timebuf,
@@ -495,3 +505,56 @@ void comm_ipc_log_get_time(char *now_date, int time_len)
     securec_check(ss_rc, "\0", "\0");
 }
 
+WakeupPipe::WakeupPipe()
+{
+    InitPipe(m_normal_wakeup_pipes);
+}
+
+void WakeupPipe::DoWakeup()
+{
+    int errno_tmp = errno;
+    if ((epoll_ctl(m_epfd, EPOLL_CTL_ADD, m_normal_wakeup_pipes[WAKEUP_PIPE_START], &m_ev)) && (errno != EEXIST)) {
+        mc_elog(ERROR, "Trace: Failed to add wakeup fd to internal epfd (errno=%d %m)", errno);
+    }
+    errno = errno_tmp;
+}
+
+void WakeupPipe::InitPipe(int *input_pipes)
+{
+    if (input_pipes == NULL) {
+        mc_elog(ERROR, "Trace: WakeupPipe::InitPipe failed. invalid args.");
+        return;
+    }
+    input_pipes[WAKEUP_PIPE_START] = INVALID_FD;
+    input_pipes[WAKEUP_PIPE_END] = INVALID_FD;
+
+    if (pipe(input_pipes)) {
+        mc_elog(ERROR, "Trace: wakeup pipe create failed (errno=%d %m)", errno);
+    }
+    if (write(input_pipes[1], "^", 1) != 1) {
+        mc_elog(ERROR, "Trace: wakeup pipe write failed(errno=%d %m)", errno);
+    }
+    mc_elog(LOG, "Trace: created wakeup epfd[%d], pipe [RD=%d, WR=%d]",
+        m_epfd, input_pipes[0], input_pipes[1]);
+
+    m_ev.events = EPOLLIN;
+    m_ev.data.fd = input_pipes[0];
+}
+
+void WakeupPipe::RemoveWakeupFd()
+{
+    (void)epoll_ctl(m_epfd, EPOLL_CTL_DEL, m_normal_wakeup_pipes[WAKEUP_PIPE_START], NULL);
+}
+
+void WakeupPipe::ClosePipe(int *input_pipes)
+{
+    close(input_pipes[WAKEUP_PIPE_START]);
+    close(input_pipes[WAKEUP_PIPE_END]);
+    input_pipes[WAKEUP_PIPE_START] = INVALID_FD;
+    input_pipes[WAKEUP_PIPE_END] = INVALID_FD;
+}
+
+WakeupPipe::~WakeupPipe()
+{
+    ClosePipe(m_normal_wakeup_pipes);
+}

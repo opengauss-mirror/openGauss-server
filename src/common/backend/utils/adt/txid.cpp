@@ -28,6 +28,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "libpq/pqformat.h"
+#include "storage/procarray.h"
 #include "storage/standby.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
@@ -253,6 +254,11 @@ bad_format:
 Datum txid_current(PG_FUNCTION_ARGS)
 {
     PG_RETURN_INT64(GetTopTransactionId());
+}
+
+Datum gs_txid_oldestxmin(PG_FUNCTION_ARGS)
+{
+    PG_RETURN_INT64(GetGlobalOldestXmin());
 }
 
 Datum pgxc_snapshot_status(PG_FUNCTION_ARGS)

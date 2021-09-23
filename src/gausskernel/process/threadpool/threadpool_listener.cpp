@@ -48,6 +48,8 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 
+#include "communication/commproxy_interface.h"
+
 #define INVALID_FD (-1)
 
 static void TpoolListenerLoop(ThreadPoolListener* listener);
@@ -114,7 +116,11 @@ ThreadPoolListener::ThreadPoolListener(ThreadPoolGroup* group)
 
 ThreadPoolListener::~ThreadPoolListener()
 {
-    close(m_epollFd);
+    if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+        CommEpollClose(m_epollFd);
+    } else {
+        comm_close(m_epollFd); /* CommProxy support */
+    }
     m_group = NULL;
     m_epollEvents = NULL;
     m_freeWorkerList = NULL;
@@ -136,7 +142,12 @@ void ThreadPoolListener::NotifyReady()
 void ThreadPoolListener::CreateEpoll()
 {
     /* MAX_LISTEN_SESSIONS for epool_create is ignored Since Linux 2.6.8 */
-    m_epollFd = epoll_create(GLOBAL_MAX_SESSION_NUM);
+    if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+        m_epollFd = CommEpollCreate(GLOBAL_MAX_SESSION_NUM);
+    } else {
+        CommSetEpollOption(CommEpollThreadPoolListener);
+        m_epollFd = comm_epoll_create(GLOBAL_MAX_SESSION_NUM);
+    }
 
     if (m_epollFd == INVALID_FD) {
         ereport(LOG,
@@ -157,12 +168,12 @@ void ThreadPoolListener::CreateEpoll()
 void ThreadPoolListener::AddEpoll(knl_session_context* session)
 {
     struct epoll_event ev = {0};
+    int res = -1;
 
     m_idleSessionList->AddTail(&session->elem);
-    ereport(DEBUG2, 
-        (errmodule(MOD_THREAD_POOL),
-            errmsg("Add a session to idleSessionList, now length is %lu, ",
-                m_idleSessionList->GetLength())));
+    ereport(DEBUG2,
+            (errmodule(MOD_THREAD_POOL),
+             errmsg("Add a session:%lu to idleSessionList ", session->session_id)));
     /*
      * Because we will dispatch the socket to worker thread once
      * we find an input event of the socket, so we use one_shot mode.
@@ -170,9 +181,31 @@ void ThreadPoolListener::AddEpoll(knl_session_context* session)
     ev.events = EPOLLRDHUP | EPOLLIN | EPOLLET | EPOLLONESHOT;
     ev.data.ptr = (void*)session;
     if (session->status != KNL_SESS_UNINIT) {
-        epoll_ctl(m_epollFd, EPOLL_CTL_MOD, session->proc_cxt.MyProcPort->sock, &ev);
+        /* CommProxy Support */
+        if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+            res = CommEpollCtl(m_epollFd, EPOLL_CTL_MOD, session->proc_cxt.MyProcPort->sock, &ev);
+        } else {
+            res = comm_epoll_ctl(m_epollFd, EPOLL_CTL_MOD, session->proc_cxt.MyProcPort->sock, &ev);
+        }
     } else {
-        epoll_ctl(m_epollFd, EPOLL_CTL_ADD, session->proc_cxt.MyProcPort->sock, &ev);
+        /* CommProxy Support */
+        if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+            res = CommEpollCtl(m_epollFd, EPOLL_CTL_ADD, session->proc_cxt.MyProcPort->sock, &ev);
+        } else {
+            res = comm_epoll_ctl(m_epollFd, EPOLL_CTL_ADD, session->proc_cxt.MyProcPort->sock, &ev);
+        }
+    }
+    if (unlikely(res != 0)) {
+#ifdef USE_ASSERT_CHECKING
+        ereport(PANIC,
+#else
+        ereport(WARNING,
+#endif
+                (errmodule(MOD_THREAD_POOL),
+                    errmsg("epoll_ctl fail %m, sess status:%d, sock:%d, host:%s, port:%s",
+                           session->status, session->proc_cxt.MyProcPort->sock,
+                           session->proc_cxt.MyProcPort->remote_host,
+                           session->proc_cxt.MyProcPort->remote_port)));
     }
 }
 
@@ -243,17 +276,22 @@ void ThreadPoolListener::ReaperAllSession()
         elem = m_idleSessionList->RemoveHead();
         while (elem != NULL) {
             sess = (knl_session_context*)DLE_VAL(elem);
-            epoll_ctl(m_epollFd, EPOLL_CTL_DEL, sess->proc_cxt.MyProcPort->sock, NULL);
+            ereport(DEBUG2,
+                (errmodule(MOD_THREAD_POOL),
+                    errmsg("ReaperAllSession remove a session:%lu from idleSessionList", sess->session_id)));
+            if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+                struct epoll_event ev = {0};
+                ev.events = EPOLLRDHUP | EPOLLIN | EPOLLET | EPOLLONESHOT;
+                ev.data.ptr = (void*)sess;
+                CommEpollCtl(m_epollFd, EPOLL_CTL_DEL, sess->proc_cxt.MyProcPort->sock, &ev);
+            } else {    /* CommProxy Support */
+                comm_epoll_ctl(m_epollFd, EPOLL_CTL_DEL, sess->proc_cxt.MyProcPort->sock, NULL);
+            }
             sess->status = KNL_SESS_CLOSE;
             DispatchSession(sess);
             elem = m_idleSessionList->RemoveHead();
         }
         pg_usleep(100);
-        if (elem == NULL && m_group->m_sessionCount > 0) {
-            ereport(DEBUG2, (errmodule(MOD_THREAD_POOL),
-                errmsg("IdleSessionList is NULL, but there are %d session in group, ",
-                    m_group->m_sessionCount)));
-        }
     }
     m_reaperAllSession = false;
 }
@@ -268,7 +306,11 @@ void ThreadPoolListener::WaitTask()
         }
 
         /* as we specify timeout -1, so 0 will not be return, either > 0 or < 0 */
-        nevents = epoll_wait(m_epollFd, m_epollEvents, GLOBAL_MAX_SESSION_NUM, -1);
+        if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+            nevents = CommEpollWait(m_epollFd, m_epollEvents, GLOBAL_MAX_SESSION_NUM, -1);
+        } else {
+            nevents = comm_epoll_wait(m_epollFd, m_epollEvents, GLOBAL_MAX_SESSION_NUM, -1); /* CommProxy Support */
+        }
         if (nevents > 0 && nevents <= GLOBAL_MAX_SESSION_NUM) {
             HandleConnEvent(nevents);
             continue;
@@ -321,16 +363,37 @@ knl_session_context* ThreadPoolListener::GetSessionBaseOnEvent(struct epoll_even
 void ThreadPoolListener::DispatchSession(knl_session_context* session)
 {
     m_idleSessionList->Remove(&session->elem);
+    /*
+     * If the sock, idx, and streamid parameters of the current session
+     * do not meet the requirements for logical connection parameters,
+     * skip this dispatch operation.
+     */
+    if (session->proc_cxt.MyProcPort->sock == NO_SOCKET &&
+        session->proc_cxt.MyProcPort->gs_sock.idx == 0 &&
+        session->proc_cxt.MyProcPort->gs_sock.sid == 0) {
+        ereport(WARNING, (errmsg("The DispatchSession is not executed, sock:%d idx:%d sid:%d.",
+            session->proc_cxt.MyProcPort->sock,
+            session->proc_cxt.MyProcPort->gs_sock.idx,
+            session->proc_cxt.MyProcPort->gs_sock.sid)));
+        return;
+    }
     while (true) {
         Dlelem* sc = m_freeWorkerList->RemoveHead();
         if (sc != NULL) {
+            ereport(DEBUG2,
+                    (errmodule(MOD_THREAD_POOL),
+                     errmsg("%s remove session:%lu from idleSessionList to worker", __func__, session->session_id)));
             if (((ThreadPoolWorker*)DLE_VAL(sc))->WakeUpToWork(session)) {
                 pg_atomic_fetch_add_u32((volatile uint32*)&m_group->m_processTaskCount, 1);
                 break;
            }
         } else {
+            ereport(DEBUG2,
+                    (errmodule(MOD_THREAD_POOL),
+                        errmsg("%s remove session:%lu from idleSessionList to readySessionList",
+                               __func__, session->session_id)));
             INSTR_TIME_SET_CURRENT(session->last_access_time);
-
+            
             /* Add new session to the head so the connection request can be quickly processed. */
             if (session->status == KNL_SESS_UNINIT) {
                 m_readySessionList->AddHead(&session->elem);
@@ -346,7 +409,18 @@ void ThreadPoolListener::DispatchSession(knl_session_context* session)
 
 void ThreadPoolListener::DelSessionFromEpoll(knl_session_context* session)
 {
-    epoll_ctl(m_epollFd, EPOLL_CTL_DEL, session->proc_cxt.MyProcPort->sock, NULL);
+    if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+        struct epoll_event ev = {0};
+        ev.events = EPOLLRDHUP | EPOLLIN | EPOLLET | EPOLLONESHOT;
+        ev.data.ptr = (void*)session;
+        CommEpollCtl(m_epollFd, EPOLL_CTL_DEL, session->proc_cxt.MyProcPort->sock, &ev);
+#ifdef ENABLE_MULTIPLE_NODES
+    } else {
+#else
+    } else if (session->proc_cxt.MyProcPort->sock > 0) {
+#endif
+        comm_epoll_ctl(m_epollFd, EPOLL_CTL_DEL, session->proc_cxt.MyProcPort->sock, NULL);
+    }
     (void)pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_sessionCount, 1);
 }
 
@@ -355,7 +429,7 @@ void ThreadPoolListener::RemoveWorkerFromList(ThreadPoolWorker* worker)
     m_freeWorkerList->Remove(&worker->m_elem);
 }
 
-bool ThreadPoolListener::GetSessIshang(instr_time* current_time,   uint64* sessionId)
+bool ThreadPoolListener::GetSessIshang(instr_time* current_time, uint64* sessionId)
 {
     bool ishang = true;
     m_readySessionList->GetLock();
@@ -377,3 +451,4 @@ bool ThreadPoolListener::GetSessIshang(instr_time* current_time,   uint64* sessi
     m_readySessionList->ReleaseLock();
     return ishang;
 }
+

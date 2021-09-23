@@ -1,0 +1,496 @@
+DROP SCHEMA test_insert_update_001 CASCADE;
+ERROR:  schema "test_insert_update_001" does not exist
+CREATE SCHEMA test_insert_update_001;
+SET CURRENT_SCHEMA TO test_insert_update_001;
+-- test description
+\h INSERT
+Command:     INSERT
+Description: create new rows in a table
+Syntax:
+[ WITH [ RECURSIVE ] with_query [, ...] ]
+INSERT [/*+ plan_hint */] INTO table_name [ ( column_name [, ...] ) ]
+    { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
+    [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] } ]
+    [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
+
+-- test permission
+--- test with no sequence column
+CREATE TABLE t00 (col1 INT DEFAULT 1 PRIMARY KEY, col2 INT);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t00_pkey" for table "t00"
+CREATE USER insert_update_tester PASSWORD '123456@cc';
+GRANT ALL PRIVILEGES ON SCHEMA test_insert_update_001 TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  permission denied for relation t00
+DETAIL:  N/A
+RESET SESSION AUTHORIZATION;
+---- error: only have INSERT permission
+GRANT INSERT ON test_insert_update_001.t00 TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  permission denied for relation t00
+DETAIL:  N/A
+RESET SESSION AUTHORIZATION;
+---- success: have INSERT UPDATE permission
+GRANT INSERT, UPDATE ON test_insert_update_001.t00 TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+RESET SESSION AUTHORIZATION;
+--- have SELECT INSERT UPDATE permission
+GRANT SELECT, INSERT, UPDATE ON test_insert_update_001.t00 TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO test_insert_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+ERROR:  column "col3" of relation "t00" does not exist
+LINE 1: ...t_update_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+                                                              ^
+RESET SESSION AUTHORIZATION;
+--- test with sequnce column
+CREATE TABLE t01 (col1 INT , col2 BIGSERIAL PRIMARY KEY, col3 INT) with(storage_type=ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "t01_col2_seq" for serial column "t01.col2"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t01_pkey" for table "t01"
+---- error: don't have UPDATE permission on sequence table.
+GRANT SELECT, INSERT, UPDATE ON test_insert_update_001.t01 TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+ERROR:  permission denied for sequence t01_col2_seq
+CONTEXT:  referenced column: col2
+RESET SESSION AUTHORIZATION;
+---- have SELECT INSERT UPDATE permission on target relation, and UPDATE permission on sequence table.
+GRANT UPDATE ON test_insert_update_001.t01_col2_seq TO insert_update_tester;
+SET SESSION SESSION AUTHORIZATION insert_update_tester PASSWORD '123456@cc';
+INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+INSERT INTO test_insert_update_001.t01 VALUES(1) ON DUPLICATE KEY UPDATE col3 = 5;
+RESET SESSION AUTHORIZATION;
+-- test ommit INSERT target column
+CREATE TABLE t02 (col1 INT DEFAULT 1 PRIMARY KEY, col2 INT, col3 INT) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t02_pkey" for table "t02"
+INSERT INTO t02 VALUES(1, 2, 3) ON DUPLICATE KEY UPDATE col2 = 20;
+SELECT * FROM t02 ORDER BY 1, 2;
+ col1 | col2 | col3 
+------+------+------
+    1 |    2 |    3
+(1 row)
+
+INSERT INTO t02 VALUES(1, 2, 3) ON DUPLICATE KEY UPDATE col2 = 20;
+SELECT * FROM t02 ORDER BY 1, 2;
+ col1 | col2 | col3 
+------+------+------
+    1 |   20 |    3
+(1 row)
+
+ALTER TABLE t02 DROP COLUMN col2;
+ALTER TABLE t02 ADD COLUMN col4 INT;
+INSERT INTO t02 VALUES(1, 2, 3) ON DUPLICATE KEY UPDATE col4 = 40;
+SELECT * FROM t02 ORDER BY 1, 2;
+ col1 | col3 | col4 
+------+------+------
+    1 |    3 |   40
+(1 row)
+
+INSERT INTO t02 VALUES(2, 3, 4) ON DUPLICATE KEY UPDATE col4 = 40;
+SELECT * FROM t02 ORDER BY 1, 2;
+ col1 | col3 | col4 
+------+------+------
+    1 |    3 |   40
+    2 |    3 |    4
+(2 rows)
+
+INSERT INTO t02 VALUES(2, 3, 4) ON DUPLICATE KEY UPDATE col4 = 40;
+SELECT * FROM t02 ORDER BY 1, 2;
+ col1 | col3 | col4 
+------+------+------
+    1 |    3 |   40
+    2 |    3 |   40
+(2 rows)
+
+-- test restriction
+--- test replication table
+CREATE TABLE t03 (col1 int PRIMARY KEY, col2 INT) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t03_pkey" for table "t03"
+--- error: not allowed volatile function as default value
+INSERT INTO t03(col2) VALUES(1) ON DUPLICATE KEY UPDATE col2 = 100;
+ERROR:  null value in column "col1" violates not-null constraint
+DETAIL:  Failing row contains (null, 1).
+--- error: primary key are not allowed to update
+INSERT INTO t03 VALUES(1) ON DUPLICATE KEY UPDATE col1 = 1;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+--- error: clause other than VALUSES are not allowed to use
+INSERT INTO t03 SELECT * FROM t03 ON DUPLICATE KEY UPDATE col2 = 1;
+--- error: expression index are not supported
+CREATE UNIQUE INDEX u_expr_index ON t03 USING ubtree (abs(col1));
+INSERT INTO t03 VALUES(-10, 10) ON DUPLICATE KEY UPDATE col2 = 20;
+DROP INDEX u_expr_index;
+-- test with stream operator on
+INSERT INTO t03 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 100;
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |     
+(2 rows)
+
+INSERT INTO t03 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 100;
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |  100
+(2 rows)
+
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |  100
+(2 rows)
+
+--- test PBE
+PREPARE p1 AS INSERT INTO t03 VALUES($1, $2) ON DUPLICATE KEY UPDATE col2 = $1*100;
+EXECUTE p1(5, 50);
+SELECT * FROM t03 WHERE col1 = 5;
+ col1 | col2 
+------+------
+    5 |   50
+(1 row)
+
+EXECUTE p1(5, 50);
+SELECT * FROM t03 WHERE col1 = 5;
+ col1 | col2 
+------+------
+    5 |  500
+(1 row)
+
+DELETE t03 WHERE col1 = 5;
+---- test with primary key
+INSERT INTO t03 VALUES(2) ON DUPLICATE KEY UPDATE col2 = 200;
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |  100
+    2 |     
+(3 rows)
+
+INSERT INTO t03 VALUES(2) ON DUPLICATE KEY UPDATE col2 = 200;
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |  100
+    2 |  200
+(3 rows)
+
+SELECT * FROM t03;
+ col1 | col2 
+------+------
+  -10 |   10
+    1 |  100
+    2 |  200
+(3 rows)
+
+---- test with unique key without NOT NULL constraint 
+---- the result is change compare with heap_table
+drop table t03;
+create table t03(col1 int PRIMARY KEY, col2 INT, col3 int) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t03_pkey" for table "t03"
+CREATE UNIQUE INDEX ON t03 (col1, col3);
+---- unique constraints might contain NULL, depends on the plan
+----- for cn light and fqs, it can be done
+INSERT INTO t03 VALUES(3) ON DUPLICATE KEY UPDATE col2 = 300;
+----- for stream or pgxc it can not be done
+INSERT INTO t03 VALUES(3) ON DUPLICATE KEY UPDATE col2 = 300;
+---- test with unique key with NOT NULL constraint, should success
+CREATE UNIQUE INDEX ON t03 (col1);
+INSERT INTO t03 VALUES(3) ON DUPLICATE KEY UPDATE col2 = 300;
+----- only col1 has result:3
+SELECT * FROM t03; 
+ col1 | col2 | col3 
+------+------+------
+    3 |  300 |     
+(1 row)
+
+INSERT INTO t03 VALUES(3) ON DUPLICATE KEY UPDATE col2 = 300;
+SELECT * FROM t03;
+ col1 | col2 | col3 
+------+------+------
+    3 |  300 |     
+(1 row)
+
+SELECT * FROM t03;
+ col1 | col2 | col3 
+------+------+------
+    3 |  300 |     
+(1 row)
+
+---- test PBE
+PREPARE p2 AS INSERT INTO t03 VALUES($1, $2) ON DUPLICATE KEY UPDATE col2 = $1*100;
+EXECUTE p2(5, 50);
+SELECT * FROM t03 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |   50 |     
+(1 row)
+
+EXECUTE p2(5, 50);
+SELECT * FROM t03 WHERE col1 = 5;
+ col1 | col2 | col3 
+------+------+------
+    5 |  500 |     
+(1 row)
+
+--- error: test with clause
+WITH tmp(col1, col2) AS (SELECT * FROM t01)
+INSERT INTO t01 SELECT * FROM tmp ON DUPLICATE KEY UPDATE col1 = 1;
+ERROR:  WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
+WITH RECURSIVE rq AS
+    (
+    SELECT col1, col2 FROM t00 WHERE col1 = 1
+    UNION ALL
+    SELECT origin.col1, rq.col2
+    FROM rq JOIN t00 AS origin ON origin.col1 = rq.col1
+    )
+    INSERT INTO t03 SELECT * FROM rq ON DUPLICATE KEY UPDATE col1 = rq.col1;
+ERROR:  WITH clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
+--- error: test returning clause
+INSERT INTO t01 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 1 RETURNING NOT(1::bool);
+ERROR:  RETURNING clause is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.
+--- error: distribute key are not allowed to UPDATE
+CREATE TABLE t04 (col1 INT, col2 INT) with(storage_type=ustore);
+INSERT INTO t04 VALUES (1) ON DUPLICATE KEY UPDATE col1 = 5;
+--- error: unique index referenced column are not allowed to UPDATE
+CREATE UNIQUE INDEX t04_u_index ON t04(col1, col2);
+INSERT INTO t04 VALUES (1) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+DROP INDEX t04_u_index;
+--- error: primary key referenced column are not allowed to UPDATE
+ALTER TABLE t04 ADD PRIMARY KEY (col1, col2);
+ERROR:  column "col2" contains null values
+INSERT INTO t04 VALUES (1) ON DUPLICATE KEY UPDATE col2 = 5;
+--- error: invalid column
+INSERT INTO t04 (col2, col3) VALUES (2, 3) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  column "col3" of relation "t04" does not exist
+LINE 1: INSERT INTO t04 (col2, col3) VALUES (2, 3) ON DUPLICATE KEY ...
+                               ^
+--- error: duplicate column
+INSERT INTO t04 (col2, col2) VALUES (2, 3) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  column "col2" specified more than once
+LINE 1: INSERT INTO t04 (col2, col2) VALUES (2, 3) ON DUPLICATE KEY ...
+                               ^
+-- error: target column more than insert target
+INSERT INTO t04 (col1, col2) VALUES (2, 3, 4) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO t04 (col1, col2) VALUES (2, 3, 4) ON DUPLICATE K...
+                                                   ^
+INSERT INTO t04 (col1, col2) VALUES (1) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more target columns than expressions
+LINE 1: INSERT INTO t04 (col1, col2) VALUES (1) ON DUPLICATE KEY UPD...
+                               ^
+INSERT INTO t04 (col1, col2) SELECT col1 FROM t04 ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more target columns than expressions
+LINE 1: INSERT INTO t04 (col1, col2) SELECT col1 FROM t04 ON DUPLICA...
+                               ^
+INSERT INTO t04 (col1, col2) SELECT *, col1 FROM t04 ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO t04 (col1, col2) SELECT *, col1 FROM t04 ON DUPL...
+                                               ^
+INSERT INTO t04 VALUES (2, 3, 4) ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO t04 VALUES (2, 3, 4) ON DUPLICATE KEY UPDATE col...
+                                      ^
+INSERT INTO t04 VALUES (1) ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO t04 SELECT col1 FROM t04 ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO t04 SELECT *, col1 FROM t04 ON DUPLICATE KEY UPDATE col2 = 5;
+ERROR:  INSERT has more expressions than target columns
+LINE 1: INSERT INTO t04 SELECT *, col1 FROM t04 ON DUPLICATE KEY UPD...
+                                  ^
+-- test DEFAULT VALUES
+truncate t00;
+truncate t01;
+--- without sequence
+----should insert
+INSERT INTO t00 DEFAULT VALUES ON DUPLICATE KEY UPDATE col2 = col1;
+SELECT * FROM t00 ORDER BY 1, 2;
+ col1 | col2 
+------+------
+    1 |     
+(1 row)
+
+---- should update
+INSERT INTO t00 DEFAULT VALUES ON DUPLICATE KEY UPDATE col2 = col1;
+SELECT * FROM t00 ORDER BY 1, 2;
+ col1 | col2 
+------+------
+    1 |    1
+(1 row)
+
+--- test drop column
+drop table t00;
+create table t00(col1 int default 1 primary key, col3 int default 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t00_pkey" for table "t00"
+----should insert
+INSERT INTO t00 DEFAULT VALUES ON DUPLICATE KEY UPDATE col3 = col1;
+SELECT * FROM t00 ORDER BY 1, 2;
+ col1 | col3 
+------+------
+    1 |  100
+(1 row)
+
+---- should update
+INSERT INTO t00 DEFAULT VALUES ON DUPLICATE KEY UPDATE col3 = col1;
+SELECT * FROM t00 ORDER BY 1, 2;
+ col1 | col3 
+------+------
+    1 |    1
+(1 row)
+
+--- with sequence
+----should insert
+INSERT INTO t01 DEFAULT VALUES ON DUPLICATE KEY UPDATE col1 = col2;
+INSERT INTO t01 (col2) SELECT col2 + 1 FROM t01 LIMIT 1;
+SELECT * FROM t01 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+      |    3 |     
+      |    4 |     
+(2 rows)
+
+---- should update
+INSERT INTO t01 DEFAULT VALUES ON DUPLICATE KEY UPDATE col1 = col2;
+SELECT * FROM t01 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    4 |    4 |     
+      |    3 |     
+(2 rows)
+
+-- test VALUES(DEFAULT)
+CREATE TABLE t05 (col1 INT , col2 INT DEFAULT 1 PRIMARY KEY, col3 INT DEFAULT 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t05_pkey" for table "t05"
+--- should insert
+INSERT INTO t05 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE col3 = 1000;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+      |    1 |  100
+(1 row)
+
+--- should update
+INSERT INTO t05 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE col3 = 1000;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+      |    1 | 1000
+(1 row)
+
+-- test UPDATE DEFAULT
+INSERT INTO t05 (col1, col2, col3) VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col3 = DEFAULT;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    2 |    2 |    2
+      |    1 | 1000
+(2 rows)
+
+INSERT INTO t05 (col1, col2, col3) VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col3 = DEFAULT;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+    2 |    2 |  100
+      |    1 | 1000
+(2 rows)
+
+-- test VALUES (DEFAULT, ...)
+TRUNCATE t05;
+--- should insert
+INSERT INTO t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+      |    1 |  200
+      |  200 |  100
+(2 rows)
+
+--- should update
+INSERT INTO t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+  100 |  200 |  100
+  200 |    1 |  100
+(2 rows)
+
+--- test drop coulmn
+BEGIN;
+ALTER TABLE t05 ADD COLUMN col4 INT;
+ALTER TABLE t05 ADD COLUMN col5 INT DEFAULT 500;
+ALTER TABLE t05 DROP COLUMN col3;
+TRUNCATE t05;
+INSERT INTO t05 VALUES(DEFAULT, DEFAULT, DEFAULT, 600) ON DUPLICATE KEY UPDATE col5 = DEFAULT;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col4 | col5 
+------+------+------+------
+      |    1 |      |  600
+(1 row)
+
+INSERT INTO t05 VALUES(DEFAULT, DEFAULT, DEFAULT, 600) ON DUPLICATE KEY UPDATE col5 = DEFAULT;
+SELECT * FROM t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col4 | col5 
+------+------+------+------
+      |    1 |      |  500
+(1 row)
+
+ROLLBACK;
+-- test schema
+SET current_schema = public;
+TRUNCATE test_insert_update_001.t05;
+--- should insert
+INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
+SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+      |    1 |  200
+      |  200 |  100
+(2 rows)
+
+--- should update
+INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE col3 = DEFAULT, col1 = col3;
+SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+  100 |  200 |  100
+  200 |    1 |  100
+(2 rows)
+
+--- test using schema on update
+INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE t05.col3 = DEFAULT, t05.col1 = t05.col3 + 1;
+SELECT * FROM test_insert_update_001.t05 ORDER BY 1, 2, 3;
+ col1 | col2 | col3 
+------+------+------
+  101 |    1 |  100
+  101 |  200 |  100
+(2 rows)
+
+--- error: should not append schema
+INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE test_insert_update_001.t05.col3 = DEFAULT, t05.col1 = t05.col3 + 1;
+ERROR:  column "test_insert_update_001.t05" of relation "t05" does not exist
+LINE 2: ON DUPLICATE KEY UPDATE test_insert_update_001.t05.col3 = DE...
+                                ^
+INSERT INTO test_insert_update_001.t05 VALUES(DEFAULT, DEFAULT, 200), (DEFAULT, 200, DEFAULT)
+ON DUPLICATE KEY UPDATE t05.col3 = DEFAULT, t05.col1 = test_insert_update_001.t05.col3 + 1;
+SET CURRENT_SCHEMA TO test_insert_update_001;
+DROP USER insert_update_tester CASCADE;
+DROP SCHEMA test_insert_update_001 CASCADE;
+NOTICE:  drop cascades to 6 other objects
+DETAIL:  drop cascades to table t01
+drop cascades to table t02
+drop cascades to table t03
+drop cascades to table t04
+drop cascades to table t00
+drop cascades to table t05

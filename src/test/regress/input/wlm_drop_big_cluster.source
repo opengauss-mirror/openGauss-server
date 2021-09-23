@@ -10,7 +10,7 @@ schemaname  text;
 tablename text;
 relkind  CHAR;
 BEGIN
-sql_stmt := 'select rolname from  pg_authid where rolsuper != ''t'' and rolsystemadmin !=''t'' ';
+sql_stmt := 'select rolname from pg_authid where rolsuper != ''t'' and rolsystemadmin !=''t'' and rolname !~ ''^gs_role_'' ';
 OPEN my_cursor FOR EXECUTE sql_stmt;
 FETCH FROM my_cursor INTO username;
 WHILE my_cursor % FOUND LOOP
@@ -38,7 +38,7 @@ sql_stmt VARCHAR2(500);
 my_cursor REFCURSOR;
 username text;
 BEGIN
-sql_stmt := 'select rolname from  pg_authid  where rolsuper != ''t'' and rolsystemadmin !=''t''  ';
+sql_stmt := 'select rolname from pg_authid where rolsuper != ''t'' and rolsystemadmin !=''t'' and rolname !~ ''^gs_role_'' ';
 OPEN my_cursor FOR EXECUTE sql_stmt;
 FETCH FROM my_cursor INTO username;
 WHILE my_cursor % FOUND LOOP

@@ -21,10 +21,17 @@ REFDOCDIR= $(top_srcdir)/doc/src/sgml/ref
 MAKESGMLDIR = $(top_builddir)/src/common/pgxc/tools/makesgml
 SGMLDIR= $(top_builddir)/doc/src/sgml
 
-override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE $(CPPFLAGS)
+###################################################################
+# libedit component
+###################################################################
+LIBEDIT_HOME = $(with_3rd)/$(BINARYPATH)/libedit/$(LIB_SUPPORT_LLT)
+LIBEDIT_INCLUDE_PATH = $(LIBEDIT_HOME)/include
+LIBEDIT_LIB_PATH = $(LIBEDIT_HOME)/lib
+
+override CPPFLAGS := -I. -I$(srcdir) -I$(libpq_srcdir) -I$(top_srcdir)/src/bin/pg_dump -DHAVE_CE -I$(LIBEDIT_INCLUDE_PATH) $(CPPFLAGS)
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o:
@@ -32,8 +39,9 @@ $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processo
 
 describe.o:  $(top_builddir)/src/common/interfaces/libpq/client_logic_processor/stmt_processor.o
 
-CFLAGS += -Wl,-z,relro,-z,now
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss
+CFLAGS += -Wl,-z,relro,-z,now -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH)
+LDFLAGS += -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -L$(LIBEDIT_LIB_PATH)
+LIBS += -ledit -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lcjson -lcurl
 
 ##############################################################################
 # memory checking component
@@ -72,7 +80,7 @@ all: submake-aes gsql
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
 
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 $(top_builddir)/src/lib/elog/elog.a:
@@ -85,7 +93,7 @@ help.o: sql_help.h
 
 sqla: $(OBJS) 
 	$(CC) -fPIC -shared $(CFLAGS) $(OBJS) $(EXTRA_OBJS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -lncurses -o lib$@.so
-	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
 	
 dumputils.cpp keywords.cpp: % : $(top_srcdir)/src/bin/pg_dump/%
 	rm -f $@ && $(LN_S) $< .
@@ -120,7 +128,7 @@ install: all installdirs
 	$(INSTALL_DATA) $(srcdir)/psqlrc.sample '$(DESTDIR)$(datadir)/psqlrc.sample'
 	$(INSTALL_DATA) retry_errcodes.conf '$(DESTDIR)$(bindir)/retry_errcodes.conf'
 	 $(MAKE) -C $(libpq_builddir) install ENABLE_CE=1
-
+	$(INSTALL_DATA) $(top_builddir)/src/common/interfaces/libpq/jdbc/client_logic_jni/libgauss_cl_jni.so$(X) '$(DESTDIR)$(bindir)/../lib/libgauss_cl_jni.so$(X)'
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(bindir)' '$(DESTDIR)$(datadir)'
 

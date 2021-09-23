@@ -18,7 +18,6 @@
 #include "lib/stringinfo.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
-#include "parser/parsetree.h"
 #include "storage/buf/block.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
@@ -26,10 +25,36 @@
 #include "optimizer/bucketinfo.h"
 
 /*
+ * Determines if query has to be launched
+ * on Coordinators only (SEQUENCE DDL),
+ * on Datanodes (normal Remote Queries),
+ * or on all openGauss nodes (Utilities and DDL).
+ */
+typedef enum
+{
+    EXEC_ON_DATANODES,
+    EXEC_ON_COORDS,
+    EXEC_ON_ALL_NODES,
+    EXEC_ON_NONE
+} RemoteQueryExecType;
+
+#define EXEC_CONTAIN_COORDINATOR(exec_type) \
+    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_COORDS)
+
+#define EXEC_CONTAIN_DATANODE(exec_type) \
+    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_DATANODES)
+
+/*
  * When looking for a "cheapest path", this enum specifies whether we want
  * cheapest startup cost or cheapest total cost.
  */
 typedef enum CostSelector { STARTUP_COST, TOTAL_COST } CostSelector;
+
+/* Different rules are used for path generation */
+typedef enum {
+    NO_PATH_GEN_RULE = 0,
+    BTREE_INDEX_CONTAIN_UNIQUE_COLS = 1 /* an equivalence constraint btree index scan contains unique cols */
+} RulesForPathGen;
 
 /*
  * The cost estimate produced by cost_qual_eval() includes both a one-time
@@ -82,6 +107,8 @@ typedef struct {
 typedef struct PlannerContext {
     MemoryContext plannerMemContext;
     MemoryContext dataSkewMemContext;
+    MemoryContext tempMemCxt;
+    int refCounter; /* tempMemCxt invoked Times */
 } PlannerContext;
 
 /*
@@ -195,6 +222,9 @@ typedef struct PlannerGlobal {
 #define SUBQUERY_IS_SUBLINK(pr) (((pr->subquery_type & SUBQUERY_SUBLINK) == SUBQUERY_SUBLINK))
 
 #define SUBQUERY_PREDPUSH(pr) ((SUBQUERY_IS_RESULT(pr)) || (SUBQUERY_IS_PARAM(pr)))
+
+#define WITHIN_SUBQUERY(root, rte) (IS_STREAM_PLAN && root->is_correlated && \
+            (GetLocatorType(rte->relid) != LOCATOR_TYPE_REPLICATED || ng_is_multiple_nodegroup_scenario()))
 
 /* ----------
  * PlannerInfo
@@ -340,7 +370,7 @@ typedef struct PlannerInfo {
     int rs_alias_index; /* used to build the alias reference */
 
     /*
-     * In Postgres-XC Coordinators are supposed to skip the handling of
+     * In openGauss Coordinators are supposed to skip the handling of
      * row marks of type ROW_MARK_EXCLUSIVE & ROW_MARK_SHARE.
      * In order to do that we simply remove such type
      * of row marks from the list rowMarks. Instead they are saved
@@ -578,6 +608,7 @@ typedef struct RelOptInfo {
     List* distribute_keys; /* distribute key */
     List* pathlist;        /* Path structures */
     List* ppilist;         /* ParamPathInfos used in pathlist */
+    struct Path* cheapest_gather_path;
     struct Path* cheapest_startup_path;
     List* cheapest_total_path; /* contain all cheapest total paths from different distribute key */
     struct Path* cheapest_unique_path;
@@ -635,6 +666,8 @@ typedef struct RelOptInfo {
     ItstDisKey rel_dis_keys;         /* interesting key info for current relation */
     List* varratio;                  /* rel tuples ratio after join to different relation */
     List* varEqRatio;
+
+    bool is_ustore;
 
     /*
      * The alternative rel for cost-based query rewrite
@@ -713,6 +746,7 @@ typedef struct IndexOptInfo {
     List* indextlist; /* targetlist representing index columns */
 
     bool isGlobal;       /* true if index is global partition index */
+    bool crossbucket;    /* true if index is crossbucket */
     bool predOK;         /* true if predicate matches query */
     bool unique;         /* true if a unique index */
     bool immediate;      /* is uniqueness enforced immediately? */
@@ -920,6 +954,7 @@ typedef struct Path {
     List* pathkeys;        /* sort ordering of path's output */
     List* distribute_keys; /* distribute key, Var list */
     char locator_type;
+    RemoteQueryExecType exec_type;
     Oid rangelistOid;
     int dop; /* degree of parallelism */
     /* pathkeys is a List of PathKey nodes; see above */
@@ -970,6 +1005,10 @@ typedef struct Path {
  * of the same length as 'indexorderbys', showing which index column each
  * ORDER BY expression is meant to be used with.  (There is no restriction
  * on which index column each ORDER BY can be used with.)
+ * 
+ * 'rulesforindexgen' is a bitmapset. It is used for recording some rules which 
+ * are satisfied in current index path. These recorded rules will be used for 
+ * filtering paths. We can consider it as the supplement of CBO (cost based optimize).
  *
  * 'indexscandir' is one of:
  *		ForwardScanDirection: forward scan of an ordered index
@@ -993,9 +1032,11 @@ typedef struct IndexPath {
     List* indexqualcols;
     List* indexorderbys;
     List* indexorderbycols;
+    int rulesforindexgen = NO_PATH_GEN_RULE;
     ScanDirection indexscandir;
     Cost indextotalcost;
     Selectivity indexselectivity;
+    bool is_ustore;
 } IndexPath;
 
 typedef struct PartIteratorPath {
@@ -1043,6 +1084,7 @@ typedef struct BitmapAndPath {
     Path path;
     List* bitmapquals; /* IndexPaths and BitmapOrPaths */
     Selectivity bitmapselectivity;
+    bool is_ustore;
 } BitmapAndPath;
 
 /*
@@ -1055,6 +1097,7 @@ typedef struct BitmapOrPath {
     Path path;
     List* bitmapquals; /* IndexPaths and BitmapAndPaths */
     Selectivity bitmapselectivity;
+    bool is_ustore;
 } BitmapOrPath;
 
 /*

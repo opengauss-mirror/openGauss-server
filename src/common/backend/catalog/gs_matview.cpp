@@ -519,6 +519,33 @@ Query *get_matview_query(Relation matviewRel)
 }
 
 /*
+ * Check if matview query contains quals
+ */
+bool CheckMatviewQuals(Query *query)
+{
+    ListCell *lc = NULL;
+
+    if (query->setOperations == NULL) {
+        if (query->jointree->quals != NULL) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    foreach (lc, query->rtable) {
+        RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+        Query *subquery = rte->subquery;
+
+        if (subquery != NULL && subquery->jointree->quals != NULL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
  * Check if the matview has privilege to refresh, for advanced and basic privilege
  */
 void CheckRefreshMatview(Relation matviewRel, bool isIncremental)

@@ -72,8 +72,6 @@ typedef enum knl_thread_role {
     AUDITOR,
     PGSTAT,
     SYSLOGGER,
-    RPC_WORKER,
-    RPC_SERVICE,
     CATCHUP,
     ARCH,
     ALARMCHECK,
@@ -83,7 +81,12 @@ typedef enum knl_thread_role {
     STARTUP,
     FAULTMONITOR,
     BGWRITER,
+    SPBGWRITER,
     PERCENTILE_WORKER,
+    TXNSNAP_CAPTURER,
+    TXNSNAP_WORKER,
+    RBCLEANER,
+    RBWORKER,
     SNAPSHOT_WORKER,
     ASH_WORKER,
     TRACK_STMT_WORKER,
@@ -103,8 +106,15 @@ typedef enum knl_thread_role {
     COMM_RECEIVER,
     COMM_AUXILIARY,
     COMM_POOLER_CLEAN,
+
+    UNDO_RECYCLER,
+    UNDO_LAUNCHER,
+    UNDO_WORKER,
     CSNMIN_SYNC,
+    GLOBALSTATS_THREAD,
     BARRIER_CREATOR,
+    BGWORKER,
+    BARRIER_ARCH,
     TS_COMPACTION,
     TS_COMPACTION_CONSUMER,
     TS_COMPACTION_AUXILIAY,
@@ -114,6 +124,8 @@ typedef enum knl_thread_role {
     STREAMING_COLLECTOR_BACKEND,
     STREAMING_QUEUE_BACKEND,
     STREAMING_REAPER_BACKEND,
+
+    COMM_PROXYER,
     /* should be last valid thread. */
     THREAD_ENTRY_BOUND,
 
@@ -123,6 +135,7 @@ typedef enum knl_thread_role {
     WAL_STANDBY_SENDER, /* Am I cascading WAL to another standby ? */
     WAL_DB_SENDER,
     TOP_CONSUMER,
+    DCF_WORKER
 } knl_thread_role;
 
 /*

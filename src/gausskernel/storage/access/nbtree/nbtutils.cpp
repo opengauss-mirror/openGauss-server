@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtutils.cpp
- *	  Utility code for Postgres btree implementation.
+ *	  Utility code for openGauss btree implementation.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -38,8 +38,6 @@ static int _bt_compare_array_elements(const void *a, const void *b, void *arg);
 static bool _bt_compare_scankey_args(IndexScanDesc scan, ScanKey op, ScanKey leftarg, ScanKey rightarg, bool *result);
 static bool _bt_fix_scankey_strategy(ScanKey skey, const int16 *indoption);
 static void _bt_mark_scankey_required(ScanKey skey);
-static bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc, ScanDirection dir,
-                                 bool *continuescan);
 
 /*
  * _bt_mkscankey
@@ -1401,7 +1399,7 @@ IndexTuple _bt_checkkeys(IndexScanDesc scan, Page page, OffsetNumber offnum, Sca
  *
  * This is a subroutine for _bt_checkkeys, which see for more info.
  */
-static bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc, ScanDirection dir,
+bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc, ScanDirection dir,
                                  bool *continuescan)
 {
     ScanKey subkey = (ScanKey)DatumGetPointer(skey->sk_argument);
@@ -1568,8 +1566,6 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
     OffsetNumber maxoff;
     int i;
     bool killedsomething = false;
-    AttrNumber partitionOidAttr;
-    TupleDesc tupdesc;
     Oid heapOid = IndexScanGetPartHeapOid(scan);
 
     Assert(BufferIsValid(so->currPos.buf));
@@ -1582,14 +1578,13 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     minoff = P_FIRSTDATAKEY(opaque);
     maxoff = PageGetMaxOffsetNumber(page);
-    tupdesc = RelationGetDescr(scan->indexRelation);
-    partitionOidAttr = IndexRelationGetNumberOfAttributes(scan->indexRelation);
 
     for (i = 0; i < so->numKilled; i++) {
         int itemIndex = so->killedItems[i];
         BTScanPosItem *kitem = &so->currPos.items[itemIndex];
         OffsetNumber offnum = kitem->indexOffset;
         Oid partOid = kitem->partitionOid;
+        int2 bucketid = kitem->bucketid;
 
         Assert(itemIndex >= so->currPos.firstItem && itemIndex <= so->currPos.lastItem);
         if (offnum < minoff) {
@@ -1598,12 +1593,9 @@ void _bt_killitems(IndexScanDesc scan, bool haveLock)
         while (offnum <= maxoff) {
             ItemId iid = PageGetItemId(page, offnum);
             IndexTuple ituple = (IndexTuple)PageGetItem(page, iid);
-            bool isNull = false;
-            Oid currPartOid = scan->xs_want_ext_oid
-                                  ? DatumGetUInt32(index_getattr(ituple, partitionOidAttr, tupdesc, &isNull))
-                                  : heapOid;
-            Assert(!isNull);
-            if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid) && currPartOid == partOid) {
+            Oid currPartOid = scan->xs_want_ext_oid ? index_getattr_tableoid(scan->indexRelation, ituple) : heapOid;
+            int2 currbktid = scan->xs_want_bucketid ? index_getattr_bucketid(scan->indexRelation, ituple) : bucketid;
+            if (ItemPointerEquals(&ituple->t_tid, &kitem->heapTid) && currPartOid == partOid && currbktid == bucketid) {
                 /* found the item */
                 ItemIdMarkDead(iid);
                 killedsomething = true;

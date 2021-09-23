@@ -1066,7 +1066,7 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amproclefttype = p3.amproclefttype AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
-      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin') THEN p1.amsupport - 1
+      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin', 'ubtree') THEN p1.amsupport - 1
             ELSE p1.amsupport END)
       AND p1.amsupport
 ORDER by 1, 2, 3;
@@ -1079,7 +1079,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin'
+WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL
 ORDER by 1, 2, 3;
@@ -1088,7 +1088,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin'
+WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin' OR am.amname = 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING (count(*) != amsupport AND count(*) != amsupport - 1)
     OR amprocfamily IS NULL

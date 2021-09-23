@@ -39,6 +39,7 @@
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
 #include "utils/snapmgr.h"
+#include "utils/lsyscache.h"
 
 void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, Oid new_part_id, int2vector* pkey,
     const oidvector* tablespaces, Datum interval, Datum maxValues, Datum transitionPoint, Datum reloptions,
@@ -562,45 +563,37 @@ Oid searchPartitionIndexOid(Oid partitionedIndexid, List* pindex)
 template <bool onlyOid>
 static Oid getPartitionIndexFormData(Oid indexid, Oid partitionid, Form_pg_partition outFormData)
 {
-    Relation pg_partition = NULL;
-    ScanKeyData key[1];
-    SysScanDesc scan = NULL;
     HeapTuple tuple = NULL;
-    Form_pg_partition partitionForm = NULL;
     Oid result = InvalidOid;
-    bool found = false;
+    CatCList* catlist = NULL;
+    Form_pg_partition partitionForm = NULL;
+    int elevel = ERROR;
 
-    pg_partition = heap_open(PartitionRelationId, AccessShareLock);
-
-    ScanKeyInit(&key[0], Anum_pg_partition_indextblid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(partitionid));
-
-    scan = systable_beginscan(pg_partition, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, key);
-    while (HeapTupleIsValid((tuple = systable_getnext(scan)))) {
-        /* If enter while loop means partition has at least one index */
-        partitionForm = (Form_pg_partition)GETSTRUCT(tuple);
-        if (partitionForm->parentid == indexid) {
-            /* means has the wanted index of this partition */
-            result = HeapTupleGetOid(tuple);
-            if (!onlyOid) {
-                errno_t rc = memcpy_s(outFormData, PARTITION_TUPLE_SIZE, partitionForm, PARTITION_TUPLE_SIZE);
-                securec_check(rc, "", "");
-            }
-            found = true;
-            break;
-        }
-    }
-    systable_endscan(scan);
-    heap_close(pg_partition, AccessShareLock);
+    catlist = SearchSysCacheList2(PARTINDEXTBLPARENTOID, ObjectIdGetDatum(partitionid), ObjectIdGetDatum(indexid));
 
     /*If drop index occur before this function and after pg_get_indexdef_partitions, the index has been deleted now. */
     /*Ext. If drop patition occur, the partition might be deleted. Drop partition just use RowExclusiveLock for parellel
      * performance.*/
-    if (!found) {
-        ereport(ERROR,
+    if (catlist->n_members == 0 ){
+        ReleaseSysCacheList(catlist);
+        Oid redis_ns = get_namespace_oid("data_redis", true);
+        if (OidIsValid(redis_ns) && redis_ns == get_rel_namespace(indexid)) {
+            elevel = WARNING;
+        }
+        ereport(elevel,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("The local index %u on the partition %u not exist.", indexid, partitionid)));
+                errmsg("The local index %u on the partition %u not exist.", indexid, partitionid),
+                errhint("In redistribution, local parititon index maybe not exists.")));
+        return InvalidOid;
     }
-
+    tuple = &catlist->members[0]->tuple;
+    partitionForm = (Form_pg_partition)GETSTRUCT(tuple);
+    result = HeapTupleGetOid(tuple);
+    if (!onlyOid) {
+        errno_t rc = memcpy_s(outFormData, PARTITION_TUPLE_SIZE, partitionForm, PARTITION_TUPLE_SIZE);
+        securec_check(rc, "", "");
+    }
+    ReleaseSysCacheList(catlist);
     return result;
 }
 
@@ -761,7 +754,18 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
     ScanKeyInit(&key[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(parttype));
     ScanKeyInit(&key[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(parentId));
 
-    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, NULL, 2, key);
+    /*
+     * The caller might need a tuple that's newer than the one the historic
+     * snapshot; currently the only case requiring to do so is looking up the
+     * relfilenode of non mapped system relations during decoding.
+     */
+    Snapshot snapshot = NULL;
+    snapshot = SnapshotNow;
+    if (HistoricSnapshotActive()) {
+        snapshot = GetCatalogSnapshot();
+    }
+
+    scan = systable_beginscan(pg_partition, PartitionParentOidIndexId, true, snapshot, 2, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         dtuple = heap_copytuple(tuple);
 

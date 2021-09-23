@@ -299,7 +299,11 @@ pg_encname* pg_char_to_encname_struct(const char* name)
         fprintf(stderr, "encoding name too long\n");
         return NULL;
 #else
+#ifndef ENABLE_UT
         ereport(ERROR, (errcode(ERRCODE_NAME_TOO_LONG), errmsg("encoding name too long")));
+#else
+	return NULL;
+#endif
 #endif
     }
     key = clean_encoding_name(name, buff);

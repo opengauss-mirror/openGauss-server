@@ -222,7 +222,7 @@ int main(int argc, char* argv[])
 
 static void help(const char* progname)
 {
-    printf(_("%s creates a PostgreSQL database.\n\n"), progname);
+    printf(_("%s creates a openGauss database.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DBNAME] [DESCRIPTION]\n"), progname);
     printf(_("\nOptions:\n"));

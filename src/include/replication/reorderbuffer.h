@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * reorderbuffer.h
- *        PostgreSQL logical replay/reorder buffer management.
+ *        openGauss logical replay/reorder buffer management.
  * 
  * Copyright (c) 2012-2014, PostgreSQL Global Development Group
  * 
@@ -37,6 +37,19 @@ typedef struct ReorderBufferTupleBuf {
 /* pointer to the data stored in a TupleBuf */
 #define ReorderBufferTupleBufData(p) ((HeapTupleHeader)MAXALIGN(((char*)p) + sizeof(ReorderBufferTupleBuf)))
 
+typedef struct ReorderBufferUTupleBuf {
+    /* position in preallocated list */
+    slist_node node;
+
+    /* Utuple header, the interesting bit for users of logical decoding */
+    UHeapTupleData tuple;
+    /* pre-allocated size of tuple buffer, different from tuple size */
+    Size alloc_tuple_size;
+
+    /* actual tuple data follows */
+} ReorderBufferUTupleBuf;
+#define ReorderBufferUTupleBufData(p) ((UHeapDiskTuple)MAXALIGN(((char*)p) + sizeof(ReorderBufferUTupleBuf)))
+
 /*
  * Types of the change passed to a 'change' callback.
  *
@@ -51,7 +64,10 @@ enum ReorderBufferChangeType {
     REORDER_BUFFER_CHANGE_DELETE,
     REORDER_BUFFER_CHANGE_INTERNAL_SNAPSHOT,
     REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID,
-    REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID
+    REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID,
+    REORDER_BUFFER_CHANGE_UINSERT,
+    REORDER_BUFFER_CHANGE_UUPDATE,
+    REORDER_BUFFER_CHANGE_UDELETE
 };
 
 /*
@@ -86,6 +102,19 @@ typedef struct ReorderBufferChange {
             /* valid for INSERT || UPDATE */
             ReorderBufferTupleBuf* newtuple;
         } tp;
+
+        /* Old, new utuples when action == UHEAP_INSERT|UPDATE|DELETE */
+        struct {
+            /* relation that has been changed */
+            RelFileNode relnode;
+            /* no previously reassembled toast chunks are necessary anymore */
+            bool clear_toast_afterwards;
+
+            /* valid for DELETE || UPDATE */
+            ReorderBufferUTupleBuf* oldtuple;
+            /* valid for INSERT || UPDATE */
+            ReorderBufferUTupleBuf* newtuple;
+        } utp;
 
         /* New snapshot, set when action == *_INTERNAL_SNAPSHOT */
         Snapshot snapshot;
@@ -349,6 +378,7 @@ ReorderBufferTupleBuf* ReorderBufferGetTupleBuf(ReorderBuffer*, Size tuple_len);
 void ReorderBufferReturnTupleBuf(ReorderBuffer*, ReorderBufferTupleBuf* tuple);
 ReorderBufferChange* ReorderBufferGetChange(ReorderBuffer*);
 void ReorderBufferReturnChange(ReorderBuffer*, ReorderBufferChange*);
+ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer*, Size tuple_len);
 
 void ReorderBufferQueueChange(ReorderBuffer*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*);
 void ReorderBufferCommit(ReorderBuffer*, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn,

@@ -54,7 +54,7 @@
 
 /*
  * Defines for CSNLOG page sizes.  A page is the same BLCKSZ as is used
- * everywhere else in Postgres.
+ * everywhere else in openGauss.
  *
  * Note: because TransactionIds are 32 bits and wrap around at 0xFFFFFFFF,
  * CSNLOG page numbering also wraps around at 0xFFFFFFFF/CSNLOG_XACTS_PER_PAGE,
@@ -491,52 +491,6 @@ static CommitSeqNo RecursiveGetCommitSeqNo(TransactionId xid)
 }
 
 /**
- * @Description: Find the next xid that is in progress
- * @in xid -  the start xid of the search scope
- * @in end -  the end xid of the search scope
- * @return -  return the next xid that is in progress in scope
- */
-TransactionId CSNLogGetNextInProgressXid(TransactionId xid, TransactionId end)
-{
-    int64 pageno;
-    Assert(TransactionIdIsValid(u_sess->utils_cxt.TransactionXmin));
-
-    if (TransactionIdPrecedes(xid, u_sess->utils_cxt.TransactionXmin))
-        xid = u_sess->utils_cxt.TransactionXmin;
-
-    for (;;) {
-        int slotno;
-        int entryno;
-
-        if (!TransactionIdPrecedes(xid, end)) {
-            goto end;
-        }
-
-        pageno = TransactionIdToCSNPage(xid);
-        slotno = SimpleLruReadPage_ReadOnly(CsnlogCtl(pageno), pageno, xid);
-
-        for (entryno = TransactionIdToCSNPgIndex(xid); entryno < (int)CSNLOG_XACTS_PER_PAGE; entryno++) {
-            CommitSeqNo csn;
-
-            if (!TransactionIdPrecedes(xid, end)) {
-                CSN_LWLOCK_RELEASE(pageno);
-                goto end;
-            }
-            csn = *(CommitSeqNo *)(CsnlogCtl(pageno)->shared->page_buffer[slotno] + entryno * sizeof(CommitSeqNo));
-            if (COMMITSEQNO_IS_INPROGRESS(csn) || COMMITSEQNO_IS_COMMITTING(csn)) {
-                CSN_LWLOCK_RELEASE(pageno);
-                goto end;
-            }
-            TransactionIdAdvance(xid);
-        }
-        CSN_LWLOCK_RELEASE(pageno);
-    }
-
-end:
-    return xid;
-}
-
-/**
  * @Description: Number of shared CSNLOG buffers.
  * @return -  return the number of shared CSNLOG buffers.
  */
@@ -570,6 +524,10 @@ void CSNLOGShmemInit(void)
     int i;
     int rc = 0;
     char name[SLRU_MAX_NAME_LENGTH];
+
+    MemoryContext old = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DEFAULT));
+    t_thrd.shemem_ptr_cxt.CsnlogCtlPtr = (SlruCtlData*)palloc0(NUM_CSNLOG_PARTITIONS * sizeof(SlruCtlData));
+    (void)MemoryContextSwitchTo(old);
 
     for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
         rc = sprintf_s(name, SLRU_MAX_NAME_LENGTH, "%s%d", "CSNLOG Ctl", i);
@@ -675,55 +633,6 @@ void ShutdownCSNLOG(void)
         (void)SimpleLruFlush(CsnlogCtl(i), false);
 
     TRACE_POSTGRESQL_CSNLOG_CHECKPOINT_DONE(false);
-}
-
-/**
- * @Description: This must be called ONCE at the end of startup/recovery.
- * @return -  no return
- */
-void TrimCSNLOG(void)
-{
-    TransactionId xid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
-    int64 pageno = TransactionIdToCSNPage(xid);
-
-    CSN_LWLOCK_ACQUIRE(pageno, LW_EXCLUSIVE);
-
-    /*
-     * Re-Initialize our idea of the latest page number.
-     */
-    CsnlogCtl(pageno)->shared->latest_page_number = pageno;
-
-    /*
-     * Zero out the remainder of the current clog page.  Under normal
-     * circumstances it should be zeroes already, but it seems at least
-     * theoretically possible that XLOG replay will have settled on a nextXID
-     * value that is less than the last XID actually used and marked by the
-     * previous database lifecycle (since subtransaction commit writes clog
-     * but makes no WAL entry).  Let's just be safe. (We need not worry about
-     * pages beyond the current one, since those will be zeroed when first
-     * used.  For the same reason, there is no need to do anything when
-     * nextXid is exactly at a page boundary; and it's likely that the
-     * "current" page doesn't exist yet in that case.)
-     */
-    if (TransactionIdToCSNPgIndex(xid) != 0) {
-        int entryno = TransactionIdToCSNPgIndex(xid);
-        int byteno = entryno * sizeof(CommitSeqNo);
-        int slotno;
-        errno_t rc = EOK;
-        char *byteptr = NULL;
-
-        slotno = SimpleLruReadPage(CsnlogCtl(pageno), pageno, false, xid);
-
-        byteptr = CsnlogCtl(pageno)->shared->page_buffer[slotno] + byteno;
-
-        /* Zero the rest of the page */
-        rc = memset_s(byteptr, BLCKSZ - byteno, 0, BLCKSZ - byteno);
-        securec_check(rc, "\0", "\0");
-
-        CsnlogCtl(pageno)->shared->page_dirty[slotno] = true;
-    }
-
-    CSN_LWLOCK_RELEASE(pageno);
 }
 
 /**

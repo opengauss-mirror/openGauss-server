@@ -32,6 +32,7 @@
 #include "catalog/gs_client_global_keys.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_auth_members.h"
@@ -63,6 +64,7 @@
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_hashbucket.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_range.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_seclabel.h"
@@ -360,13 +362,23 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         1,
         {Anum_pg_foreign_table_ftrelid, 0, 0, 0},
         128},
-    {ClientLogicGlobalSettingsId, /* GLOBAL_KEY_NAME */
+    {ClientLogicGlobalSettingsId, /* GLOBALSETTINGNAME */
         ClientLogicGlobalSettingsNameIndexId,
         2,
         {Anum_gs_client_global_keys_global_key_name, Anum_gs_client_global_keys_key_namespace, 0, 0},
         128},
-    {ClientLogicGlobalSettingsId, /* GLOBAL_KEY_ID */
+    {ClientLogicGlobalSettingsId, /* GLOBALSETTINGOID */
         ClientLogicGlobalSettingsOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        128},
+    {ClientLogicProcId, /* GSCLPROCID */
+        GsClProcFuncIdIndexId,
+        1,
+        {Anum_gs_encrypted_proc_func_id, 0, 0, 0},
+        128},
+    {ClientLogicProcId, /* GSCLPROCOID */
+        GsClProcOid,
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         128},
@@ -432,6 +444,12 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         3,
         {Anum_pg_partition_relname, Anum_pg_partition_parttype, Anum_pg_partition_parentid, 0},
         1024},
+    {PartitionRelationId, /* PARTINDEXTBLPARENTOID */
+        PartitionIndexTableIdParentOidIndexId,
+        3,
+        {Anum_pg_partition_indextblid, Anum_pg_partition_parentid, ObjectIdAttributeNumber, 0},
+        1024},
+
     {PgJobRelationId, /* PGJOBID */
         PgJobIdIndexId,
         1,
@@ -726,7 +744,17 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         3,
         {Anum_pg_aggregate_aggtransfn, Anum_pg_aggregate_aggcollectfn, 
          Anum_pg_aggregate_aggfinalfn, 0},
-        128}
+        128},
+    {PackageRelationId, /* PACKAGEOID */
+        PackageOidIndexId,
+        1,
+        {ObjectIdAttributeNumber, 0, 0, 0},
+        2048},
+    {PackageRelationId, /* PKGNAMENSP */
+        PackageNameIndexId,
+        2,
+        {Anum_gs_package_pkgname, Anum_gs_package_pkgnamespace, 0, 0},
+        2048}
 };
 
 int SysCacheSize = lengthof(cacheinfo);
@@ -1038,61 +1066,10 @@ uint32 GetSysCacheHashValue(int cacheId, Datum key1, Datum key2, Datum key3, Dat
  */
 struct catclist* SearchSysCacheList(int cacheId, int nkeys, Datum key1, Datum key2, Datum key3, Datum key4)
 {
+    
     if (cacheId < 0 || cacheId >= SysCacheSize || !PointerIsValid(u_sess->syscache_cxt.SysCache[cacheId])) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid cache ID: %d", cacheId)));
     }
 
     return SearchCatCacheList(u_sess->syscache_cxt.SysCache[cacheId], nkeys, key1, key2, key3, key4);
-}
-
-/*
- * Certain relations that do not have system caches send snapshot invalidation
- * messages in lieu of catcache messages.  This is for the benefit of
- * GetCatalogSnapshot(), which can then reuse its existing MVCC snapshot
- * for scanning one of those catalogs, rather than taking a new one, if no
- * invalidation has been received.
- *
- * Relations that have syscaches need not (and must not) be listed here.  The
- * catcache invalidation messages will also flush the snapshot.  If you add a
- * syscache for one of these relations, remove it from this list.
- */
-bool RelationInvalidatesSnapshotsOnly(Oid relid)
-{
-    switch (relid) {
-        case DbRoleSettingRelationId:
-        case DependRelationId:
-        case SharedDependRelationId:
-        case DescriptionRelationId:
-        case SharedDescriptionRelationId:
-        case SecLabelRelationId:
-        case SharedSecLabelRelationId:
-            return true;
-        default:
-            break;
-    }
-    return false;
-}
-
-/*
- * Test whether a relation has a system cache.
- */
-bool RelationHasSysCache(Oid relid)
-{
-    int low = 0;
-    int high = SysCacheSize - 1;
-
-    while (low <= high) {
-        int middle = low + (high - low) / 2;
-
-        if (u_sess->syscache_cxt.SysCacheRelationOid[middle] == relid) {
-            return true;
-        }
-        if (u_sess->syscache_cxt.SysCacheRelationOid[middle] < relid) {
-            low = middle + 1;
-        } else {
-            high = middle - 1;
-        }
-    }
-
-    return false;
 }

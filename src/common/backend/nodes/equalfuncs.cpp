@@ -35,6 +35,8 @@
 #include "nodes/relation.h"
 #include "utils/datum.h"
 #include "storage/proc.h"
+#include "storage/tcap.h"
+
 /*
  * Macros to simplify comparison of different kinds of fields.	Use these
  * wherever possible to reduce the chance for silly typos.	Note that these
@@ -75,7 +77,7 @@
     } while (0)
 
 /* Macro for comparing string fields that might be NULL */
-#define equalstr(a, b) (((a) != NULL && (b) != NULL) ? (strcmp(a, b) == 0) : (a) == (b))
+#define equalstr(a, b) (((a) != NULL && (b) != NULL) ? (strcmp(a, b) == 0) : ((a) == (b)))
 
 /* Compare a field that is a pointer to a simple palloc'd object of size sz */
 #define COMPARE_POINTER_FIELD(fldname, sz)             \
@@ -115,6 +117,7 @@ static bool _equalRangeVar(const RangeVar* a, const RangeVar* b)
     COMPARE_NODE_FIELD(partitionKeyValuesList);
     COMPARE_SCALAR_FIELD(isbucket);
     COMPARE_NODE_FIELD(buckets);
+    COMPARE_SCALAR_FIELD(withVerExpr);
 
     return true;
 }
@@ -257,6 +260,7 @@ static bool _equalFuncExpr(const FuncExpr* a, const FuncExpr* b)
 {
     COMPARE_SCALAR_FIELD(funcid);
     COMPARE_SCALAR_FIELD(funcresulttype);
+    COMPARE_SCALAR_FIELD(funcresulttype_orig);
     COMPARE_SCALAR_FIELD(funcretset);
     COMPARE_COERCIONFORM_FIELD(funcformat);
     COMPARE_SCALAR_FIELD(funccollid);
@@ -1271,6 +1275,27 @@ static bool _equalTruncateStmt(const TruncateStmt* a, const TruncateStmt* b)
     COMPARE_NODE_FIELD(relations);
     COMPARE_SCALAR_FIELD(restart_seqs);
     COMPARE_SCALAR_FIELD(behavior);
+    COMPARE_SCALAR_FIELD(purge);
+
+    return true;
+}
+
+static bool EqualPurgeStmt(const PurgeStmt* a, const PurgeStmt* b)
+{
+    COMPARE_SCALAR_FIELD(purtype);
+    COMPARE_NODE_FIELD(purobj);
+
+    return true;
+}
+
+static bool EqualTimeCapsuleStmt(const TimeCapsuleStmt* a, const TimeCapsuleStmt* b)
+{
+    COMPARE_SCALAR_FIELD(tcaptype);
+    COMPARE_NODE_FIELD(relation);
+    COMPARE_STRING_FIELD(new_relname);
+
+    COMPARE_NODE_FIELD(tvver);
+    COMPARE_SCALAR_FIELD(tvtype);
 
     return true;
 }
@@ -1848,6 +1873,15 @@ static bool _equalCreateDataSourceStmt(const CreateDataSourceStmt* a, const Crea
     return true;
 }
 
+static bool _equalAlterSchemaStmt(const AlterSchemaStmt* a, const AlterSchemaStmt* b)
+{
+    COMPARE_STRING_FIELD(schemaname);
+    COMPARE_STRING_FIELD(authid);
+    COMPARE_SCALAR_FIELD(hasBlockChain);
+
+    return true;
+}
+
 static bool _equalAlterDataSourceStmt(const AlterDataSourceStmt* a, const AlterDataSourceStmt* b)
 {
     COMPARE_STRING_FIELD(srcname);
@@ -1879,6 +1913,18 @@ static bool _equalAlterRlsPolicyStmt(const AlterRlsPolicyStmt* a, const AlterRls
     COMPARE_NODE_FIELD(roleList);
     COMPARE_NODE_FIELD(usingQual);
 
+    return true;
+}
+
+static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* a, const CreateWeakPasswordDictionaryStmt* b)
+{
+    COMPARE_NODE_FIELD(weak_password_string_list);
+
+    return true;
+}
+
+static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
+{
     return true;
 }
 
@@ -1977,17 +2023,6 @@ static bool _equalPolicyFilterNode(const PolicyFilterNode* a, const PolicyFilter
     return true;
 }
 
-static bool _equalCreateWeakPasswordDictionaryStmt(const CreateWeakPasswordDictionaryStmt* a, const CreateWeakPasswordDictionaryStmt* b)
-{
-    COMPARE_NODE_FIELD(weak_password_string_list);
-
-    return true;
-}
-
-static bool _equalDropWeakPasswordDictionaryStmt(const DropWeakPasswordDictionaryStmt* a, const DropWeakPasswordDictionaryStmt* b)
-{
-    return true;
-}
 
 static bool _equalCreateTrigStmt(const CreateTrigStmt* a, const CreateTrigStmt* b)
 {
@@ -2088,6 +2123,7 @@ static bool _equalCreateSchemaStmt(const CreateSchemaStmt* a, const CreateSchema
 {
     COMPARE_STRING_FIELD(schemaname);
     COMPARE_STRING_FIELD(authid);
+    COMPARE_SCALAR_FIELD(hasBlockChain);
     COMPARE_NODE_FIELD(schemaElts);
 
     return true;
@@ -2277,6 +2313,7 @@ static bool _equalTypeName(const TypeName* a, const TypeName* b)
     COMPARE_SCALAR_FIELD(typemod);
     COMPARE_NODE_FIELD(arrayBounds);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_LOCATION_FIELD(end_location);
 
     return true;
 }
@@ -2401,6 +2438,24 @@ static bool _equalRangeTableSample(const RangeTableSample* a, const RangeTableSa
     return true;
 }
 
+/*
+ * Description: a compare with b
+ *
+ * Parameters: @in a: one RangeTimeCapsule
+ *             @in b: another RangeTableSample
+ *
+ * Return: bool (if a be equal to b return true, else return false)
+ */
+static bool EqualRangeTimeCapsule(const RangeTimeCapsule* a, const RangeTimeCapsule* b)
+{
+    COMPARE_NODE_FIELD(relation);
+    COMPARE_SCALAR_FIELD(tvtype);
+    COMPARE_NODE_FIELD(tvver);
+    COMPARE_LOCATION_FIELD(location);
+
+    return true;
+}
+
 static bool _equalIndexElem(const IndexElem* a, const IndexElem* b)
 {
     COMPARE_STRING_FIELD(name);
@@ -2476,6 +2531,8 @@ static bool _equalDefElem(const DefElem* a, const DefElem* b)
     COMPARE_STRING_FIELD(defname);
     COMPARE_NODE_FIELD(arg);
     COMPARE_SCALAR_FIELD(defaction);
+    COMPARE_SCALAR_FIELD(begin_location);
+    COMPARE_SCALAR_FIELD(end_location);
 
     return true;
 }
@@ -2499,6 +2556,8 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_NODE_FIELD(partid_list);
     COMPARE_SCALAR_FIELD(relkind);
     COMPARE_SCALAR_FIELD(isResultRel);
+    COMPARE_NODE_FIELD(tablesample);
+    COMPARE_NODE_FIELD(timecapsule);
     COMPARE_SCALAR_FIELD(ispartrel);
     COMPARE_NODE_FIELD(subquery);
     COMPARE_SCALAR_FIELD(security_barrier);
@@ -2535,9 +2594,11 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_SCALAR_FIELD(correlated_with_recursive_cte);
     COMPARE_SCALAR_FIELD(relhasbucket);
     COMPARE_SCALAR_FIELD(isbucket);
+    COMPARE_SCALAR_FIELD(bucketmapsize);
     COMPARE_NODE_FIELD(buckets);
     COMPARE_SCALAR_FIELD(isexcluded);
     COMPARE_SCALAR_FIELD(sublink_pull_up);
+    COMPARE_SCALAR_FIELD(is_ustore);
 
     return true;
 }
@@ -2545,9 +2606,8 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
 /*
  * Description: a compare with b
  *
- * Parameters:
- *	@in a: one TableSampleClause
- *	@in b: another TableSampleClause
+ * Parameters: @in a: one TableSampleClause
+ *             @in b: another TableSampleClause
  *
  * Return: bool (if a be equal to b return true, else return false)
  */
@@ -2559,6 +2619,24 @@ static bool _equalTableSampleClause(const TableSampleClause* a, const TableSampl
 
     return true;
 }
+
+/*
+ * Description: a compare with b
+ *
+ * Parameters:
+ *	@in a: one TimeCapsuleClause
+ *	@in b: another TimeCapsuleClause
+ *
+ * Return: bool (if a be equal to b return true, else return false)
+ */
+static bool EqualTimeCapsuleClause(const TimeCapsuleClause* a, const TimeCapsuleClause* b)
+{
+    COMPARE_SCALAR_FIELD(tvtype);
+    COMPARE_NODE_FIELD(tvver);
+
+    return true;
+}
+
 
 static bool _equalSortGroupClause(const SortGroupClause* a, const SortGroupClause* b)
 {
@@ -3287,6 +3365,12 @@ bool equal(const void* a, const void* b)
         case T_TruncateStmt:
             retval = _equalTruncateStmt((TruncateStmt*)a, (TruncateStmt*)b);
             break;
+        case T_PurgeStmt:
+            retval = EqualPurgeStmt((PurgeStmt*)a, (PurgeStmt*)b);
+            break;
+        case T_TimeCapsuleStmt:
+            retval = EqualTimeCapsuleStmt((TimeCapsuleStmt*)a, (TimeCapsuleStmt*)b);
+            break;
         case T_CommentStmt:
             retval = _equalCommentStmt((CommentStmt*)a, (CommentStmt*)b);
             break;
@@ -3460,6 +3544,9 @@ bool equal(const void* a, const void* b)
         case T_CreateDataSourceStmt:
             retval = _equalCreateDataSourceStmt((CreateDataSourceStmt*)a, (CreateDataSourceStmt*)b);
             break;
+        case T_AlterSchemaStmt:
+            retval = _equalAlterSchemaStmt((AlterSchemaStmt*)a, (AlterSchemaStmt*)b);
+            break;
         case T_AlterDataSourceStmt:
             retval = _equalAlterDataSourceStmt((AlterDataSourceStmt*)a, (AlterDataSourceStmt*)b);
             break;
@@ -3468,6 +3555,12 @@ bool equal(const void* a, const void* b)
             break;
         case T_AlterRlsPolicyStmt:
             retval = _equalAlterRlsPolicyStmt((AlterRlsPolicyStmt*)a, (AlterRlsPolicyStmt*)b);
+            break;
+        case T_CreateWeakPasswordDictionaryStmt:
+            retval = _equalCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)a, (CreateWeakPasswordDictionaryStmt*)b);
+            break;
+        case T_DropWeakPasswordDictionaryStmt:
+            retval = _equalDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)a, (DropWeakPasswordDictionaryStmt*)b);
             break;
         case T_CreatePolicyLabelStmt:
             retval = _equalCreatePolicyLabelStmt((CreatePolicyLabelStmt*)a, (CreatePolicyLabelStmt*)b);
@@ -3501,12 +3594,6 @@ bool equal(const void* a, const void* b)
             break;
         case T_PolicyFilterNode:
             retval = _equalPolicyFilterNode((PolicyFilterNode*)a, (PolicyFilterNode*)b);
-            break;
-        case T_CreateWeakPasswordDictionaryStmt:
-            retval = _equalCreateWeakPasswordDictionaryStmt((CreateWeakPasswordDictionaryStmt*)a, (CreateWeakPasswordDictionaryStmt*)b);
-            break;
-        case T_DropWeakPasswordDictionaryStmt:
-            retval = _equalDropWeakPasswordDictionaryStmt((DropWeakPasswordDictionaryStmt*)a, (DropWeakPasswordDictionaryStmt*)b);
             break;
         case T_CreateTrigStmt:
             retval = _equalCreateTrigStmt((CreateTrigStmt*)a, (CreateTrigStmt*)b);
@@ -3694,6 +3781,9 @@ bool equal(const void* a, const void* b)
         case T_RangeTableSample:
             retval = _equalRangeTableSample((RangeTableSample*)a, (RangeTableSample*)b);
             break;
+        case T_RangeTimeCapsule:
+            retval = EqualRangeTimeCapsule((RangeTimeCapsule*)a, (RangeTimeCapsule*)b);
+            break;
         case T_TypeName:
             retval = _equalTypeName((TypeName*)a, (TypeName*)b);
             break;
@@ -3717,6 +3807,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_TableSampleClause:
             retval = _equalTableSampleClause((TableSampleClause*)a, (TableSampleClause*)b);
+            break;
+        case T_TimeCapsuleClause:
+            retval = EqualTimeCapsuleClause((TimeCapsuleClause*)a, (TimeCapsuleClause*)b);
             break;
         case T_SortGroupClause:
             retval = _equalSortGroupClause((SortGroupClause*)a, (SortGroupClause*)b);

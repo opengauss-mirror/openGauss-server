@@ -1097,6 +1097,23 @@ void libpqrcv_send(const char *buffer, int nbytes)
                                                                 PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
 }
 
+void HaSetRebuildRepInfoError(HaRebuildReason reason)
+{
+    if (NONE_REBUILD == reason) {
+        ha_set_rebuild_connerror(NONE_REBUILD, NONE_ERROR);
+    } else if (DCF_LOG_LOSS_REBUILD == reason) {
+        ha_set_rebuild_connerror(DCF_LOG_LOSS_REBUILD, DCF_LOG_ERROR);
+    } else {
+        /* Assert the left is REPL_INFO_ERROR */
+        ha_set_rebuild_connerror(reason, REPL_INFO_ERROR);
+    }
+}
+
+void SetObsRebuildReason(HaRebuildReason reason)
+{
+    ha_set_rebuild_connerror(reason, REPL_INFO_ERROR);
+}
+
 /*
  * Set the specified rebuild reason in HaShmData. when set the rebuild reason,
  * the hashmdata->current_repl implys the current replconnlist.

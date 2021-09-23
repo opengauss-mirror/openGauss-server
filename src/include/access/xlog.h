@@ -1,7 +1,7 @@
 /*
  * xlog.h
  *
- * PostgreSQL transaction log manager
+ * openGauss transaction log manager
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -12,6 +12,8 @@
 #ifndef XLOG_H
 #define XLOG_H
 
+#include "access/htup.h"
+#include "access/parallel_recovery/redo_item.h"
 #include "access/rmgr.h"
 #include "access/xlogdefs.h"
 #include "access/xloginsert.h"
@@ -19,12 +21,13 @@
 #include "catalog/pg_control.h"
 #include "datatype/timestamp.h"
 #include "lib/stringinfo.h"
-#include "access/parallel_recovery/redo_item.h"
 #include "knl/knl_instance.h"
+
 #include "access/htup.h"
 #include "storage/lock/lwlock.h"
 
 #include <time.h>
+#include "nodes/pg_list.h"
 
 /* Sync methods */
 #define SYNC_METHOD_FSYNC 0
@@ -90,7 +93,8 @@ typedef enum {
     RECOVERY_TARGET_XID,
     RECOVERY_TARGET_TIME,
     RECOVERY_TARGET_NAME,
-    RECOVERY_TARGET_LSN
+    RECOVERY_TARGET_LSN,
+    RECOVERY_TARGET_TIME_OBS
 #ifdef PGXC
     ,
     RECOVERY_TARGET_BARRIER
@@ -136,6 +140,8 @@ extern const int DemoteModeNum;
 
 #define DemoteModeDesc(mode) (((mode) > 0 && (mode) < DemoteModeNum) ? DemoteModeDescs[(mode)] : DemoteModeDescs[0])
 
+extern bool XLogBackgroundFlush(void);
+
 typedef struct {
     LWLock* lock;
     PGSemaphoreData	sem;
@@ -151,14 +157,34 @@ typedef struct {
     PGSemaphoreData	sem;
 } WALBufferInitWaitLock;
 
-#define WAL_INSERT_STATUS_ENTRIES g_instance.attr.attr_storage.wal_insert_status_entries
 #define WAL_NOT_COPIED 0
 #define WAL_COPIED 1
 #define WAL_COPY_SUSPEND (-1)
 #define WAL_SCANNED_LRC_INIT (-2)
 
+
+/* The current size of walInsertStatusTable is calculated based on 
+ * the max_connections parameter or the number of threads configured 
+ * in thread_pool_attr. WAL_INSERT_STATUS_TBL_EXPAND_FACTOR is used 
+ * as the expansion factor to ensure that walInsertStatusTable has 
+ * certain redundancy.
+ */
+#define WAL_INSERT_STATUS_TBL_EXPAND_FACTOR (4)
+/* 
+ * Indicates the min size of the g_instance.wal_cxt.walInsertStatusTable, 
+ * which is calculated to the power of 2. To ensure xlog performance, 
+ * the size of each xlog write is estimated based on experience. (Currently,
+ * the number is several hundred KB. We expand it to 2 MB to cope with the 
+ * CPU performance improvement.) , divided by the smallest xlog (only the 
+ * header of the xlog and the size of the xlog is 32 bytes). Therefore, 
+ * the size of walInsertStatusTable is calculated as 64 KB.
+ */
+#define MIN_WAL_INSERT_STATUS_ENTRY_POW (16)
+
+#define GET_WAL_INSERT_STATUS_ENTRY_CNT(num) \
+    ((num <= 0) ? (1 << MIN_WAL_INSERT_STATUS_ENTRY_POW) : (1 << num))
 /* (ientry + 1) % WAL_INSERT_STATUS_ENTRIES */
-#define GET_NEXT_STATUS_ENTRY(ientry) ((ientry + 1) & (WAL_INSERT_STATUS_ENTRIES - 1))
+#define GET_NEXT_STATUS_ENTRY(num, ientry) ((ientry + 1) & (GET_WAL_INSERT_STATUS_ENTRY_CNT(num) - 1))
 
 #define GET_STATUS_ENTRY_INDEX(ientry) ientry
 
@@ -303,13 +329,21 @@ typedef struct XLogwrtResult {
     XLogRecPtr Flush; /* last byte + 1 flushed */
 } XLogwrtResult;
 
+extern void XLogMultiFileInit(int advance_xlog_file_num);
+typedef struct XLogwrtPaxos {
+    XLogRecPtr  Write; /* last byte + 1 written out */
+    XLogRecPtr  Consensus; /* last byte + 1 consensus in DCF */
+    unsigned long long PaxosIndex; /* The index in DCF log, which is corresponding to consensus. */
+} XLogwrtPaxos;
+
 typedef struct TermFileData {
     uint32 term;
     bool finish_redo;
 } TermFileData;
 
-extern bool PreInitXlogFileForStandby(XLogRecPtr requestLsn);
-extern void PreInitXlogFileForPrimary(int advance_xlog_file_num);
+
+extern void XLogMultiFileInit(int advance_xlog_file_num);
+
 extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool isupgrade = false);
 extern void XLogWaitFlush(XLogRecPtr recptr);
 extern void XLogWaitBufferInit(XLogRecPtr recptr);
@@ -318,6 +352,8 @@ extern bool XLogBackgroundFlush(void);
 extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
 extern int XLogFileInit(XLogSegNo segno, bool* use_existent, bool use_lock);
 extern int XLogFileOpen(XLogSegNo segno);
+extern bool PreInitXlogFileForStandby(XLogRecPtr requestLsn);
+extern void PreInitXlogFileForPrimary(int advance_xlog_file_num);
 
 extern void CheckXLogRemoved(XLogSegNo segno, TimeLineID tli);
 extern void XLogSetAsyncXactLSN(XLogRecPtr record);
@@ -348,6 +384,10 @@ extern XLogRecPtr GetStandbyFlushRecPtr(TimeLineID* targetTLI);
 extern XLogRecPtr GetXLogInsertRecPtr(void);
 extern XLogRecPtr GetXLogInsertEndRecPtr(void);
 extern XLogRecPtr GetXLogWriteRecPtr(void);
+#ifndef ENABLE_MULTIPLE_NODES
+extern XLogRecPtr GetPaxosWriteRecPtr(void);
+extern XLogRecPtr GetPaxosConsensusRecPtr(void);
+#endif
 extern bool RecoveryIsPaused(void);
 extern void SetRecoveryPause(bool recoveryPause);
 extern TimestampTz GetLatestXTime(void);
@@ -423,12 +463,15 @@ extern void heap_xlog_bcm_new_page(xl_heap_logical_newpage* xlrec, RelFileNode n
  */
 extern XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfile, DIR* tblspcdir,
     char** tblspcmapfile, List** tablespaces, bool infotbssize, bool needtblspcmapfile);
+extern XLogRecPtr StandbyDoStartBackup(const char* backupidstr, char** labelFile, char** tblSpcMapFile,
+    List** tableSpaces, DIR* tblSpcDir, bool infoTbsSize);
 extern void set_start_backup_flag(bool startFlag);
 extern bool get_startBackup_flag(void);
 extern bool check_roach_start_backup(const char *slotName);
 extern bool GetDelayXlogRecycle(void);
 extern XLogRecPtr GetDDLDelayStartPtr(void);
-extern XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive);
+extern XLogRecPtr do_pg_stop_backup(char *labelfile, bool waitforarchive, unsigned long long* consensusPaxosIdx = NULL);
+extern XLogRecPtr StandbyDoStopBackup(char *labelfile);
 extern void do_pg_abort_backup(void);
 extern void RegisterAbortExclusiveBackup();
 extern void enable_delay_xlog_recycle(bool isRedo = false);
@@ -444,6 +487,8 @@ extern XLogRecPtr do_roach_start_backup(const char *backupidstr);
 extern XLogRecPtr do_roach_stop_backup(const char *backupidstr);
 extern XLogRecPtr enable_delay_ddl_recycle_with_slot(const char* slotname);
 extern void disable_delay_ddl_recycle_with_slot(const char* slotname, XLogRecPtr *startLSN, XLogRecPtr *endLSN);
+extern char* TrimStr(const char* str);
+
 
 extern void CloseXlogFilesAtThreadExit(void);
 extern void SetLatestXTime(TimestampTz xtime);
@@ -458,6 +503,8 @@ extern void WaitCheckpointSync(void);
 extern void btree_clear_imcompleteAction();
 extern void update_max_page_flush_lsn(XLogRecPtr biggest_lsn, ThreadId thdId, bool is_force);
 extern void set_global_max_page_flush_lsn(XLogRecPtr lsn);
+extern void DcfUpdateConsensusLsnAndIndex(XLogRecPtr ConsensusLsn, unsigned long long dcfIndex);
+
 XLogRecPtr get_global_max_page_flush_lsn();
 void GetRecoveryLatch();
 void ReLeaseRecoveryLatch();
@@ -471,11 +518,9 @@ void ReOpenXlog(XLogReaderState *xlogreader);
 void SetSwitchHistoryFile(XLogRecPtr switchLsn, XLogRecPtr catchLsn, uint32 termId);
 void CheckMaxPageFlushLSN(XLogRecPtr reqLsn);
 bool CheckForForceFinishRedoTrigger(TermFileData *term_file);
+void close_readFile_if_open();
 
 extern XLogRecPtr XlogRemoveSegPrimary;
-
-void XLogArchiveNotify(const char *xlog);
-extern bool IsValidArchiverStandby(WalSnd* walsnd);
 
 /* File path names (all relative to $PGDATA) */
 #define BACKUP_LABEL_FILE "backup_label"
@@ -498,7 +543,7 @@ typedef struct delayddlrange {
         InvalidXLogRecPtr, InvalidXLogRecPtr \
     }
 #define DISABLE_DDL_DELAY_TIMEOUT 1800000
-#define ENABLE_DDL_DELAY_TIMEOUT 60000
+#define ENABLE_DDL_DELAY_TIMEOUT 3600000 /* 1 hour */
 
 #define TABLESPACE_MAP "tablespace_map"
 #define TABLESPACE_MAP_OLD "tablespace_map.old"
@@ -509,15 +554,42 @@ typedef struct delayddlrange {
 
 static const uint64 INVALID_READ_OFF = 0xFFFFFFFF;
 
-inline bool force_finish_enabled()
-{
-    return (g_instance.attr.attr_storage.enable_update_max_page_flush_lsn != 0);
-}
+#define FORCE_FINISH_ENABLED \
+    (g_instance.attr.attr_storage.enable_update_max_page_flush_lsn != 0)
+
+struct PGSemaphoreData;
+typedef PGSemaphoreData* PGSemaphore;
+void PGSemaphoreReset(PGSemaphore sema);
+void PGSemaphoreUnlock(PGSemaphore sema);
+
+#define TABLESPACE_MAP "tablespace_map"
+#define TABLESPACE_MAP_OLD "tablespace_map.old"
 
 static inline void WakeupWalSemaphore(PGSemaphore sema)
 {
     PGSemaphoreReset(sema);
     PGSemaphoreUnlock(sema);
 }
+
+/*
+ * Options for enum values stored in other modules
+ */
+extern struct config_enum_entry wal_level_options[];
+extern struct config_enum_entry sync_method_options[];
+
+extern void SetRemainSegsStartPoint(XLogRecPtr remain_segs_start_point);
+extern XLogRecPtr GetRemainSegsStartPoint(void);
+extern void UpdateRemainSegsStartPoint(XLogRecPtr new_start_point);
+extern bool IsNeedLogRemainSegs(XLogRecPtr cur_lsn);
+
+extern void SetRemainCommitLsn(XLogRecPtr remainCommitLsn);
+extern XLogRecPtr GetRemainCommitLsn(void);
+extern void UpdateRemainCommitLsn(XLogRecPtr newRemainCommitLsn);
+
+void RecoveryAllocSegsFromRemainSegsFile(struct HTAB* alloc_segs_htbl, char* buf, uint32* used_len);
+void RecoveryDropSegsFromRemainSegsFile(struct HTAB* drop_segs_hbtl, char* buf, uint32* used_len);
+void RecoveryShrinkExtentsFromRemainSegsFile(struct HTAB* shrink_extents_htbl, char* buf, uint32* used_len);
+void WriteRemainSegsFile(int fd, const char* buffer, uint32 used_len);
+void InitXlogStatuEntryTblSize();
 
 #endif /* XLOG_H */

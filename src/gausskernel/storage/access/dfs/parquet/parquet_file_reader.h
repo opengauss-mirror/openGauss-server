@@ -25,7 +25,8 @@
 #define PQRQUET_FILE_READER_H
 
 #include "parquet/api/reader.h"
-
+#include "parquet/types.h"
+#include "parquet/deprecated_io.h"
 #include "utils/dfs_vector.h"
 #include "utils/bloom_filter.h"
 #include "vecexecutor/vectorbatch.h"

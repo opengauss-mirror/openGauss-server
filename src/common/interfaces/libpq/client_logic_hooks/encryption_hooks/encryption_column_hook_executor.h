@@ -29,11 +29,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-#include "gs_ktool_interface.h"
-#else
-#include "localkms_gen_cmk.h"
-#endif
 #include "column_hook_executor.h"
 #include "abstract_encryption_hook.h"
 #include "encryption_global_hook_executor.h"
@@ -88,22 +83,26 @@ private:
         securec_rc = memset_s(m_cek_keys, MAX_CEK_LENGTH, '\0', MAX_CEK_LENGTH);
         securec_check_c(securec_rc, "\0", "\0");
         m_cek_size = 0;
-
+        
         return;
     }
-    bool deprocess_column_encryption_key(EncryptionGlobalHookExecutor *encryption_global_hook_executor, 
+    bool deprocess_column_encryption_key(EncryptionGlobalHookExecutor *encryption_global_hook_executor,
         unsigned char *decryptedKey, size_t *decryptedKeySize, const char *encrypted_key_value, 
         const size_t *encrypted_key_value_size) const;
-    void set_cek_keys(const unsigned char *cek_keys, size_t cek_size)
+    bool set_cek_keys(const unsigned char *cek_keys, size_t cek_size)
     {
         if (cek_keys == NULL || cek_size == 0 || m_cek_keys == NULL) {
-            return;
+            return false;
         }
         errno_t securec_rc = EOK;
         Assert(cek_size <= MAX_CEK_LENGTH);
         securec_rc = memcpy_s(m_cek_keys, MAX_CEK_LENGTH, cek_keys, cek_size);
         securec_check_c(securec_rc, "\0", "\0");
-        return;
+        set_cek_size(cek_size);
+        if (!aesCbcEncryptionKey.generate_keys((unsigned char *)cek_keys, cek_size)) {
+            return false;
+        }
+        return true;
     }
 
     unsigned char *get_cek_keys() const
@@ -134,6 +133,7 @@ private:
     unsigned char *m_cek_keys;
     size_t m_cek_size;
     ColumnEncryptionAlgorithm m_column_encryption_algorithm = ColumnEncryptionAlgorithm::INVALID_ALGORITHM;
+    AeadAesHamcEncKey aesCbcEncryptionKey;         /* contains iv, encryption and mac keys */
 };
 
 #endif

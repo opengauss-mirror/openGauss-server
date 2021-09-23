@@ -128,6 +128,7 @@ struct PGPROC {
      */
     ThreadId sessMemorySessionid;
     uint64 sessionid; /* if not zero, session id in thread pool*/
+    GlobalSessionId globalSessionId;
     int logictid;     /*logic thread id*/
     TransactionId gtt_session_frozenxid;    /* session level global temp table relfrozenxid */
 
@@ -173,6 +174,10 @@ struct PGPROC {
     int syncRepState;       /* wait state for sync rep */
     bool syncRepInCompleteQueue; /* waiting in complete queue */
     SHM_QUEUE syncRepLinks; /* list link if process is in syncrep queue */
+
+    XLogRecPtr waitPaxosLSN;    /* waiting for this LSN or higher on paxos callback */
+    int syncPaxosState;  /* wait state for sync paxos, reuse syncRepState defines */
+    SHM_QUEUE syncPaxosLinks;  /* list link if process is in syncpaxos queue */
 
     DataQueuePtr waitDataSyncPoint; /* waiting for this data sync point */
     int dataSyncRepState;           /* wait state for data sync rep */
@@ -259,6 +264,14 @@ struct PGPROC {
     volatile int32 dw_pos;
 
     /*
+     * Support for lock groups.  Use LockHashPartitionLockByProc on the group
+     * leader to get the LWLock protecting these fields.
+     */
+    PGPROC     *lockGroupLeader;    /* lock group leader, if I'm a member */
+    dlist_head  lockGroupMembers;   /* list of members, if I'm a leader */
+    dlist_node  lockGroupLink;  /* my member link, if I'm a member */
+
+    /*
      * All PROCLOCK objects for locks held or awaited by this backend are
      * linked into one of these lists, according to the partition number of
      * their lock.
@@ -323,12 +336,16 @@ typedef struct PROC_HDR {
     uint32		allNonPreparedProcCount;
     /* Head of list of free PGPROC structures */
     PGPROC* freeProcs;
+    /* Head of list of external's free PGPROC structures */
+    PGPROC* externalFreeProcs;
     /* Head of list of autovacuum's free PGPROC structures */
     PGPROC* autovacFreeProcs;
     /* Head of list of cm agent's free PGPROC structures */
     PGPROC* cmAgentFreeProcs;
     /* Head of list of pg_job's free PGPROC structures */
     PGPROC* pgjobfreeProcs;
+	/* Head of list of bgworker free PGPROC structures */
+    PGPROC* bgworkerFreeProcs;
     /* First pgproc waiting for group XID clear */
     pg_atomic_uint32 procArrayGroupFirst;
     /* First pgproc waiting for group transaction status update */
@@ -351,6 +368,8 @@ typedef struct PROC_HDR {
 #ifdef __aarch64__
     char pad[PG_CACHE_LINE_SIZE - PROC_HDR_PAD_OFFSET];
 #endif
+    /* Oldest transaction id which is having undo. */
+    pg_atomic_uint64 oldestXidInUndo;
 } PROC_HDR;
 
 /*
@@ -373,16 +392,23 @@ const int MAX_COMPACTION_THREAD_NUM = 100;
      MAX_RECOVERY_THREAD_NUM + \
      MAX_BG_WRITER_THREAD_NUM + \
      g_instance.shmem_cxt.ThreadPoolGroupNum + \
-     MAX_COMPACTION_THREAD_NUM)
+     MAX_COMPACTION_THREAD_NUM \
+    )
 
 #define NUM_AUXILIARY_PROCS (NUM_SINGLE_AUX_PROC + NUM_MULTI_AUX_PROC) 
 
 /* max number of CMA's connections */
 #define NUM_CMAGENT_PROCS (10)
 
+/* max number of DCF call back threads */
+#define NUM_DCF_CALLBACK_PROCS \
+        (g_instance.attr.attr_storage.dcf_attr.enable_dcf ? \
+        g_instance.attr.attr_storage.dcf_attr.dcf_max_workers : 0)
+
 #define GLOBAL_ALL_PROCS \
     (g_instance.shmem_cxt.MaxBackends + \
-     NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + g_instance.attr.attr_storage.max_prepared_xacts)
+     NUM_CMAGENT_PROCS + NUM_AUXILIARY_PROCS + NUM_DCF_CALLBACK_PROCS + \
+     (g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS))
 
 #define GLOBAL_MAX_SESSION_NUM (2 * g_instance.shmem_cxt.MaxBackends)
 #define GLOBAL_RESERVE_SESSION_NUM (g_instance.shmem_cxt.MaxReserveBackendId)
@@ -433,6 +459,8 @@ extern bool enable_session_sig_alarm(int delayms);
 extern bool disable_session_sig_alarm(void);
 
 extern bool disable_sig_alarm(bool is_statement_timeout);
+extern bool pause_sig_alarm(bool is_statement_timeout);
+extern bool resume_sig_alarm(bool is_statement_timeout);
 extern void handle_sig_alarm(SIGNAL_ARGS);
 
 extern bool enable_standby_sig_alarm(TimestampTz now, TimestampTz fin_time, bool deadlock_only);
@@ -445,4 +473,12 @@ extern int getLogicThreadIdFromThreadId(ThreadId tid);
 extern bool IsRedistributionWorkerProcess(void);
 
 void CancelBlockedRedistWorker(LOCK* lock, LOCKMODE lockmode);
+
+extern void BecomeLockGroupLeader(void);
+extern void BecomeLockGroupMember(PGPROC *leader);
+static inline bool TransactionIdOlderThanAllUndo(TransactionId xid)
+{
+    uint64 cutoff = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    return xid < cutoff;
+}
 #endif /* PROC_H */

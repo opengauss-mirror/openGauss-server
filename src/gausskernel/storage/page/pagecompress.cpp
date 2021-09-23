@@ -475,7 +475,7 @@ ColArray* PageCompress::DeformTups(HeapTuple* tups, int nTups)
      *   ....
      */
     for (int row = 0; row < nTups; ++row) {
-		heap_deform_tuple(tups[row], desc, m_deformVals, m_deformNulls);
+        heap_deform_tuple(tups[row], desc, m_deformVals, m_deformNulls);
 
         for (int col = 0; col < attrNum; ++col) {
             colArray[col].val[row] = m_deformVals[col];
@@ -1698,10 +1698,11 @@ bool PageCompress::CompressOnePage(void)
          * form compressed tuple and then dispatch until part of tuples fill one page,
          * or all compressed tuples fill part of one page.
          */
-        if (hascmpr)
-			fillOnePage = Dispatch(m_mappedTups[row], (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
-        else
+        if (hascmpr) {
+            fillOnePage = Dispatch(m_mappedTups[row], (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
+        } else {
             fillOnePage = Dispatch(m_mappedTups[row], size, blksize);
+        }
 
         if (fillOnePage)
             break;
@@ -1733,7 +1734,7 @@ bool PageCompress::CompressOnePage(void)
             continue;
         }
 
-		heap_deform_tuple(raw, desc, values, isnulls);
+        heap_deform_tuple(raw, desc, values, isnulls);
         hascmpr = false;
 
         for (int col = 0; col < attrNum; ++col) {
@@ -1744,10 +1745,11 @@ bool PageCompress::CompressOnePage(void)
 #endif
         }
 
-        if (hascmpr)
-			fillOnePage = Dispatch(raw, (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
-        else
+        if (hascmpr) {
+            fillOnePage = Dispatch(raw, (HeapTuple)tableam_tops_form_cmprs_tuple(desc, &formTupleData, HEAP_TUPLE), size, blksize);
+        } else {
             fillOnePage = Dispatch(raw, size, blksize);
+        }
 
         if (fillOnePage)
             break;
@@ -2241,7 +2243,7 @@ void PageCompress::CheckCmprTuple(HeapTuple rawTup, HeapTuple cmprTup)
     bool* isnulls = (bool*)palloc(sizeof(bool) * nattrs);
     bool* isnulls2 = (bool*)palloc(sizeof(bool) * nattrs);
 
-	heap_deform_cmprs_tuple(cmprTup, desc, values, isnulls, m_cmprHeaderData);
+    heap_deform_cmprs_tuple(cmprTup, desc, values, isnulls, m_cmprHeaderData);
     heap_deform_tuple(rawTup, desc, values2, isnulls2);
 
     for (int col = 0; col < nattrs; ++col) {

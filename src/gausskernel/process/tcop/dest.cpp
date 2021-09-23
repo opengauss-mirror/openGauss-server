@@ -306,7 +306,7 @@ void ReadyForQuery(CommandDest dest)
                 if (u_sess->attr.attr_common.enable_full_encryption) {
                     unsigned short s = TransactionBlockStatusCode();
                     s = s << 8; 
-                    s |= (uint8)ce_cache_refresh_type;
+                    s |= ce_cache_refresh_type;
                     pq_sendint16(&buf, s);
                 } else {
                     pq_sendbyte(&buf, TransactionBlockStatusCode());

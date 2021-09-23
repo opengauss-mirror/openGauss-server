@@ -245,10 +245,10 @@ LINE 1: CREATE TABLE ctlt10 (LIKE ctlseq1);
                                   ^
 CREATE VIEW ctlv1 AS SELECT * FROM ctlt4;
 CREATE TABLE ctlt11 (LIKE ctlv1);
-ERROR:  Postgres-XC does not support VIEW in LIKE clauses
+ERROR:  openGauss does not support VIEW in LIKE clauses
 DETAIL:  The feature is not currently supported
 CREATE TABLE ctlt11a (LIKE ctlv1 INCLUDING DEFAULTS  INCLUDING CONSTRAINTS  INCLUDING INDEXES  INCLUDING STORAGE  INCLUDING COMMENTS);
-ERROR:  Postgres-XC does not support VIEW in LIKE clauses
+ERROR:  openGauss does not support VIEW in LIKE clauses
 DETAIL:  The feature is not currently supported
 CREATE TYPE ctlty1 AS (a int, b text);
 CREATE TABLE ctlt12 (LIKE ctlty1);

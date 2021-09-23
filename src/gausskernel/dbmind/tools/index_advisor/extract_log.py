@@ -10,21 +10,75 @@ SQL_TYPE = ['select ', 'delete ', 'insert ', 'update ']
 SQL_AMOUNT = 0
 PLACEHOLDER = r'@@@'
 SAMPLE_NUM = 5
+UPDATE_THRESHOLD = 7
+TEMPLATE_LENGTH_THRESHOLD = 5e+03
+IS_ALL_LATEST_SQL = False
 SQL_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
                r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
                r'(([^<>]\s*=\s*)|([^<>]\s+))(\d+)(\.\d+)?']  # match single integer
 
 
+def truncate_template(templates, update_time, avg_update):
+    global IS_ALL_LATEST_SQL
+    prune_list = []
+    # get the currently unupdated template list
+    if not IS_ALL_LATEST_SQL:
+        for sql_template, sql_detail in templates.items():
+            if sql_detail['update'][-1] != update_time and len(sql_detail['update']) < avg_update:
+                prune_list.append((sql_template, len(sql_detail['update'])))
+    # filter by update frequency
+    if len(prune_list) > len(templates)/SAMPLE_NUM:
+        sorted(prune_list, key=lambda elem: elem[1])
+        prune_list = prune_list[:len(templates)//SAMPLE_NUM]
+    if len(prune_list):
+        for item in prune_list:
+            del templates[item]
+        return True
+    IS_ALL_LATEST_SQL = True
+    # if all templates have been updated, then randomly selected one to be deleted
+    if random.random() < 0.5:
+        del templates[random.sample(templates.keys(), 1)]
+        return True
+    return False
+
+
 def get_workload_template(templates, sqls):
+    update_time = time.time()
+    invalid_template = []
+    total_update = 0
+    is_record = True
+    # delete templates that have not been updated within UPDATE_THRESHOLD threshold
+    for sql_template, sql_detail in templates.items():
+        if (update_time - sql_detail['update'][-1])/60/60/24 >= UPDATE_THRESHOLD:
+            invalid_template.append(sql_template)
+            continue
+        total_update += len(sql_detail['update'])
+    avg_update = (total_update / len(templates)) if len(templates) else 0
+    for item in invalid_template:
+        del templates[item]
     for sql in sqls:
         sql_template = sql
         for pattern in SQL_PATTERN:
             sql_template = re.sub(pattern, PLACEHOLDER, sql_template)
         if sql_template not in templates:
+            # prune the templates if the total size is greater than the given threshold
+            if len(templates) > TEMPLATE_LENGTH_THRESHOLD:
+                is_record = truncate_template(templates, update_time, avg_update)
+            if not is_record:
+                continue
             templates[sql_template] = {}
             templates[sql_template]['cnt'] = 0
             templates[sql_template]['samples'] = []
+            templates[sql_template]['update'] = []
         templates[sql_template]['cnt'] += 1
+        # clear the update threshold outside
+        for ind, item in enumerate(templates[sql_template]['update']):
+            if (update_time - item)/60/60/24 < UPDATE_THRESHOLD:
+                templates[sql_template]['update'] = templates[sql_template]['update'][ind:]
+                break
+        # update the last update time of the sql template
+        if update_time not in templates[sql_template]['update']:
+            templates[sql_template]['update'].append(update_time)
         # reservoir sampling
         if len(templates[sql_template]['samples']) < SAMPLE_NUM:
             if sql not in templates[sql_template]['samples']:
@@ -103,7 +157,7 @@ def get_parsed_sql(file, user, database, sql_amount, statement):
                                         reverse=True)
                         for item in param_list:
                             sql = sql.replace(item[0].strip() if re.match(r'\$', item[0]) else
-                                               ('$' + item[0].strip()), item[1].strip())
+                                              ('$' + item[0].strip()), item[1].strip())
                         if output_valid_sql(sql):
                             SQL_AMOUNT += 1
                             yield output_valid_sql(sql)
@@ -164,7 +218,11 @@ def extract_sql_from_log(args):
                 break
             valid_files.insert(0, file)
     if args.json:
-        templates = {}
+        try:
+            with open(args.f, 'r') as output_file:
+                templates = json.load(output_file)
+        except json.JSONDecodeError:
+            templates = {}
         record_sql(valid_files, args, templates)
         with open(args.f, 'w') as output_file:
             json.dump(templates, output_file)
@@ -196,4 +254,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 

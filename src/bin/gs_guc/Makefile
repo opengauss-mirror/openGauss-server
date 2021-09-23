@@ -39,13 +39,13 @@ encrypt: encrypt.o crypt.o $(COMMON_OBJS)| submake-libpgport
 
 gs_guc_ut: $(OBJS) | submake-libpgport
 	$(CC)  -fPIC -shared $(CFLAGS) $(OBJS) $(LIBS) $(pgport) $(LDFLAGS) $(LDFLAGS_EX) -o lib$@.so
-	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
 	
 install: all installdirs
 	$(INSTALL_PROGRAM) gs_guc$(X) '$(DESTDIR)$(bindir)/gs_guc$(X)'
 	$(INSTALL_PROGRAM) encrypt$(X) '$(DESTDIR)$(bindir)/encrypt$(X)'
 ifeq ($(enable_multiple_nodes), yes)
-	$(INSTALL_DATA) $(top_builddir)/src/distribute/cluster_guc.conf$(X) '$(DESTDIR)$(bindir)/cluster_guc.conf$(X)'
+	$(INSTALL_DATA) $(top_builddir)/../distribute/cluster_guc.conf$(X) '$(DESTDIR)$(bindir)/cluster_guc.conf$(X)'
 else
 	$(INSTALL_DATA) cluster_guc.conf$(X) '$(DESTDIR)$(bindir)/cluster_guc.conf$(X)'
 endif

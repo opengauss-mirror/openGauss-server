@@ -222,7 +222,7 @@ int main(int argc, char* argv[])
 #ifndef WIN32
     if (geteuid() == 0) {
         fprintf(stderr, _("%s: cannot be executed by \"root\"\n"), progname);
-        fprintf(stderr, _("You must run %s as the PostgreSQL system admin.\n"), progname);
+        fprintf(stderr, _("You must run %s as the openGauss system admin.\n"), progname);
         exit(1);
     }
 #endif
@@ -518,17 +518,21 @@ static void GuessControlValues(void)
  * NB: this display should be just those fields that will not be
  * reset by RewriteControlFile().
  */
+void CheckGuessed(bool guessed)
+{
+    if (guessed)
+        printf(_("Guessed pg_control values:\n\n"));
+    else
+        printf(_("pg_control values:\n\n"));
+}
+
 static void PrintControlValues(bool guessed)
 {
     char sysident_str[32];
     int nRet = 0;
     char fname[MAXFNAMELEN];
-
-    if (guessed)
-        printf(_("Guessed pg_control values:\n\n"));
-    else
-        printf(_("pg_control values:\n\n"));
-
+    
+    CheckGuessed(guessed);
     /*
      * Format system_identifier separately to keep platform-dependent format
      * code out of the translatable message string.
@@ -537,13 +541,10 @@ static void PrintControlValues(bool guessed)
         sysident_str, sizeof(sysident_str), sizeof(sysident_str) - 1, UINT64_FORMAT, ControlFile.system_identifier);
     securec_check_ss_c(nRet, "\0", "\0");
 
-    nRet = snprintf_s(fname,
-        MAXFNAMELEN,
-        MAXFNAMELEN - 1,
-        "%08X%08X%08X",
-        ControlFile.checkPointCopy.ThisTimeLineID,
-        (uint32)((newXlogSegNo) / XLogSegmentsPerXLogId),
-        (uint32)((newXlogSegNo) % XLogSegmentsPerXLogId));
+    nRet = snprintf_s(fname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X",
+                      ControlFile.checkPointCopy.ThisTimeLineID,
+                      (uint32)((newXlogSegNo) / XLogSegmentsPerXLogId),
+                      (uint32)((newXlogSegNo) % XLogSegmentsPerXLogId));
     securec_check_ss_c(nRet, "", "");
 
     printf(_("First log segment after reset:		%s\n"), fname);
@@ -992,7 +993,7 @@ static void WriteEmptyXLOG(void)
 
 static void usage(void)
 {
-    printf(_("%s resets the PostgreSQL transaction log.\n\n"), progname);
+    printf(_("%s resets the openGauss transaction log.\n\n"), progname);
     printf(_("Usage:\n  %s [OPTION]... DATADIR\n\n"), progname);
     printf(_("Options:\n"));
     printf(_("  -e XIDEPOCH      set next transaction ID epoch\n"));

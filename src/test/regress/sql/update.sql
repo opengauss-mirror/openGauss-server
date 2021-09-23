@@ -306,7 +306,6 @@ select * from test;
 drop table test;
 
 --test update multiple fields of column which using composite type at once
-set enable_light_proxy=off;
 create type nt as(a int,b int);
 create table aa (a nt, b int,c char);
 explain (verbose on, costs off) insert into aa values(ROW(1,2),3,'4');
@@ -340,4 +339,3 @@ explain (verbose on, costs off) update test set a[1:2]='{10,20}' where c='7';
 update test set a[1:2]='{10,20}' where c='7';
 select * from test order by 3;
 drop table test;
-set enable_light_proxy=on;

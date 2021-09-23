@@ -27,6 +27,7 @@
 #include "postgres_fe.h"
 #include <string>
 
-bool scanint8(const char *str, bool errorOK, int64 *result, char *err_msg);
+typedef struct pg_conn PGconn;
+bool scanint8(const PGconn* conn, const char *str, bool errorOK, int64 *result, char *err_msg);
 
 #endif

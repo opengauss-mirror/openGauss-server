@@ -189,6 +189,34 @@ public:
         iter_wrapper = NULL;
     }
 
+    static void copyDataEntry(RBTree* rb, RBNode *dest, const RBNode *src)
+    {
+        /* We should use our defined function to copy data replace the default copy logic of the rb tree */
+        IteratorTreeNodeWrapper *iter_dest = (IteratorTreeNodeWrapper *)dest;
+        IteratorTreeNodeWrapper *iter_src = (IteratorTreeNodeWrapper *)src;
+        if (iter_dest->m_iter.first != NULL) {
+            if (std::is_trivial<key_type>::value == 0) {
+                iter_dest->m_iter.first->~key_type();
+            }
+            pfree(iter_dest->m_iter.first);
+        }
+        if (iter_dest->m_iter.second != NULL) {
+            if (std::is_trivial<mapped_type>::value == 0) {
+                iter_dest->m_iter.second->~mapped_type();
+            }
+            pfree(iter_dest->m_iter.second);
+        }
+        errno_t rc = memcpy_s(dest + 1, rb->node_size - sizeof(RBNode), src + 1, rb->node_size - sizeof(RBNode));
+        securec_check(rc, "\0", "\0");
+        MemoryContext oldContext = MemoryContextSwitchTo(GetMapMemory());
+        /* allocate for key & value */
+        iter_dest->m_iter.first = (key_type *)palloc(key_size);
+        iter_dest->m_iter.second = (mapped_type *)palloc(t_size);
+        new (static_cast<void *>(iter_dest->m_iter.first)) key_type(*(iter_src->m_iter.first));
+        new (static_cast<void *>(iter_dest->m_iter.second)) mapped_type(*(iter_src->m_iter.second));
+        MemoryContextSwitchTo(oldContext);
+    }
+
 public:
     /* *
      * Constructs a map container object, initializing its contents.
@@ -222,7 +250,7 @@ public:
         m_begin_iter = m_end_iter;
 
         m_tree = rb_create(sizeof(IteratorTreeNodeWrapper), compareDataEntry, combineDataEntry, allocDataEntry,
-            deallocDataEntry, NULL);
+            deallocDataEntry, NULL, copyDataEntry);
 
         (void)MemoryContextSwitchTo(oldContext);
     }
@@ -424,6 +452,26 @@ public:
         }
     }
 
+    void update_iterator()
+    {
+        if (m_tree != NULL && !empty()) {
+            rb_begin_iterate(m_tree, DirectWalk); /* preorder traversal */
+            RBNode *node = rb_iterate(m_tree);
+            IteratorTreeNodeWrapper *itr = (IteratorTreeNodeWrapper *)node;
+            m_begin_iter = &itr->m_iter;
+            m_begin_iter->m_prev = NULL;
+            while ((node = rb_iterate(m_tree)) != NULL) {
+                IteratorTreeNodeWrapper *cur_itr = (IteratorTreeNodeWrapper *)node;
+                itr->m_iter.m_next = &cur_itr->m_iter;
+                cur_itr->m_iter.m_prev = &itr->m_iter;
+                itr = cur_itr;
+            }
+            itr->m_iter.m_next = m_end_iter;
+            m_end_iter->m_prev = &itr->m_iter;
+        } else {
+            m_begin_iter = m_end_iter;
+        }
+    }
     /* *
      * Erase element.
      * Removes from the map container a single element.
@@ -439,27 +487,9 @@ public:
             return 0;
         }
 
-        IteratorTreeNodeWrapper *it_wrapper = (IteratorTreeNodeWrapper *)res;
-        /* delete from head */
-        if (m_begin_iter == &(it_wrapper->m_iter)) {
-            m_begin_iter = it_wrapper->m_iter.m_next;
-            it_wrapper->m_iter.m_next->m_prev = NULL;
-        } else {  /* delete from middle */
-            if (it_wrapper->m_iter.m_prev && it_wrapper->m_iter.m_next) {
-                it_wrapper->m_iter.m_next->m_prev = it_wrapper->m_iter.m_prev;
-                it_wrapper->m_iter.m_prev->m_next = it_wrapper->m_iter.m_next;
-            } else {
-                if (it_wrapper->m_iter.m_next) {
-                    it_wrapper->m_iter.m_next->m_prev = NULL;
-                }
-                if (it_wrapper->m_iter.m_prev) {
-                    it_wrapper->m_iter.m_prev->m_next = NULL;
-                }
-            }
-        }
-
         rb_delete(m_tree, res);
         m_size--;
+        update_iterator();
         return 1;
     }
 

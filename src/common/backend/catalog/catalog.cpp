@@ -38,6 +38,7 @@
 #include "catalog/pg_obsscaninfo.h"
 #include "catalog/pg_pltemplate.h"
 #include "catalog/pg_db_role_setting.h"
+#include "catalog/pg_recyclebin.h"
 #include "catalog/pg_shdepend.h"
 #include "catalog/pg_shdescription.h"
 #include "catalog/pg_shseclabel.h"
@@ -50,6 +51,7 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/pg_extension_data_source.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_snapshot.h"
 #include "commands/tablespace.h"
 #include "commands/directory.h"
 #include "cstore.h"
@@ -59,7 +61,8 @@
 #include "catalog/pg_workload_group.h"
 #include "catalog/pg_app_workloadgroup_mapping.h"
 #include "miscadmin.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
+#include "storage/smgr/segment.h"
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -196,7 +199,6 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
     char* path = NULL;
 
     // Column store
-    //  Future: fix this function.
     if (IsValidColForkNum(forknum)) {
         path = (char*)palloc0(MAXPGPATH * sizeof(char));
 
@@ -210,7 +212,7 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
         if (rnode.spcNode == GLOBALTABLESPACE_OID) {
             /* Shared system relations live in {datadir}/global */
             Assert(rnode.dbNode == 0);
-            Assert(rnode.bucketNode == InvalidBktId);
+            Assert(IsHeapFileNode(rnode));
             Assert(backend == InvalidBackendId);
             pathlen = 7 + OIDCHARS + 1 + FORKNAMECHARS + 1;
             path = (char*)palloc(pathlen);
@@ -225,29 +227,26 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
             if (backend == InvalidBackendId) {
                 pathlen = 5 + OIDCHARS + 1 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1 + OIDCHARS + 2;
                 path = (char*)palloc(pathlen);
-                if (rnode.bucketNode == DIR_BUCKET_ID) {
-                    rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u/",
-                        rnode.dbNode, rnode.relNode);
-                } else if (forknum != MAIN_FORKNUM) {
-                    if (rnode.bucketNode == InvalidBktId) {
+                if (forknum != MAIN_FORKNUM) {
+                    if (!IsBucketFileNode(rnode)) {
                         rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_%s",
                             rnode.dbNode, rnode.relNode, forkNames[forknum]);
                     } else {
-                        rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u/%u_b%d_%s",
-                            rnode.dbNode, rnode.relNode, rnode.relNode, rnode.bucketNode, forkNames[forknum]);
+                        rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_b%d_%s",
+                            rnode.dbNode, rnode.relNode, rnode.bucketNode, forkNames[forknum]);
                     }
                 } else {
-                    if (rnode.bucketNode == InvalidBktId) {
+                    if (!IsBucketFileNode(rnode)) {
                         rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u", rnode.dbNode, rnode.relNode);
                     } else {
-                        rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u/%u_b%d",
-                            rnode.dbNode, rnode.relNode, rnode.relNode, rnode.bucketNode);
+                        rc = snprintf_s(path, pathlen, pathlen - 1, "base/%u/%u_b%d",
+                            rnode.dbNode, rnode.relNode, rnode.bucketNode);
                     }
                 }
                 securec_check_ss(rc, "\0", "\0");
             } else {
                 /* OIDCHARS will suffice for an integer, too */
-                Assert(rnode.bucketNode == InvalidBktId);
+                Assert(!IsBucketFileNode(rnode));
                 pathlen = 5 + OIDCHARS + 2 + OIDCHARS + 1 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char*)palloc(pathlen);
                 if (forknum != MAIN_FORKNUM) {
@@ -269,22 +268,18 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
                 OIDCHARS + 1 + OIDCHARS + 1 + OIDCHARS + 2 + OIDCHARS + 1 + FORKNAMECHARS + 1;
                 path = (char*)palloc(pathlen);
 #ifdef PGXC
-                if (rnode.bucketNode == DIR_BUCKET_ID) {
-                    rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u/",
-                        rnode.spcNode, TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName,
-                        rnode.dbNode, rnode.relNode);
-                } else if (forknum != MAIN_FORKNUM) {
-                    if (rnode.bucketNode == InvalidBktId) {
+                if (forknum != MAIN_FORKNUM) {
+                    if (!IsBucketFileNode(rnode)) {
                         rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u_%s",
                             rnode.spcNode, TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName,
                             rnode.dbNode, rnode.relNode, forkNames[forknum]);
                     } else {
-                        rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u/%u_b%d_%s",
+                        rc = snprintf_s(path, pathlen, pathlen - 1, "pg_tblspc/%u/%s_%s/%u/%u_b%d_%s",
                             rnode.spcNode, TABLESPACE_VERSION_DIRECTORY, g_instance.attr.attr_common.PGXCNodeName,
-                            rnode.dbNode, rnode.relNode, rnode.relNode, rnode.bucketNode, forkNames[forknum]);
+                            rnode.dbNode, rnode.relNode, rnode.bucketNode, forkNames[forknum]);
                     }
                 } else {
-                    if (rnode.bucketNode == InvalidBktId) {
+                    if (!IsBucketFileNode(rnode)) {
                         rc = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
@@ -298,12 +293,11 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
                         rc = snprintf_s(path,
                             pathlen,
                             pathlen - 1,
-                            "pg_tblspc/%u/%s_%s/%u/%u/%u_b%d",
+                            "pg_tblspc/%u/%s_%s/%u/%u_b%d",
                             rnode.spcNode,
                             TABLESPACE_VERSION_DIRECTORY,
                             g_instance.attr.attr_common.PGXCNodeName,
                             rnode.dbNode,
-                            rnode.relNode,
                             rnode.relNode,
                             rnode.bucketNode);
                     }
@@ -401,10 +395,6 @@ char* relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum)
  *  dbNode/relNode
  *  dbNode/relNode.1 (segno = 1)
  *  dbNode/relNode_forkName 
- * Hashbucket Table Path(e.g. bucketNode = 0):
- *  dbNode/relNode/relNode_b0
- *  dbNode/relNode/relNode_b0_fsm
- *  dbNode/relNode/relNode_b0_bcm
  * Tmp Table Path:
  *  dbNode/tbackendId_relNode
  *  dbNode/tbackendId_relNode_forkName
@@ -444,32 +434,11 @@ static void relpath_parse_rnode(char *path, RelFileNodeForkNum &filenode)
             filenode.segno = ('\0' == *tmptoken) ? 0 : (BlockNumber)atooid(tmptoken);
         } else {
             /* 
-             *   Normal Table Path:
-             *      dbNode/relNode_forkName 
-             *   Hashbucket Table Path(e.g. bucketNode = 0):
-             *      dbNode/relNode/relNode_b0
-             *      dbNode/relNode/relNode_b0_fsm
-             *      dbNode/relNode/relNode_b0_bcm
+             *   dbNode/relNode_forkName 
              */
-            filenode.rnode.node.relNode = atooid(token); /* relNode or relNode/relNode */
+            filenode.rnode.node.relNode = atooid(token); /* relNode */
             filenode.rnode.node.bucketNode = InvalidBktId;
-            /* avoid _bcm */
-            if ('b' == *tmptoken && 'c' != *(tmptoken + 1)) {
-                tmptoken = tmptoken + 1;
-                filenode.rnode.node.bucketNode = (int2)atooid(tmptoken);
-                token = strtok_r(NULL, "_", &tmptoken);
-                if ('\0' == *tmptoken) {
-                    filenode.forknumber = MAIN_FORKNUM;
-                    token = strtok_r(token, ".", &tmptoken);
-                    if ('\0' != *tmptoken) {
-                        filenode.segno = (BlockNumber)atooid(tmptoken);
-                    }
-                } else {
-                    filenode.forknumber = forkname_to_number(tmptoken, NULL);
-                }
-            } else {
-                filenode.forknumber = forkname_to_number(tmptoken, &filenode.segno);
-            }
+            filenode.forknumber = forkname_to_number(tmptoken, &filenode.segno);
         }
     } else {
         tmptoken = tmptoken + 1; /* skip 't' */
@@ -539,10 +508,6 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
         *   Normal Table Path:
         *      base/dbNode/relNode
         *      base/dbNode/relNode_forkName 
-        *   Hashbucket Table Path(e.g. bucketNode = 0):
-        *      base/dbNode/relNode/relNode_b0
-        *      base/dbNode/relNode/relNode_b0_fsm
-        *      base/dbNode/relNode/relNode_b0_bcm
         *   Tmp Table Path:
         *      base/dbNode/tbackendId_relNode
         *      base/dbNode/tbackendId_relNode_forkName
@@ -554,10 +519,6 @@ RelFileNodeForkNum relpath_to_filenode(char* path)
          *   Normal Table Path:
          *      pg_tblspc/spcNode/version_dir/dbNode/relNode
          *      pg_tblspc/spcNode/version_dir/dbNode/relNode_forkName
-         *   Hashbucket Table Path(e.g. bucketNode = 0):
-         *      pg_tblspc/spcNode/version_dir/dbNode/relNode/relNode_b0
-         *      pg_tblspc/spcNode/version_dir/dbNode/relNode/relNode_b0_fsm
-         *      pg_tblspc/spcNode/version_dir/dbNode/relNode/relNode_b0_bcm
          *   Tmp Table File Path:
          *      pg_tblspc/spcNode/version_dir/dbNode/tbackendId_relNode
          *      pg_tblspc/spcNode/version_dir/dbNode/tbackendId_relNode_forkName
@@ -1043,6 +1004,7 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
     rnode.node.spcNode = ConvertToRelfilenodeTblspcOid(reltablespace);
     rnode.node.dbNode = (rnode.node.spcNode == GLOBALTABLESPACE_OID) ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
     rnode.node.bucketNode = InvalidBktId;
+
     /*
      * The relpath will vary based on the backend ID, so we must initialize
      * that properly here to make sure that any collisions based on filename
@@ -1080,6 +1042,13 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
              */
             collides = false;
         }
+        HTAB* relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+        bool found = false;
+        LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
+        if (hash_search(relfilenode_hashtbl, &rnode, HASH_FIND, &found) !=  NULL) {
+            collides = true;
+        }
+        LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
 
         pfree(rpath);
         rpath = NULL;

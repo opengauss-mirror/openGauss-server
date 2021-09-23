@@ -14,6 +14,7 @@
  * "Safe" memory allocation functions --- these exit(1) on failure
  */
 char *feparser_strdup(const char *in);
+char *feparser_strndup(const char *in, const size_t n);
 void *feparser_malloc(size_t size);
 void *feparser_malloc0(size_t size);
 void *feparser_malloc_extended(size_t size, int flags);

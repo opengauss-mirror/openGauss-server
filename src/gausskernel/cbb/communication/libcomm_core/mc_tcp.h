@@ -37,6 +37,7 @@
 #include <string.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include "../libcomm_common.h"
 
 #define TCP_LISTENQ 1024
 

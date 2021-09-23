@@ -4,7 +4,7 @@
  *
  * testlibpq.c
  *
- *		Test the C version of libpq, the PostgreSQL frontend library.
+ *		Test the C version of libpq, the openGauss frontend library.
  */
 #include <stdio.h>
 #include <stdlib.h>

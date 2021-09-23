@@ -22,6 +22,16 @@
 #define GIDSIZE 200
 #define MAX_PREP_XACT_VERSIONS 64
 
+#define TwoPhaseStateHashPartition(hashcode) ((hashcode) % NUM_TWOPHASE_PARTITIONS)
+#define TwoPhaseState(n) (t_thrd.xact_cxt.TwoPhaseState[TwoPhaseStateHashPartition(n)])
+
+#define TwoPhaseStateMappingPartitionLock(hashcode) (&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstTwoPhaseStateLock + \
+    TwoPhaseStateHashPartition(hashcode)].lock)
+#define TWOPAHSE_LWLOCK_ACQUIRE(xid, lockmode) ((void)LWLockAcquire(TwoPhaseStateMappingPartitionLock(xid), lockmode))
+
+#define TWOPAHSE_LWLOCK_RELEASE(xid) (LWLockRelease(TwoPhaseStateMappingPartitionLock(xid)))
+
+
 /*
  * GlobalTransactionData is defined in twophase.c; other places have no
  * business knowing the internal definition.
@@ -80,8 +90,8 @@ typedef struct GlobalTransactionData {
 /*
  * Header for a 2PC state file
  */
-#define TWOPHASE_MAGIC 0x57F94532 /* format identifier */
-
+const uint32 TWOPHASE_MAGIC = 0x57F94532; /* format identifier */
+const uint32 TWOPHASE_MAGIC_NEW = 0x57F94533;
 typedef struct TwoPhaseFileHeader {
     uint32 magic;            /* format identifier */
     uint32 total_len;        /* actual file length */
@@ -98,6 +108,13 @@ typedef struct TwoPhaseFileHeader {
     int32 ncommitlibrarys;   /* number of delete-on-commit library file  */
     int32 nabortlibrarys;    /* number of delete-on-abort library file */
 } TwoPhaseFileHeader;
+
+typedef struct TwoPhaseFileHeaderNew {
+    TwoPhaseFileHeader hdr;
+    int32 ncommitrels_temp;  /* number of delete-on-commit temp rels */
+    int32 nabortrels_temp;   /* number of delete-on-abort temp rels */
+} TwoPhaseFileHeaderNew;
+
 
 typedef struct ValidPrepXidData
 {
@@ -158,6 +175,7 @@ extern void CheckPointTwoPhase(XLogRecPtr redo_horizon);
 
 void DropBufferForDelRelinXlogUsingScan(ColFileNodeRel *delrels, int ndelrels);
 void DropBufferForDelRelsinXlogUsingHash(ColFileNodeRel *delrels, int ndelrels);
+bool relsContainsSegmentTable(ColFileNodeRel *delrels, int ndelrels);
 
 extern void FinishPreparedTransaction(const char* gid, bool isCommit);
 

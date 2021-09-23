@@ -27,6 +27,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_proc.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
@@ -37,13 +38,15 @@
 #include "optimizer/restrictinfo.h"
 #include "optimizer/var.h"
 #include "parser/parse_hint.h"
+#include "parser/parsetree.h"
 #include "utils/builtins.h"
 #include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
 
-#define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || (opfamily) == BOOL_HASH_FAM_OID)
+#define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
+    (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
 
 #define IndexCollMatchesExprColl(idxcollation, exprcollation) \
     ((idxcollation) == InvalidOid || (idxcollation) == (exprcollation))
@@ -102,7 +105,7 @@ static void get_index_paths(
 static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo* index, IndexClauseSet* clauses,
     bool useful_predicate, SaOpControl saop_control, ScanTypeControl scantype);
 static List* build_paths_for_OR(
-    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, bool justUseGloalPartIndex = false);
+    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, IndexFeature idx_feature);
 static List* drop_indexable_join_clauses(RelOptInfo* rel, List* clauses);
 static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, List* globalPartIndexPaths = NIL);
 static int path_usage_comparator(const void* a, const void* b);
@@ -217,8 +220,19 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
          * (generate_bitmap_or_paths() might be able to do something with
          * them, but that's of no concern here.)
          */
-        if (index->indpred != NIL && !index->predOK)
+        if (index->indpred != NIL && !index->predOK) {
             continue;
+        }
+
+        /*
+         * Build paths with global indexes only for un-bounded partition tables.
+         * The partition bounded tables should be handled by partition iterator
+         * or local indexes.
+         */
+        RangeTblEntry* rte = planner_rt_fetch(rel->relid, root);
+        if (index->isGlobal && rte && OidIsValid(rte->partitionOid)) {
+            continue;
+        }
 
         /*
          * Identify the restriction clauses that can match the index.
@@ -263,7 +277,11 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
          * If we found any plain or eclass join clauses, build parameterized
          * index paths using them.
          */
-        if (jclauseset.nonempty || eclauseset.nonempty)
+        if ((jclauseset.nonempty || eclauseset.nonempty)
+#ifdef ENABLE_MULTIPLE_NODES
+            && !WITHIN_SUBQUERY(root, rte)
+#endif   /* ENABLE_MULTIPLE_NODES */
+            )
             consider_index_join_clauses(root, rel, index, &rclauseset, &jclauseset, &eclauseset, &bitjoinpaths);
     }
 
@@ -283,14 +301,16 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
 
     /*
      * Generate BitmapOrPaths for any suitable OR-clauses present in the
-     * restriction list and joinorclauses just use global partition index.
+     * restriction list and joinorclauses just use featured index.
      * Add these to bitindexpaths.
      */
-    if (rel->isPartitionedTable) {
-        indexpaths = GenerateBitmapOrPathsUseGPI(root, rel, rel->baserestrictinfo, NIL, false);
+    IndexFeature indexFeature = getIndexFeature(rel->isPartitionedTable, (rel->bucketInfo != NULL));
+    if (indexFeature != NONFEATURED_INDEX) {
+        indexpaths = GenerateBitmapOrPathsWithFeaturedIndex(root, rel, rel->baserestrictinfo, NIL, false, indexFeature);
         bitindexpaths = list_concat(bitindexpaths, indexpaths);
 
-        indexpaths = GenerateBitmapOrPathsUseGPI(root, rel, joinorclauses, rel->baserestrictinfo, false);
+        indexpaths = GenerateBitmapOrPathsWithFeaturedIndex(root, rel, joinorclauses, rel->baserestrictinfo, false,
+            indexFeature);
         bitjoinpaths = list_concat(bitjoinpaths, indexpaths);
     }
 
@@ -383,6 +403,14 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
             add_path(root, rel, (Path*)bpath);
         }
     }
+}
+
+/*
+ * getIndexFeature
+ * Get index feature base on baserel feature.
+ */
+IndexFeature getIndexFeature(bool isPartitioned, bool hasBucket) {
+    return (IndexFeature)((int)isPartitioned | (((int)hasBucket) << 1));
 }
 
 /*
@@ -725,6 +753,67 @@ static inline bool index_relation_has_bucket(IndexOptInfo* index)
     return hasBucket;
 }
 
+inline bool IsEqRestrict(const RestrictInfo* rinfo)
+{
+    Expr* clause = rinfo->clause;
+    return is_opclause(clause) && get_oprrest(((OpExpr*)clause)->opno) == EQSELRETURNOID;
+}
+
+/*
+ * Check whether the indexqualcols in indexpath contain the given attNum and the 
+ * constraint condition on this attNum is equality constraints.
+ */
+inline bool HasAttNumAndEqRestrict(const IndexPath* newPath, const int attNum)
+{
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+    IndexOptInfo* newPathIndex = (IndexOptInfo*)newPath->indexinfo;
+    forboth (lc1, newPath->indexqualcols, lc2, newPath->indexquals) {
+        int i = lfirst_int(lc1);
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(lc2);
+        if (newPathIndex->indexkeys[i] == attNum && IsEqRestrict(rinfo))
+            return true;
+    }
+    return false;
+}
+
+/* 
+ * Check whether index path contain all the index columns and the constraint conditions 
+ * are equality constraints.
+ */
+inline bool ContainAllColsAndEqRestrict(const IndexPath* newPath, const IndexOptInfo* index)
+{
+    for (int pos = 0; pos < index->ncolumns; pos++) {
+        if (!HasAttNumAndEqRestrict(newPath, index->indexkeys[pos]))
+            return false;
+    }
+    return true;
+}
+
+/*
+ * For the given index, we want to mark whether the index contains the columns come from an 
+ * unique index and the constraint conditions on these columns are equality constraints. This 
+ * mark will be used in unique index first rule during path generation.
+ */
+void MarkUniqueIndexFirstRule(const RelOptInfo* rel, const IndexOptInfo* index, List* result)
+{
+    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && index->relam == BTREE_AM_OID) {
+        ListCell* lcr = NULL;
+        foreach (lcr, result) {
+            IndexPath* newPath = (IndexPath*)lfirst(lcr);
+            ListCell* lci = NULL;
+            foreach (lci, rel->indexlist) {
+                IndexOptInfo* indexToMatch = (IndexOptInfo*)lfirst(lci);
+                if (indexToMatch->relam == BTREE_AM_OID && indexToMatch->unique && 
+                    ContainAllColsAndEqRestrict(newPath, indexToMatch)) {
+                        newPath->rulesforindexgen |= BTREE_INDEX_CONTAIN_UNIQUE_COLS;
+                        break;
+                }
+            }
+        }
+    }
+}
+
 /*
  * build_index_paths
  *	  Given an index and a set of index clauses for it, construct zero
@@ -920,7 +1009,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
      * predicate, OR an index-only scan is possible.
      */
     if (found_clause || useful_pathkeys != NIL || useful_predicate || index_only_scan) {
-        if (relHasbkt) {
+        if (relHasbkt && !index->crossbucket) {
             useful_pathkeys = NIL;
         }
         ipath = create_index_path(root,
@@ -945,7 +1034,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
         index_pathkeys = build_index_pathkeys(root, index, BackwardScanDirection);
         useful_pathkeys = truncate_useless_pathkeys(root, rel, index_pathkeys);
         if (useful_pathkeys != NIL) {
-            if (relHasbkt) {
+            if (relHasbkt && !index->crossbucket) {
                 useful_pathkeys = NIL;
             }
             ipath = create_index_path(root,
@@ -963,6 +1052,13 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             result = lappend(result, ipath);
         }
     }
+
+    /*
+     * 6. Mark whether unique index fisrt rule satisfied in current btree index path. 
+     * The rules will be used for selecting paths. We will check whether current index path 
+     * contains a unique btree columns and the constraint conditions are equality constraints.
+     */
+    MarkUniqueIndexFirstRule(rel, index, result);
 
     return result;
 }
@@ -994,7 +1090,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
  * 'other_clauses' is the list of additional upper-level clauses
  */
 static List* build_paths_for_OR(
-    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, bool justUseGloalPartIndex)
+    PlannerInfo* root, RelOptInfo* rel, List* clauses, List* other_clauses, IndexFeature idx_feature)
 {
     List* result = NIL;
     List* all_clauses = NIL; /* not computed till needed */
@@ -1010,8 +1106,9 @@ static List* build_paths_for_OR(
         if (!index->amhasgetbitmap)
             continue;
 
-        /* Ignore global partition index if caller don't set use global part index flag */
-        if (index->isGlobal != justUseGloalPartIndex) {
+        /* Use indexes based on its feature */
+        IndexFeature feature = getIndexFeature(index->isGlobal, index->crossbucket);
+        if (feature != idx_feature) {
             continue;
         }
 
@@ -1139,7 +1236,7 @@ List* generate_bitmap_or_paths(
                 if (restriction_only)
                     andargs = drop_indexable_join_clauses(rel, andargs);
 
-                indlist = build_paths_for_OR(root, rel, andargs, all_clauses, false);
+                indlist = build_paths_for_OR(root, rel, andargs, all_clauses, NONFEATURED_INDEX);
 
                 /* Recurse in case there are sub-ORs */
                 indlist = list_concat(
@@ -1151,11 +1248,13 @@ List* generate_bitmap_or_paths(
                     break;
                 }
 
-                if (rel->isPartitionedTable) {
-                    globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, true);
+                IndexFeature indexFeature = getIndexFeature(rel->isPartitionedTable, (rel->bucketInfo != NULL));
+                if (indexFeature != NONFEATURED_INDEX) {
+                    globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, indexFeature);
                     /* Recurse in case there are sub-ORs */
                     globalIndexList = list_concat(globalIndexList,
-                        GenerateBitmapOrPathsUseGPI(root, rel, andargs, all_clauses, restriction_only));
+                        GenerateBitmapOrPathsWithFeaturedIndex(root, rel, andargs, all_clauses, restriction_only,
+                            indexFeature));
                 }
             } else {
                 List* orargs = NIL;
@@ -1170,7 +1269,7 @@ List* generate_bitmap_or_paths(
                 if (restriction_only)
                     orargs = drop_indexable_join_clauses(rel, orargs);
 
-                indlist = build_paths_for_OR(root, rel, orargs, all_clauses, false);
+                indlist = build_paths_for_OR(root, rel, orargs, all_clauses, NONFEATURED_INDEX);
 
                 /* If nothing matched this arm, we can't do anything with this OR clause */
                 if (indlist == NIL) {
@@ -1178,8 +1277,9 @@ List* generate_bitmap_or_paths(
                     break;
                 }
 
-                if (rel->isPartitionedTable) {
-                    globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, true);
+                IndexFeature indexFeature = getIndexFeature(rel->isPartitionedTable, (rel->bucketInfo != NULL));
+                if (indexFeature != NONFEATURED_INDEX) {
+                    globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, indexFeature);
                 }
             }
 
@@ -1205,10 +1305,11 @@ List* generate_bitmap_or_paths(
 }
 
 /*
- * GenerateBitmapOrPathsUseGlobalPartIndex
- *		Look through the list of clauses to find OR clauses, and generate
- *		a BitmapOrPath for each one we can handle that way.  Return a list
- *		of the generated BitmapOrPaths.
+ * GenerateBitmapOrPathsWithFeaturedIndex
+ * Generate BitmapOr paths With Special indexes,
+ * Look through the list of clauses to find OR clauses, and generate
+ * a BitmapOrPath for each one we can handle that way.  Return a list
+ * of the generated BitmapOrPaths.
  *
  * other_clauses is a list of additional clauses that can be assumed true
  * for the purpose of generating indexquals, but are not to be searched for
@@ -1219,16 +1320,14 @@ List* generate_bitmap_or_paths(
  * nor other_clauses contain any join clauses that are not ORs, as we do not
  * re-filter those lists.
  *
- * Notes: Just for partition table and just use global partition index.
+ * Notes: For partition/hashbucket table and use featured index.
  */
-List* GenerateBitmapOrPathsUseGPI(
-    PlannerInfo* root, RelOptInfo* rel, const List* clauses, List* other_clauses, bool restriction_only)
+List* GenerateBitmapOrPathsWithFeaturedIndex(PlannerInfo* root, RelOptInfo* rel, const List* clauses,
+    List* other_clauses, bool restriction_only, IndexFeature idx_feature)
 {
     List* result = NIL;
     List* all_clauses = NIL;
     ListCell* lc = NULL;
-
-    AssertEreport(rel->isPartitionedTable, MOD_OPT, "rel is incorrect");
 
     /*
      * We can use both the current and other clauses as context for
@@ -1263,10 +1362,12 @@ List* GenerateBitmapOrPathsUseGPI(
                 if (restriction_only)
                     andargs = drop_indexable_join_clauses(rel, andargs);
 
-                globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, true);
+                globalIndexList = build_paths_for_OR(root, rel, andargs, all_clauses, idx_feature);
                 /* Recurse in case there are sub-ORs */
                 globalIndexList = list_concat(
-                    globalIndexList, GenerateBitmapOrPathsUseGPI(root, rel, andargs, all_clauses, restriction_only));
+                    globalIndexList,
+                    GenerateBitmapOrPathsWithFeaturedIndex(root, rel, andargs, all_clauses, restriction_only,
+                        idx_feature));
             } else {
                 List* orargs = NIL;
 
@@ -1280,7 +1381,7 @@ List* GenerateBitmapOrPathsUseGPI(
                 if (restriction_only)
                     orargs = drop_indexable_join_clauses(rel, orargs);
 
-                globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, true);
+                globalIndexList = build_paths_for_OR(root, rel, orargs, all_clauses, idx_feature);
             }
 
             /*
@@ -1504,7 +1605,8 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
      * we can remove this limitation.  (But note that this also defends
      * against flat-out duplicate input paths, which can happen because
      * match_join_clauses_to_index will find the same OR join clauses that
-     * create_or_index_quals has pulled OR restriction clauses out of.)
+     * extract_restriction_or_clauses has pulled OR restriction clauses out
+     * of.)
      *
      * For the same reason, we reject AND combinations in which an index
      * predicate clause duplicates another clause.	Here we find it necessary
@@ -2339,7 +2441,7 @@ static bool match_rowcompare_to_indexcol(
     Oid expr_coll;
 
     /* Forget it if we're not dealing with a btree index */
-    if (index->relam != BTREE_AM_OID)
+    if (!OID_IS_BTREE(index->relam))
         return false;
 
     /*
@@ -2705,7 +2807,7 @@ bool eclass_member_matches_indexcol(EquivalenceClass* ec, EquivalenceMember* em,
      * generate_implied_equalities_for_indexcol; see
      * match_eclass_clauses_to_index.
      */
-    if (index->relam == BTREE_AM_OID && !list_member_oid(ec->ec_opfamilies, curFamily))
+    if (OID_IS_BTREE(index->relam) && !list_member_oid(ec->ec_opfamilies, curFamily))
         return false;
 
     /* We insist on collation match for all index types, though */
@@ -3164,15 +3266,17 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
         case OID_TEXT_ICREGEXEQ_OP:
             isIndexable =
                 (opfamily == TEXT_PATTERN_BTREE_FAM_OID) || (opfamily == TEXT_SPGIST_FAM_OID) ||
-                (opfamily == TEXT_BTREE_FAM_OID && (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)));
+                (opfamily == TEXT_PATTERN_UBTREE_FAM_OID) ||
+                ((opfamily == TEXT_BTREE_FAM_OID || opfamily == TEXT_UBTREE_FAM_OID) &&
+                 (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)));
             break;
 
         case OID_BPCHAR_LIKE_OP:
         case OID_BPCHAR_ICLIKE_OP:
         case OID_BPCHAR_REGEXEQ_OP:
         case OID_BPCHAR_ICREGEXEQ_OP:
-            isIndexable = (opfamily == BPCHAR_PATTERN_BTREE_FAM_OID) ||
-                          (opfamily == BPCHAR_BTREE_FAM_OID &&
+            isIndexable = (opfamily == BPCHAR_PATTERN_BTREE_FAM_OID || opfamily == BPCHAR_PATTERN_UBTREE_FAM_OID) ||
+                          ((opfamily == BPCHAR_BTREE_FAM_OID || opfamily == BPCHAR_UBTREE_FAM_OID) &&
                               (pstatus == Pattern_Prefix_Exact || lc_collate_is_c(idxcollation)));
             break;
 
@@ -3181,16 +3285,16 @@ static bool match_special_index_operator(Expr* clause, Oid opfamily, Oid idxcoll
         case OID_NAME_REGEXEQ_OP:
         case OID_NAME_ICREGEXEQ_OP:
             /* name uses locale-insensitive sorting */
-            isIndexable = (opfamily == NAME_BTREE_FAM_OID);
+            isIndexable = (opfamily == NAME_BTREE_FAM_OID || opfamily == NAME_UBTREE_FAM_OID);
             break;
 
         case OID_BYTEA_LIKE_OP:
-            isIndexable = (opfamily == BYTEA_BTREE_FAM_OID);
+            isIndexable = (opfamily == BYTEA_BTREE_FAM_OID || opfamily == BYTEA_UBTREE_FAM_OID);
             break;
 
         case OID_INET_SUB_OP:
         case OID_INET_SUBEQ_OP:
-            isIndexable = (opfamily == NETWORK_BTREE_FAM_OID);
+            isIndexable = (opfamily == NETWORK_BTREE_FAM_OID || opfamily == NETWORK_UBTREE_FAM_OID);
             break;
         default:
             break;
@@ -3703,19 +3807,25 @@ static List* prefix_quals(Node* leftop, Oid opfamily, Oid collation, Const* pref
         case TEXT_BTREE_FAM_OID:
         case TEXT_PATTERN_BTREE_FAM_OID:
         case TEXT_SPGIST_FAM_OID:
+        case TEXT_UBTREE_FAM_OID:
+        case TEXT_PATTERN_UBTREE_FAM_OID:
             datatype = TEXTOID;
             break;
 
         case BPCHAR_BTREE_FAM_OID:
         case BPCHAR_PATTERN_BTREE_FAM_OID:
+        case BPCHAR_UBTREE_FAM_OID:
+        case BPCHAR_PATTERN_UBTREE_FAM_OID:
             datatype = BPCHAROID;
             break;
 
         case NAME_BTREE_FAM_OID:
+        case NAME_UBTREE_FAM_OID:
             datatype = NAMEOID;
             break;
 
         case BYTEA_BTREE_FAM_OID:
+        case BYTEA_UBTREE_FAM_OID:
             datatype = BYTEAOID;
             break;
 

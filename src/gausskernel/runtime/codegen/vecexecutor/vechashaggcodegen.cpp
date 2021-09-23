@@ -477,6 +477,7 @@ void VecHashAggCodeGen::SonicHashAggCodeGen(VecAggState* node)
     if (NULL != jitted_sonicbatchagg)
         llvmCodeGen->addFunctionToMCJit(jitted_sonicbatchagg, reinterpret_cast<void**>(&(node->jitted_sonicbatchagg)));
 }
+
 template <bool isSglTbl>
 llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 {
@@ -511,11 +512,18 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 
     /* Define data types and some llvm consts */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
     DEFINE_CG_PTRTYPE(vectorBatchPtrType, "class.VectorBatch");
     DEFINE_CG_PTRTYPE(hashAggRunnerPtrType, "class.HashAggRunner");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
+    DEFINE_CG_PTRTYPE(hashSegTblPtrType, "struct.HashSegTbl");
 
     DEFINE_CGVAR_INT32(int32_m1, -1);
     DEFINE_CGVAR_INT32(int32_0, 0);
@@ -559,15 +567,15 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 
     /* get the number of rows of this batch : VectorBatch.m_rows */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* nValues = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    llvm::Value* nValues = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* mask = hashAggRunner.m_hashSize - 1 */
     Vals[1] = int32_pos_hAggR_hashSize;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals);
-    llvm::Value* maskval = builder.CreateAlignedLoad(tmpval, 8, "m_hashSize");
+    llvm::Value* maskval = builder.CreateLoad(int64Type, tmpval, "m_hashSize");
     maskval = builder.CreateSub(maskval, Datum_1, "mask");
 
-    /* HashAggRunner.BaseAggRunner.hashBasedOperator.m_cols */
+    /* HashAggRunner.BaseAggRunner.hashBasedOperator::m_cols */
     Vals4[3] = int32_pos_hBOper_cols;
     llvm::Value* m_colsVal = builder.CreateInBoundsGEP(hAggRunner, Vals4);
 
@@ -589,36 +597,36 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     llvm::Value** pVector = (llvm::Value**)palloc(sizeof(llvm::Value*) * numkeys);
     llvm::Value** pFlag = (llvm::Value**)palloc(sizeof(llvm::Value*) * numkeys);
 
-    /* HashAggRunner.BaseAggRunner.m_keyIdxInCell */
+    /* HashAggRunner.BaseAggRunner::m_keyIdxInCell */
     Vals3[0] = Datum_0;
     Vals3[1] = int32_0;
     Vals3[2] = int32_pos_bAggR_keyIdxInCell;
     llvm::Value* cellkeyIdx = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    cellkeyIdx = builder.CreateAlignedLoad(cellkeyIdx, 4, "keyIdxInCellArr");
+    cellkeyIdx = builder.CreateLoad(int32PtrType, cellkeyIdx, "keyIdxInCellArr");
     for (i = 0; i < numkeys; i++) {
         /* load keyIdx in cell */
         tmpval = llvmCodeGen->getIntConstant(INT4OID, i);
         keyIdxInCell[i] = builder.CreateInBoundsGEP(cellkeyIdx, tmpval);
-        keyIdxInCell[i] = builder.CreateAlignedLoad(keyIdxInCell[i], 4, "m_keyIdxInCell");
+        keyIdxInCell[i] = builder.CreateLoad(int32Type, keyIdxInCell[i], "m_keyIdxInCell");
     }
 
     /* load m_arr from batch data */
     Vals[0] = Datum_0;
     Vals[1] = int32_pos_batch_marr;
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* tmparr = builder.CreateAlignedLoad(tmpval, 8, "m_arr");
+    llvm::Value* tmparr = builder.CreateLoad(scalarVecPtrType, tmpval, "m_arr");
     for (i = 0; i < numkeys; i++) {
         /* load scalarvector from m_arr */
         AttrNumber key = keyIdx[i] - 1;
         Vals[0] = llvmCodeGen->getIntConstant(INT8OID, key);
         Vals[1] = int32_pos_scalvec_vals;
         llvm::Value* pVec = builder.CreateInBoundsGEP(tmparr, Vals);
-        pVector[i] = builder.CreateAlignedLoad(pVec, 8, "pVector");
+        pVector[i] = builder.CreateLoad(int64PtrType, pVec, "pVector");
 
         /* load flag information from m_arr */
         Vals[1] = int32_pos_scalvec_flag;
         llvm::Value* Flag = builder.CreateInBoundsGEP(tmparr, Vals);
-        pFlag[i] = builder.CreateAlignedLoad(Flag, 8, "pFlag");
+        pFlag[i] = builder.CreateLoad(int8PtrType, Flag, "pFlag");
     }
 
     /*
@@ -656,9 +664,9 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 
         /* load the phi_idx-th value and flag of the current key */
         llvm::Value* pval = builder.CreateInBoundsGEP(pVector[i], phi_idx);
-        pval = builder.CreateAlignedLoad(pval, 8, "pval");
+        pval = builder.CreateLoad(int64Type, pval, "pval");
         llvm::Value* pflag = builder.CreateInBoundsGEP(pFlag[i], phi_idx);
-        pflag = builder.CreateAlignedLoad(pflag, 1, "pflag");
+        pflag = builder.CreateLoad(int8Type, pflag, "pflag");
 
         hash_res = builder.CreateCall(func_hashbatch, {pval, pflag, hash_res});
     }
@@ -669,7 +677,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals3[2] = phi_idx;
     llvm::Value* hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
     llvm::Value* hash_res64 = builder.CreateZExt(hash_res, int64Type);
-    builder.CreateAlignedStore(hash_res64, hashValSlot, 8);
+    builder.CreateStore(hash_res64, hashValSlot);
 
     /* corresponding to  m_cacheLoc[i] = m_hashVal[i] & mask; (uint64) */
     llvm::Value* cacheLocVal = builder.CreateAnd(hash_res64, maskval, "cacheLoc");
@@ -677,7 +685,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals5[3] = int32_pos_hBOper_cacheLoc;
     Vals5[4] = phi_idx;
     llvm::Value* cacheLoc_i = builder.CreateInBoundsGEP(hAggRunner, Vals5);
-    builder.CreateAlignedStore(cacheLocVal, cacheLoc_i, 8);
+    builder.CreateStore(cacheLocVal, cacheLoc_i);
     llvm::Value* segmaxval = NULL;
     llvm::Value* nsegsval = NULL;
     llvm::Value* pos = NULL;
@@ -687,7 +695,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
         Vals[1] = int32_pos_hAggR_hsegmax;
         /* segmaxval, nsegsval and pos are for AgghashingCodeGen */
         segmaxval = builder.CreateInBoundsGEP(hAggRunner, Vals);
-        segmaxval = builder.CreateAlignedLoad(segmaxval, 4, "segmax");
+        segmaxval = builder.CreateLoad(int32Type, segmaxval, "segmax");
         segmaxval = builder.CreateSExt(segmaxval, int64Type);
         /* nsegs  =  m_cacheLoc[i] / m_hashseg_max */
         nsegsval = builder.CreateExactUDiv(cacheLocVal, segmaxval, "nsegs");
@@ -699,7 +707,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals[0] = Datum_0;
     Vals[1] = int32_pos_hAggR_hSegTbl;
     llvm::Value* hashData = builder.CreateInBoundsGEP(hAggRunner, Vals);
-    hashData = builder.CreateAlignedLoad(hashData, 8, "m_hashData");
+    hashData = builder.CreateLoad(hashSegTblPtrType, hashData, "m_hashData");
     if (isSglTbl) {
         Vals[0] = int32_0;
     } else {
@@ -707,13 +715,13 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     }
     Vals[1] = int32_1;
     llvm::Value* tbldata = builder.CreateInBoundsGEP(hashData, Vals);
-    tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
+    tbldata = builder.CreateLoad(hashCellPtrPtrType, tbldata, "tbl_data");
     if (isSglTbl) {
         tmpval = builder.CreateInBoundsGEP(tbldata, cacheLocVal);
     } else {
         tmpval = builder.CreateInBoundsGEP(tbldata, pos);
     }
-    llvm::Value* cellval = builder.CreateAlignedLoad(tmpval, 8, "cell");
+    llvm::Value* cellval = builder.CreateLoad(hashCellPtrType, tmpval, "cell");
 
     /* check if cell is NULL or not */
     tmpval = builder.CreatePtrToInt(cellval, int64Type);
@@ -733,7 +741,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     llvm::Value* nextcellval = builder.CreateInBoundsGEP(phi_cell, Vals3);
-    nextcellval = builder.CreateAlignedLoad(nextcellval, 8, "nextcellval");
+    nextcellval = builder.CreateLoad(hashCellPtrType, nextcellval, "nextcellval");
     tmpval = builder.CreatePtrToInt(nextcellval, int64Type);
     cmpval = builder.CreateICmpEQ(tmpval, Datum_0);
     builder.CreateCondBr(cmpval, alloc_hashslot, while_body);
@@ -744,14 +752,14 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     phi_cell->addIncoming(cellval, for_body);
 
     /* get hash value from current cell : cell->m_val[m_cols].val */
-    tmpval = builder.CreateAlignedLoad(m_colsVal, 4, "m_cols");
+    tmpval = builder.CreateLoad(int32Type, m_colsVal, "m_cols");
     tmpval = builder.CreateZExt(tmpval, int64Type);
     Vals4[0] = Datum_0;
     Vals4[1] = int32_pos_hcell_mval;
     Vals4[2] = tmpval;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(phi_cell, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 8, "hashval_cell");
+    tmpval = builder.CreateLoad(int64Type, tmpval, "hashval_cell");
     llvm::Value* cmp_hashval = builder.CreateICmpEQ(hash_res64, tmpval);
     builder.CreateCondBr(cmp_hashval, hashval_eq, next_cell);
 
@@ -777,9 +785,9 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
 
         /* load the phi_idx-th value and flag of the current key */
         llvm::Value* pval = builder.CreateInBoundsGEP(pVector[i], phi_idx);
-        pval = builder.CreateAlignedLoad(pval, 8, "pval");
+        pval = builder.CreateLoad(int64Type, pval, "pval");
         llvm::Value* pflag = builder.CreateInBoundsGEP(pFlag[i], phi_idx);
-        pflag = builder.CreateAlignedLoad(pflag, 1, "pflag");
+        pflag = builder.CreateLoad(int8Type, pflag, "pflag");
         llvm::Value* res = builder.CreateCall(func_matchonekey, {pval, pflag, phi_cell, keyIdxInCell[i]});
 
         cmpval = builder.CreateICmpEQ(res, Datum_0);
@@ -804,7 +812,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals4[2] = int32_pos_bAggR_Loc;
     Vals4[3] = phi_idx;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals4);
-    builder.CreateAlignedStore(phi_cell, tmpval, 8);
+    builder.CreateStore(phi_cell, tmpval);
     builder.CreateBr(for_inc);
 
     /* if (foundMatch == false){ allocate hash slot and initilize it } */
@@ -814,7 +822,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingCodeGenorSglTbl(VecAggState* node)
     Vals3[1] = int32_0;
     Vals3[2] = int32_pos_bAggR_keySimple;
     llvm::Value* simple_key = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    simple_key = builder.CreateAlignedLoad(simple_key, 4, "key_simple");
+    simple_key = builder.CreateLoad(int32Type, simple_key, "key_simple");
     if (isSglTbl) {
         WarpSglTblAllocHashSlotCodeGen(&builder, hAggRunner, batch, phi_idx, simple_key);
     } else {
@@ -887,12 +895,19 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
 
     /* Define data types and some llvm consts */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
     DEFINE_CG_PTRTYPE(vectorBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
     DEFINE_CG_PTRTYPE(hashAggRunnerPtrType, "class.HashAggRunner");
-
+    DEFINE_CG_PTRTYPE(hashSegTblPtrType, "struct.HashSegTbl");
+    
     DEFINE_CGVAR_INT32(int32_m1, -1);
     DEFINE_CGVAR_INT32(int32_0, 0);
     DEFINE_CGVAR_INT32(int32_1, 1);
@@ -934,12 +949,12 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
 
     /* get the number of rows of this batch : VectorBatch.m_rows */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* nValues = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    llvm::Value* nValues = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* mask = hashAggRunner.m_hashSize - 1  */
     Vals[1] = int32_pos_hAggR_hashSize;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals);
-    llvm::Value* maskval = builder.CreateAlignedLoad(tmpval, 8, "m_hashSize");
+    llvm::Value* maskval = builder.CreateLoad(int64Type, tmpval, "m_hashSize");
     maskval = builder.CreateSub(maskval, Datum_1, "mask");
 
     /* HashAggRunner.BaseAggRunner.hashBasedOperator.m_cols */
@@ -973,31 +988,31 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals3[1] = int32_0;
     Vals3[2] = int32_pos_bAggR_keyIdxInCell;
     llvm::Value* cellkeyIdx = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    cellkeyIdx = builder.CreateAlignedLoad(cellkeyIdx, 4, "keyIdxInCellArr");
+    cellkeyIdx = builder.CreateLoad(int32PtrType, cellkeyIdx, "keyIdxInCellArr");
     for (i = 0; i < numkeys; i++) {
         /* load keyIdx in cell */
         tmpval = llvmCodeGen->getIntConstant(INT4OID, i);
         keyIdxInCell[i] = builder.CreateInBoundsGEP(cellkeyIdx, tmpval);
-        keyIdxInCell[i] = builder.CreateAlignedLoad(keyIdxInCell[i], 4, "m_keyIdxInCell");
+        keyIdxInCell[i] = builder.CreateLoad(int32Type, keyIdxInCell[i], "m_keyIdxInCell");
     }
 
     /* load m_arr from batch data */
     Vals[0] = Datum_0;
     Vals[1] = int32_pos_batch_marr;
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    llvm::Value* tmparr = builder.CreateAlignedLoad(tmpval, 8, "m_arr");
+    llvm::Value* tmparr = builder.CreateLoad(scalarVecPtrType, tmpval, "m_arr");
     for (i = 0; i < numkeys; i++) {
         /* load scalarvector from m_arr */
         AttrNumber key = keyIdx[i] - 1;
         Vals[0] = llvmCodeGen->getIntConstant(INT8OID, key);
         Vals[1] = int32_pos_scalvec_vals;
         llvm::Value* pVec = builder.CreateInBoundsGEP(tmparr, Vals);
-        pVector[i] = builder.CreateAlignedLoad(pVec, 8, "pVector");
+        pVector[i] = builder.CreateLoad(int64PtrType, pVec, "pVector");
 
         /* load flag information from m_arr */
         Vals[1] = int32_pos_scalvec_flag;
         llvm::Value* Flag = builder.CreateInBoundsGEP(tmparr, Vals);
-        pFlag[i] = builder.CreateAlignedLoad(Flag, 8, "pFlag");
+        pFlag[i] = builder.CreateLoad(int8PtrType, Flag, "pFlag");
     }
 
     /*
@@ -1034,9 +1049,9 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
 
         /* load the phi_idx-th value and flag of the current key */
         llvm::Value* pval = builder.CreateInBoundsGEP(pVector[i], phi_idx);
-        pval = builder.CreateAlignedLoad(pval, 8, "pval");
+        pval = builder.CreateLoad(int64Type, pval, "pval");
         llvm::Value* pflag = builder.CreateInBoundsGEP(pFlag[i], phi_idx);
-        pflag = builder.CreateAlignedLoad(pflag, 1, "pflag");
+        pflag = builder.CreateLoad(int8Type, pflag, "pflag");
 
         hash_res = builder.CreateCall(func_hashbatch, {pval, pflag, hash_res});
     }
@@ -1047,7 +1062,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals3[2] = phi_idx;
     llvm::Value* hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
     llvm::Value* hash_res64 = builder.CreateZExt(hash_res, int64Type);
-    builder.CreateAlignedStore(hash_res64, hashValSlot, 8);
+    builder.CreateStore(hash_res64, hashValSlot);
     builder.CreateBr(hashing_for_inc);
 
     builder.SetInsertPoint(hashing_for_inc);
@@ -1091,7 +1106,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals3[1] = int32_pos_hAggR_hashVal;
     Vals3[2] = phi_idx;
     hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    hash_res64 = builder.CreateAlignedLoad(hashValSlot, 8, "m_hashVal");
+    hash_res64 = builder.CreateLoad(int64Type, hashValSlot, "m_hashVal");
     hash_res = builder.CreateTrunc(hash_res64, int32Type);
 
     /* corresponding to  m_cacheLoc[i] = m_hashVal[i] & mask; (uint64) */
@@ -1100,7 +1115,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals5[3] = int32_pos_hBOper_cacheLoc;
     Vals5[4] = phi_idx;
     llvm::Value* cacheLoc_i = builder.CreateInBoundsGEP(hAggRunner, Vals5);
-    builder.CreateAlignedStore(cacheLocVal, cacheLoc_i, 8);
+    builder.CreateStore(cacheLocVal, cacheLoc_i);
 
     /* segmaxval, nsegsval and pos are for AgghashingCodeGen */
     llvm::Value* segmaxval = NULL;
@@ -1111,7 +1126,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
         Vals[0] = Datum_0;
         Vals[1] = int32_pos_hAggR_hsegmax;
         segmaxval = builder.CreateInBoundsGEP(hAggRunner, Vals);
-        segmaxval = builder.CreateAlignedLoad(segmaxval, 4, "segmax");
+        segmaxval = builder.CreateLoad(int32Type, segmaxval, "segmax");
         segmaxval = builder.CreateSExt(segmaxval, int64Type);
         /* nsegs  =  m_cacheLoc[i] / m_hashseg_max */
         nsegsval = builder.CreateExactUDiv(cacheLocVal, segmaxval, "nsegs");
@@ -1123,7 +1138,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals[0] = Datum_0;
     Vals[1] = int32_pos_hAggR_hSegTbl;
     llvm::Value* hashData = builder.CreateInBoundsGEP(hAggRunner, Vals);
-    hashData = builder.CreateAlignedLoad(hashData, 8, "m_hashData");
+    hashData = builder.CreateLoad(hashSegTblPtrType, hashData, "m_hashData");
     if (isSglTbl) {
         Vals[0] = int32_0;
     } else {
@@ -1131,13 +1146,13 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     }
     Vals[1] = int32_1;
     llvm::Value* tbldata = builder.CreateInBoundsGEP(hashData, Vals);
-    tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
+    tbldata = builder.CreateLoad(hashCellPtrPtrType, tbldata, "tbl_data");
     if (isSglTbl) {
         tmpval = builder.CreateInBoundsGEP(tbldata, cacheLocVal);
     } else {
         tmpval = builder.CreateInBoundsGEP(tbldata, pos);
     }
-    llvm::Value* cellval = builder.CreateAlignedLoad(tmpval, 8, "cell");
+    llvm::Value* cellval = builder.CreateLoad(hashCellPtrType, tmpval, "cell");
     /* check if cell is NULL or not */
     tmpval = builder.CreatePtrToInt(cellval, int64Type);
     cmpval = builder.CreateICmpEQ(tmpval, Datum_0);
@@ -1153,7 +1168,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals3[1] = int32_0;
     Vals3[2] = int32_0;
     llvm::Value* nextcellval = builder.CreateInBoundsGEP(phi_cell, Vals3);
-    nextcellval = builder.CreateAlignedLoad(nextcellval, 8, "nextcellval");
+    nextcellval = builder.CreateLoad(hashCellPtrType, nextcellval, "nextcellval");
     tmpval = builder.CreatePtrToInt(nextcellval, int64Type);
     cmpval = builder.CreateICmpEQ(tmpval, Datum_0);
     builder.CreateCondBr(cmpval, alloc_hashslot, while_body);
@@ -1164,14 +1179,14 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     phi_cell->addIncoming(cellval, for_body);
 
     /* get hash value from current cell : cell->m_val[m_cols].val */
-    tmpval = builder.CreateAlignedLoad(m_colsVal, 4, "m_cols");
+    tmpval = builder.CreateLoad(int32Type, m_colsVal, "m_cols");
     tmpval = builder.CreateZExt(tmpval, int64Type);
     Vals4[0] = Datum_0;
     Vals4[1] = int32_pos_hcell_mval;
     Vals4[2] = tmpval;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(phi_cell, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 8, "hashval_cell");
+    tmpval = builder.CreateLoad(int64Type, tmpval, "hashval_cell");
     llvm::Value* cmp_hashval = builder.CreateICmpEQ(hash_res64, tmpval);
     builder.CreateCondBr(cmp_hashval, hashval_eq, next_cell);
 
@@ -1197,9 +1212,9 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
 
         /* load the phi_idx-th value and flag of the current key */
         llvm::Value* pval = builder.CreateInBoundsGEP(pVector[i], phi_idx);
-        pval = builder.CreateAlignedLoad(pval, 8, "pval");
+        pval = builder.CreateLoad(int64Type, pval, "pval");
         llvm::Value* pflag = builder.CreateInBoundsGEP(pFlag[i], phi_idx);
-        pflag = builder.CreateAlignedLoad(pflag, 1, "pflag");
+        pflag = builder.CreateLoad(int8Type, pflag, "pflag");
         llvm::Value* res = builder.CreateCall(func_matchonekey, {pval, pflag, phi_cell, keyIdxInCell[i]});
 
         cmpval = builder.CreateICmpEQ(res, Datum_0);
@@ -1224,7 +1239,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals4[2] = int32_pos_bAggR_Loc;
     Vals4[3] = phi_idx;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals4);
-    builder.CreateAlignedStore(phi_cell, tmpval, 8);
+    builder.CreateStore(phi_cell, tmpval);
     builder.CreateBr(for_inc);
 
     /* if (foundMatch == false){ allocate hash slot and initilize it } */
@@ -1234,7 +1249,7 @@ llvm::Function* VecHashAggCodeGen::AgghashingWithPrefetchCodeGenorSglTbl(VecAggS
     Vals3[1] = int32_0;
     Vals3[2] = int32_pos_bAggR_keySimple;
     llvm::Value* simple_key = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    simple_key = builder.CreateAlignedLoad(simple_key, 4, "key_simple");
+    simple_key = builder.CreateLoad(int32Type, simple_key, "key_simple");
     WarpAllocHashSlotCodeGen(&builder, hAggRunner, batch, phi_idx, simple_key);
     builder.CreateBr(for_inc);
 
@@ -1292,14 +1307,17 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int32PtrType, INT4OID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
-    DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
-    DEFINE_CG_PTRTYPE(vectorBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
+    DEFINE_CG_PTRTYPE(exprCxtPtrType, "struct.ExprContext");
+    DEFINE_CG_PTRTYPE(vecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
     DEFINE_CG_PTRTYPE(hashAggRunnerPtrType, "class.HashAggRunner");
     DEFINE_CG_PTRTYPE(numericPtrType, "struct.NumericData");
-    llvm::Type* hashCellPtrPtrType = llvmCodeGen->getPtrType(hashCellPtrType);
+    DEFINE_CG_PTRTYPE(memCxtDataPtrType, "struct.MemoryContextData");
 
     /* create LLVM value with {uint16, int64} format type */
     llvm::Type* Elements[] = {int16Type, int64Type};
@@ -1338,32 +1356,32 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "JittedFastBatchAgg", voidType);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("haRuner", hashAggRunnerPtrType));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("Loc", hashCellPtrPtrType));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vectorBatchPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vecBatchPtrType));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("aggIdx", int32PtrType));
     jitted_batchagg = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
     llvm::Value* hAggRunner = llvmargs[0];
-    llvm::Value* Loc = llvmargs[1];
+    llvm::Value* hashCellPP = llvmargs[1];
     llvm::Value* batch = llvmargs[2];
     llvm::Value* aggIdx = llvmargs[3];
 
     /* parameter used to mark if this tuple is NULL or not */
     llvm::Value* isNull = builder.CreateAlloca(int8Type);
 
-    /* HashAggRunner.BaseAggRunner.hashBasedOperator.m_hashContext */
+    /* HashAggRunner.BaseAggRunner.hashBasedOperator::m_hashContext */
     Vals4[3] = int32_pos_hBOper_hcxt;
     llvm::Value* hcxt = builder.CreateInBoundsGEP(hAggRunner, Vals4);
-    hcxt = builder.CreateAlignedLoad(hcxt, 8, "hashContext");
+    hcxt = builder.CreateLoad(memCxtDataPtrType, hcxt, "hashContext");
 
     /* get the nrows of the batch */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    nValues = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    nValues = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* get vectorBatch.m_arr of the batch */
     Vals[0] = int64_0;
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* argVector = builder.CreateInBoundsGEP(batch, Vals);
-    argVector = builder.CreateAlignedLoad(argVector, 8, "m_arr");
+    argVector = builder.CreateLoad(scalarVecPtrType, argVector, "m_arr");
 
     /* pre-load all the expression context */
     llvm::Value** econtext = (llvm::Value**)palloc(sizeof(llvm::Value*) * numaggs);
@@ -1373,7 +1391,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
         aggref = (Aggref*)(peraggstate->aggref);
         if (peraggstate->evalproj != NULL && aggref->aggfnoid != COUNTOID) {
             ExprContext* exprcontext = peragg[numaggs - 1 - i].evalproj->pi_exprContext;
-            econtext[i] = llvmCodeGen->CastPtrToLlvmPtr(ExprContextPtrType, exprcontext);
+            econtext[i] = llvmCodeGen->CastPtrToLlvmPtr(exprCxtPtrType, exprcontext);
         }
     }
 
@@ -1387,7 +1405,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     for (i = 0; i < numaggs; i++) {
         llvm::Value* tmpidx = llvmCodeGen->getIntConstant(INT4OID, i);
         tmpval = builder.CreateInBoundsGEP(aggIdx, tmpidx);
-        tmpval = builder.CreateAlignedLoad(tmpval, 4, "aggIdx");
+        tmpval = builder.CreateLoad(int32Type, tmpval, "aggIdx");
         aggIdxList[i] = builder.CreateSExt(tmpval, int64Type);
 
         agg_bb[i] = llvm::BasicBlock::Create(context, "agg_bb", jitted_batchagg);
@@ -1414,10 +1432,10 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
     /* HashAggRunner.BaseAggRunner.m_econtext */
     Vals3[2] = int32_pos_bAggR_econtext;
     llvm::Value* mecontext = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    mecontext = builder.CreateAlignedLoad(mecontext, 8, "m_econtext");
+    mecontext = builder.CreateLoad(exprCxtPtrType, mecontext, "m_econtext");
     Vals[1] = int32_pos_ecxt_pertuple;
     llvm::Value* agg_expr_context = builder.CreateInBoundsGEP(mecontext, Vals);
-    agg_expr_context = builder.CreateAlignedLoad(agg_expr_context, 8, "agg_per_tuple_memory");
+    agg_expr_context = builder.CreateLoad(memCxtDataPtrType, agg_expr_context, "agg_per_tuple_memory");
     llvm::Value* agg_oldcontext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, agg_expr_context);
 
     /*
@@ -1439,13 +1457,13 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
                 Vals[1] = int32_pos_scalvec_vals;
                 tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-                tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_vals");
+                tmpval = builder.CreateLoad(int64PtrType, tmpval, "m_vals");
                 batch_vals[i] = tmpval;
 
                 /* m_arr[varNumber].m_flag */
                 Vals[1] = int32_pos_scalvec_flag;
                 llvm::Value* argFlag = builder.CreateInBoundsGEP(argVector, Vals);
-                argFlag = builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+                argFlag = builder.CreateLoad(int8PtrType, argFlag, "m_flag");
                 batch_flag[i] = argFlag;
             }
         }
@@ -1470,15 +1488,15 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
             func_prefetch = prefetchBatchAggregationCodeGen();
         }
         llvm::Value* nrows = builder.CreateZExt(nValues, int64Type);
-        builder.CreateCall(func_prefetch, {Loc, phi_idx, nrows});
+        builder.CreateCall(func_prefetch, {hashCellPP, phi_idx, nrows});
     }
 
     /*
      * get the hashcell : cell = Loc[i] (see vnumeric_sum and vint8_sum)
      * and check if it is NULL
      */
-    tmpval = builder.CreateInBoundsGEP(Loc, phi_idx);
-    cell = builder.CreateAlignedLoad(tmpval, 8, "hashCell");
+    tmpval = builder.CreateInBoundsGEP(hashCellPP, phi_idx);
+    cell = builder.CreateLoad(hashCellPtrType, tmpval, "hashCell");
     tmpval = builder.CreatePtrToInt(cell, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
     builder.CreateCondBr(tmpval, for_inc, agg_bb[0]);
@@ -1525,19 +1543,19 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                     /* m_arr[varNumber].m_vals */
                     tmpval = batch_vals[i];
                     tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                    result = builder.CreateAlignedLoad(tmpval, 8, "val");
+                    result = builder.CreateLoad(int64Type, tmpval, "val");
 
                     /* m_arr[varNumber].m_flag */
                     tmpval = batch_flag[i];
                     tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                    tmpval = builder.CreateAlignedLoad(tmpval, 1, "flag");
-                    builder.CreateAlignedStore(tmpval, isNull, 1);
+                    tmpval = builder.CreateLoad(int8Type, tmpval, "flag");
+                    builder.CreateStore(tmpval, isNull);
                 } else {
                     /* set the batch information : econtext->ecxt_outerbatch = batch */
                     Vals[0] = int64_0;
                     Vals[1] = int32_pos_ecxt_outerbatch;
                     llvm::Value* tmp_outerbatch = builder.CreateInBoundsGEP(econtext[i], Vals);
-                    builder.CreateAlignedStore(batch, tmp_outerbatch, 8);
+                    builder.CreateStore(batch, tmp_outerbatch);
 
                     /*
                      * If fast_aggref is true, we could try to evaluate the
@@ -1570,7 +1588,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 
                         /* expres is already in {int16, int64} format */
                         builder.SetInsertPoint(bb_last);
-                        builder.CreateAlignedStore(int8_0, isNull, 1);
+                        builder.CreateStore(int8_0, isNull);
                         llvm::Value* tmp_scale = builder.CreateExtractValue(tmpexpres, 0);
                         llvm::Value* tmp_value = builder.CreateExtractValue(tmpexpres, 1);
                         expres = llvm::UndefValue::get(SiNumeric64Type);
@@ -1580,7 +1598,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 
                         /* construct a null value, and no need to do aggregation */
                         builder.SetInsertPoint(bb_null);
-                        builder.CreateAlignedStore(int8_1, isNull, 1);
+                        builder.CreateStore(int8_1, isNull);
                         if (i == numaggs - 1)
                             builder.CreateBr(for_inc);
                         else
@@ -1594,7 +1612,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_ecxt_pertuple;
                         llvm::Value* curr_Context = builder.CreateInBoundsGEP(econtext[i], Vals);
-                        curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+                        curr_Context = builder.CreateLoad(memCxtDataPtrType, curr_Context, "per_tuple_memory");
                         llvm::Value* cg_oldContext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, curr_Context);
                         result = EvalSimpleExprInBatchAgg(estate, builder, econtext[i], phi_idx, isNull);
                         /* return back to the old memory context */
@@ -1607,7 +1625,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_ecxt_pertuple;
                         llvm::Value* curr_Context = builder.CreateInBoundsGEP(econtext[i], Vals);
-                        curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+                        curr_Context = builder.CreateLoad(memCxtDataPtrType, curr_Context, "per_tuple_memory");
                         llvm::Value* cg_oldContext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, curr_Context);
                         /* corresponding to ExecVecProject(peraggstate->evalproj) */
                         result = EvalSimpleExprInBatchAgg(estate, builder, econtext[i], phi_idx, isNull);
@@ -1622,7 +1640,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                  * is not null.
                  */
                 result = int64_0;
-                builder.CreateAlignedStore(int8_0, isNull, 1);
+                builder.CreateStore(int8_0, isNull);
             }
         } else {
             /*
@@ -1636,17 +1654,17 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
                 Vals[1] = int32_pos_scalvec_vals;
                 tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-                tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_vals");
+                tmpval = builder.CreateLoad(int64PtrType, tmpval, "m_vals");
                 tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                result = builder.CreateAlignedLoad(tmpval, 8, "val");
+                result = builder.CreateLoad(int64Type, tmpval, "val");
 
                 /* m_arr[varNumber].m_flag */
                 Vals[1] = int32_pos_scalvec_flag;
                 llvm::Value* argFlag = builder.CreateInBoundsGEP(argVector, Vals);
-                argFlag = builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+                argFlag = builder.CreateLoad(int8PtrType, argFlag, "m_flag");
                 tmpval = builder.CreateInBoundsGEP(argFlag, phi_idx);
-                tmpval = builder.CreateAlignedLoad(tmpval, 1, "flag");
-                builder.CreateAlignedStore(tmpval, isNull, 1);
+                tmpval = builder.CreateLoad(int8Type, tmpval, "flag");
+                builder.CreateStore(tmpval, isNull);
             } else {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -1682,7 +1700,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
              * the flag and do aggregation.
              */
             /* see if IS_NULL(flag[phi_idx]) == false */
-            llvm::Value* tmpnull = builder.CreateAlignedLoad(isNull, 1, "tmpnull");
+            llvm::Value* tmpnull = builder.CreateLoad(int8Type, isNull, "tmpnull");
             tmpnull = builder.CreateAnd(tmpnull, int8_1);
             llvm::Value* flag_cmp = builder.CreateICmpEQ(tmpnull, int8_0);
             builder.CreateCondBr(flag_cmp, flag_then[i], flag_else[i]);
@@ -1727,7 +1745,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* get the flag of the hash cell and check if it is NULL */
                         Vals4[3] = int32_1;
                         llvm::Value* cellflag = builder.CreateInBoundsGEP(cell, Vals4);
-                        tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellFlag");
+                        tmpval = builder.CreateLoad(int8Type, cellflag, "cellFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -1744,8 +1762,8 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
 
-                        builder.CreateAlignedStore(tmpval, cellval, 8);
-                        builder.CreateAlignedStore(int8_0, cellflag, 1);
+                        builder.CreateStore(tmpval, cellval);
+                        builder.CreateStore(int8_0, cellflag);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -1769,14 +1787,14 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[2] = int32_0;
                         Vals4[3] = int32_0;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "biheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "biheader");
                         llvm::Value* rflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* extract the header of hashcell to check if it is BINumeric */
-                        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+                        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
                         llvm::Value* cellarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(cellarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "cellheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "cellheader");
                         llvm::Value* lflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* check if either of them is not BI64 */
@@ -1795,12 +1813,12 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[3] = int32_1;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
                         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-                        llvm::Value* resval = builder.CreateAlignedLoad(tmpval, 8, "value");
+                        llvm::Value* resval = builder.CreateLoad(int64Type, tmpval, "value");
 
                         /* locate the restore value in hash cell by position */
                         llvm::Value* cell_addr = builder.CreateAdd(real_cellval, int64_6);
                         cell_addr = builder.CreateIntToPtr(cell_addr, int64PtrType);
-                        llvm::Value* mid_cell_val = builder.CreateAlignedLoad(cell_addr, 8);
+                        llvm::Value* mid_cell_val = builder.CreateLoad(int64Type, cell_addr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -1827,7 +1845,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, cell_addr, 8);
+                        builder.CreateStore(sumval, cell_addr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -1867,7 +1885,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* get the flag of the hash cell and check if it is NULL */
                         Vals4[3] = int32_1;
                         llvm::Value* cellflag = builder.CreateInBoundsGEP(cell, Vals4);
-                        tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellFlag");
+                        tmpval = builder.CreateLoad(int8Type, cellflag, "cellFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -1888,8 +1906,8 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
 
-                        builder.CreateAlignedStore(tmpval, cellval, 8);
-                        builder.CreateAlignedStore(int8_0, cellflag, 1);
+                        builder.CreateStore(tmpval, cellval);
+                        builder.CreateStore(int8_0, cellflag);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -1899,7 +1917,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 
                         /* cell not be null, do aggregation */
                         builder.SetInsertPoint(agg_else);
-                        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+                        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
 
                         /* first make sure the value in cell is BI64 format */
                         Vals4[0] = int64_0;
@@ -1908,7 +1926,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[3] = int32_0;
                         llvm::Value* cellarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(cellarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "cellheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "cellheader");
                         llvm::Value* biflag = builder.CreateAnd(tmpval, val_mask);
                         llvm::Value* isbi64 = builder.CreateICmpEQ(biflag, val_binum64);
                         builder.CreateCondBr(isbi64, expr_bisum_bb, bioverflow_bb);
@@ -1920,7 +1938,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         builder.SetInsertPoint(expr_bisum_bb);
                         llvm::Value* cell_ptr = builder.CreateAdd(real_cellval, int64_6);
                         cell_ptr = builder.CreateIntToPtr(cell_ptr, int64PtrType);
-                        llvm::Value* mid_cell_val = builder.CreateAlignedLoad(cell_ptr, 8);
+                        llvm::Value* mid_cell_val = builder.CreateLoad(int64Type, cell_ptr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -1958,7 +1976,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* if there is no overflow, extract result directly */
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, cell_ptr, 8);
+                        builder.CreateStore(sumval, cell_ptr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -2004,7 +2022,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         llvm::Value* cellflag2 = builder.CreateInBoundsGEP(cell, Vals4);
 
                         /* Now load the cell flag and check it */
-                        tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellFlag");
+                        tmpval = builder.CreateLoad(int8Type, cellflag, "cellFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -2016,14 +2034,14 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
-                        builder.CreateAlignedStore(tmpval, cellval, 8);
+                        builder.CreateStore(tmpval, cellval);
 
                         /* count set to be one */
-                        builder.CreateAlignedStore(int64_1, cellval2, 8);
+                        builder.CreateStore(int64_1, cellval2);
 
                         /* set cell flag */
-                        builder.CreateAlignedStore(int8_0, cellflag, 1);
-                        builder.CreateAlignedStore(int8_0, cellflag2, 1);
+                        builder.CreateStore(int8_0, cellflag);
+                        builder.CreateStore(int8_0, cellflag2);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -2046,14 +2064,14 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[2] = int32_0;
                         Vals4[3] = int32_0;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "biheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "biheader");
                         llvm::Value* rflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* extract the header of hashcell to check if it is BINumeric */
-                        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+                        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
                         llvm::Value* cellarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(cellarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "cellheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "cellheader");
                         llvm::Value* lflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* check if either of them is not BI64 */
@@ -2072,11 +2090,11 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[3] = int32_1;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
                         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-                        llvm::Value* resval = builder.CreateAlignedLoad(tmpval, 8, "value");
+                        llvm::Value* resval = builder.CreateLoad(int64Type, tmpval, "value");
 
                         llvm::Value* cell_addr = builder.CreateAdd(real_cellval, int64_6);
                         cell_addr = builder.CreateIntToPtr(cell_addr, int64PtrType);
-                        llvm::Value* mid_cell_val = builder.CreateAlignedLoad(cell_addr, 8);
+                        llvm::Value* mid_cell_val = builder.CreateLoad(int64Type, cell_addr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -2102,12 +2120,12 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
 
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, cell_addr, 8);
+                        builder.CreateStore(sumval, cell_addr);
 
                         /* cell->m_val[idx+1].val++ */
-                        tmpval = builder.CreateAlignedLoad(cellval2, 8, "count");
+                        tmpval = builder.CreateLoad(int64Type, cellval2, "count");
                         tmpval = builder.CreateAdd(tmpval, int64_1);
-                        builder.CreateAlignedStore(tmpval, cellval2, 8);
+                        builder.CreateStore(tmpval, cellval2);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -2151,7 +2169,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[2] = builder.CreateAdd(aggIdxList[i], int64_1, "flag_plus");
                         llvm::Value* cellflag2 = builder.CreateInBoundsGEP(cell, Vals4);
 
-                        tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellFlag");
+                        tmpval = builder.CreateLoad(int8Type, cellflag, "cellFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -2170,12 +2188,12 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         tmpval = DatumGetBINumericCodeGen(&builder, tmpval);
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
-                        builder.CreateAlignedStore(tmpval, cellval, 8);
+                        builder.CreateStore(tmpval, cellval);
                         /* count set to be one */
-                        builder.CreateAlignedStore(int64_1, cellval2, 8);
+                        builder.CreateStore(int64_1, cellval2);
                         /* set the flag of hashcell */
-                        builder.CreateAlignedStore(int8_0, cellflag, 1);
-                        builder.CreateAlignedStore(int8_0, cellflag2, 1);
+                        builder.CreateStore(int8_0, cellflag);
+                        builder.CreateStore(int8_0, cellflag2);
 
                         /* turn to next basicblock */
                         if (i == numaggs - 1)
@@ -2184,7 +2202,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                             builder.CreateBr(agg_bb[i + 1]);
 
                         builder.SetInsertPoint(agg_else);
-                        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+                        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
 
                         /* first make sure the value in cell is BI64 format */
                         Vals4[0] = int64_0;
@@ -2193,7 +2211,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         Vals4[3] = int32_0;
                         llvm::Value* cellarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(cellarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "cellheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "cellheader");
                         llvm::Value* biflag = builder.CreateAnd(tmpval, val_mask);
                         llvm::Value* isbi64 = builder.CreateICmpEQ(biflag, val_binum64);
                         builder.CreateCondBr(isbi64, expr_bisum_bb, bioverflow_bb);
@@ -2205,7 +2223,7 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         builder.SetInsertPoint(expr_bisum_bb);
                         llvm::Value* cell_ptr = builder.CreateAdd(real_cellval, int64_6);
                         cell_ptr = builder.CreateIntToPtr(cell_ptr, int64PtrType);
-                        llvm::Value* mid_cell_val = builder.CreateAlignedLoad(cell_ptr, 8);
+                        llvm::Value* mid_cell_val = builder.CreateLoad(int64Type, cell_ptr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -2244,12 +2262,12 @@ llvm::Function* VecHashAggCodeGen::BatchAggregationCodeGen(VecAggState* node, bo
                         /* if there is no overflow, extract result directly */
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, cell_ptr, 8);
+                        builder.CreateStore(sumval, cell_ptr);
 
                         /* cell->m_val[idx+1].val++ */
-                        tmpval = builder.CreateAlignedLoad(cellval2, 8, "count");
+                        tmpval = builder.CreateLoad(int64Type, cellval2, "count");
                         tmpval = builder.CreateAdd(tmpval, int64_1);
-                        builder.CreateAlignedStore(tmpval, cellval2, 8);
+                        builder.CreateStore(tmpval, cellval2);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -2355,6 +2373,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
 
     /* Define data types and some llvm consts */
     DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -2434,7 +2453,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
                 while (len >= 8) {
                     kidx = llvmCodeGen->getIntConstant(INT4OID, k);
                     pval = builder.CreateInBoundsGEP(big_data, kidx);
-                    pval = builder.CreateAlignedLoad(pval, 8, "bigdat");
+                    pval = builder.CreateLoad(int64Type, pval, "bigdat");
                     llvm_crc32_32_64(hash_res1, hash_res1, pval);
                     len = len - 8;
                     k++;
@@ -2446,7 +2465,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             if (len >= 4) {
                 llvm::Value* data = builder.CreateBitCast(data1, int32PtrType);
                 pval = builder.CreateInBoundsGEP(data, Datum_0);
-                pval = builder.CreateAlignedLoad(pval, 4, "intdat");
+                pval = builder.CreateLoad(int32Type, pval, "intdat");
                 llvm_crc32_32_32(hash_res1, hash_res1, pval);
                 data1 = builder.CreateInBoundsGEP(data1, int32_4);
                 len = len - 4;
@@ -2455,14 +2474,14 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             if (len >= 2) {
                 llvm::Value* short_data = builder.CreateBitCast(data1, int16PtrType);
                 pval = builder.CreateInBoundsGEP(short_data, Datum_0);
-                pval = builder.CreateAlignedLoad(pval, 2, "shortdat");
+                pval = builder.CreateLoad(int16Type, pval, "shortdat");
                 llvm_crc32_32_16(hash_res1, hash_res1, pval);
                 data1 = builder.CreateInBoundsGEP(data1, int32_2);
                 len = len - 2;
             }
 
             if (len == 1) {
-                pval = builder.CreateAlignedLoad(data1, 1, "val_char");
+                pval = builder.CreateLoad(int8Type, data1, "val_char");
                 llvm_crc32_32_8(hash_res1, hash_res1, pval);
             }
         } break;
@@ -2535,7 +2554,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             whl_hash = builder.CreateTrunc(whl_hash, int32Type);
             /* compute hash value */
             llvm::Value* whl_data = builder.CreateInBoundsGEP(bigdata, whl_pos);
-            whl_data = builder.CreateAlignedLoad(whl_data, 8, "whl_data");
+            whl_data = builder.CreateLoad(int64Type, whl_data, "whl_data");
             llvm_crc32_32_64(nxt_hash, whl_hash, whl_data);
             phi_whl_hash->addIncoming(bighash, be_not_null);
             nxt_hash = builder.CreateZExt(nxt_hash, int64Type);
@@ -2575,7 +2594,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             builder.SetInsertPoint(GE4_bb);
             data = builder.CreateBitCast(lt8_data, int32PtrType);
             data = builder.CreateInBoundsGEP(data, Datum_0);
-            data = builder.CreateAlignedLoad(data, 4, "intdat");
+            data = builder.CreateLoad(int32Type, data, "intdat");
             llvm::Value* ge4_hash = NULL;
             llvm_crc32_32_32(ge4_hash, lt8_hash, data);
             llvm::Value* ge4_data = builder.CreateInBoundsGEP(lt8_data, int32_4);
@@ -2606,7 +2625,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             builder.SetInsertPoint(GE2_bb);
             data = builder.CreateBitCast(lt4_data, int16PtrType);
             data = builder.CreateInBoundsGEP(data, Datum_0);
-            data = builder.CreateAlignedLoad(data, 2, "shortdat");
+            data = builder.CreateLoad(int16Type, data, "shortdat");
             llvm::Value* ge2_hash = NULL;
             llvm_crc32_32_16(ge2_hash, lt4_hash, data);
             llvm::Value* ge2_data = builder.CreateInBoundsGEP(lt4_data, int32_2);
@@ -2634,7 +2653,7 @@ llvm::Function* VecHashAggCodeGen::HashBatchCodeGen(VecAggState* node, int idx, 
             builder.CreateCondBr(cmpval, EQ1_bb, EQ0_bb);
 
             builder.SetInsertPoint(EQ1_bb);
-            data = builder.CreateAlignedLoad(lt2_data, 1, "val_char");
+            data = builder.CreateLoad(int8Type, lt2_data, "val_char");
             llvm::Value* lt1_hash = NULL;
             llvm_crc32_32_8(lt1_hash, lt2_hash, data);
             builder.CreateBr(EQ0_bb);
@@ -2767,11 +2786,11 @@ llvm::Function* VecHashAggCodeGen::MatchOneKeyCodeGen(VecAggState* node, int idx
     Vals4[2] = keyidxincell;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(hashcell, Vals4);
-    llvm::Value* keyval = builder.CreateAlignedLoad(tmpval, 8, "keyincell");
+    llvm::Value* keyval = builder.CreateLoad(int64Type, tmpval, "keyincell");
 
     Vals4[3] = int32_1;
     tmpval = builder.CreateInBoundsGEP(hashcell, Vals4);
-    llvm::Value* keyflg = builder.CreateAlignedLoad(tmpval, 1, "flagincell");
+    llvm::Value* keyflg = builder.CreateLoad(int8Type, tmpval, "flagincell");
 
     llvm::Value* cmp1 = NULL;
     llvm::Value* cmp2 = NULL;
@@ -2889,7 +2908,7 @@ llvm::Function* VecHashAggCodeGen::MatchOneKeyCodeGen(VecAggState* node, int idx
     return jitted_matchonekey;
 }
 
-llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeGen::LlvmBuilder builder,
+llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeGen::LlvmBuilder& builder,
     llvm::Function* jitted_func, llvm::BasicBlock** bb_null, llvm::BasicBlock** bb_last,
     llvm::BasicBlock** bb_outofbound, llvm::Value* econtext, llvm::Value* argVector, llvm::Value* phi_idx)
 {
@@ -2897,8 +2916,10 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
     llvm::Module* mod = llvmCodeGen->module();
     llvm::LLVMContext& context = llvmCodeGen->context();
 
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
 
     DEFINE_CGVAR_INT8(int8_0, 0);
@@ -3178,15 +3199,15 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
             Vals[0] = m_attno;
             Vals[1] = int32_pos_scalvec_vals;
             tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-            tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_vals");
+            tmpval = builder.CreateLoad(int64PtrType, tmpval, "m_vals");
             tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-            llvm::Value* res = builder.CreateAlignedLoad(tmpval, 8, "val");
+            llvm::Value* res = builder.CreateLoad(int64Type, tmpval, "val");
 
             Vals[1] = int32_pos_scalvec_flag;
             tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-            tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_flag");
+            tmpval = builder.CreateLoad(int8PtrType, tmpval, "m_flag");
             tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-            llvm::Value* flg = builder.CreateAlignedLoad(tmpval, 1, "flag");
+            llvm::Value* flg = builder.CreateLoad(int8Type, tmpval, "flag");
 
             /* make sure the value is null or not */
             llvm::Value* tmpNull = builder.CreateAnd(flg, int8_1);
@@ -3205,13 +3226,13 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
             Vals4[2] = int32_0;
             Vals4[3] = int32_0;
             tmpval = builder.CreateInBoundsGEP(bires, Vals4);
-            tmpval = builder.CreateAlignedLoad(tmpval, 2, "header");
+            tmpval = builder.CreateLoad(int16Type, tmpval, "header");
             result = builder.CreateInsertValue(result, tmpval, 0);
 
             Vals4[3] = int32_1;
             tmpval = builder.CreateInBoundsGEP(bires, Vals4);
             tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-            tmpval = builder.CreateAlignedLoad(tmpval, 8, "value");
+            tmpval = builder.CreateLoad(int64Type, tmpval, "value");
             result = builder.CreateInsertValue(result, tmpval, 1);
             *bb_last = var_bb;
 
@@ -3250,7 +3271,7 @@ llvm::Value* VecHashAggCodeGen::EvalFastExprInBatchAgg(ExprState* state, GsCodeG
 }
 
 llvm::Value* VecHashAggCodeGen::EvalSimpleExprInBatchAgg(
-    ExprState* state, GsCodeGen::LlvmBuilder builder, llvm::Value* econtext, llvm::Value* phi_idx, llvm::Value* isNull)
+    ExprState* state, GsCodeGen::LlvmBuilder& builder, llvm::Value* econtext, llvm::Value* phi_idx, llvm::Value* isNull)
 {
     llvm::Value* result = NULL;
     switch (nodeTag(state->expr)) {
@@ -3335,13 +3356,20 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
     DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int16PtrType, INT2OID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
-    DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
-    DEFINE_CG_PTRTYPE(vectorBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(exprCxtPtrType, "struct.ExprContext");
+    DEFINE_CG_PTRTYPE(vecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(scalarVecPtrType, "class.ScalarVector");
     DEFINE_CG_PTRTYPE(sonicEncodingDatumArrayPtrType, "class.SonicEncodingDatumArray");
     DEFINE_CG_PTRTYPE(numericPtrType, "struct.NumericData");
     DEFINE_CG_PTRTYPE(sonicHashAggPtrType, "class.SonicHashAgg");
+    DEFINE_CG_PTRTYPE(atomPtrType, "struct.atom");
+    DEFINE_CG_PTRPTRTYPE(atomPtrPtrType, "struct.atom");
+    DEFINE_CG_PTRTYPE(memCxtDataPtrType, "struct.MemoryContextData");
+    DEFINE_CG_PTRTYPE(sonicDatumArrayPtrType, "class.SonicDatumArray");
+    DEFINE_CG_PTRPTRTYPE(sonicDatumArrayPtrPtrType, "class.SonicDatumArray");
 
     /* create LLVM value with {uint16, int64} format type */
     llvm::Type* Elements[] = {int16Type, int64Type};
@@ -3387,7 +3415,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
     GsCodeGen::FnPrototype fn_prototype(llvmCodeGen, "JittedSonicFastBatchAgg", voidType);
     fn_prototype.addArgument(GsCodeGen::NamedVariable("sonicHashAgg", sonicHashAggPtrType));
-    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vectorBatchPtrType));
+    fn_prototype.addArgument(GsCodeGen::NamedVariable("batch", vecBatchPtrType));
     fn_prototype.addArgument(GsCodeGen::NamedVariable("aggIdx", int16PtrType));
     jitted_sonicbatchagg = fn_prototype.generatePrototype(&builder, &llvmargs[0]);
 
@@ -3402,28 +3430,28 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
     Vals4[2] = int32_pos_shash_sonichmemctl;
     Vals4[3] = int32_pos_sonichmemctl_hcxt;
     llvm::Value* hcxt = builder.CreateInBoundsGEP(sonicHashAgg, Vals4);
-    hcxt = builder.CreateAlignedLoad(hcxt, 8, "hashContext");
+    hcxt = builder.CreateLoad(memCxtDataPtrType, hcxt, "hashContext");
 
     /* get the nrows of the batch */
     tmpval = builder.CreateInBoundsGEP(batch, Vals);
-    nValues = builder.CreateAlignedLoad(tmpval, 4, "m_rows");
+    nValues = builder.CreateLoad(int32Type, tmpval, "m_rows");
 
     /* get vectorBatch.m_arr of the batch */
     Vals[0] = int64_0;
     Vals[1] = int32_pos_batch_marr;
     llvm::Value* argVector = builder.CreateInBoundsGEP(batch, Vals);
-    argVector = builder.CreateAlignedLoad(argVector, 8, "m_arr");
+    argVector = builder.CreateLoad(scalarVecPtrType, argVector, "m_arr");
 
     /* pre-load all the expression context : node->ss.ps.ps_ExprContext*/
     ExprContext* exprcontext = node->ss.ps.ps_ExprContext;
-    llvm::Value* econtext = llvmCodeGen->CastPtrToLlvmPtr(ExprContextPtrType, exprcontext);
+    llvm::Value* econtext = llvmCodeGen->CastPtrToLlvmPtr(exprCxtPtrType, exprcontext);
 
     /* get sonic data array structure : SonicHashAgg.SonicHash.SonicDatumArray** */
     Vals3[2] = int32_pos_shash_data;
     llvm::Value* sdataptr = builder.CreateInBoundsGEP(sonicHashAgg, Vals3);
-    sdataptr = builder.CreateAlignedLoad(sdataptr, 8, "sonicdatumarray");
+    sdataptr = builder.CreateLoad(sonicDatumArrayPtrPtrType, sdataptr, "m_data");
 
-    /* get sonic data array structure: SonicHashAgg.SonicHash.m_loc */
+    /* get sonic data array structure: SonicHashAgg.SonicHash::m_loc */
     Vals4[2] = int32_pos_shash_loc;
     Vals4[3] = int64_0;
     llvm::Value* loc = builder.CreateInBoundsGEP(sonicHashAgg, Vals4);
@@ -3438,11 +3466,11 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
     for (i = 0; i < numaggs; i++) {
         llvm::Value* tmpidx = llvmCodeGen->getIntConstant(INT4OID, i);
         tmpval = builder.CreateInBoundsGEP(aggIdx, tmpidx);
-        tmpval = builder.CreateAlignedLoad(tmpval, 4, "aggIdx");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "aggIdx");
         aggIdxList[i] = builder.CreateSExt(tmpval, int64Type);
 
         tmpval = builder.CreateInBoundsGEP(sdataptr, aggIdxList[i]);
-        sdata[i] = builder.CreateAlignedLoad(tmpval, 8, "sonicdata");
+        sdata[i] = builder.CreateLoad(sonicDatumArrayPtrType, tmpval, "sonicdata");
 
         agg_bb[i] = llvm::BasicBlock::Create(context, "agg_bb", jitted_sonicbatchagg);
         flag_then[i] = llvm::BasicBlock::Create(context, "flag_then", jitted_sonicbatchagg);
@@ -3468,10 +3496,10 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
     /* SonicHashAgg.m_econtext */
     Vals[1] = int32_pos_shashagg_ecxt;
     llvm::Value* mecontext = builder.CreateInBoundsGEP(sonicHashAgg, Vals);
-    mecontext = builder.CreateAlignedLoad(mecontext, 8, "m_econtext");
+    mecontext = builder.CreateLoad(exprCxtPtrType, mecontext, "m_econtext");
     Vals[1] = int32_pos_ecxt_pertuple;
     llvm::Value* agg_expr_context = builder.CreateInBoundsGEP(mecontext, Vals);
-    agg_expr_context = builder.CreateAlignedLoad(agg_expr_context, 8, "agg_per_tuple_memory");
+    agg_expr_context = builder.CreateLoad(memCxtDataPtrType, agg_expr_context, "agg_per_tuple_memory");
     llvm::Value* agg_oldcontext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, agg_expr_context);
 
     /*
@@ -3493,13 +3521,13 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
                 Vals[1] = int32_pos_scalvec_vals;
                 tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-                tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_vals");
+                tmpval = builder.CreateLoad(int64PtrType, tmpval, "m_vals");
                 batch_vals[i] = tmpval;
 
                 /* m_arr[varNumber].m_flag */
                 Vals[1] = int32_pos_scalvec_flag;
                 llvm::Value* argFlag = builder.CreateInBoundsGEP(argVector, Vals);
-                argFlag = builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+                argFlag = builder.CreateLoad(int8PtrType, argFlag, "m_flag");
                 batch_flag[i] = argFlag;
             } else {
                 batch_vals[i] = NULL;
@@ -3522,7 +3550,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
     /* get location : loc[i] (see vsnumeric_sum and vsint8_sum) and check if it is zero */
     tmpval = builder.CreateInBoundsGEP(loc, phi_idx);
-    locidx = builder.CreateAlignedLoad(tmpval, 4, "loc_i");
+    locidx = builder.CreateLoad(int32Type, tmpval, "loc_i");
     tmpval = builder.CreateICmpEQ(locidx, int32_0);
     builder.CreateCondBr(tmpval, for_inc, agg_bb[0]);
 
@@ -3544,7 +3572,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
             /* get scount = sdata[aggidx + 1] */
             llvm::Value* aggplus = builder.CreateAdd(aggIdxList[i], int64_1);
             tmpval = builder.CreateInBoundsGEP(sdataptr, aggplus);
-            scount = builder.CreateAlignedLoad(tmpval, 8, "scount");
+            scount = builder.CreateLoad(sonicDatumArrayPtrType, tmpval, "scount");
         }
 
         if (aggref->aggstage == 0) {
@@ -3576,19 +3604,19 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                     /* m_arr[varNumber].m_vals */
                     tmpval = batch_vals[i];
                     tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                    result = builder.CreateAlignedLoad(tmpval, 8, "val");
+                    result = builder.CreateLoad(int64Type, tmpval, "val");
 
                     /* m_arr[varNumber].m_flag */
                     tmpval = batch_flag[i];
                     tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                    tmpval = builder.CreateAlignedLoad(tmpval, 1, "flag");
-                    builder.CreateAlignedStore(tmpval, isNull, 1);
+                    tmpval = builder.CreateLoad(int8Type, tmpval, "flag");
+                    builder.CreateStore(tmpval, isNull);
                 } else {
                     /* set the batch information : econtext->ecxt_outerbatch = batch */
                     Vals[0] = int64_0;
                     Vals[1] = int32_pos_ecxt_outerbatch;
                     llvm::Value* tmp_outerbatch = builder.CreateInBoundsGEP(econtext, Vals);
-                    builder.CreateAlignedStore(batch, tmp_outerbatch, 8);
+                    builder.CreateStore(batch, tmp_outerbatch);
 
                     /*
                      * If fast_aggref is true, we could try to evaluate the
@@ -3621,7 +3649,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
                         /* expres is already in {int16, int64} format */
                         builder.SetInsertPoint(bb_last);
-                        builder.CreateAlignedStore(int8_0, isNull, 1);
+                        builder.CreateStore(int8_0, isNull);
                         llvm::Value* tmp_scale = builder.CreateExtractValue(tmpexpres, 0);
                         llvm::Value* tmp_value = builder.CreateExtractValue(tmpexpres, 1);
                         expres = llvm::UndefValue::get(SiNumeric64Type);
@@ -3631,7 +3659,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
                         /* construct a null value, and no need to do aggregation */
                         builder.SetInsertPoint(bb_null);
-                        builder.CreateAlignedStore(int8_1, isNull, 1);
+                        builder.CreateStore(int8_1, isNull);
                         if (i == numaggs - 1)
                             builder.CreateBr(for_inc);
                         else
@@ -3645,7 +3673,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_ecxt_pertuple;
                         llvm::Value* curr_Context = builder.CreateInBoundsGEP(econtext, Vals);
-                        curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+                        curr_Context = builder.CreateLoad(memCxtDataPtrType, curr_Context, "per_tuple_memory");
                         llvm::Value* cg_oldContext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, curr_Context);
                         result = EvalSimpleExprInBatchAgg(estate, builder, econtext, phi_idx, isNull);
                         /* return back to the old memory context */
@@ -3658,7 +3686,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_ecxt_pertuple;
                         llvm::Value* curr_Context = builder.CreateInBoundsGEP(econtext, Vals);
-                        curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+                        curr_Context = builder.CreateLoad(memCxtDataPtrType, curr_Context, "per_tuple_memory");
                         llvm::Value* cg_oldContext = VecExprCodeGen::MemCxtSwitToCodeGen(&builder, curr_Context);
                         /* corresponding to ExecVecProject(peraggstate->evalproj) */
                         result = EvalSimpleExprInBatchAgg(estate, builder, econtext, phi_idx, isNull);
@@ -3673,7 +3701,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                  * is not null.
                  */
                 result = int64_0;
-                builder.CreateAlignedStore(int8_0, isNull, 1);
+                builder.CreateStore(int8_0, isNull);
             }
         } else {
             /*
@@ -3687,17 +3715,17 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                 Vals[0] = llvmCodeGen->getIntConstant(INT8OID, varNumber);
                 Vals[1] = int32_pos_scalvec_vals;
                 tmpval = builder.CreateInBoundsGEP(argVector, Vals);
-                tmpval = builder.CreateAlignedLoad(tmpval, 8, "m_vals");
+                tmpval = builder.CreateLoad(int64PtrType, tmpval, "m_vals");
                 tmpval = builder.CreateInBoundsGEP(tmpval, phi_idx);
-                result = builder.CreateAlignedLoad(tmpval, 8, "val");
+                result = builder.CreateLoad(int64Type, tmpval, "val");
 
                 /* m_arr[varNumber].m_flag */
                 Vals[1] = int32_pos_scalvec_flag;
                 llvm::Value* argFlag = builder.CreateInBoundsGEP(argVector, Vals);
-                argFlag = builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+                argFlag = builder.CreateLoad(int8PtrType, argFlag, "m_flag");
                 tmpval = builder.CreateInBoundsGEP(argFlag, phi_idx);
-                tmpval = builder.CreateAlignedLoad(tmpval, 1, "flag");
-                builder.CreateAlignedStore(tmpval, isNull, 1);
+                tmpval = builder.CreateLoad(int8Type, tmpval, "flag");
+                builder.CreateStore(tmpval, isNull);
             } else {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
@@ -3733,7 +3761,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
              * the flag and do aggregation.
              */
             /* see if IS_NULL(flag[phi_idx]) == false */
-            llvm::Value* tmpnull = builder.CreateAlignedLoad(isNull, 1, "tmpnull");
+            llvm::Value* tmpnull = builder.CreateLoad(int8Type, isNull, "tmpnull");
             tmpnull = builder.CreateAnd(tmpnull, int8_1);
             llvm::Value* flag_cmp = builder.CreateICmpEQ(tmpnull, int8_0);
             builder.CreateCondBr(flag_cmp, flag_then[i], flag_else[i]);
@@ -3759,13 +3787,13 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_sdarray_nbit;
                         nbit = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+                        nbit = builder.CreateLoad(int32Type, nbit, "arridx");
                         arrIdx = builder.CreateLShr(locidx, nbit);
                         arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
                         Vals[1] = int32_pos_sdarray_atomsize;
                         atomsize = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+                        atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
                         atomsize = builder.CreateSub(atomsize, int32_1);
                         atomIdx = builder.CreateAnd(atomsize, locidx);
                         atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -3773,25 +3801,25 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* get sdata[i]->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         atom = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+                        atom = builder.CreateLoad(atomPtrPtrType, atom, "atom**");
                         atom = builder.CreateInBoundsGEP(atom, arrIdx);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atom");
+                        atom = builder.CreateLoad(atomPtrType, atom, "atom*");
 
                         /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         data = builder.CreateInBoundsGEP(atom, Vals);
-                        data = builder.CreateAlignedLoad(data, 8, "data");
+                        data = builder.CreateLoad(int8PtrType, data, "data");
                         data = builder.CreateBitCast(data, int64PtrType);
                         llvm::Value* dataptr = builder.CreateInBoundsGEP(data, atomIdx);
 
                         /* get sdata->m_arr[arrIdx]->nullFlag[atomIdx] and check if it is NULL */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* nullflag = builder.CreateInBoundsGEP(atom, Vals);
-                        nullflag = builder.CreateAlignedLoad(nullflag, 8, "nullflagptr");
+                        nullflag = builder.CreateLoad(int8PtrType, nullflag, "nullflagptr");
                         nullflag = builder.CreateInBoundsGEP(nullflag, atomIdx);
 
                         /* load nullflag */
-                        tmpval = builder.CreateAlignedLoad(nullflag, 1, "nullFlag");
+                        tmpval = builder.CreateLoad(int8Type, nullflag, "nullFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -3809,8 +3837,8 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
 
-                        builder.CreateAlignedStore(tmpval, dataptr, 8);
-                        builder.CreateAlignedStore(int8_0, nullflag, 1);
+                        builder.CreateStore(tmpval, dataptr);
+                        builder.CreateStore(int8_0, nullflag);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -3826,6 +3854,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                          * the expr is numeric type var. Convert this numeric type data to
                          * SiNumeric data to get the value.
                          */
+                        // return struct.NumericData*
                         llvm::Value* bires = DatumGetBINumericCodeGen(&builder, result);
 
                         /* extract the header of result to check if it is BINumeric */
@@ -3834,14 +3863,14 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[2] = int32_0;
                         Vals4[3] = int32_0;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "biheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "biheader");
                         llvm::Value* rflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* get leftdata[0] and convert to BINumeric */
-                        llvm::Value* realdata = builder.CreateAlignedLoad(dataptr, 8, "dataval");
+                        llvm::Value* realdata = builder.CreateLoad(int64Type, dataptr, "dataval");
                         llvm::Value* leftarg = DatumGetBINumericCodeGen(&builder, realdata);
                         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "sonicheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "sonicheader");
                         llvm::Value* lflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* check if either of them is not BI64 */
@@ -3860,12 +3889,12 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[3] = int32_1;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
                         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-                        llvm::Value* resval = builder.CreateAlignedLoad(tmpval, 8, "bivalue");
+                        llvm::Value* resval = builder.CreateLoad(int64Type, tmpval, "bivalue");
 
                         /* extrac the actual data of leftdata and do sum */
                         llvm::Value* sonicptr = builder.CreateAdd(realdata, int64_6);
                         sonicptr = builder.CreateIntToPtr(sonicptr, int64PtrType);
-                        llvm::Value* midval = builder.CreateAlignedLoad(sonicptr, 8, "intvalue");
+                        llvm::Value* midval = builder.CreateLoad(int64Type, sonicptr, "intvalue");
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -3894,7 +3923,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, sonicptr, 8);
+                        builder.CreateStore(sumval, sonicptr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -3928,13 +3957,13 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* calculate arrIdx and atomIdx */
                         Vals[1] = int32_pos_sdarray_nbit;
                         nbit = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+                        nbit = builder.CreateLoad(int32Type, nbit, "arridx");
                         arrIdx = builder.CreateLShr(locidx, nbit);
                         arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
                         Vals[1] = int32_pos_sdarray_atomsize;
                         atomsize = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+                        atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
                         atomsize = builder.CreateSub(atomsize, int32_1);
                         atomIdx = builder.CreateAnd(atomsize, locidx);
                         atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -3942,25 +3971,25 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* get sdata[aggidx]->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         atom = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+                        atom = builder.CreateLoad(atomPtrPtrType, atom, "atom**");
                         atom = builder.CreateInBoundsGEP(atom, arrIdx);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atom");
+                        atom = builder.CreateLoad(atomPtrType, atom, "atom*");
 
                         /* get address of sdata[aggidx]->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         data = builder.CreateInBoundsGEP(atom, Vals);
-                        data = builder.CreateAlignedLoad(data, 8, "data");
+                        data = builder.CreateLoad(int8PtrType, data, "data");
                         data = builder.CreateBitCast(data, int64PtrType);
                         llvm::Value* dataptr = builder.CreateInBoundsGEP(data, atomIdx);
 
                         /* get sdata[aggidx]->m_arr[arrIdx]->nullFlag[atomIdx] and check if it is NULL */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* nullflag = builder.CreateInBoundsGEP(atom, Vals);
-                        nullflag = builder.CreateAlignedLoad(nullflag, 8, "nullflagptr");
+                        nullflag = builder.CreateLoad(int8PtrType, nullflag, "nullflagptr");
                         nullflag = builder.CreateInBoundsGEP(nullflag, atomIdx);
 
                         /* load nullflag */
-                        tmpval = builder.CreateAlignedLoad(nullflag, 1, "nullFlag");
+                        tmpval = builder.CreateLoad(int8Type, nullflag, "nullFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -3983,8 +4012,8 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
 
-                        builder.CreateAlignedStore(tmpval, dataptr, 8);
-                        builder.CreateAlignedStore(int8_0, nullflag, 1);
+                        builder.CreateStore(tmpval, dataptr);
+                        builder.CreateStore(int8_0, nullflag);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -3994,7 +4023,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
                         /* cell not be null, do aggregation */
                         builder.SetInsertPoint(agg_else);
-                        llvm::Value* realdata = builder.CreateAlignedLoad(dataptr, 8, "dataval");
+                        llvm::Value* realdata = builder.CreateLoad(int64Type, dataptr, "dataval");
 
                         /* first make sure the value in sonic datum array is BI64 format */
                         llvm::Value* leftarg = DatumGetBINumericCodeGen(&builder, realdata);
@@ -4003,7 +4032,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[2] = int32_0;
                         Vals4[3] = int32_0;
                         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "leftheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "leftheader");
                         llvm::Value* biflag = builder.CreateAnd(tmpval, val_mask);
                         llvm::Value* isbi64 = builder.CreateICmpEQ(biflag, val_binum64);
                         builder.CreateCondBr(isbi64, expr_bisum_bb, bioverflow_bb);
@@ -4015,7 +4044,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         builder.SetInsertPoint(expr_bisum_bb);
                         llvm::Value* sonicptr = builder.CreateAdd(realdata, int64_6);
                         sonicptr = builder.CreateIntToPtr(sonicptr, int64PtrType);
-                        llvm::Value* midval = builder.CreateAlignedLoad(sonicptr, 8, "intvalue");
+                        llvm::Value* midval = builder.CreateLoad(int64Type, sonicptr, "intvalue");
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -4055,7 +4084,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* if there is no overflow, extract result directly */
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, sonicptr, 8);
+                        builder.CreateStore(sumval, sonicptr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -4087,13 +4116,13 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_sdarray_nbit;
                         nbit = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+                        nbit = builder.CreateLoad(int32Type, nbit, "arridx");
                         arrIdx = builder.CreateLShr(locidx, nbit);
                         arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
                         Vals[1] = int32_pos_sdarray_atomsize;
                         atomsize = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+                        atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
                         atomsize = builder.CreateSub(atomsize, int32_1);
                         atomIdx = builder.CreateAnd(atomsize, locidx);
                         atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -4101,45 +4130,45 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* get sdata[aggidx]->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         atom = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+                        atom = builder.CreateLoad(atomPtrPtrType, atom, "atom**");
                         atom = builder.CreateInBoundsGEP(atom, arrIdx);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atom");
+                        atom = builder.CreateLoad(atomPtrType, atom, "atom*");
 
                         /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         data = builder.CreateInBoundsGEP(atom, Vals);
-                        data = builder.CreateAlignedLoad(data, 8, "data");
+                        data = builder.CreateLoad(int8PtrType, data, "data");
                         data = builder.CreateBitCast(data, int64PtrType);
                         llvm::Value* dataptr = builder.CreateInBoundsGEP(data, atomIdx);
 
                         /* get scount->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         cntatom = builder.CreateInBoundsGEP(scount, Vals);
-                        cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatomptr");
+                        cntatom = builder.CreateLoad(atomPtrPtrType, cntatom, "cntatom**");
                         cntatom = builder.CreateInBoundsGEP(cntatom, arrIdx);
-                        cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatom");
+                        cntatom = builder.CreateLoad(atomPtrType, cntatom, "cntatom*");
 
                         /* get address of scount->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         cntdata = builder.CreateInBoundsGEP(cntatom, Vals);
-                        cntdata = builder.CreateAlignedLoad(cntdata, 8, "cntdata");
+                        cntdata = builder.CreateLoad(int8PtrType, cntdata, "cntdata");
                         cntdata = builder.CreateBitCast(cntdata, int64PtrType);
                         llvm::Value* cntptr = builder.CreateInBoundsGEP(cntdata, atomIdx);
 
                         /* get sdata[aggidx]->m_arr[arrIdx]->nullFlag[atomIdx] */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* dataflag = builder.CreateInBoundsGEP(atom, Vals);
-                        dataflag = builder.CreateAlignedLoad(dataflag, 8, "dataflagptr");
+                        dataflag = builder.CreateLoad(int8PtrType, dataflag, "dataflagptr");
                         dataflag = builder.CreateInBoundsGEP(dataflag, atomIdx);
 
                         /* get scount>m_arr[arrIdx]->nullFlag[atomIdx] */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* cntflag = builder.CreateInBoundsGEP(cntatom, Vals);
-                        cntflag = builder.CreateAlignedLoad(cntflag, 8, "cntflagptr");
+                        cntflag = builder.CreateLoad(int8PtrType, cntflag, "cntflagptr");
                         cntflag = builder.CreateInBoundsGEP(cntflag, atomIdx);
 
                         /* Now load the sonic data flag and check it */
-                        tmpval = builder.CreateAlignedLoad(dataflag, 1, "dataFlag");
+                        tmpval = builder.CreateLoad(int8Type, dataflag, "dataFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -4151,14 +4180,14 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
-                        builder.CreateAlignedStore(tmpval, dataptr, 8);
+                        builder.CreateStore(tmpval, dataptr);
 
                         /* count set to be one */
-                        builder.CreateAlignedStore(int64_1, cntptr, 8);
+                        builder.CreateStore(int64_1, cntptr);
 
                         /* set cell flag */
-                        builder.CreateAlignedStore(int8_0, dataflag, 1);
-                        builder.CreateAlignedStore(int8_0, cntflag, 1);
+                        builder.CreateStore(int8_0, dataflag);
+                        builder.CreateStore(int8_0, cntflag);
 
                         /* turn to next basicblock or end this */
                         if (i == numaggs - 1)
@@ -4181,14 +4210,14 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[2] = int32_0;
                         Vals4[3] = int32_0;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "biheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "biheader");
                         llvm::Value* rflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* get leftdata[0] and convert to Numeric to get lflag */
-                        llvm::Value* realdata = builder.CreateAlignedLoad(dataptr, 8, "dataval");
+                        llvm::Value* realdata = builder.CreateLoad(int64Type, dataptr, "dataval");
                         llvm::Value* leftarg = builder.CreateIntToPtr(realdata, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "sonicheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "sonicheader");
                         llvm::Value* lflag = builder.CreateAnd(tmpval, val_mask);
 
                         /* check if either of them is not BI64 */
@@ -4207,11 +4236,11 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[3] = int32_1;
                         tmpval = builder.CreateInBoundsGEP(bires, Vals4);
                         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-                        llvm::Value* resval = builder.CreateAlignedLoad(tmpval, 8, "value");
+                        llvm::Value* resval = builder.CreateLoad(int64Type, tmpval, "value");
 
                         llvm::Value* sonicptr = builder.CreateAdd(realdata, int64_6);
                         sonicptr = builder.CreateIntToPtr(sonicptr, int64PtrType);
-                        llvm::Value* midval = builder.CreateAlignedLoad(sonicptr, 8);
+                        llvm::Value* midval = builder.CreateLoad(int64Type, sonicptr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -4239,12 +4268,12 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
 
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, sonicptr, 8);
+                        builder.CreateStore(sumval, sonicptr);
 
                         /* cell->m_val[idx+1].val++ */
-                        tmpval = builder.CreateAlignedLoad(cntptr, 8, "count");
+                        tmpval = builder.CreateLoad(int64Type, cntptr, "count");
                         tmpval = builder.CreateAdd(tmpval, int64_1);
-                        builder.CreateAlignedStore(tmpval, cntptr, 8);
+                        builder.CreateStore(tmpval, cntptr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -4272,13 +4301,13 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals[0] = int64_0;
                         Vals[1] = int32_pos_sdarray_nbit;
                         nbit = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+                        nbit = builder.CreateLoad(int32Type, nbit, "arridx");
                         arrIdx = builder.CreateLShr(locidx, nbit);
                         arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
                         Vals[1] = int32_pos_sdarray_atomsize;
                         atomsize = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+                        atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
                         atomsize = builder.CreateSub(atomsize, int32_1);
                         atomIdx = builder.CreateAnd(atomsize, locidx);
                         atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -4286,45 +4315,45 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* get sdata[aggidx]->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         atom = builder.CreateInBoundsGEP(sdata[i], Vals);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+                        atom = builder.CreateLoad(atomPtrPtrType, atom, "atom**");
                         atom = builder.CreateInBoundsGEP(atom, arrIdx);
-                        atom = builder.CreateAlignedLoad(atom, 8, "atom");
+                        atom = builder.CreateLoad(atomPtrType, atom, "atom*");
 
                         /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         data = builder.CreateInBoundsGEP(atom, Vals);
-                        data = builder.CreateAlignedLoad(data, 8, "data");
+                        data = builder.CreateLoad(int8PtrType, data, "data");
                         data = builder.CreateBitCast(data, int64PtrType);
                         llvm::Value* dataptr = builder.CreateInBoundsGEP(data, atomIdx);
 
                         /* get scount->m_arr[arrIdx] */
                         Vals[1] = int32_pos_sdarray_arr;
                         cntatom = builder.CreateInBoundsGEP(scount, Vals);
-                        cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatomptr");
+                        cntatom = builder.CreateLoad(atomPtrPtrType, cntatom, "cnt atom**");
                         cntatom = builder.CreateInBoundsGEP(cntatom, arrIdx);
-                        cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatom");
+                        cntatom = builder.CreateLoad(atomPtrType, cntatom, "cnt atom*");
 
                         /* get address of scount->m_arr[arrIdx]->data[atomIdx] */
                         Vals[1] = int32_pos_atom_data;
                         cntdata = builder.CreateInBoundsGEP(cntatom, Vals);
-                        cntdata = builder.CreateAlignedLoad(cntdata, 8, "cntdata");
+                        cntdata = builder.CreateLoad(int8PtrType, cntdata, "cntdata");
                         cntdata = builder.CreateBitCast(cntdata, int64PtrType);
                         llvm::Value* cntptr = builder.CreateInBoundsGEP(cntdata, atomIdx);
 
                         /* get sdata[aggidx]->m_arr[arrIdx]->nullFlag[atomIdx] */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* dataflag = builder.CreateInBoundsGEP(atom, Vals);
-                        dataflag = builder.CreateAlignedLoad(dataflag, 8, "dataflagptr");
+                        dataflag = builder.CreateLoad(int8PtrType, dataflag, "dataflagptr");
                         dataflag = builder.CreateInBoundsGEP(dataflag, atomIdx);
 
                         /* get scount>m_arr[arrIdx]->nullFlag[atomIdx] */
                         Vals[1] = int32_pos_atom_nullflag;
                         llvm::Value* cntflag = builder.CreateInBoundsGEP(cntatom, Vals);
-                        cntflag = builder.CreateAlignedLoad(cntflag, 8, "cntflagptr");
+                        cntflag = builder.CreateLoad(int8PtrType, cntflag, "cntflagptr");
                         cntflag = builder.CreateInBoundsGEP(cntflag, atomIdx);
 
                         /* Now load the sonic data flag and check it */
-                        tmpval = builder.CreateAlignedLoad(dataflag, 1, "dataFlag");
+                        tmpval = builder.CreateLoad(int8Type, dataflag, "dataFlag");
                         tmpval = builder.CreateAnd(tmpval, int8_1);
                         tmpval = builder.CreateICmpEQ(tmpval, int8_0);
                         builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -4343,12 +4372,12 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         tmpval = DatumGetBINumericCodeGen(&builder, tmpval);
                         tmpval = builder.CreatePtrToInt(tmpval, int64Type);
                         tmpval = WrapaddVariableCodeGen(&builder, hcxt, tmpval);
-                        builder.CreateAlignedStore(tmpval, dataptr, 8);
+                        builder.CreateStore(tmpval, dataptr);
                         /* count set to be one */
-                        builder.CreateAlignedStore(int64_1, cntptr, 8);
+                        builder.CreateStore(int64_1, cntptr);
                         /* set the flag of hashcell */
-                        builder.CreateAlignedStore(int8_0, dataflag, 1);
-                        builder.CreateAlignedStore(int8_0, cntflag, 1);
+                        builder.CreateStore(int8_0, dataflag);
+                        builder.CreateStore(int8_0, cntflag);
 
                         /* turn to next basicblock */
                         if (i == numaggs - 1)
@@ -4357,7 +4386,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                             builder.CreateBr(agg_bb[i + 1]);
 
                         builder.SetInsertPoint(agg_else);
-                        llvm::Value* realdata = builder.CreateAlignedLoad(dataptr, 8, "cell_val");
+                        llvm::Value* realdata = builder.CreateLoad(int64Type, dataptr, "cell_val");
 
                         /* first make sure the value in cell is BI64 format */
                         Vals4[0] = int64_0;
@@ -4366,7 +4395,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         Vals4[3] = int32_0;
                         llvm::Value* leftflag = builder.CreateIntToPtr(realdata, numericPtrType);
                         tmpval = builder.CreateInBoundsGEP(leftflag, Vals4);
-                        tmpval = builder.CreateAlignedLoad(tmpval, 2, "leftheader");
+                        tmpval = builder.CreateLoad(int16Type, tmpval, "leftheader");
                         llvm::Value* biflag = builder.CreateAnd(tmpval, val_mask);
                         llvm::Value* isbi64 = builder.CreateICmpEQ(biflag, val_binum64);
                         builder.CreateCondBr(isbi64, expr_bisum_bb, bioverflow_bb);
@@ -4378,7 +4407,7 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         builder.SetInsertPoint(expr_bisum_bb);
                         llvm::Value* sonicptr = builder.CreateAdd(realdata, int64_6);
                         sonicptr = builder.CreateIntToPtr(sonicptr, int64PtrType);
-                        llvm::Value* midval = builder.CreateAlignedLoad(sonicptr, 8);
+                        llvm::Value* midval = builder.CreateLoad(int64Type, sonicptr);
 
                         /* check overflow */
                         llvm::Type* Intrinsic_Tys[] = {int64Type};
@@ -4419,12 +4448,12 @@ llvm::Function* VecHashAggCodeGen::SonicBatchAggregationCodeGen(VecAggState* nod
                         /* if there is no overflow, extract result directly */
                         builder.SetInsertPoint(normal_bb);
                         llvm::Value* sumval = builder.CreateExtractValue(aggres, 0);
-                        builder.CreateAlignedStore(sumval, sonicptr, 8);
+                        builder.CreateStore(sumval, sonicptr);
 
                         /* cell->m_val[idx+1].val++ */
-                        tmpval = builder.CreateAlignedLoad(cntptr, 8, "count");
+                        tmpval = builder.CreateLoad(int64Type, cntptr, "count");
                         tmpval = builder.CreateAdd(tmpval, int64_1);
-                        builder.CreateAlignedStore(tmpval, cntptr, 8);
+                        builder.CreateStore(tmpval, cntptr);
                         builder.CreateBr(agg_end);
 
                         builder.SetInsertPoint(agg_end);
@@ -4587,7 +4616,7 @@ llvm::Function* prefetchBatchAggregationCodeGen()
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
-    llvm::Type* hashCellPtrPtrType = llvmCodeGen->getPtrType(hashCellPtrType);
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
 
     DEFINE_CGVAR_INT32(int32_0, 0);
     DEFINE_CGVAR_INT32(int32_1, 1);
@@ -4620,7 +4649,7 @@ llvm::Function* prefetchBatchAggregationCodeGen()
                 errmsg("Failed to get llvm function Intrinsic::prefetch!\n")));
     }
     tmpval = builder.CreateInBoundsGEP(Loc, prefetchIdx);
-    tmpval = builder.CreateAlignedLoad(tmpval, 8, "hashCell");
+    tmpval = builder.CreateLoad(hashCellPtrType, tmpval, "hashCell");
     tmpval = builder.CreateBitCast(tmpval, int8PtrType);
     builder.CreateCall(fn_prefetch, {tmpval, int32_0, int32_3, int32_1});
     builder.CreateBr(ret_bb);
@@ -4660,6 +4689,9 @@ llvm::Function* prefetchAggHashingCodeGen()
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(hashAggRunnerPtrType, "class.HashAggRunner");
+    DEFINE_CG_PTRTYPE(hashSegTblPtrType, "struct.HashSegTbl");
+    DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
 
     DEFINE_CGVAR_INT32(int32_0, 0);
     DEFINE_CGVAR_INT32(int32_1, 1);
@@ -4702,7 +4734,7 @@ llvm::Function* prefetchAggHashingCodeGen()
     /* mask = hashAggRunner.m_hashSize - 1 */
     Vals2[1] = int32_pos_hAggR_hashSize;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals2);
-    llvm::Value* maskval = builder.CreateAlignedLoad(tmpval, 8, "m_hashSize");
+    llvm::Value* maskval = builder.CreateLoad(int64Type, tmpval, "m_hashSize");
     maskval = builder.CreateSub(maskval, int64_1, "mask");
 
     /* calculate m_cacheLoc[i+4] = m_hashVal[i+4] & mask */
@@ -4710,7 +4742,7 @@ llvm::Function* prefetchAggHashingCodeGen()
     Vals3[1] = int32_pos_hAggR_hashVal;
     Vals3[2] = next_hashData_idx;
     llvm::Value* hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    llvm::Value* hashVal64 = builder.CreateAlignedLoad(hashValSlot, 8, "hashVal");
+    llvm::Value* hashVal64 = builder.CreateLoad(int64Type, hashValSlot, "hashVal");
     llvm::Value* cacheLocVal = builder.CreateAnd(hashVal64, maskval);
 
     /* get hashData = hashAggRunner->m_hashData.tbl_data */
@@ -4718,7 +4750,7 @@ llvm::Function* prefetchAggHashingCodeGen()
     Vals2[0] = int64_0;
     Vals2[1] = int32_pos_hAggR_hsegmax;
     llvm::Value* segmaxval = builder.CreateInBoundsGEP(hAggRunner, Vals2);
-    segmaxval = builder.CreateAlignedLoad(segmaxval, 4, "segmax");
+    segmaxval = builder.CreateLoad(int32Type, segmaxval, "segmax");
     segmaxval = builder.CreateSExt(segmaxval, int64Type);
     /* nsegs  =  m_cacheLoc[i+4] / m_hashseg_max */
     llvm::Value* nsegsval = builder.CreateExactUDiv(cacheLocVal, segmaxval, "nsegs");
@@ -4729,11 +4761,11 @@ llvm::Function* prefetchAggHashingCodeGen()
     Vals2[0] = int64_0;
     Vals2[1] = int32_pos_hAggR_hSegTbl;
     llvm::Value* hashData = builder.CreateInBoundsGEP(hAggRunner, Vals2);
-    hashData = builder.CreateAlignedLoad(hashData, 8, "m_hashData");
+    hashData = builder.CreateLoad(hashSegTblPtrType, hashData, "m_hashData");
     Vals2[0] = nsegsval;
     Vals2[1] = int32_1;
     llvm::Value* tbldata = builder.CreateInBoundsGEP(hashData, Vals2);
-    tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
+    tbldata = builder.CreateLoad(hashCellPtrPtrType, tbldata, "tbl_data");
     llvm::Value* next_hashData_addr = builder.CreateInBoundsGEP(tbldata, pos);
 
     llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
@@ -4751,7 +4783,7 @@ llvm::Function* prefetchAggHashingCodeGen()
     Vals3[1] = int32_pos_hAggR_hashVal;
     Vals3[2] = next_cell_idx;
     hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    hashVal64 = builder.CreateAlignedLoad(hashValSlot, 8, "hashVal");
+    hashVal64 = builder.CreateLoad(int64Type, hashValSlot, "hashVal");
     cacheLocVal = builder.CreateAnd(hashVal64, maskval);
 
     /* nsegs  =  m_cacheLoc[i+2] / m_hashseg_max */
@@ -4762,9 +4794,9 @@ llvm::Function* prefetchAggHashingCodeGen()
     Vals2[0] = nsegsval2;
     Vals2[1] = int32_1;
     llvm::Value* tbldata2 = builder.CreateInBoundsGEP(hashData, Vals2);
-    tbldata2 = builder.CreateAlignedLoad(tbldata2, 8, "tbl_data");
+    tbldata2 = builder.CreateLoad(hashCellPtrPtrType, tbldata2, "tbl_data");
     tmpval = builder.CreateInBoundsGEP(tbldata2, pos2);
-    llvm::Value* next_cell = builder.CreateAlignedLoad(tmpval, 8, "cell");
+    llvm::Value* next_cell = builder.CreateLoad(hashCellPtrType, tmpval, "cell");
 
     tmpval = builder.CreatePtrToInt(next_cell, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);
@@ -4809,6 +4841,9 @@ llvm::Function* prefetchAggSglTblHashingCodeGen()
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(hashAggRunnerPtrType, "class.HashAggRunner");
+    DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
+    DEFINE_CG_PTRPTRTYPE(hashCellPtrPtrType, "struct.hashCell");
+    DEFINE_CG_PTRTYPE(hashSegTblPtrType, "struct.HashSegTbl");
 
     DEFINE_CGVAR_INT32(int32_0, 0);
     DEFINE_CGVAR_INT32(int32_1, 1);
@@ -4850,7 +4885,7 @@ llvm::Function* prefetchAggSglTblHashingCodeGen()
     /* mask = hashAggRunner.m_hashSize - 1 */
     Vals2[1] = int32_pos_hAggR_hashSize;
     tmpval = builder.CreateInBoundsGEP(hAggRunner, Vals2);
-    llvm::Value* maskval = builder.CreateAlignedLoad(tmpval, 8, "m_hashSize");
+    llvm::Value* maskval = builder.CreateLoad(int64Type, tmpval, "m_hashSize");
     maskval = builder.CreateSub(maskval, int64_1, "mask");
 
     /* calculate m_cacheLoc[i+4] = m_hashVal[i+4] & mask */
@@ -4858,20 +4893,20 @@ llvm::Function* prefetchAggSglTblHashingCodeGen()
     Vals3[1] = int32_pos_hAggR_hashVal;
     Vals3[2] = next_hashData_idx;
     llvm::Value* hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    llvm::Value* hashVal64 = builder.CreateAlignedLoad(hashValSlot, 8, "hashVal");
+    llvm::Value* hashVal64 = builder.CreateLoad(int64Type, hashValSlot, "hashVal");
     llvm::Value* cacheLocVal = builder.CreateAnd(hashVal64, maskval);
 
     /* get m_hashData from hashAggRunner */
     Vals2[0] = int64_0;
     Vals2[1] = int32_pos_hAggR_hSegTbl;
     llvm::Value* hashData = builder.CreateInBoundsGEP(hAggRunner, Vals2);
-    hashData = builder.CreateAlignedLoad(hashData, 8, "m_hashData");
+    hashData = builder.CreateLoad(hashSegTblPtrType, hashData, "m_hashData");
 
     /* calculate address of m_hashData[0].tbl_data[m_cacheLoc[i+4]] */
     Vals2[0] = int64_0;
     Vals2[1] = int32_1;
     llvm::Value* tbldata = builder.CreateInBoundsGEP(hashData, Vals2);
-    tbldata = builder.CreateAlignedLoad(tbldata, 8, "tbl_data");
+    tbldata = builder.CreateLoad(hashCellPtrPtrType, tbldata, "tbl_data");
     llvm::Value* next_hashData_addr = builder.CreateInBoundsGEP(tbldata, cacheLocVal);
 
     llvm::Function* fn_prefetch = llvm::Intrinsic::getDeclaration(llvmCodeGen->module(), llvm_prefetch);
@@ -4889,11 +4924,11 @@ llvm::Function* prefetchAggSglTblHashingCodeGen()
     Vals3[1] = int32_pos_hAggR_hashVal;
     Vals3[2] = next_cell_idx;
     hashValSlot = builder.CreateInBoundsGEP(hAggRunner, Vals3);
-    hashVal64 = builder.CreateAlignedLoad(hashValSlot, 8, "hashVal");
+    hashVal64 = builder.CreateLoad(int64Type, hashValSlot, "hashVal");
     cacheLocVal = builder.CreateAnd(hashVal64, maskval);
 
     llvm::Value* next_cell = builder.CreateInBoundsGEP(tbldata, cacheLocVal);
-    next_cell = builder.CreateAlignedLoad(next_cell, 8, "cell");
+    next_cell = builder.CreateLoad(hashCellPtrType, next_cell, "cell");
 
     tmpval = builder.CreatePtrToInt(next_cell, int64Type);
     tmpval = builder.CreateICmpEQ(tmpval, int64_0);

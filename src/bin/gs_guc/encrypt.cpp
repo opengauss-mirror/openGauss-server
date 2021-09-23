@@ -34,6 +34,41 @@
 static int check_key_num(const char* password);
 static void create_child_dir(const char* pathdir);
 
+void check_path(const char *path_name)
+{
+    const char* danger_character_list[] = {"|",
+        ";",
+        "&",
+        "$",
+        "<",
+        ">",
+        "`",
+        "\\",
+        "'",
+        "\"",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        "~",
+        "*",
+        "?",
+        "!",
+        "\n",
+        NULL};
+    int i = 0;
+
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr(path_name, danger_character_list[i]) != NULL) {
+            fprintf(
+                    stderr, "invalid token \"%s\" in path name: (%s)\n", danger_character_list[i], path_name);
+            exit(1);
+        }
+    }
+}
+
 static int check_key_num(const char* password)
 {
     int key_len = 0;
@@ -72,7 +107,6 @@ static void create_child_dir(const char* pathdir)
 int main(int argc, char* argv[])
 {
     int result = -1;
-    errno_t ret = 0;
     int key_num = 0;
     int key_child_num = 0;
     int i = 0;
@@ -80,13 +114,16 @@ int main(int argc, char* argv[])
     char* path_child[MAX_CHILD_NUM];
     char* keyword = NULL;
     errno_t rc = EOK;
+    FILE* cmd_fp = NULL;
+    char read_buf[MAX_CHILD_PATH] = {0};
+    char* mv_cmd = NULL;
 
     for (i = 0; i < MAX_CHILD_NUM; i++) {
         key_child[i] = NULL;
         path_child[i] = NULL;
     }
 
-    if (argc != 3) {
+    if (argc != 3 && argc != 4) {
         (void)fprintf(stderr, _("ERROR: invalid parameter\n"));
         return result;
     }
@@ -110,49 +147,75 @@ int main(int argc, char* argv[])
         securec_check_c(rc, "\0", "\0");
     }
 
-    if (strlen(argv[2]) > MAX_CHILD_PATH) {
-        (void)fprintf(stderr, _("ERROR: path %s length is more then %d\n"), argv[2], MAX_CHILD_PATH);
-        if (keyword != NULL) {
-            rc = memset_s(keyword, KEY_SPLIT_LEN * key_child_num, 0, KEY_SPLIT_LEN * key_child_num);
-            securec_check_c(rc, "\0", "\0");
-            CRYPT_FREE(keyword);
+    for (i = 2; i < argc; i++) {
+        if (strlen(argv[i]) > MAX_CHILD_PATH) {
+            (void)fprintf(stderr, _("ERROR: path %s length is more then %d\n"), argv[i], MAX_CHILD_PATH);
+            goto END;
         }
-        return result;
-    }
-    canonicalize_path(argv[2]);
-    if (-1 == access(argv[2], R_OK | W_OK)) {
-        (void)fprintf(stderr, _("ERROR: Could not access the path %s\n"), argv[2]);
-        if (keyword != NULL) {
-            rc = memset_s(keyword, KEY_SPLIT_LEN * key_child_num, 0, KEY_SPLIT_LEN * key_child_num);
-            securec_check_c(rc, "\0", "\0");
-            CRYPT_FREE(keyword);
+        canonicalize_path(argv[i]);
+        if (-1 == access(argv[i], R_OK | W_OK)) {
+            (void)fprintf(stderr, _("ERROR: Could not access the path %s\n"), argv[i]);
+            goto END;
         }
-        return result;
+        check_path(argv[i]);
     }
 
     init_log((char*)PROG_NAME);
 
     for (i = 0; i < key_child_num; i++) {
         key_child[i] = (char*)crypt_malloc_zero(KEY_SPLIT_LEN + 1);
-        ret = memcpy_s(key_child[i], KEY_SPLIT_LEN, keyword + (i * KEY_SPLIT_LEN), KEY_SPLIT_LEN);
-        securec_check_c(ret, "\0", "\0");
+        rc = memcpy_s(key_child[i], KEY_SPLIT_LEN, keyword + (i * KEY_SPLIT_LEN), KEY_SPLIT_LEN);
+        securec_check_c(rc, "\0", "\0");
 
         path_child[i] = (char*)crypt_malloc_zero(MAX_CHILD_PATH + 1);
-        ret = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", argv[2], i);
-        securec_check_ss_c(ret, "\0", "\0");
-        create_child_dir(path_child[i]);
+        rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", argv[2], i);
+        securec_check_ss_c(rc, "\0", "\0");
 
+        create_child_dir(path_child[i]);
         gen_cipher_rand_files(SERVER_MODE, key_child[i], "newsql", path_child[i], NULL);
 
+        if (argc == 4) {
+            CRYPT_FREE(path_child[i]);
+            path_child[i] = (char*)crypt_malloc_zero(MAX_CHILD_PATH + 1);
+            rc = snprintf_s(path_child[i], MAX_CHILD_PATH, MAX_CHILD_PATH - 1, "%s/key_%d", argv[3], i);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            create_child_dir(path_child[i]);
+
+            mv_cmd = (char*)crypt_malloc_zero(MAX_COMMAND_LEN + 1);
+            rc = snprintf_s(mv_cmd, MAX_COMMAND_LEN, MAX_COMMAND_LEN - 1, "mv %s/key_%d/*.rand %s/key_%d/",
+                            argv[2], i, argv[3], i);
+            securec_check_ss_c(rc, "\0", "\0");
+
+            cmd_fp = popen(mv_cmd, "r");
+            if (NULL == cmd_fp) {
+                perror("could not open mv command.\n");
+                CRYPT_FREE(mv_cmd);
+                CRYPT_FREE(key_child[i]);
+                CRYPT_FREE(path_child[i]);
+                goto END;
+            }
+
+            while (fgets(read_buf, sizeof(read_buf) - 1, cmd_fp) != 0) {
+                printf("%s\n", read_buf);
+                rc = memset_s(read_buf, sizeof(read_buf), 0, sizeof(read_buf));
+                securec_check_c(rc, "\0", "\0");
+            }
+            pclose(cmd_fp);
+            CRYPT_FREE(mv_cmd);
+        }
         CRYPT_FREE(key_child[i]);
         CRYPT_FREE(path_child[i]);
     }
+
+    printf("encrypt success.\n");
+    result = 0;
+
+END:
     if (keyword != NULL) {
         rc = memset_s(keyword, KEY_SPLIT_LEN * key_child_num, 0, KEY_SPLIT_LEN * key_child_num);
         securec_check_c(rc, "\0", "\0");
         CRYPT_FREE(keyword);
     }
-    printf("encrypt success\n");
-    result = 0;
     return result;
 }

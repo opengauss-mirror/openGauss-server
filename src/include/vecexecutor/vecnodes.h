@@ -26,7 +26,7 @@
 #define VECNODES_H_
 
 #include "access/dfs/dfs_am.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "nodes/execnodes.h"
 #include "access/cstore_am.h"
 #include "pgxc/execRemote.h"
@@ -259,6 +259,7 @@ typedef struct TsStoreScanState : ScanState {
     bool has_sort;
     int limit;                       // If is limit n
     AttrNumber sort_by_time_colidx;  // If is sort by tstime limit n
+
 #ifdef ENABLE_MULTIPLE_NODES
     TagRows* tag_rows;
 #endif

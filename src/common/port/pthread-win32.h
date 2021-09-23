@@ -3,7 +3,7 @@
  */
 #ifndef __PTHREAD_H
 #define __PTHREAD_H
-
+#if defined(WIN32) && !defined(_MINGW32)
 typedef ULONG pthread_key_t;
 typedef CRITICAL_SECTION* pthread_mutex_t;
 typedef int pthread_once_t;
@@ -19,4 +19,5 @@ int pthread_mutex_lock(pthread_mutex_t*);
 /* blocking */
 int pthread_mutex_unlock(pthread_mutex_t*);
 
+#endif
 #endif

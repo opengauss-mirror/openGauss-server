@@ -32,7 +32,7 @@
 #include "parser/scansup.h"
 #include "rewrite/prs2lock.h"
 #include "storage/buf/block.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/item/itemptr.h"
 #include "storage/off.h"
 #include "utils/rel.h"
@@ -65,6 +65,10 @@ sid		\"([^\"])*\"
 arrayid [A-Za-z0-9_]+\[{D}*\]
 
 %%
+
+asc			{ return(ASC); }
+
+desc			{ return(DESC); }
 
 open			{ return(OPEN); }
 

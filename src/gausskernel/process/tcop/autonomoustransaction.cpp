@@ -21,147 +21,100 @@
  * -------------------------------------------------------------------------
  */
 
+
 #include "tcop/autonomoustransaction.h"
 #include "postgres.h"
 #include "commands/dbcommands.h"
 #include "knl/knl_variable.h"
 #include "libpq/libpq-fe.h"
+#include "libpq/libpq-int.h"
 #include "utils/lsyscache.h"
 #include "utils/plpgsql.h"
 #include "storage/spin.h"
+#include "utils/builtins.h"
+#include "utils/typcache.h"
+#include "storage/lmgr.h"
 
-ATManager g_atManager;
+#define MAX_LINESIZE 32767
+
+extern bool PQsendQueryStart(PGconn *conn);
+extern Datum RecordCstringGetDatum(TupleDesc tupdesc, char* string);
+extern void send_only_message_to_frontend(const char* message, bool is_putline);
+
+static bool PQexecStart(PGconn* conn);
+static int PQsendQueryAutonm(PGconn* conn, const char* query);
+static PGresult* PQexecAutonm(PGconn* conn, const char* query, int64 currentXid, bool isLockWait = false);
+static PGresult* PQexecAutonmFinish(PGconn* conn);
+
+static void ProcessorNotice(void* arg, const char* message);
 
 const int MAX_CONNINFO_SIZE = 512;
+pg_atomic_uint32 AutonomousSession::m_sessioncnt = 0;
 
-bool ATManager::AddSession()
+/*
+ * AddSessionCount()
+ * m_sessioncnt Number of sessions started by 
+ * autonomous transactions on the current node
+ */
+void AutonomousSession::AddSessionCount(void)
 {
-    bool bok = false;
-
-    SpinLockAcquire(&m_lock);
-    if (m_sessioncnt < (uint32)g_instance.attr.attr_storage.max_concurrent_autonomous_transactions) {
-        ++m_sessioncnt;
+    if (GetSessionCount() < (uint32)g_instance.attr.attr_storage.max_concurrent_autonomous_transactions) {
+        AddRefcount();
         ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc session : %d", m_sessioncnt)));
-        bok = true;
-    }
-    SpinLockRelease(&m_lock);
-
-    return bok;
-}
-
-void ATManager::RemoveSession()
-{
-    SpinLockAcquire(&m_lock);
-    if (m_sessioncnt > 0) {
-        --m_sessioncnt;
-        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction dec session : %d", m_sessioncnt)));
-    }
-    SpinLockRelease(&m_lock);
-}
-
-
-ATResult AutonomousSession::ExecSimpleQuery(const char* query)
-{
-    if (unlikely(query == NULL)) {
+    } else {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
-                        errmsg("try execute null query string in autonomous transactions")));
+                errmsg("concurrent autonomous transactions reach its maximun : %d",
+                    g_instance.attr.attr_storage.max_concurrent_autonomous_transactions)));
     }
-
-    CreateSession();
-
-    bool old = t_thrd.int_cxt.ImmediateInterruptOK;
-    t_thrd.int_cxt.ImmediateInterruptOK = true;
-    CHECK_FOR_INTERRUPTS();  // Allow cancel/die interrupts
-    m_res = PQexec(m_conn, query);
-    t_thrd.int_cxt.ImmediateInterruptOK = old;
-
-    ATResult result = HandlePGResult(m_conn, m_res);
-    PQclear(m_res);
-    m_res = NULL;
-
-    return result;
 }
 
-ATResult AutonomousSession::ExecQueryWithParams(const char* query, PQ_ParamInfo* pinfo)
+void AutonomousSession::ReduceSessionCount()
 {
-    if (unlikely(query == NULL || pinfo == NULL)) {
-        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("invalid data \" %s \" in autonomous transactions",
-                                                               (query == NULL) ? "query" : "param")));
-    }
-
-    CreateSession();
-
-    bool old = t_thrd.int_cxt.ImmediateInterruptOK;
-    t_thrd.int_cxt.ImmediateInterruptOK = true;
-    CHECK_FOR_INTERRUPTS();  // Allow cancel/die interrupts
-    m_res = PQexecParams(m_conn, query, pinfo->nparams, pinfo->paramtypes, pinfo->paramvalues, pinfo->paramlengths,
-                         pinfo->paramformats, PQ_FORMAT_BINARY);
-    t_thrd.int_cxt.ImmediateInterruptOK = old;
-
-    FreePQParamInfo(pinfo);  // free pinfo as soon as it's useless for us
-
-    ATResult result = HandlePGResult(m_conn, m_res);
-    PQclear(m_res);
-    m_res = NULL;
-
-    return result;
-}
-
-void AutonomousSession::CloseSession(void)
-{
-    if (m_conn == NULL) {
-        return;
-    }
-
-    m_manager->RemoveSession();
-    PGconn* conn = m_conn;
-    m_conn = NULL;
-    PQfinish(conn);
-
-    if (m_res != NULL) {
-        PQclear(m_res);
+    if (GetSessionCount() > 0) {
+        SubRefCount();
+        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction dec session : %d", m_sessioncnt)));
+    } else {
+        if (!t_thrd.proc_cxt.proc_exit_inprogress){
+            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
+                errmsg("The number of concurrent autonomous transactions is too small."),
+                errdetail("Number of current connections: %d", m_sessioncnt),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
+        }
     }
 }
 
-void AutonomousSession::CreateSession(void)
+/*
+ * AttachSession()
+ * Connecting to the server through libpq
+ */
+void AutonomousSession::AttachSession(void)
 {
     if (m_conn != NULL) {  // create session alike singleton
         return;
     }
 
-    if (!m_manager->AddSession()) {
-        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
-                        errmsg("concurrent autonomous transactions reach its maximun : %d",
-                               g_instance.attr.attr_storage.max_concurrent_autonomous_transactions)));
-    }
-
     /* create a connection info with current database info */
-    char conninfo[MAX_CONNINFO_SIZE];
-    const char* dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
-    if (dbname == NULL) {
+    char connInfo[MAX_CONNINFO_SIZE];
+    const char* dbName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+    if (dbName == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database with OID %u does not exist",
                                                                     u_sess->proc_cxt.MyDatabaseId)));
     }
 
-    errno_t ret = snprintf_s(conninfo, sizeof(conninfo), sizeof(conninfo) - 1,
-                             "dbname=%s port=%d application_name='autonomous_transaction'",
-                             dbname, g_instance.attr.attr_network.PostPortNumber);
+    errno_t ret = snprintf_s(connInfo, sizeof(connInfo), sizeof(connInfo) - 1,
+                             "dbname=%s port=%d application_name='autonomoustransaction'",
+                             dbName, g_instance.attr.attr_network.PostPortNumber);
     securec_check_ss_c(ret, "\0", "\0");
 
     /* do the actual create session */
-    CreateSession(conninfo);
-}
-
-void AutonomousSession::CreateSession(const char* conninfo)
-{
-    if (unlikely(conninfo == NULL)) {
-        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("null connection info data")));
-    }
-
     bool old = t_thrd.int_cxt.ImmediateInterruptOK;
     t_thrd.int_cxt.ImmediateInterruptOK = true;
-    CHECK_FOR_INTERRUPTS();  // Allow cancel/die interrupts
-    m_conn = PQconnectdb(conninfo);
+    /* Allow cancel/die interrupts */
+    CHECK_FOR_INTERRUPTS();
+    AddSessionCount();
+    m_conn = PQconnectdb(connInfo);
+    PQsetNoticeProcessor(m_conn, ProcessorNotice, NULL);
     t_thrd.int_cxt.ImmediateInterruptOK = old;
 
     if (PQstatus(m_conn) != CONNECTION_OK) {
@@ -169,32 +122,149 @@ void AutonomousSession::CreateSession(const char* conninfo)
                         errmsg("autonomous transaction failed to create autonomous session"),
                         errdetail("%s", PQerrorMessage(m_conn))));
     }
-
-    ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction create session : %s", conninfo)));
 }
 
-void AutonomousSession::Attach(void)
+/*
+ * DetachSession()
+ * Disconnects from the server and decreases the global link count by one.
+ */
+void AutonomousSession::DetachSession(void)
 {
-    ++m_refcount;
-    ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction inc ref : %d", m_refcount)));
+    if (m_conn == NULL) {
+        return;
+    }
+
+    PQfinish(m_conn);
+    m_conn = NULL;
+
+    if (m_res != NULL) {
+        PQclear(m_res);
+    }
+
+    ReduceSessionCount();
 }
 
-void AutonomousSession::Detach(void)
+/*
+ * ExecSimpleQuery
+ * Entry for executing concatenation statements. 
+ * If the execution is successful, the execution result is returned. 
+ * An error message is displayed.
+ */
+Datum AutonomousSession::ExecSimpleQuery(const char* query, TupleDesc resultTupleDesc, 
+                                            int64 currentXid, bool isLockWait)
 {
-    if (m_refcount > 0) {
-        --m_refcount;
-        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction dec ref : %d", m_refcount)));
+    if (unlikely(query == NULL)) {
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR),
+                        errmsg("try execute null query string in autonomous transactions")));
+    }
+
+    bool old = t_thrd.int_cxt.ImmediateInterruptOK;
+    t_thrd.int_cxt.ImmediateInterruptOK = true;
+    CHECK_FOR_INTERRUPTS();  // Allow cancel/die interrupts
+    m_res = PQexecAutonm(m_conn, query, currentXid, isLockWait);
+    t_thrd.int_cxt.ImmediateInterruptOK = old;
+
+    ATResult result = HandlePGResult(m_conn, m_res, resultTupleDesc);
+    PQclear(m_res);
+    m_res = NULL;
+
+    return result.ResTup;
+}
+
+/*
+ * GetConnStatus()
+ * Obtain the link status. 
+ * If the link status is normal, the value 1 is returned. 
+ * If the link status is faulty, the value 0 is returned.
+ */
+bool AutonomousSession::GetConnStatus(void)
+{
+    return PQstatus(m_conn) != CONNECTION_BAD;
+}
+
+bool AutonomousSession::ReConnSession(void)
+{
+    for (int i = 0; i < 3; i++) {
+        PQreset(m_conn);
+        if (u_sess->SPI_cxt.autonomous_session->GetConnStatus()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * CreateAutonomousSession()
+ * Creates a new autonomous transaction session. 
+ * If the session exists, the session is not processed.
+ */
+void CreateAutonomousSession(void)
+{
+    if (u_sess->SPI_cxt.autonomous_session == NULL) {
+        MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->SPI_cxt._stack[0].procCxt);
+        u_sess->SPI_cxt.autonomous_session = (AutonomousSession*)palloc(sizeof(AutonomousSession));
+        (void)MemoryContextSwitchTo(oldCxt);
+        u_sess->SPI_cxt.autonomous_session->Init();
+        u_sess->SPI_cxt.autonomous_session->AttachSession();
     } else {
-        ereport(DEBUG2, (errmodule(MOD_PLSQL), errmsg("autonomous transaction invalid dec ref")));
+        if (!u_sess->SPI_cxt.autonomous_session->GetConnStatus() 
+            && !u_sess->SPI_cxt.autonomous_session->ReConnSession()) {
+            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("connection to server was lost !")));
+        }
     }
+}
 
-    if (m_refcount == 0) {
-        CloseSession();
+/*
+ * DestoryAutonomousSession
+ * You are the top-level procedure 
+ * and have completed the execution.
+ */
+void DestoryAutonomousSession(bool force)
+{
+    if (u_sess->SPI_cxt.autonomous_session && (force || u_sess->SPI_cxt._connected == 0)) {
+        u_sess->SPI_cxt.autonomous_session->DetachSession();
+        AutonomousSession* autonomousSession = u_sess->SPI_cxt.autonomous_session;
+        pfree(autonomousSession);
+        u_sess->SPI_cxt.autonomous_session = NULL;
     }
 }
 
 
-ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
+/*
+ * HandleResInfo
+ * Process the result returned by the 'select function'.
+ */
+Datum HandleResInfo(PGconn* conn, const PGresult* result, TupleDesc resultTupleDesc)
+{
+    Oid typeInput;
+    Oid typeParam;
+    int nColumns = PQnfields(result);
+    int nRows = PQntuples(result);
+    Datum res;
+    if (nColumns > 1 || nRows > 1) {
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), 
+            errmsg("Invalid autonomous transaction return datatypes"),
+            errdetail("nColumns = %d, nRows = %d", nColumns, nRows),
+            errcause("PL/SQL uses unsupported feature."),
+            erraction("Contact Huawei Engineer.")));
+    }
+
+    Oid ftype = PQftype(result, 0);
+    char* valueStr = PQgetvalue(result, 0, 0);
+
+    if (resultTupleDesc != NULL) {
+        res = RecordCstringGetDatum(resultTupleDesc, valueStr);
+    } else {
+        /* translate data string to Datum */
+        getTypeInputInfo(ftype, &typeInput, &typeParam);
+        res = OidInputFunctionCall(typeInput, valueStr, typeParam, -1);
+    }
+
+    return res;
+}
+
+
+ATResult HandlePGResult(PGconn* conn, PGresult* pgresult, TupleDesc resultTupleDesc)
 {
     if (unlikely(conn == NULL || pgresult == NULL)) {
         ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("invalid data \" %s \" in autonomous transactions",
@@ -202,24 +272,30 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
     }
     ATResult res;
     ExecStatusType status = PQresultStatus(pgresult);
+    int errorCode = 0;
+    
     switch (status) {
         /* successful completion of a command returning no data */
         case PGRES_COMMAND_OK:
             res.result = RES_COMMAND_OK;
             res.withtuple = true;
+            res.ResTup = (Datum)0;
             break;
         /*
          * contains a single result tuple from the current command. 
          * this status occurs only when single-row mode has been selected for the query
          */
+         /* We do not handle this type of return. */
         case PGRES_SINGLE_TUPLE:
             res.result = RES_SINGLE_TUPLE;
             res.withtuple = true;
+            res.ResTup = (Datum)0;
             break;
-        /* successful completion of a command returning data (such as a `SELECT` or `SHOW`) */
         case PGRES_TUPLES_OK:
             res.result = RES_TUPLES_OK;
             res.withtuple = true;
+
+            res.ResTup = HandleResInfo(conn, pgresult, resultTupleDesc);
             break;
 
         /* the string sent to the server was empty */
@@ -234,8 +310,11 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
             if (hint == NULL) {  // this a error associated with connection in stead of query command
                 hint = PQerrorMessage(conn);
             }
-            ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("autonomous transaction failed in query execution."),
-                            errhint("%s", hint)));
+            errorCode = MAKE_SQLSTATE((unsigned char)conn->last_sqlstate[0], (unsigned char)conn->last_sqlstate[1], 
+                                      (unsigned char)conn->last_sqlstate[2], (unsigned char)conn->last_sqlstate[3], 
+                                      (unsigned char)conn->last_sqlstate[4]);
+
+            ereport(ERROR, (errcode(errorCode), errmsg("%s", hint)));
         }
 
         /* following cases should not be happened */
@@ -258,125 +337,275 @@ ATResult HandlePGResult(PGconn* conn, PGresult* pgresult)
     return res;
 }
 
-void InitPQParamInfo(PQ_ParamInfo* pinfo, int n)
+
+/* ----------
+ * IsAutonomousTransaction
+ *
+ * Check whether a new session needs to be started 
+ *    for the current stored procedure.
+ * ----------
+ */
+bool IsAutonomousTransaction(bool isAutonomous)
 {
-    if (pinfo == NULL) {
-        return;
-    }
-
-    pinfo->nparams = n;
-    if (n > 0) {
-        pinfo->paramtypes   = (Oid*)palloc(n * sizeof(Oid));
-        pinfo->paramvalues  = (char**)palloc(n * sizeof(char*));
-        pinfo->paramlengths = (int*)palloc(n * sizeof(int));
-        pinfo->paramformats = (int*)palloc(n * sizeof(int));
-    } else {
-        pinfo->paramtypes   = NULL;
-        pinfo->paramvalues  = NULL;
-        pinfo->paramlengths = NULL;
-        pinfo->paramformats = NULL;
-    }
-}
-
-void FreePQParamInfo(PQ_ParamInfo* pinfo)
-{
-    if (pinfo == NULL) {
-        return;
-    }
-    if (pinfo->paramtypes) {
-        pfree(pinfo->paramtypes);
-    }
-    if (pinfo->paramvalues) {
-        pfree(pinfo->paramvalues);
-    }
-    if (pinfo->paramlengths) {
-        pfree(pinfo->paramlengths);
-    }
-    if (pinfo->paramformats) {
-        pfree(pinfo->paramformats);
-    }
-
-    pfree(pinfo);
-}
-
-bool IsValidAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
-{
-    if (unlikely(estate == NULL || block == NULL)) {
+    /* If the current stored procedure is not an autonomous transaction, false is returned. */
+    if (!isAutonomous) {
         return false;
     }
-    if (block->exceptions != NULL) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Autonomous transaction don't support exception")));
+    /* The current stored procedure is transferred from gsql and the PQexec interface is invoked. */
+    if (u_sess->is_autonomous_session == false) {
+        return true;
     }
-    if (estate->func->fn_is_trigger) { 
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Trigger don't support autonomous transaction")));
-    } 
-
-    return true;
-}
-
-bool IsAutonomousTransaction(const PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
-{
-    /* 
-     * in outer block of plpgsql using block->autonomous to identify autonomus,
-     * in subblock of plpgsql using estate->autonomous_session.
-     * ----------------------------------------------------
-      CREATE FUNCTION ff_subblock() RETURNS void AS $$
-      DECLARE
-      PRAGMA AUTONOMOUS_TRANSACTION;
-      BEGIN <<outer block>>
-           BEGIN <<subblock>>
-               insert into tt01 values(1);
-           END;
-           BEGIN <<subblock>>
-                insert into tt01 values(2);
-           END;
-      END;
-      $$ LANGUAGE plpgsql;
-     * ----------------------------------------------------
+    /* The current stored procedure is transferred 
+     * through the Autonm interface of libpq and is a called function. 
      */
-    return (block->autonomous || estate->autonomous_session);
+    if (u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected > 0) {
+        return true;
+    }
+
+    return false;
 }
 
-bool IsValidAutonomousTransactionQuery(PLpgSQL_exectype exectype, const PLpgSQL_expr* stmtexpr, bool isinto)
+
+/*
+ * get output buffer size
+ */
+inline int32 GetSendBuffSize(void)
 {
-    if (exectype == STMT_UNKNOW) {
-        return false;
+    StringInfoData* buffer = t_thrd.log_cxt.msgbuf;
+    if (buffer == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("msgbuf is invalud")));
     }
-    if (unlikely(stmtexpr == NULL)) {
-        ereport(ERROR, (errcode(ERRCODE_PLPGSQL_ERROR), errmsg("null stmt expr in autonomous transactions")));
-    }
-    if (isinto) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Autonomous transaction don't support 'into' clause"),
-                        errdetail("%s", stmtexpr->query)));
-    }
-    if (stmtexpr->paramnos != NULL && exectype != STMT_DYNAMIC) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Un-support feature : Autonomous transaction don't support sql command with parameter"),
-                        errdetail("%s", stmtexpr->query)));
+    return buffer->len;
+}
+
+/*
+ * for backend Notice messages (INFO, WARNING, etc)
+ */
+static void ProcessorNotice(void* arg, const char* message)
+{
+    (void)arg; /* not used */
+    StringInfoData ds;
+    bool isPutline = true;
+    
+    uint32 lineSize = strlen(message);
+    if (lineSize > MAX_LINESIZE)
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("The length of incoming msg exceeds the max line size %d", MAX_LINESIZE)));
+
+    initStringInfo(&ds);
+    appendStringInfoString(&ds, message);
+
+    /* add a arg to see it's a put or put_line */
+    send_only_message_to_frontend(ds.data, isPutline);
+    pfree(ds.data);
+}
+
+int PQsendQueryAutonm(PGconn* conn, const char* query)
+{
+    if (!PQsendQueryStart(conn))
+        return 0;
+
+    if (query == NULL) {
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("command string is a null pointer\n"));
+        return 0;
     }
 
+#ifdef HAVE_CE
+    StatementData statementData (conn, query);
+    if (conn->client_logic->enable_client_encryption) {
+        if (!conn->client_logic->disable_once) {
+            bool clientLogicRet = Processor::run_pre_query(&statementData);
+            if (!clientLogicRet)
+                return 0;
+            query = statementData.params.adjusted_query;
+        } else {
+            conn->client_logic->disable_once  = false;
+        }
+    } else { 
+        char *temp_query = del_blanks(const_cast<char*>(query), strlen(query));
+        const char *global_setting_str = "createclientmasterkey";
+        const char *column_setting_str = "createcolumnencryptionkey";
+        const char *client_logic_str = "encryptedwith";
+        if (temp_query != NULL && ((strcasestr(temp_query, global_setting_str) != NULL) ||
+            (strcasestr(temp_query, column_setting_str) != NULL) ||
+            (strcasestr(temp_query, client_logic_str) != NULL))) {
+            free(temp_query);
+            temp_query = NULL;
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): disable client-encryption feature, please use -C to enable it.\n"));
+            return 0;
+        }
+        if (temp_query != NULL) {
+            free(temp_query);
+            temp_query = NULL;
+        }
+    } 
+#endif
+
+    Oid currentId = GetCurrentUserId();
+    /* construct the outgoing Query message */
+    if (pqPutMsgStart('u', false, conn) < 0 || pqPutInt((int)currentId, 4, conn) 
+        || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0) {
+        pqHandleSendFailure(conn);
+        return 0;
+    }
+
+    /* remember we are using simple query protocol */
+    conn->queryclass = PGQUERY_SIMPLE;
+
+    /* and remember the query text too, if possible */
+    /* if insufficient memory, last_query just winds up NULL */
+    if (conn->last_query != NULL)
+        free(conn->last_query);
+    conn->last_query = strdup(query);
+
+    /*
+     * Give the data a push.  In nonblock mode, don't complain if we're unable
+     * to send it all; PQgetResult() will do any additional flushing needed.
+     */
+    if (pqFlush(conn) < 0) {
+        pqHandleSendFailure(conn);
+        return 0;
+    }
+
+    /* OK, it's launched! */
+    conn->asyncStatus = PGASYNC_BUSY;
+    return 1;
+}
+
+
+PGresult* PQexecAutonm(PGconn* conn, const char* query, int64 automnXid, bool isLockWait)
+{
+    if (!PQexecStart(conn)) {
+        return NULL;
+    }
+
+    if (!PQsendQueryAutonm(conn, query)) {
+        return NULL;
+    }
+    if (isLockWait) {
+        XactLockTableWait(automnXid);
+        CHECK_FOR_INTERRUPTS();
+    }
+    return PQexecAutonmFinish(conn);
+}
+
+
+/*
+ * Common code for PQexec and sibling routines: prepare to send command
+ */
+static bool PQexecStart(PGconn* conn)
+{
+    PGresult* result = NULL;
+
+    if (conn == NULL)
+        return false;
+
+    /*
+     * Silently discard any prior query result that application didn't eat.
+     * This is probably poor design, but it's here for backward compatibility.
+     */
+    while ((result = PQgetResult(conn)) != NULL) {
+        ExecStatusType resultStatus = result->resultStatus;
+
+        PQclear(result); /* only need its status */
+        if (resultStatus == PGRES_COPY_IN) {
+            if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3) {
+                /* In protocol 3, we can get out of a COPY IN state */
+                if (PQputCopyEnd(conn, libpq_gettext("COPY terminated by new PQexec")) < 0)
+                    return false;
+                /* keep waiting to swallow the copy's failure message */
+            } else {
+                /* In older protocols we have to punt */
+                printfPQExpBuffer(&conn->errorMessage,
+                    libpq_gettext("COPY IN state must be terminated first, remote datanode %s, err: %s\n"),
+                    conn->remote_nodename, strerror(errno));
+                return false;
+            }
+        } else if (resultStatus == PGRES_COPY_OUT) {
+            if (PG_PROTOCOL_MAJOR(conn->pversion) >= 3) {
+                /*
+                 * In protocol 3, we can get out of a COPY OUT state: we just
+                 * switch back to BUSY and allow the remaining COPY data to be
+                 * dropped on the floor.
+                 */
+                conn->asyncStatus = PGASYNC_BUSY;
+                /* keep waiting to swallow the copy's completion message */
+            } else {
+                /* In older protocols we have to punt */
+                printfPQExpBuffer(&conn->errorMessage,
+                    libpq_gettext("COPY OUT state must be terminated first, remote datanode %s, err: %s\n"), 
+                    conn->remote_nodename, strerror(errno));
+                return false;
+            }
+        } else if (resultStatus == PGRES_COPY_BOTH) {
+            /* We don't allow PQexec during COPY BOTH */
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("PQexec not allowed during COPY BOTH, remote datanode %s, errno: %s\n"),
+                conn->remote_nodename, strerror(errno));
+            return false;
+        }
+        /* check for loss of connection, too */
+        if (conn->status == CONNECTION_BAD)
+            return false;
+    }
+
+    /* OK to send a command */
     return true;
 }
 
-void AttachToAutonomousSession(PLpgSQL_execstate* estate, const PLpgSQL_stmt_block* block)
-{
-    if (IsValidAutonomousTransaction(estate, block)) {
-        if (estate->autonomous_session == NULL) {
-            estate->autonomous_session = (AutonomousSession*)palloc(sizeof(AutonomousSession));
-            estate->autonomous_session->Init(&g_atManager);
-        }
-        estate->autonomous_session->Attach();
-    }
-}
 
-void DetachToAutonomousSession(const PLpgSQL_execstate* estate)
+/*
+ * Common code for PQexec and sibling routines: wait for command result
+ */
+static PGresult* PQexecAutonmFinish(PGconn* conn)
 {
-    if (estate->autonomous_session) {
-        estate->autonomous_session->Detach();
+    PGresult* result = NULL;
+    PGresult* lastResult = NULL;
+
+    /*
+     * For backwards compatibility, return the last result if there are more
+     * than one --- but merge error messages if we get more than one error
+     * result.
+     *
+     * We have to stop if we see copy in/out/both, however. We will resume
+     * parsing after application performs the data transfer.
+     *
+     * Also stop if the connection is lost (else we'll loop infinitely).
+     */
+    lastResult = NULL;
+    while ((result = PQgetResult(conn)) != NULL) {
+        if (lastResult != NULL) {
+            if (lastResult->resultStatus == PGRES_FATAL_ERROR && result->resultStatus == PGRES_FATAL_ERROR) {
+                pqCatenateResultError(lastResult, result->errMsg);
+                PQclear(result);
+                result = lastResult;
+
+                /*
+                 * Make sure PQerrorMessage agrees with concatenated result
+                 */
+                resetPQExpBuffer(&conn->errorMessage);
+                appendPQExpBufferStr(&conn->errorMessage, result->errMsg);
+            } else {
+                if (strncmp(result->cmdStatus, "COMMIT", 7) != 0) {
+                    PQclear(lastResult);
+                    lastResult = NULL;
+                } else {
+                    PQclear(result);
+                    result = NULL;
+                }
+            }
+        }
+        if (lastResult == NULL) {
+            lastResult = result;
+        } 
+        if (lastResult->resultStatus == PGRES_COPY_IN || lastResult->resultStatus == PGRES_COPY_OUT ||
+            lastResult->resultStatus == PGRES_COPY_BOTH || conn->status == CONNECTION_BAD)
+            break;
     }
+
+    return lastResult;
 }
 
 /* end of file */

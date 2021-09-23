@@ -23,8 +23,6 @@
 #include "executor/executor.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
-#include "vecexecutor/vecexecutor.h"
-#include "vecexecutor/vecnoderowtovector.h"
 
 /*
  * ExecScanFetch -- fetch next potential tuple
@@ -381,45 +379,3 @@ void ExecScanReScan(ScanState* node)
         estate->es_epqScanDone[scan_rel_id - 1] = false;
     }
 }
-
-VectorBatch* ExecBatchScan(ScanState* node, ExecScanAccessMtd access_mtd,
-    ExecScanRecheckMtd recheck_mtd)
-{
-    VectorBatch* p_out_batch = node->m_pCurrentBatch;
-
-    ExprContext* econtext = node->ps.ps_ExprContext;
-    TupleTableSlot* result_slot = NULL;
-
-    ResetExprContext(econtext);
-    /*
-     * We don't go through the regular ExecScan interface as we will handle all
-     * common code ourselves here
-     */
-    p_out_batch->Reset(true);
-
-    if (node->is_scan_end) {
-        return p_out_batch;
-    }
-
-    for (;;) {
-        result_slot = ExecScan(node, access_mtd, recheck_mtd);
-        if (TupIsNull(result_slot)) {
-            node->is_scan_end = true;
-            break;
-        }
-        
-        if (VectorizeOneTuple(p_out_batch, result_slot, econtext->ecxt_per_tuple_memory)) {
-            /* It is full now, now return current batch */
-            break;
-        }
-    }
-
-    p_out_batch->FixRowCount();
-
-    /* Response to the stop query flag. */
-    if (unlikely(executorEarlyStop()))
-        return NULL;
-
-    return p_out_batch;
-}
-

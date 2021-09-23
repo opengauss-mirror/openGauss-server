@@ -534,6 +534,7 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
     int io_priority = Anum_pg_resource_pool_io_priority;
     int nodegroup = Anum_pg_resource_pool_nodegroup;
     int foreign_users = Anum_pg_resource_pool_is_foreign;
+    int max_worker = Anum_pg_resource_pool_max_worker;
 
     int mempct = -1;
     char memory[256] = {0};
@@ -627,7 +628,7 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
 
             max_dop = (int)defGetInt64(defel);
 
-            if (max_dop < DEFAULT_MAX_DOP) {
+            if (max_dop < DEFAULT_DOP || max_dop > DEFAULT_MAX_DOP) {
                 ereport(ERROR,
                     (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("max_dop value can't be %ld.", max_dop)));
             }
@@ -747,6 +748,22 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
             nulls[foreign_users - 1] = false;
             repl[foreign_users - 1] = true;
             is_foreign_changed = true;
+        } else if (strcmp(defel->defname, "max_worker") == 0){
+            if (!nulls[max_worker - 1]) {
+                ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NO_INDICATOR_PARAMETER),
+                    errmsg("redundant options: \"max_worker\"")));
+            }
+        
+            int max_workers = (int)defGetInt64(defel);
+        
+            if (max_workers < DEFAULT_WORKER || max_workers > DEFAULT_MAX_WORKER) {
+                ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                    errmsg("max_worker can't be %d.", max_workers)));
+            }
+        
+            values[max_worker - 1] = Int32GetDatum(max_workers);
+            nulls[max_worker - 1] = false;
+            repl[max_worker - 1] = true;
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("incorrect option: %s", defel->defname)));
         }
@@ -918,7 +935,7 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
         }
 
         if (nulls[dop_cnt - 1]) {
-            values[dop_cnt - 1] = Int32GetDatum(DEFAULT_MAX_DOP);
+            values[dop_cnt - 1] = Int32GetDatum(DEFAULT_DOP);
             nulls[dop_cnt - 1] = false;
         }
 
@@ -956,6 +973,11 @@ static void CheckResourcePoolOptions(const char* pool_name, List* options, bool 
         if (nulls[foreign_users - 1]) {
             values[foreign_users - 1] = BoolGetDatum(is_foreign);
             nulls[foreign_users - 1] = false;
+        }
+
+        if (nulls[max_worker - 1]) {
+            values[max_worker - 1] = Int32GetDatum(DEFAULT_WORKER);
+            nulls[max_worker - 1] = false;
         }
     }
 }

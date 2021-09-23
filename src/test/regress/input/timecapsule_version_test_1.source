@@ -1,0 +1,886 @@
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;
+
+create schema schema_test_3;
+set search_path = schema_test_3;
+
+-- prepare for the test
+drop table t_timecapsule_test_tmp;
+create table t_timecapsule_test_tmp(id int, snaptime timestamptz, snapcsn bigint);
+
+CREATE OR REPLACE FUNCTION findCsn(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count integer;
+begin
+  count = (select snapcsn from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION findTime(int8)
+  RETURNS timestamptz
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count timestamptz;
+begin
+  count = (select snaptime from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+
+
+--1：单表查询
+drop table t1;
+create table t1(a int);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(1),(2),(3);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+update t1 set a = 99 where a = 2;
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+delete from t1 where a = 3;
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(4),(5);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 5, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+--对以上三个快照进行
+--反复执行，
+select * from t1 timecapsule csn findCsn(1) order by a;
+select * from t1 timecapsule timestamp findTime(1) order by a;
+select * from t1 timecapsule csn findCsn(2) order by a;
+select * from t1 timecapsule timestamp findTime(2) order by a;
+select * from t1 timecapsule csn findCsn(3) order by a;
+select * from t1 timecapsule timestamp findTime(3) order by a;
+select * from t1 timecapsule csn findCsn(4) order by a;
+select * from t1 timecapsule timestamp findTime(4) order by a;
+select * from t1 timecapsule csn findCsn(5) where a < 6 order by a;
+select * from t1 timecapsule timestamp findTime(5) where a < 6 order by a;
+select * from t1 timecapsule timestamp now() order by a;
+
+--复杂语句
+select * from t1 timecapsule csn findCsn(3) group by a order by a limit 2;
+select * from t1 timecapsule csn findCsn(3), (select * from t1 timecapsule csn findCsn(4)) order by 1, 2;
+
+--执行闪回table
+--反复执行
+timecapsule table t1 to csn findCsn(1);
+select * from t1 timecapsule csn findCsn(1) order by a;
+timecapsule table t1 to csn findCsn(2);
+select * from t1 timecapsule csn findCsn(2) order by a;
+timecapsule table t1 to csn findCsn(3);
+select * from t1 timecapsule csn findCsn(3) order by a;
+timecapsule table t1 to csn findCsn(4);
+select * from t1 timecapsule csn findCsn(4) order by a;
+timecapsule table t1 to csn findCsn(5);
+select * from t1 timecapsule csn findCsn(5) order by a;
+
+timecapsule table t1 to csn findCsn(1) + 1;
+timecapsule table t1 to csn findCsn(2) + 2;
+timecapsule table t1 to csn findCsn(3) + 3;
+timecapsule table t1 to csn findCsn(4) + 444444;
+timecapsule table t1 to csn findCsn(5) + 555555;
+
+--same to use to timestamp snpcsnXX
+timecapsule table t1 to timestamp findTime(1);
+timecapsule table t1 to timestamp findTime(2);
+timecapsule table t1 to timestamp findTime(3);
+timecapsule table t1 to timestamp findTime(4);
+timecapsule table t1 to timestamp findTime(5);
+
+--混合测试
+--反复执行
+timecapsule table t1 to csn findCsn(2);
+select * from t1 timecapsule csn findCsn(2) order by a;
+timecapsule table t1 to csn findCsn(3);
+select * from t1 timecapsule csn findCsn(2) order by a;
+timecapsule table t1 to csn findCsn(3);
+select * from t1 timecapsule csn findCsn(1) order by a;
+timecapsule table t1 to csn findCsn(4);
+select * from t1 timecapsule csn findCsn(1) order by a;
+timecapsule table t1 to csn findCsn(1);
+select * from t1 timecapsule csn findCsn(4) order by a;
+timecapsule table t1 to csn findCsn(1);
+select * from t1 timecapsule csn findCsn(3) order by a;
+timecapsule table t1 to csn findCsn(3);
+select * from t1 timecapsule csn findCsn(5) order by a;
+
+
+--和其他DML语句混合
+update t1 set a = 100 where a in ( select a from t1 timecapsule csn findCsn(2)) and a in ( select a from t1 timecapsule csn findCsn(5));
+update t1 set a = 101 where a in ( select a from t1 timecapsule csn findCsn(3)) and a in ( select a from t1 timecapsule csn findCsn(4));
+update t1 set a = 102 where a in ( select a from t1 timecapsule csn findCsn(4)) and a in ( select a from t1 timecapsule csn findCsn(3));
+update t1 set a = 103 where a in ( select a from t1 timecapsule csn findCsn(5)) and a in ( select a from t1 timecapsule csn findCsn(2));
+delete from t1 where a in ( select a from t1 timecapsule csn findCsn(2)) and a in ( select a from t1 timecapsule csn findCsn(5));
+delete from t1 where a in ( select a from t1 timecapsule csn findCsn(3)) and a in ( select a from t1 timecapsule csn findCsn(4));
+delete from t1 where a in ( select a from t1 timecapsule csn findCsn(4)) and a in ( select a from t1 timecapsule csn findCsn(3));
+delete from t1 where a in ( select a from t1 timecapsule csn findCsn(5)) and a in ( select a from t1 timecapsule csn findCsn(2));
+
+insert into t1 select * from t1 timecapsule csn findCsn(2);
+insert into t1 select * from t1 timecapsule csn findCsn(3);
+insert into t1 select * from t1 timecapsule csn findCsn(4);
+insert into t1 select * from t1 timecapsule csn findCsn(5);
+
+insert into t1 select * from t1 timecapsule timestamp findTime(2);
+insert into t1 select * from t1 timecapsule timestamp findTime(3);
+insert into t1 select * from t1 timecapsule timestamp findTime(4);
+insert into t1 select * from t1 timecapsule timestamp findTime(5);
+
+delete from t_timecapsule_test_tmp;
+drop table t1;
+
+---------------------------------------------------------------
+--2：多表联合查询
+delete from t_timecapsule_test_tmp;
+drop table t1;
+drop table t2;
+drop table t3;
+create table t1(a int);
+create table t2(a int);
+create table t3(a int);
+
+insert into t1 values(1);
+insert into t2 values(11);
+insert into t3 values(21);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(2);
+insert into t2 values(12);
+insert into t3 values(22);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(3);
+insert into t2 values(13);
+insert into t3 values(23);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+--按照findCsn(1)闪回
+select t1.a, t2.a, t3.a from t1, t2, t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2, t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2 timecapsule csn findCsn(1), t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2, t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(1), t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2, t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(1) order by 1,2,3;
+
+--按照findTime(1)闪回
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2, t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2 timecapsule timestamp findTime(1), t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2, t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(1), t3 order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2, t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1, t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+
+-- 按照csn混合snapshot 闪回
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(1), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(3) order by 1,2,3;
+
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(2), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(3) order by 1,2,3;
+
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(1), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(2), t3 timecapsule csn findCsn(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule csn findCsn(3), t2 timecapsule csn findCsn(3), t3 timecapsule csn findCsn(3) order by 1,2,3;
+
+--按照时间，混合snap闪回。
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(1), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(2), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(1), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(2), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(1) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(2) order by 1,2,3;
+select t1.a, t2.a, t3.a from t1 timecapsule timestamp findTime(3), t2 timecapsule timestamp findTime(3), t3 timecapsule timestamp findTime(3) order by 1,2,3;
+
+
+delete from t_timecapsule_test_tmp;
+drop table t1;
+drop table t2;
+drop table t3;
+
+
+---------------------------------------------------------------
+--3：约束测试，syntax test only
+drop table t1;
+drop table t2;
+create table t1(a int);
+create table t2(a int);
+select pg_sleep(4);
+
+--sys table
+select * from pg_class timecapsule csn 92233720368547758;
+timecapsule table pg_class to csn 92233720368547758;
+
+select * from gs_txn_snapshot timecapsule csn 92233720368547758;
+timecapsule table gs_txn_snapshot to csn 92233720368547758;
+
+--view
+drop view vvvvv;
+create view vvvvv as select * from t1;
+select * from vvvvv timecapsule csn 92233720368547758;
+timecapsule table vvvvv to csn 92233720368547758;
+drop view vvvvv;
+
+--临时表
+drop table temp_t1;
+CREATE TEMP TABLE temp_t1 as (select * from t1 limit 0);
+select * from t1 timecapsule timestamp now();
+timecapsule table temp_t1 to timestamp now();
+drop table temp_t1;
+
+--函数/存储过程
+CREATE OR REPLACE FUNCTION constVal()  
+RETURNS integer   AS $maxValue$  
+declare  
+   val integer;  
+BEGIN  
+   val = 1;
+   RETURN val;  
+END;  
+$maxValue$ LANGUAGE plpgsql;
+
+select * from constVal() timecapsule timestamp now();
+
+select * from t1 t timecapsule csn constVal() + 56789;
+
+--边界测试
+select * from t1 timecapsule csn 9223372036854775808; --2^63
+select * from t1 timecapsule csn 9223372036854775807; --(2^63 - 1)
+select * from t1 timecapsule csn 0;
+select * from t1 timecapsule csn -1;
+select * from t1 timecapsule csn -9223372036854775807; ---(-2^63 + 1)
+select * from t1 timecapsule csn -9223372036854775808; --(-2^63)
+select * from t1 timecapsule csn -9223372036854775809; --(-2^63 - 1)
+
+--语法测试
+timecapsule table t1, t2 to timestamp now();
+
+timecapsule table t1 to csn 92233720368547758;
+timecapsule table t1 to csn '92233720368547758';
+timecapsule table t1 to csn '92233720368547758'+'434';
+timecapsule table t1 to 92233720368547758;
+timecapsule table t1 csn 92233720368547758;
+timecapsule table t1 to timestamp now();
+timecapsule table t1 to now();
+timecapsule table t1 timestamp now();
+
+select * from t1 timecapsule csn (92233720368547758+1111);
+select * from t1 timecapsule csn :p1;
+select * from t1 timecapsule csn (select 1 from dual);
+select * from t1 t timecapsule csn t.a;
+select * from t1 t timecapsule csn constVal();
+
+timecapsule table t1 to csn (92233720368547758+1111);
+timecapsule table t1 to :p1;
+timecapsule table t1 csn (select 1 from dual);
+timecapsule table t1 csn (select count(*) from pg_class);
+
+--changecsn 测试（合入婷婷的用例即可）
+--TODO
+
+drop table t1;
+drop table t2;
+
+---------------------------------------------------------------
+
+
+---------------------------------------------------------------
+--5:边缘用例
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+create table t1(a int);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(1),(2),(3);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+update t1 set a = 99 where a = 2;
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+delete from t1 where a = 3;
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(4),(5);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 5, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+--函数/存储过程执行
+CREATE OR REPLACE FUNCTION maxRecordsByCsn(int8)  
+RETURNS integer AS $maxValue$  
+declare  
+    val integer;  
+BEGIN  
+   SELECT max(a) into val FROM t1 timecapsule csn $1;  
+   RETURN val;  
+END;  
+$maxValue$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION maxRecordsByTime(timestamp with time zone)  
+RETURNS integer AS $maxValue$  
+declare  
+    val integer;  
+BEGIN  
+   SELECT max(a) into val FROM t1 timecapsule timestamp $1;  
+   RETURN val;  
+END;  
+$maxValue$ LANGUAGE plpgsql;
+
+select maxRecordsByCsn(findCsn(1));
+select maxRecordsByCsn(findCsn(2));
+select maxRecordsByCsn(findCsn(3));
+select maxRecordsByCsn(findCsn(4));
+select maxRecordsByCsn(findCsn(5));
+
+select maxRecordsByTime(findTime(1));
+select maxRecordsByTime(findTime(2));
+select maxRecordsByTime(findTime(3));
+select maxRecordsByTime(findTime(4));
+select maxRecordsByTime(findTime(5));
+
+
+CREATE OR REPLACE FUNCTION countRecordsByCsn(int8)  
+RETURNS integer AS $countValue$  
+declare  
+    val integer;  
+BEGIN  
+   SELECT count(a) into val FROM t1 timecapsule csn $1;  
+   RETURN val;  
+END;  
+$countValue$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION countRecordsByTime(timestamp with time zone)  
+RETURNS integer AS $countValue$  
+declare  
+    val integer;  
+BEGIN  
+   SELECT count(a) into val FROM t1 timecapsule timestamp $1;  
+   RETURN val;  
+END;  
+$countValue$ LANGUAGE plpgsql;
+
+select countRecordsByCsn(findCsn(1));
+select countRecordsByCsn(findCsn(2));
+select countRecordsByCsn(findCsn(3));
+select countRecordsByCsn(findCsn(4));
+select countRecordsByCsn(findCsn(5));
+
+select countRecordsByTime(findTime(1));
+select countRecordsByTime(findTime(2));
+select countRecordsByTime(findTime(3));
+select countRecordsByTime(findTime(4));
+select countRecordsByTime(findTime(5));
+
+
+-- testcase 2
+CREATE OR REPLACE FUNCTION ChangeRecords()  
+RETURNS integer AS $dd$  
+declare  
+BEGIN  
+   timecapsule table t1 to csn findCsn(4);
+   timecapsule table t1 to csn findCsn(2);
+   timecapsule table t1 to csn findCsn(3);
+   RETURN 1;  
+END;  
+$dd$ LANGUAGE plpgsql;
+
+select ChangeRecords();
+select * from t1 order by a;
+
+
+--for update语句
+select * from t1 timecapsule csn findCsn(2) order by a for update;
+
+--嵌套查询
+select * from (select * from (select * from (select * from t1 timecapsule csn findCsn(2)))) order by a;
+
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+
+--按照索引测试 (index only scan)
+delete from t_timecapsule_test_tmp;
+drop table t1;
+create table t1(a int, b int check(b > 0));
+create index bbb on t1(b, a);
+
+insert into t1 values(1,2);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(3,4);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(5,6);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(7,8);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+
+set enable_seqscan to on;
+Set enable_indexscan to off;
+Set enable_bitmapscan to off;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+
+
+set enable_seqscan to off;
+Set enable_indexscan to on;
+Set enable_bitmapscan to on;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+
+
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+
+--testcase 2 (index scan)
+delete from t_timecapsule_test_tmp;
+drop table t1;
+create table t1(a int, b int check(b > 0), c varchar(10), d varchar(10));
+create index bbb on t1(b, a);
+
+insert into t1 values(1,2,'a','b');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(3,4,'c','d');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(5,6,'e','f');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(7,8,'g','h');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+
+set enable_seqscan to on;
+Set enable_indexscan to off;
+Set enable_bitmapscan to off;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+
+
+set enable_seqscan to off;
+Set enable_indexscan to on;
+Set enable_bitmapscan to on;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where b < 10 and a <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where b < 10 and a <10 order by a, b;
+
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+
+
+--testcase 3 (index scan)(function index)
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+drop table t1;
+create table t1(a int, b int check(b > 0));
+create index bbb on t1(lower(a));
+
+insert into t1 values(1,2);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(3,4);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(5,6);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1 values(7,8);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+
+set enable_seqscan to on;
+Set enable_indexscan to off;
+Set enable_bitmapscan to off;
+select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b;
+
+set enable_seqscan to off;
+Set enable_indexscan to on;
+Set enable_bitmapscan to on;
+select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b;
+select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule csn findCsn(2) where lower(a) <10 order by a, b;
+
+select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b;
+select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b for update;
+explain (costs off) select * from t1 timecapsule timestamp findTime(2) where lower(a) <10 order by a, b;
+
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+
+--text, clob test
+create or replace function f_random_str(length INTEGER) returns character varying
+LANGUAGE plpgsql
+AS $$
+DECLARE
+	result text;
+BEGIN
+	SELECT ARRAY(select substring('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz' FROM (ceil(random()*62))::int FOR 1) FROM generate_series(1,length)) INTO result;
+	return result;
+END
+$$;
+
+delete from t_timecapsule_test_tmp;
+drop table tt;
+create table tt(a int, b text, c clob);
+create index on tt(a);
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+select pg_sleep(4);
+
+insert into tt values(1, 'aaa_' || f_random_str(10000), 'AAA_' || f_random_str(10000));
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into tt values(2, 'bbb_' || f_random_str(10000), 'BBB_' || f_random_str(20000));
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into tt values(3, 'ccc_' || f_random_str(10000), 'CCC_' || f_random_str(30000));
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 4, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into tt values(4, 'ddd_' || f_random_str(10000), 'DDD_' || f_random_str(40000));
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 5, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+--
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(1) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule timestamp findTime(1) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(2) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule timestamp findTime(2) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(3) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule timestamp findTime(3) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(4) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule timestamp findTime(4) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(5) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule timestamp findTime(5) order by a;
+
+--
+timecapsule table tt to csn findCsn(1);
+timecapsule table tt to csn findCsn(2);
+timecapsule table tt to csn findCsn(3);
+timecapsule table tt to csn findCsn(4);
+timecapsule table tt to csn findCsn(5);
+timecapsule table tt to timestamp findTime(1);
+timecapsule table tt to timestamp findTime(2);
+timecapsule table tt to timestamp findTime(3);
+timecapsule table tt to timestamp findTime(4);
+timecapsule table tt to timestamp findTime(5);
+
+--
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(1) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(2) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(3) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(4) order by a;
+select a, substring(b, 1, 3), length(c) from tt timecapsule csn findCsn(5) order by a;
+
+drop table tt;
+drop function f_random_str;
+delete from t_timecapsule_test_tmp;
+
+--6：类型测试
+--
+delete from t_timecapsule_test_tmp;
+drop table t1 cascade;
+drop SEQUENCE tablename_colname_seq;
+CREATE SEQUENCE tablename_colname_seq;
+create table t1(col1 smallint, col2 integer, col3 bigint, col4 decimal, col5 numeric, col6 real, col7 double precision, col8 integer NOT NULL DEFAULT nextval('tablename_colname_seq'));
+--
+drop table t2 cascade;
+drop TYPE mood cascade;
+CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
+create table t2(col1 money, col2 varchar(100), col3 char(10), col4 text, col5 bytea, col6 boolean, col7 mood, col8 BIT(3), col9 BIT VARYING(5), col10 integer[]);
+--
+drop table t3 cascade;
+create table t3(col1 point);
+--
+CREATE TYPE inventory_item AS (
+    name            text,
+    supplier_id     integer,
+    price           numeric
+);
+drop table t4 cascade;
+CREATE TABLE t4 (
+    item      inventory_item,
+    count     integer,
+	during    tsrange
+);
+--
+drop table t5 cascade;
+CREATE TABLE t5 (
+    a      cidr,
+    b      inet,
+	c      macaddr
+);
+
+insert into t1(col1, col2, col3, col4, col5, col6, col7) values(1,1,1,54541.45435431,1.4324321,1324.431,1);
+insert into t2 values(43434, 'hhhhhhh', '1234567890', 'mmmmmmmmm', E'\\xDEADBEEF', TRUE, 'sad', B'111', B'101', '{10000, 10000, 10000, 10000}');
+insert into t3 values(point(1,2));
+INSERT INTO t4 VALUES (ROW('fuzzy dice', 7676, 1.987764), 8888, '[2000-01-01 11:40, 2434-01-09 15:30)');
+insert into t5 values('192.168.0.0/24', '128.1.2.0/24', '08:00:2b:01:02:03');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1(col1, col2, col3, col4, col5, col6, col7) values(1211,323,1,7777.1,45435.1,9999.1,9780);
+insert into t2 values(10, 'fwfewfe', 'qwertyuiop', 'qwertyuiop', E'\\xAAAAAF', TRUE, 'ok', B'101', B'101', '{10000, 4342, 342, 544545}');
+insert into t3 values(point(65,2445));
+INSERT INTO t4 VALUES (ROW('43regre gergreg', 432, 3224.99), 9999, '[2010-01-01 19:30, 2087-02-01 15:30)');
+insert into t5 values('199.168.00.00/24', '128.1.1.0/24', '08:55:2a:01:07:03');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into t1(col1, col2, col3, col4, col5, col6, col7) values(22,121321,1,7777.1,45435.1,9999.222,888);
+insert into t2 values(43320, 'vxgfbgf', 'vbnjgghjds', 'y64y45y45', E'\\xDDDDDF', FALSE, 'happy', B'110', B'101', '{9879, 2434, 121, 544545}');
+insert into t3 values(point(1211,5555));
+INSERT INTO t4 VALUES (ROW('regregre dice', 122, 6565.99), 10000, '[1019-06-01 04:30, 2320-01-01 15:30)');
+insert into t5 values('123.168.0.0/24', '128.1.0.0/24', '08:11:2b:01:02:03');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+
+--
+select * from t1 timecapsule csn findCsn(1) order by col1;
+select * from t2 timecapsule csn findCsn(1) order by col1;
+select * from t3 timecapsule csn findCsn(1) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(1) order by item;
+select * from t5 timecapsule csn findCsn(1) order by a;
+
+select * from t1 timecapsule timestamp findTime(1) order by col1;
+select * from t2 timecapsule timestamp findTime(1) order by col1;
+select * from t3 timecapsule timestamp findTime(1) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(1) order by item;
+select * from t5 timecapsule timestamp findTime(1) order by a;
+
+select * from t1 timecapsule csn findCsn(2) order by col1;
+select * from t2 timecapsule csn findCsn(2) order by col1;
+select * from t3 timecapsule csn findCsn(2) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(2) order by item;
+select * from t5 timecapsule csn findCsn(2) order by a;
+
+select * from t1 timecapsule timestamp findTime(2) order by col1;
+select * from t2 timecapsule timestamp findTime(2) order by col1;
+select * from t3 timecapsule timestamp findTime(2) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(2) order by item;
+select * from t5 timecapsule timestamp findTime(2) order by a;
+
+select * from t1 timecapsule csn findCsn(3) order by col1;
+select * from t2 timecapsule csn findCsn(3) order by col1;
+select * from t3 timecapsule csn findCsn(3) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(3) order by item;
+select * from t5 timecapsule csn findCsn(3) order by a;
+
+select * from t1 timecapsule timestamp findTime(3) order by col1;
+select * from t2 timecapsule timestamp findTime(3) order by col1;
+select * from t3 timecapsule timestamp findTime(3) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(3) order by item;
+select * from t5 timecapsule timestamp findTime(3) order by a;
+
+--
+timecapsule table t1 to csn findCsn(1);
+timecapsule table t2 to csn findCsn(1);
+timecapsule table t3 to csn findCsn(1);
+timecapsule table t4 to csn findCsn(1);
+timecapsule table t5 to csn findCsn(1);
+select * from t1 timecapsule csn findCsn(1) order by col1;
+select * from t2 timecapsule csn findCsn(1) order by col1;
+select * from t3 timecapsule csn findCsn(1) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(1) order by item;
+select * from t5 timecapsule csn findCsn(1) order by a;
+
+timecapsule table t1 to csn findCsn(2);
+timecapsule table t2 to csn findCsn(2);
+timecapsule table t3 to csn findCsn(2);
+timecapsule table t4 to csn findCsn(2);
+timecapsule table t5 to csn findCsn(2);
+select * from t1 timecapsule csn findCsn(2) order by col1;
+select * from t2 timecapsule csn findCsn(2) order by col1;
+select * from t3 timecapsule csn findCsn(2) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(2) order by item;
+select * from t5 timecapsule csn findCsn(2) order by a;
+
+timecapsule table t1 to csn findCsn(3);
+timecapsule table t2 to csn findCsn(3);
+timecapsule table t3 to csn findCsn(3);
+timecapsule table t4 to csn findCsn(3);
+timecapsule table t5 to csn findCsn(3);
+select * from t1 timecapsule csn findCsn(3) order by col1;
+select * from t2 timecapsule csn findCsn(3) order by col1;
+select * from t3 timecapsule csn findCsn(3) order by cast(col1 as text);
+select * from t4 timecapsule csn findCsn(3) order by item;
+select * from t5 timecapsule csn findCsn(3) order by a;
+
+--
+timecapsule table t1 to timestamp findTime(1);
+timecapsule table t2 to timestamp findTime(1);
+timecapsule table t3 to timestamp findTime(1);
+timecapsule table t4 to timestamp findTime(1);
+timecapsule table t5 to timestamp findTime(1);
+select * from t1 timecapsule timestamp findTime(1) order by col1;
+select * from t2 timecapsule timestamp findTime(1) order by col1;
+select * from t3 timecapsule timestamp findTime(1) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(1) order by item;
+select * from t5 timecapsule timestamp findTime(1) order by a;
+
+timecapsule table t1 to timestamp findTime(2);
+timecapsule table t2 to timestamp findTime(2);
+timecapsule table t3 to timestamp findTime(2);
+timecapsule table t4 to timestamp findTime(2);
+timecapsule table t5 to timestamp findTime(2);
+select * from t1 timecapsule timestamp findTime(2) order by col1;
+select * from t2 timecapsule timestamp findTime(2) order by col1;
+select * from t3 timecapsule timestamp findTime(2) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(2) order by item;
+select * from t5 timecapsule timestamp findTime(2) order by a;
+
+timecapsule table t1 to timestamp findTime(3);
+timecapsule table t2 to timestamp findTime(3);
+timecapsule table t3 to timestamp findTime(3);
+timecapsule table t4 to timestamp findTime(3);
+timecapsule table t5 to timestamp findTime(3);
+select * from t1 timecapsule timestamp findTime(3) order by col1;
+select * from t2 timecapsule timestamp findTime(3) order by col1;
+select * from t3 timecapsule timestamp findTime(3) order by cast(col1 as text);
+select * from t4 timecapsule timestamp findTime(3) order by item;
+select * from t5 timecapsule timestamp findTime(3) order by a;
+
+
+
+drop table t1 cascade;
+drop table t2 cascade;
+drop table t3 cascade;
+drop table t4 cascade;
+drop table t5 cascade;
+
+
+
+drop SEQUENCE tablename_colname_seq;
+drop TYPE inventory_item cascade;
+drop TYPE mood cascade;
+
+drop table t_timecapsule_test_tmp;
+
+drop schema schema_test_3 cascade;
+reset search_path;
+
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;
+
+set ustore_attr = "enable_default_ustore_table=off";

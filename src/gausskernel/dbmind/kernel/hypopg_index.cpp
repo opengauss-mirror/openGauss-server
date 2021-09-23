@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * hypopg_index.cpp: Implementation of hypothetical indexes for PostgreSQL
+ * hypopg_index.cpp: Implementation of hypothetical indexes for openGauss
  *
  * This file contains all the internal code related to hypothetical indexes
  * support.
@@ -68,7 +68,7 @@ extern Oid GetIndexOpClass(List *opclass, Oid attrType, const char *accessMethod
 extern void CheckPredicate(Expr *predicate);
 extern bool CheckMutability(Expr *expr);
 static void hypo_utility_hook(Node *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
-    DestReceiver *dest, bool sent_to_remote, char *completionTag);
+    DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas);
 static void hypo_executorEnd_hook(QueryDesc *queryDesc);
 static void hypo_get_relation_info_hook(PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel);
 static const char *hypo_explain_get_index_name_hook(Oid indexId);
@@ -157,14 +157,14 @@ static Oid hypo_getNewOid(Oid relid)
  * If this flag is setup, we can add hypothetical indexes.
  */
 void hypo_utility_hook(Node *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
-    DestReceiver *dest, bool sent_to_remote, char *completionTag)
+    DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCtas)
 {
     isExplain = query_or_expression_tree_walker(parsetree, (bool (*)())hypo_query_walker, NULL, 0);
 
     if (prev_utility_hook) {
-        prev_utility_hook(parsetree, queryString, params, isTopLevel, dest, sent_to_remote, completionTag);
+        prev_utility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag, isCtas);
     } else {
-        standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sent_to_remote, completionTag);
+        standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag, isCtas);
     }
 }
 
@@ -232,14 +232,17 @@ List *get_index_attrnum(Oid index_oid)
     HeapTuple index_tup = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(index_oid));
     if (!HeapTupleIsValid(index_tup))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("cache lookup failed for index %u", index_oid)));
+
     Form_pg_index index_form = (Form_pg_index)GETSTRUCT(index_tup);
     int2vector *attnums = &(index_form->indkey);
+
     // get attrnum from table oid.
     List *attrnum = NIL;
     int i;
     for (i = 0; i < attnums->dim1; i++) {
         attrnum = lappend_int(attrnum, attnums->values[i]);
     }
+
     ReleaseSysCache(index_tup);
     return attrnum;
 }
@@ -361,8 +364,8 @@ static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, 
     entry->opclass = (Oid *)palloc0(sizeof(Oid) * nkeycolumns);
     entry->opcintype = (Oid *)palloc0(sizeof(Oid) * nkeycolumns);
     /* only palloc sort related fields if needed */
-    if ((entry->relam == BTREE_AM_OID) || (entry->amcanorder)) {
-        if (entry->relam != BTREE_AM_OID) {
+    if (OID_IS_BTREE(entry->relam) || (entry->amcanorder)) {
+        if (!OID_IS_BTREE(entry->relam)) {
             entry->sortopfamily = (Oid *)palloc0(sizeof(Oid) * nkeycolumns);
         }
         entry->reverse_sort = (bool *)palloc0(sizeof(bool) * nkeycolumns);
@@ -399,7 +402,7 @@ static hypoIndex *hypo_newIndex(Oid relid, char *accessMethod, int nkeycolumns, 
          * reject unsupported am. It could be done earlier but it's simpler
          * (and was previously done) here.
          */
-        if (entry->relam != BTREE_AM_OID) {
+        if (!OID_IS_BTREE(entry->relam)) {
             /*
              * do not store hypothetical indexes with access method not
              * supported
@@ -758,7 +761,7 @@ static const hypoIndex *hypo_index_store_parsetree(IndexStmt *node, const char *
         }
 
         /* Check if the average size fits in a btree index */
-        if (entry->relam == BTREE_AM_OID) {
+        if (OID_IS_BTREE(entry->relam)) {
             if (ind_avg_width >= (int)HYPO_BTMaxItemSize) {
                 ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("hypopg: estimated index row size %d "
@@ -794,7 +797,7 @@ static const hypoIndex *hypo_index_store_parsetree(IndexStmt *node, const char *
      * Fetch the ordering information for the index, if any. Adapted from
      * plancat.c - get_relation_info().
      */
-    if ((entry->relam != BTREE_AM_OID) && entry->amcanorder) {
+    if (!OID_IS_BTREE(entry->relam) && entry->amcanorder) {
         /*
          * Otherwise, identify the corresponding btree opfamilies by trying to
          * map this index's "<" operators into btree.  Since "<" uniquely
@@ -880,8 +883,8 @@ static void hypo_index_pfree(hypoIndex *entry)
     pfree(entry->opfamily);
     pfree(entry->opclass);
     pfree(entry->opcintype);
-    if ((entry->relam == BTREE_AM_OID) || entry->amcanorder) {
-        if ((entry->relam != BTREE_AM_OID) && entry->sortopfamily) {
+    if (OID_IS_BTREE(entry->relam) || entry->amcanorder) {
+        if (!OID_IS_BTREE(entry->relam) && entry->sortopfamily) {
             pfree(entry->sortopfamily);
         }
         if (entry->reverse_sort) {
@@ -934,8 +937,8 @@ static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId
     index->opfamily = (Oid *)palloc(sizeof(int) * ncolumns);
     index->opcintype = (Oid *)palloc(sizeof(int) * ncolumns);
 
-    if ((index->relam == BTREE_AM_OID) || entry->amcanorder) {
-        if (index->relam != BTREE_AM_OID) {
+    if (OID_IS_BTREE(index->relam) || entry->amcanorder) {
+        if (!OID_IS_BTREE(index->relam)) {
             index->sortopfamily = (Oid *)palloc0(sizeof(Oid) * ncolumns);
         }
 
@@ -962,7 +965,7 @@ static void hypo_injectHypotheticalIndex(PlannerInfo *root, Oid relationObjectId
      * in hypo_index_store_parsetree(). Again, adapted from plancat.c -
      * get_relation_info()
      */
-    if (entry->relam == BTREE_AM_OID) {
+    if (OID_IS_BTREE(entry->relam)) {
         /*
          * If it's a btree index, we can use its opfamily OIDs directly as the
          * sort ordering opfamily OIDs.
@@ -1211,6 +1214,9 @@ Datum hypopg_create_index(PG_FUNCTION_ARGS)
         } else {
             entry = hypo_index_store_parsetree((IndexStmt *)parsetree, sql);
             if (entry != NULL) {
+                if (entry->indexname == NULL) {
+                    ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("hypopg: a field value is corrupted")));
+                }
                 values[0] = ObjectIdGetDatum(entry->oid);
                 values[1] = CStringGetTextDatum(entry->indexname);
 
@@ -1420,7 +1426,7 @@ static void hypo_estimate_index(hypoIndex *entry, RelOptInfo *rel)
         }
     }
 
-    if (entry->relam == BTREE_AM_OID) {
+    if (OID_IS_BTREE(entry->relam)) {
         /* -------------------------------
          * quick estimating of index size:
          *
@@ -1527,7 +1533,8 @@ static bool hypo_can_return(hypoIndex *entry, Oid atttype, int i, char *amname)
     }
 
     switch (entry->relam) {
-        case BTREE_AM_OID: {
+        case BTREE_AM_OID:
+        case UBTREE_AM_OID: {
             /* btree always support Index-Only scan */
             return true;
             break;

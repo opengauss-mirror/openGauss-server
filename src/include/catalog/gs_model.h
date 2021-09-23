@@ -50,8 +50,8 @@ CATALOG(gs_model_warehouse,3991) BKI_ROWTYPE_OID(3994) BKI_SCHEMA_MACRO
     timestamp   createtime;     /* Model storage time */
     int4        processedtuples;
     int4        discardedtuples;
-    float4      preprocesstime;
-    float4      exectime;
+    float4      pre_process_time;
+    float4      exec_time;
     int4        iterations;
     Oid         outputtype;
 #ifdef CATALOG_VARLEN /* variable-length fields start here */
@@ -122,6 +122,9 @@ inline void remove_model_by_oid(Oid model_oid)
     HeapTuple tup;
     ScanKeyData skey[1];
     SysScanDesc scan;
+
+    if (t_thrd.proc->workingVersionNum < 92366)
+        return;
 
     ScanKeyInit(&skey[0], ObjectIdAttributeNumber, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(model_oid));
 

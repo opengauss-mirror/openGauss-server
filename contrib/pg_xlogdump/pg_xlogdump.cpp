@@ -31,6 +31,7 @@
 #include "lib/stringinfo.h"
 #include "replication/replicainternal.h"
 #include "rmgrdesc.h"
+#include "storage/smgr/segment.h"
 
 static const char* progname;
 
@@ -416,6 +417,24 @@ static void XLogDumpCountRecord(XLogDumpConfig* config, XLogDumpStats* stats, XL
     stats->record_stats[rmid][recid].fpi_len += fpi_len;
 }
 
+const char* storage_type_names[] = {
+    "HEAP DISK", /* Heap Disk */
+    "SEGMENT PAGE", /* Segment Page */
+    "Invalid Storage" /* Invalid Storage */
+};
+
+const char* virtual_fork_names[] = {
+    "SEGMENT_EXT_8", /* segment extent 8 */
+    "SEGMENT_EXT_128", /* segment extent 128 */
+    "SEGMENT_EXT_1024", /* segment extent 1024 */
+    "SEGMENT_EXT_8192"  /* segment extent 8192 */
+};
+
+static const char* XLogGetForkNames(ForkNumber forknum)
+{
+    return forkNames[forknum];
+}
+
 /*
  * Print a record to stdout
  */
@@ -447,106 +466,56 @@ static void XLogDumpDisplayRecord(XLogDumpConfig* config, XLogReaderState* recor
     /* the desc routine will printf the description directly to stdout */
     desc->rm_desc(NULL, record);
 
-    if (!config->bkp_details) {
-        /* print block references (short format) */
-        for (block_id = 0; block_id <= record->max_block_id; block_id++) {
-            if (!XLogRecHasBlockRef(record, block_id))
-                continue;
 
-            XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
-            XLogRecGetBlockLastLsn(record, block_id, &lsn);
-            if (forknum != MAIN_FORKNUM) {
-                if (rnode.bucketNode != -1) {
-                    printf(", blkref #%u: rel %u/%u/%u/%d fork %s blk %u lastlsn %X/%X",
-                        block_id,
-                        rnode.spcNode,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        rnode.bucketNode,
-                        forkNames[forknum],
-                        blk,
-                        (uint32)(lsn >> 32),
-                        (uint32)lsn);
-               } else {
-                    printf(", blkref #%u: rel %u/%u/%u fork %s blk %u lastlsn %X/%X",
-                        block_id,
-                        rnode.spcNode,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        forkNames[forknum],
-                        blk,
-                        (uint32)(lsn >> 32),
-                        (uint32)lsn);
-                }
-            } else {
-                if (rnode.bucketNode != -1) {
-                    printf(", blkref #%u: rel %u/%u/%u/%d blk %u lastlsn %X/%X",
-                        block_id,
-                        rnode.spcNode,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        rnode.bucketNode,
-                        blk,
-                        (uint32)(lsn >> 32),
-                        (uint32)lsn);
-                } else {
-                    printf(", blkref #%u: rel %u/%u/%u blk %u lastlsn %X/%X",
-                        block_id,
-                        rnode.spcNode,
-                        rnode.dbNode,
-                        rnode.relNode,
-                        blk,
-                        (uint32)(lsn >> 32),
-                        (uint32)lsn);
-                }
-            }
-            if (XLogRecHasBlockImage(record, block_id))
-                printf(" FPW");
+    /* print block references */
+    for (block_id = 0; block_id <= record->max_block_id; block_id++) {
+        if (!XLogRecHasBlockRef(record, block_id))
+            continue;
+
+        XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
+        XLogRecGetBlockLastLsn(record, block_id, &lsn);
+
+        uint8 seg_fileno;
+        BlockNumber seg_blockno;
+        XLogRecGetPhysicalBlock(record, block_id, &seg_fileno, &seg_blockno);
+        
+        // output format: ", blkref #%u: rel %u/%u/%u/%d storage %s fork %s blk %u (phy loc %u/%u) lastlsn %X/%X"
+        printf(", blkref #%u: rel %u/%u/%u", block_id, rnode.spcNode, rnode.dbNode, rnode.relNode);
+        if (IsBucketFileNode(rnode)) {
+            printf("/%d", rnode.bucketNode);
         }
-        putchar('\n');
-    } else {
-        /* print block references (detailed format) */
-        putchar('\n');
-        for (block_id = 0; block_id <= record->max_block_id; block_id++) {
-            if (!XLogRecHasBlockRef(record, block_id))
-                continue;
-
-            XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blk);
-            XLogRecGetBlockLastLsn(record, block_id, &lsn);
-            if (rnode.bucketNode != -1) {
-                printf("\tblkref #%u: rel %u/%u/%u/%d fork %s blk %u lastlsn %X/%X",
-                    block_id,
-                    rnode.spcNode,
-                    rnode.dbNode,
-                    rnode.relNode,
-                    rnode.bucketNode,
-                    forkNames[forknum],
-                    blk,
-                    (uint32)(lsn >> 32),
-                    (uint32)lsn);
-            } else {
-                printf("\tblkref #%u: rel %u/%u/%u fork %s blk %u lastlsn %X/%X",
-                    block_id,
-                    rnode.spcNode,
-                    rnode.dbNode,
-                    rnode.relNode,
-                    forkNames[forknum],
-                    blk,
-                    (uint32)(lsn >> 32),
-                    (uint32)lsn);
+        StorageType storage_type = HEAP_DISK;
+        if (IsSegmentFileNode(rnode)) {
+            storage_type = SEGMENT_PAGE;
+        }
+        printf(" storage %s", storage_type_names[storage_type]);
+        if (forknum != MAIN_FORKNUM) {
+            printf(" fork %s", XLogGetForkNames(forknum));
+        }
+        printf(" blk %u", blk);
+        if (seg_fileno != EXTENT_INVALID) {
+            printf(" (phy loc %u/%u)", EXTENT_TYPE_TO_SIZE(BKPBLOCK_GET_SEGFILENO(seg_fileno)), seg_blockno);
+            if (record->blocks[block_id].has_vm_loc) {
+                printf(" (vm phy loc %u/%u)", EXTENT_TYPE_TO_SIZE(record->blocks[block_id].vm_seg_fileno),
+                    record->blocks[block_id].vm_seg_blockno);
             }
-            if (XLogRecHasBlockImage(record, block_id)) {
+        }
+        printf(" lastlsn %X/%X", (uint32)(lsn >> 32), (uint32)lsn);
+        if (XLogRecHasBlockImage(record, block_id)) {
+            if (config->bkp_details) {
                 printf(" (FPW); hole: offset: %u, length: %u",
                     record->blocks[block_id].hole_offset,
                     record->blocks[block_id].hole_length);
 
                 if (config->write_fpw)
                     XLogDumpTablePage(record, block_id, rnode, blk);
+            } else {
+                printf(" FPW");
             }
-
-            putchar('\n');
         }
     }
+    putchar('\n');
+    
 
     if (config->verbose) {
         printf("\tSYSID " UINT64_FORMAT "; record_origin %u; max_block_id %u; readSegNo " UINT64_FORMAT "; readOff %u; "

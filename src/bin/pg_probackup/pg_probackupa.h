@@ -137,7 +137,9 @@ typedef enum CompressAlg
     NOT_DEFINED_COMPRESS = 0,
     NONE_COMPRESS,
     PGLZ_COMPRESS,
+#ifdef HAVE_LIBZ
     ZLIB_COMPRESS,
+#endif
 } CompressAlg;
 
 typedef enum ForkName

@@ -60,7 +60,8 @@ typedef struct SyncRepConfigData {
 } SyncRepConfigData;
 
 /* called by user backend */
-extern void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN);
+extern void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel = true);
+extern bool SyncPaxosWaitForLSN(XLogRecPtr PaxosConsensusLSN);
 
 /* called at backend exit */
 extern void SyncRepCleanupAtProcExit(void);
@@ -68,6 +69,7 @@ extern void SyncRepCleanupAtProcExit(void);
 /* called by wal sender */
 extern void SyncRepInitConfig(void);
 extern void SyncRepReleaseWaiters(void);
+extern void SyncPaxosReleaseWaiters(XLogRecPtr PaxosConsensusLSN);
 
 /* called by wal writer */
 extern void SyncRepUpdateSyncStandbysDefined(void);

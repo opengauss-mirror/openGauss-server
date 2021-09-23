@@ -37,14 +37,16 @@
 
 #define PartitionIsTablePartition(partition) (PART_OBJ_TYPE_TABLE_PARTITION == (partition)->pd_part->parttype)
 
-#define PartitionIsBucket(partition) ((partition)->pd_node.bucketNode > InvalidBktId)
+#define PartitionIsBucket(partition) \
+    ((partition)->pd_node.bucketNode > InvalidBktId && (partition)->pd_node.bucketNode < SegmentBktId)
 
-#define PartitionIsIndexPartition(partition) (PART_OBJ_TYPE_INDEX_PARTITION == (partition)->pd_part->parttype)
+#define PartitionIsIndexPartition(partition) \
+    ((partition)->pd_part != NULL && ((partition)->pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION))
 
 /*
  * Routines to open (lookup) and close a partcache entry
  */
-extern Partition PartitionIdGetPartition(Oid partitionId, bool isbucket);
+extern Partition PartitionIdGetPartition(Oid partitionId, StorageType storage_type);
 extern void PartitionClose(Partition partition);
 extern char* PartitionOidGetName(Oid partOid);
 extern Oid PartitionOidGetTablespace(Oid partOid);
@@ -61,7 +63,8 @@ extern void PartitionCacheInitializePhase3(void);
 /*
  * Routine to create a partcache entry for an about-to-be-created relation
  */
-Partition PartitionBuildLocalPartition(const char* relname, Oid partid, Oid partfilenode, Oid parttablespace);
+Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
+    StorageType storage_type);
 /*
  * Routines for backend startup
  */
@@ -98,4 +101,3 @@ extern void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisiblePa
 extern bool PartitionMetadataDisabledClean(Relation pgPartition);
 
 #endif /* RELCACHE_H */
-

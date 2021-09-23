@@ -24,8 +24,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodePartIterator.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodePartIterator.h"
 #include "executor/tuptable.h"
 #include "utils/memutils.h"
 #include "nodes/execnodes.h"
@@ -59,7 +59,29 @@ PartIteratorState* ExecInitPartIterator(PartIterator* node, EState* estate, int 
     return state;
 }
 
-static void init_scan_partition(PartIteratorState* node)
+static int GetScanPartitionNum(PartIteratorState* node)
+{
+    PartIterator* pi_node = (PartIterator*)node->ps.plan;
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    int partitionScan;
+    switch (nodeTag(noden)) {
+        case T_SeqScanState:
+        case T_IndexScanState:
+        case T_IndexOnlyScanState:
+        case T_BitmapHeapScanState:
+            partitionScan =  ((ScanState*)noden)->part_id;
+            break;
+        case T_VecToRowState:
+            partitionScan = ((VecToRowState*)noden)->part_id;
+            break;
+        default:
+            partitionScan = pi_node->itrs;
+            break;
+    }
+    return partitionScan;
+}
+
+static void InitScanPartition(PartIteratorState* node, int partitionScan)
 {
     int paramno = 0;
     unsigned int itr_idx = 0;
@@ -72,7 +94,7 @@ static void init_scan_partition(PartIteratorState* node)
     node->currentItr++;
     itr_idx = node->currentItr;
     if (BackwardScanDirection == pi_node->direction)
-        itr_idx = pi_node->itrs - itr_idx - 1;
+        itr_idx = partitionScan - itr_idx - 1;
 
     paramno = pi_node->param->paramno;
     param = &(node->ps.state->es_param_exec_vals[paramno]);
@@ -96,34 +118,11 @@ static void init_scan_partition(PartIteratorState* node)
 TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 {
     TupleTableSlot* slot = NULL;
-    PartIterator* pi_node = (PartIterator*)node->ps.plan;
     EState* state = node->ps.lefttree->state;
     node->ps.lefttree->do_not_reset_rownum = true;
     bool orig_early_free = state->es_skip_early_free;
 
-    PlanState* noden = (PlanState*)node->ps.lefttree;
-    int partitionScan;
-    switch (nodeTag(noden)) {
-        case T_SeqScanState:
-            partitionScan =  ((SeqScanState*)noden)->part_id;
-            break;
-        case T_IndexScanState:
-            partitionScan =  ((IndexScanState*)noden)->part_id;
-            break;
-        case T_IndexOnlyScanState:
-            partitionScan =  ((IndexOnlyScanState*)noden)->part_id;
-            break;
-        case T_BitmapHeapScanState:
-            partitionScan =  ((BitmapHeapScanState*)noden)->part_id;
-            break;
-        case T_VecToRowState:
-            partitionScan = ((VecToRowState*)noden)->part_id;
-            break;
-        default:
-            partitionScan = pi_node->itrs;
-            break;
-    }
-
+    int partitionScan = GetScanPartitionNum(node);
     if (partitionScan == 0) {
         /* return NULL if no partition is selected */
         return NULL;
@@ -131,7 +130,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
     /* init first scanned partition */
     if (node->currentItr == -1)
-        init_scan_partition(node);
+        InitScanPartition(node, partitionScan);
 
     /* For partition wise join, can not early free left tree's caching memory */
     state->es_skip_early_free = true;
@@ -150,7 +149,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
             return NULL;
 
         /* switch to next partiiton */
-        init_scan_partition(node);
+        InitScanPartition(node, partitionScan);
 
         /* For partition wise join, can not early free left tree's caching memory */
         orig_early_free = state->es_skip_early_free;
@@ -160,6 +159,7 @@ TupleTableSlot* ExecPartIterator(PartIteratorState* node)
 
         if (!TupIsNull(slot))
             return slot;
+        node->ps.lefttree->ps_rownum--;
     }
 }
 
@@ -189,13 +189,13 @@ void ExecReScanPartIterator(PartIteratorState* node)
     PartIterator* pi_node = NULL;
     int paramno = -1;
     ParamExecData* param = NULL;
-    PartIterator* piterator = NULL;
-
-    piterator = (PartIterator*)node->ps.plan;
 
     /* do nothing if there is no partition to scan */
-    if (piterator->itrs == 0)
+    int partitionScan = GetScanPartitionNum(node);
+    if (partitionScan == 0) {
+        /* return NULL if no partition is selected */
         return;
+    }
 
     node->currentItr = -1;
 

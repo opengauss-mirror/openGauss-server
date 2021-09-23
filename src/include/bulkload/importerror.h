@@ -28,7 +28,7 @@
 
 #include "access/tupdesc.h"
 #include "commands/gds_stream.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 
 typedef struct CopyStateData* CopyState;
 

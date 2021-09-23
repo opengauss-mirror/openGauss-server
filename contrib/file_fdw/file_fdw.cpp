@@ -527,7 +527,7 @@ static void fileBeginForeignScan(ForeignScanState* node, int eflags)
      * Create CopyState from FDW options.  We always acquire all columns, so
      * as to match the expected ScanTupleSlot signature.
      */
-    cstate = BeginCopyFrom(node->ss.ss_currentRelation, filename, NIL, options, NULL);
+    cstate = BeginCopyFrom(node->ss.ss_currentRelation, filename, NIL, options, NULL, NULL);
 
     /*
      * Save state in node->fdw_state.  We must save enough information to call
@@ -592,7 +592,7 @@ static void fileReScanForeignScan(ForeignScanState* node)
 
     EndCopyFrom(festate->cstate);
 
-    festate->cstate = BeginCopyFrom(node->ss.ss_currentRelation, festate->filename, NIL, festate->options, NULL);
+    festate->cstate = BeginCopyFrom(node->ss.ss_currentRelation, festate->filename, NIL, festate->options, NULL, NULL);
 }
 
 /*
@@ -789,7 +789,7 @@ static int file_acquire_sample_rows(Relation onerel, int elevel, HeapTuple* rows
     /*
      * Create CopyState from FDW options.
      */
-    cstate = BeginCopyFrom(onerel, filename, NIL, options, NULL);
+    cstate = BeginCopyFrom(onerel, filename, NIL, options, NULL, NULL);
 
     /*
      * Use per-tuple memory context to prevent leak of memory used to read

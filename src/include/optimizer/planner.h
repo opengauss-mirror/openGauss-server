@@ -14,7 +14,7 @@
 #ifndef PLANNER_H
 #define PLANNER_H
 
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "optimizer/clauses.h"
@@ -34,6 +34,7 @@
 #define EXPRKIND_APPINFO           7
 #define EXPRKIND_PHV               8
 #define EXPRKIND_TABLESAMPLE       9
+#define EXPRKIND_TIMECAPSULE       10
 
 /*
  * @hdfs
@@ -73,6 +74,10 @@ extern bool ContainRecursiveUnionSubplan(PlannedStmt* pstmt);
 
 extern void preprocess_qual_conditions(PlannerInfo* root, Node* jtnode);
 
+extern int apply_set_hint(const Query* parse);
+
+extern void recover_set_hint(int savedNestLevel);
+
 typedef enum {
     /*
      * Disable "inlist2join" rewrite optimization
@@ -107,6 +112,8 @@ typedef struct RewriteVarMapping {
     bool need_fix; /* the var is needed to fix when create plan */
 } RewriteVarMapping;
 
+extern MemoryContext SwitchToPlannerTempMemCxt(PlannerInfo *root);
+extern MemoryContext ResetPlannerTempMemCxt(PlannerInfo *root, MemoryContext cxt);
 extern void fix_vars_plannode(PlannerInfo* root, Plan* plan);
 extern void inlist2join_qrw_optimization(PlannerInfo* root, int rti);
 extern void find_inlist2join_path(PlannerInfo* root, Path* best_path);
@@ -181,5 +188,6 @@ extern List* get_plan_list(Plan* plan);
 extern RelOptInfo* build_alternative_rel(const RelOptInfo* origin, RTEKind rtekind);
 extern Plan* get_foreign_scan(Plan* plan);
 extern uint64 adjust_plsize(Oid relid, uint64 plan_width, uint64 pl_size, uint64* width);
+extern int plan_create_index_workers(Oid tableOid);
 
 #endif /* PLANNER_H */

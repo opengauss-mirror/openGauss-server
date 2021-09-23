@@ -1585,6 +1585,9 @@ JoinExpr* convert_ANY_sublink_to_join(PlannerInfo* root, SubLink* sublink, bool 
     JoinExpr* result = NULL;
     Query* parse = root->parse;
     Query* subselect = (Query*)sublink->subselect;
+    if (has_no_expand_hint(subselect)) {
+        return NULL;
+    }
     Relids upper_varnos;
     int rtindex;
     RangeTblEntry* rte = NULL;
@@ -1694,6 +1697,9 @@ JoinExpr* convert_EXISTS_sublink_to_join(PlannerInfo* root, SubLink* sublink, bo
     JoinExpr* result = NULL;
     Query* parse = root->parse;
     Query* subselect = (Query*)sublink->subselect;
+    if (has_no_expand_hint(subselect)) {
+        return NULL;
+    }
     Node* whereClause = NULL;
     int rtoffset;
     int varno;
@@ -1729,12 +1735,6 @@ JoinExpr* convert_EXISTS_sublink_to_join(PlannerInfo* root, SubLink* sublink, bo
         return NULL;
 
     /*
-     * The subquery must have a nonempty jointree, else we won't have a join.
-     */
-    if (subselect->jointree->fromlist == NIL)
-        return NULL;
-
-    /*
      * Separate out the WHERE clause.  (We could theoretically also remove
      * top-level plain JOIN/ON clauses, but it's probably not worth the
      * trouble.)
@@ -1761,6 +1761,11 @@ JoinExpr* convert_EXISTS_sublink_to_join(PlannerInfo* root, SubLink* sublink, bo
      */
     if (contain_volatile_functions(whereClause))
         return NULL;
+
+    /*
+     * The subquery must have a nonempty jointree, but we can make it so.
+     */
+    replace_empty_jointree(subselect);
 
     /*
      * Prepare to pull up the sub-select into top range table.
@@ -4962,7 +4967,7 @@ convert_EXPR_sublink_to_join(PlannerInfo *root,
 {
     Query   *subQuery = (Query *)sublink->subselect;
 
-    if (!safe_convert_EXPR(root, inout_quals, sublink, *available_rels)) {
+    if (!safe_convert_EXPR(root, inout_quals, sublink, *available_rels) || has_no_expand_hint(subQuery)) {
         return inout_quals;
     }
 
@@ -5401,6 +5406,9 @@ void convert_OREXISTS_to_join(
     }
 
     subQuery = (Query*)(exists_sublink->subselect);
+    if (has_no_expand_hint(subQuery)) {
+        return;
+    }
 
     subQuery = (Query*)copyObject(subQuery);
 
@@ -5524,6 +5532,9 @@ void convert_ORANY_to_join(
     PlannerInfo* root, BoolExpr* or_clause, SubLink* any_sublink, Node** jtlink1, Relids available_rels)
 {
     Query* sub_select = (Query*)any_sublink->subselect;
+    if (has_no_expand_hint(sub_select)) {
+        return;
+    }
     Query* parse = root->parse;
     List* subquery_vars = NULL;
     Node* test_quals = NULL;
@@ -5642,6 +5653,9 @@ convert_OREXPR_to_join(PlannerInfo *root, BoolExpr *or_clause,
     }
 
     subQuery = (Query *)copyObject(expr_sublink->subselect);
+    if (has_no_expand_hint(subQuery)) {
+        return NULL;
+    }
     expr_sublink->subselect = (Node *)subQuery;
     
     if (get_pullUp_equal_expr((Node*)subQuery->jointree, &EqualExprList) && EqualExprList) {

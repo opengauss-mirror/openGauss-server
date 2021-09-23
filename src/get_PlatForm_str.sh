@@ -26,6 +26,9 @@ then
 elif [ -f "/etc/centos-release" ]
 then
 	kernel=$(cat /etc/centos-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
+elif [ -f "/etc/kylin-release" ]
+then
+	kernel=$(cat /etc/kylin-release | awk -F ' ' '{print $1}' | tr A-Z a-z)
 else
 	kernel=$(lsb_release -d | awk -F ' ' '{print $2}'| tr A-Z a-z)
 fi

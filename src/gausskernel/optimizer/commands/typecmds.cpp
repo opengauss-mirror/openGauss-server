@@ -66,6 +66,7 @@
 #include "parser/parse_expr.h"
 #include "parser/parse_func.h"
 #include "parser/parse_type.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
@@ -1474,6 +1475,7 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
          */
         procOid = ProcedureCreate(name, /* name: same as range type */
             nmspace,                    /* namespace */
+            InvalidOid,                 /* package oid default invalid oid*/
             false,                      /* not A db compatible */
             false,                      /* replace */
             false,                      /* returns set */
@@ -1501,7 +1503,8 @@ static void makeRangeConstructors(const char* name, Oid nmspace, Oid rangeOid, O
             false,
             false,
             false,
-            false);
+            false,
+            NULL);
 
         /*
          * Make the constructors internally-dependent on the range type so
@@ -1768,7 +1771,7 @@ static Oid findRangeSubOpclass(List* opcname, Oid subtype)
     Oid opInputType;
 
     if (opcname != NIL) {
-        opcid = get_opclass_oid(BTREE_AM_OID, opcname, false);
+        opcid = get_opclass_oid(BTREE_AM_OID, opcname, false); 
 
         /*
          * Verify that the operator class accepts this datatype. Note we will
@@ -1782,7 +1785,7 @@ static Oid findRangeSubOpclass(List* opcname, Oid subtype)
                         NameListToString(opcname),
                         format_type_be(subtype))));
     } else {
-        opcid = GetDefaultOpClass(subtype, BTREE_AM_OID);
+        opcid = GetDefaultOpClass(subtype, BTREE_AM_OID); 
         if (!OidIsValid(opcid)) {
             /* We spell the error message identically to GetIndexOpClass */
             ereport(ERROR,
@@ -2952,6 +2955,8 @@ void RenameType(RenameStmt* stmt)
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typeOid)));
     typTup = (Form_pg_type)GETSTRUCT(tup);
 
+    TrForbidAccessRbObject(TypeRelationId, typeOid, NameStr(typTup->typname));
+
     /* check permissions on type */
     AclResult aclresult = pg_type_aclcheck(typeOid, GetUserId(), ACL_ALTER);
     if (aclresult != ACLCHECK_OK && !pg_type_ownercheck(typeOid, GetUserId())) {
@@ -3018,6 +3023,8 @@ void AlterTypeOwner(List* names, Oid newOwnerId, ObjectType objecttype)
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type \"%s\" does not exist", TypeNameToString(typname))));
     typeOid = typeTypeId(tup);
+
+    TrForbidAccessRbObject(TypeRelationId, typeOid, NameStr(((Form_pg_type)GETSTRUCT(tup))->typname));
 
     /* Copy the syscache entry so we can scribble on it below */
     newtup = (HeapTuple)tableam_tops_copy_tuple(tup);
@@ -3158,6 +3165,8 @@ void AlterTypeNamespace(List* names, const char* newschema, ObjectType objecttyp
     /* Make a TypeName so we can use standard type lookup machinery */
     typname = makeTypeNameFromNameList(names);
     typeOid = typenameTypeId(NULL, typname);
+
+    TrForbidAccessRbObject(TypeRelationId, typeOid);
 
     /* Don't allow ALTER DOMAIN on a type */
     if (objecttype == OBJECT_DOMAIN && get_typtype(typeOid) != TYPTYPE_DOMAIN)

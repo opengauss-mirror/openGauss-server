@@ -105,6 +105,7 @@ bool verbose_opt = false;
 /* Global variables */
 node_info* pgxc_clean_node_info;
 int pgxc_clean_node_count;
+int pgxc_clean_datanode_count;
 
 database_info* head_database_info;
 database_info* last_database_info;
@@ -127,6 +128,13 @@ static bool no_clean_temp_schema_tbspc = false;
 
 static char* password = NULL;
 static char password_prompt[256];
+
+typedef enum {
+    LOG,
+    DEBUG
+} LogLevel;
+
+LogLevel g_log_level = LOG;
 
 #ifdef Assert
 #undef Assert
@@ -865,6 +873,9 @@ static void deletePlanTableDataForInactiveSession()
 
     database_info* cur_database = NULL;
 
+    if (verbose_opt)
+        write_stderr("%s start deleting from plan_table_data\n", formatLogTime());
+
     for (cur_database = head_database_info; cur_database != NULL; cur_database = cur_database->next) {
         coord_conn = loginDatabase(coordinator_host,
             coordinator_port,
@@ -883,7 +894,7 @@ static void deletePlanTableDataForInactiveSession()
         if (tableIsNotExist(coord_conn))
             return;
 
-        if (verbose_opt)
+        if (g_log_level == DEBUG)
             write_stderr("%s %s: ready to delete from plan_table_data for database \"%s\"\n",
                 formatLogTime(),
                 progname,
@@ -897,7 +908,7 @@ static void deletePlanTableDataForInactiveSession()
             return;
         }
 
-        if (verbose_opt)
+        if (g_log_level == DEBUG)
             write_stderr(
                 "%s %s: connected to the database \"%s\"\n", formatLogTime(), progname, cur_database->database_name);
 
@@ -907,7 +918,7 @@ static void deletePlanTableDataForInactiveSession()
         (void)deletePlanTableDataS(coord_conn, false);
         (void)cleanBackendList();
 
-        if (verbose_opt)
+        if (g_log_level == DEBUG)
             write_stderr("%s %s: delete from plan_table_data for database \"%s\" finished\n",
                 formatLogTime(),
                 progname,
@@ -915,6 +926,9 @@ static void deletePlanTableDataForInactiveSession()
         PQfinish(coord_conn);
         coord_conn = NULL;
     }
+
+    if (verbose_opt)
+        write_stderr("%s finish deleting from plan_table_data\n", formatLogTime());
 }
 
 static bool checkDangerCharacter(const char* input)
@@ -950,7 +964,7 @@ static void getSessionIdListInPlantable(PGconn* conn)
     rc = snprintf_s(stmt_get_sessid_list, STMT_LEN + 1, STMT_LEN, "SELECT DISTINCT(session_id) FROM plan_table_data");
     securec_check_ss_c(rc, "\0", "\0");
 
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s start getting sessiond_id from PLAN_TABLE_DATA on %s\n", formatLogTime(), my_nodename);
 
     res = PQexec(conn, stmt_get_sessid_list);
@@ -993,7 +1007,7 @@ static void addSessionIdInfo(char* sessid)
     add_sessid->next = NULL;
     add_sessid->session_id = strdup(sessid);
     checkAllocMem(add_sessid->session_id);
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s add session id: %s\n", formatLogTime(), sessid);
 
     if (session_id_info == NULL)
@@ -1071,7 +1085,7 @@ static void deletePlanTableData(PGconn* conn, char* sessid, bool missing_ok)
         sessid);
     securec_check_ss_c(rc, "\0", "\0");
 
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s %s\n", formatLogTime(), stmt_delete_plan_table_data);
 
     res = PQexec(conn, stmt_delete_plan_table_data);
@@ -1117,8 +1131,11 @@ static void dropTempNamespace()
     int datanode_no = -1;
 
     if (head_database_info != NULL) {
+        if (verbose_opt)
+            write_stderr("%s start droping temp namespaces\n", formatLogTime());
+
         for (cur_database = head_database_info; cur_database != NULL; cur_database = cur_database->next) {
-            if (verbose_opt)
+            if (g_log_level == DEBUG)
                 write_stderr("%s %s: drop temp namespace for database \"%s\"\n",
                     formatLogTime(),
                     progname,
@@ -1155,7 +1172,7 @@ static void dropTempNamespace()
                 return;
             }
 
-            if (verbose_opt)
+            if (g_log_level == DEBUG)
                 write_stderr("%s %s: connected to the database \"%s\"\n",
                     formatLogTime(),
                     progname,
@@ -1167,12 +1184,13 @@ static void dropTempNamespace()
             (void)cleanBackendList();
 
             datanode_no = getTempSchemaListOnDN(coord_conn);
-            (void)getActiveBackendListOnCN(coord_conn, datanode_no);
-            (void)dropTempSchemas(coord_conn, true);
-            (void)cleanBackendList();
+            if (datanode_no != -1) {
+                (void)getActiveBackendListOnCN(coord_conn, datanode_no);
+                (void)dropTempSchemas(coord_conn, true);
+                (void)cleanBackendList();
+            }
 
-
-            if (verbose_opt)
+            if (g_log_level == DEBUG)
                 write_stderr("%s %s: drop temp namespace for database \"%s\" finished\n",
                     formatLogTime(),
                     progname,
@@ -1181,6 +1199,9 @@ static void dropTempNamespace()
             coord_conn = NULL;
         }
     }
+
+    if (verbose_opt)
+        write_stderr("%s finish droping temp namespaces\n", formatLogTime());
 }
 
 static void dropTempSchemas(PGconn* conn, bool missing_ok)
@@ -1380,7 +1401,7 @@ static void dropTempSchema(PGconn* conn, char* nspname, bool missing_ok)
             toastnspname);
     securec_check_ss_c(rc, "\0", "\0");
 
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s %s\n", formatLogTime(), STMT_DROP_TEMP_SCHEMA);
 
     res = PQexec(conn, STMT_DROP_TEMP_SCHEMA);
@@ -2288,7 +2309,7 @@ static void add_temp_schema_info(char* temp_schema_name)
     rv->next = NULL;
     rv->tempschema_name = strdup(temp_schema_name);
     checkAllocMem(rv->tempschema_name);
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s add temp schema: %s\n", formatLogTime(), temp_schema_name);
 
     if (temp_schema_info == NULL)
@@ -2311,7 +2332,7 @@ static void add_active_backend_info(int64 sessionID, uint32 tempID, uint32 timeL
     rv->tempID = tempID;
     rv->timeLineID = timeLineID;
 
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s add backendID: %lld\n", formatLogTime(), (long long int)sessionID);
 
     if (active_backend_info == NULL)
@@ -2325,10 +2346,15 @@ static void add_active_backend_info(int64 sessionID, uint32 tempID, uint32 timeL
 /*
  * @Description: get temp schema list of a random DN.
  * @param[IN] conn:  node connection handle
- * @return: int - the random datanode number.
+ * @return: int - the random datanode number, -1 means failure.
  */
 static int getTempSchemaListOnDN(PGconn* conn)
 {
+    if (pgxc_clean_datanode_count == 0) {
+        /* No active datanode, just return */
+        return -1;
+    }
+
     const char* STMT_GET_RANDOM = "SELECT RANDOM();";
     PGresult* res = NULL;
     double random_value;
@@ -2348,7 +2374,7 @@ static int getTempSchemaListOnDN(PGconn* conn)
         PQclear(res);
 
         if (pgxc_clean_node_info[random_datanode_no].type == NODE_TYPE_DATANODE) {
-            if (verbose_opt)
+            if (g_log_level == DEBUG)
                 write_stderr("%s starting get temp schema on %s\n",
                     formatLogTime(),
                     pgxc_clean_node_info[random_datanode_no].node_name);
@@ -2433,7 +2459,7 @@ static void getTempSchemaListOnCN(PGconn* conn)
         my_nodename);
     securec_check_ss_c(rc, "\0", "\0");
 
-    if (verbose_opt)
+    if (g_log_level == DEBUG)
         write_stderr("%s start getting temp schema on %s\n", formatLogTime(), my_nodename);
 
     /*
@@ -2565,6 +2591,7 @@ static void getNodeList(PGconn* conn)
         goto error_exit;
     }
     pgxc_clean_node_count = PQntuples(res);
+    pgxc_clean_datanode_count = 0;
     pgxc_clean_node_info = (node_info*)calloc(pgxc_clean_node_count, sizeof(node_info));
     if (pgxc_clean_node_info == NULL) {
         write_stderr("%s No more memory.\n", formatLogTime());
@@ -2590,6 +2617,7 @@ static void getNodeList(PGconn* conn)
                 break;
             case 'D':
                 node_type = NODE_TYPE_DATANODE;
+                pgxc_clean_datanode_count++;
                 break;
             default:
                 write_stderr("%s Invalid catalog data (node_type), node_name: %s, node_type: %s\n",
@@ -2671,12 +2699,37 @@ static void add_to_database_list(char* dbname)
     last_database_names->database_name = dbname;
 }
 
+typedef struct {
+    const char* level_name_upper;
+    const char* level_name_lower;
+    LogLevel log_level;
+} LevelMap;
+
+static void set_log_level(const char* level_name)
+{
+    static LevelMap log_levels[] = {{"LOG", "log", LOG},
+                                    {"DEBUG", "debug", DEBUG},
+                                    {NULL, NULL, LOG}};
+
+    for (int i = 0; log_levels[i].level_name_upper != NULL; i++) {
+        if (level_name != NULL && (strcmp(log_levels[i].level_name_upper, level_name) == 0 ||
+            strcmp(log_levels[i].level_name_lower, level_name) == 0)) {
+            g_log_level = log_levels[i].log_level;
+            return;
+        }
+    }
+
+    write_stderr("%s Unexpected log level %s, use DEBUG or LOG.\n", formatLogTime(), level_name);
+    exit(1);
+}
+
 static void parse_pgxc_clean_options(int argc, char* argv[])
 {
     static struct option long_options[] = {{"all", no_argument, NULL, 'a'},
         {"commit", no_argument, NULL, 'c'},
         {"dbname", required_argument, NULL, 'd'},
         {"host", required_argument, NULL, 'h'},
+        {"loglevel", required_argument, NULL, 'l'},
         {"node", required_argument, NULL, 'n'},
         {"no-clean", no_argument, NULL, 'N'},
         {"port", required_argument, NULL, 'p'},
@@ -2705,7 +2758,7 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
 
     progname = get_progname(argv[0]); /* Should be more fancy */
 
-    while ((c = getopt_long(argc, argv, "acd:h:n:Np:qrR:t:U:vVwW:seCEj:?", long_options, &optindex)) != -1) {
+    while ((c = getopt_long(argc, argv, "acd:h:l:n:Np:qrR:t:U:vVwW:seCEj:?", long_options, &optindex)) != -1) {
         switch (c) {
             case 'a':
                 clean_all_databases = true;
@@ -2720,6 +2773,10 @@ static void parse_pgxc_clean_options(int argc, char* argv[])
             case 'h':
                 check_env_value_c(optarg);
                 coordinator_host = optarg;
+                break;
+            case 'l':
+                check_env_name_c(optarg);
+                set_log_level(optarg);
                 break;
             case 'n':
                 check_env_value_c(optarg);
@@ -2903,6 +2960,7 @@ static void usage(void)
     check_env_value_c(env);
     printf("  -h, --host=HOSTNAME      target coordinator host address, (default: \"%s\")\n",
         env != NULL ? env : "local socket");
+    printf("  -l, --loglevel=level     set log level, current supports DEBUG/LOG\n");
     printf("  -n, --node=NODENAME      only recover prepared transaction on this node\n");
     printf("  -N, --no-clean           only collect 2PC information.  Do not recover them\n");
     env = getenv("PGPORT");

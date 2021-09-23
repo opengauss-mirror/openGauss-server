@@ -66,6 +66,7 @@ typedef struct SessionHistEntry {
     int numnodes;                    /* nodes number when reporting waitstatus in case it changed */
     LOCALLOCKTAG locallocktag;       /* locked object */
     uint64 st_block_sessionid;       /* block session */
+    GlobalSessionId globalSessionId;
 } SessionHistEntry;
 
 typedef struct ActiveSessHistArrary {

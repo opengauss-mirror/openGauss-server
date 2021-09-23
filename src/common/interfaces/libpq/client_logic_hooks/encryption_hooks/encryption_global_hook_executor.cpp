@@ -35,85 +35,52 @@
 #include "libpq-fe.h"
 #include "libpq-int.h"
 #include "cl_state.h"
+#include "cmk_entity_manager_hooks/reg_cmkem_manager_main.h"
+#include "cmk_entity_manager_hooks/reg_hook_frame.h"
 
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-static bool create_cmk(const char *key_path_str)
-{
-    RealCmkPath real_cmk_path = {0};
-    KmsErrType err_type = SUCCEED;
-    RsaKeyStr *rsa_key_str = NULL;
-
-    err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, CREATE_KEY_FILE);
-    if (err_type != SUCCEED) {
-        handle_kms_err(err_type);
-        return false;
-    }
-
-    rsa_key_str = generate_cmk_kms();
-    if (rsa_key_str == NULL) {
-        printf("ERROR(CLIENT): failed to generate rsa key.\n");
-        return false;
-    }
-
-    err_type = write_cmk_plain_kms(real_cmk_path.real_pub_cmk_path, sizeof(real_cmk_path.real_pub_cmk_path),
-        rsa_key_str->pub_key, rsa_key_str->pub_key_len);
-    if (err_type != SUCCEED) {
-        free_rsa_str(rsa_key_str);
-        handle_kms_err(err_type);
-        return false;
-    }
-
-    err_type = write_cmk_plain_kms(real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path),
-        rsa_key_str->priv_key, rsa_key_str->priv_key_len);
-    if (err_type != SUCCEED) {
-        free_rsa_str(rsa_key_str);
-        handle_kms_err(err_type);
-        return false;
-    }
-
-    free_rsa_str(rsa_key_str);
-    return true;
-}
-
-#endif
-
+/* 
+ * while using SQL :
+ *      CREATE CLIENT MASTER KEY xxx WITH(
+ *          KEY_STORE = xxx, KEY_PATH = "xxx", ALGORITHM = xxx);
+ * the GaussDB Kernel will process the cmk object identified by "KEY_STORE & KEY_PATH"
+ * the cmk entity management tools/components/services will process the cmk enrty identified by "KEY_STORE & KEY_PATH"
+ * 
+ * the whole process is divided into 3 stages:
+ *      (1) client : pre_create() the cmk object in SQL, call cmk entity manager to process cmk entity
+ *          then, send the SQL to server
+ *      (2) server : process the cmk object in SQL, return the process result to client
+ *      (3) client : judge whether the result is SUCCEED or not, post_create() will call cmk entity
+ *          manager to process cmk entity again
+ */
 bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
     const GlobalHookExecutor **existing_global_hook_executors, size_t existing_global_hook_executors_size)
 {
-    const char *key_store_str;
-    const char *key_path_str;
-    const char *algorithm_type_str;
     PGconn *conn = m_clientLogic.m_conn;
-    key_store_str = args.find("key_store");
-    key_path_str = args.find("key_path");
-    algorithm_type_str = args.find("algorithm");
+    const char *key_store_str = args.find("key_store");
+    const char *key_path_str = args.find("key_path");
+    const char *key_algo_str = args.find("algorithm");
+    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, m_clientLogic.client_cache_id};
+    CmkemErrCode ret = CMKEM_SUCCEED;
 
-    /* check algorithm */
-    CmkAlgorithm cmk_algo = get_algorithm_from_string(algorithm_type_str);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
-#else
-    if (cmk_algo != CmkAlgorithm::RSA_2048) {
-#endif
-        printfPQExpBuffer(&conn->errorMessage,
-            libpq_gettext("ERROR(CLIENT): unsupported client master key algorithm\n"));
+    /* 
+     * You can register your own cmk entity management tools/components/services in reg_all_cmk_entity_manager()
+     * now, we have registered 3:
+     *      (1) cmk entity management tool : gs_ktool. (not supported in openGauss)
+     *      (2) cmk entity management component : localkms
+     *      (3) cmk entity management service : HuaWei KMS (provided by HuaWei Cloud, not supported in openGauss)
+     * 
+     *      (*4) finally, we have a grammar check ：if cmk entity is not processed, we think it's out of control 
+     *           and it is a syntax error
+     */
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
         return false;
     }
 
-    /* check key store */
-    CmkKeyStore key_store = get_key_store_from_string(key_store_str);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    if (key_store != CmkKeyStore::GS_KTOOL) {
-#else
-    if (key_store != CmkKeyStore::LOCALKMS) {
-#endif
-        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): invalid key store\n"));
-        return false;
-    }
-
-    /* check key path */
-    if (key_path_str == NULL || strlen(key_path_str) == 0) {
-        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): invalid key path\n"));
+    ret = create_cmk_obj(&cmk_identify);
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
         return false;
     }
 
@@ -128,63 +95,78 @@ bool EncryptionGlobalHookExecutor::pre_create(const StringArgs &args,
             return false;
         }
 
-        if (key_store == encryptionGlobalHookExecutor->get_key_store() &&
+        if (strcasecmp(key_store_str, encryptionGlobalHookExecutor->get_key_store()) == 0 &&
             strcasecmp(key_path_str, encryptionGlobalHookExecutor->get_key_path()) == 0) {
             printfPQExpBuffer(&conn->errorMessage,
                 libpq_gettext("ERROR(CLIENT): key store and key path are already in use by another object\n"));
             return false;
         }
     }
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    /* generate cmk */
-    unsigned int cmk_id = 0;
 
-    if (key_store == CmkKeyStore::GS_KTOOL) {
-        if (!kt_atoi(key_path_str, &cmk_id)) {
-            return false;
-        }
-
-        if (!create_cmk(cmk_id)) {
-            return false;
-        }
-    } else {
-        return false;
-    }
-#else
-    if (key_store == CmkKeyStore::LOCALKMS) {
-        if (!create_cmk(key_path_str)) {
-            return false;
-        }
-    } else {
-        /* remain */
-        return false;
-    }
-#endif
     set_keystore(key_store_str, strlen(key_store_str));
-    set_keystore(key_path_str, strlen(key_path_str));
+    set_keypath(key_path_str, strlen(key_path_str));
+    set_keyalgo(key_algo_str, strlen(key_algo_str));
 
     return true;
 }
 
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool EncryptionGlobalHookExecutor::get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len)
+bool EncryptionGlobalHookExecutor::post_create(const StringArgs& args)
 {
-    const char *key_path_str = NULL;
-    size_t key_path_size = 0;
-    error_t rc = 0;
+    PGconn *conn = m_clientLogic.m_conn;
+    const char *key_store_str = args.find("key_store");
+    const char *key_path_str = args.find("key_path");
+    const char *key_algo_str = args.find("algorithm");
+    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, m_clientLogic.client_cache_id};
+    CmkemErrCode ret = CMKEM_SUCCEED;
 
-    get_argument("key_path", &key_path_str, key_path_size);
-    if (strlen(key_path_str) > buf_len) {
-        printf("ERROR(CLIENT): key path value is too long.\n");
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
         return false;
     }
 
-    rc = strcpy_s(key_path_buf, buf_len, key_path_str);
-    securec_check_c(rc, "", "");
+    ret = post_create_cmk_obj(&cmk_identify);
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        return false;
+    }
 
     return true;
 }
-#endif
+
+/* 
+ * while using SQL :
+ *      DROP CLIENT MASTER KEY xxx;
+ * the cmk entity management tools/components/services will process all the cmk entities identified 
+ * by "KEY_STORE & KEY_PATH" 
+ */
+bool EncryptionGlobalHookExecutor::set_deletion_expected()
+{
+    PGconn *conn = m_clientLogic.m_conn;
+    size_t unused = 0;
+    const char *key_store_str = NULL;
+    const char *key_path_str = NULL;
+    CmkemErrCode ret = CMKEM_SUCCEED;
+
+    get_argument("key_store", &key_store_str, unused);
+    get_argument("key_path", &key_path_str, unused);
+
+    CmkIdentity cmk_identify = {key_store_str, key_path_str, NULL, 0, m_clientLogic.client_cache_id};
+
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        return false;
+    }
+
+    ret = drop_cmk_obj(&cmk_identify);
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        return false;
+    }
+
+    return true;
+}
 
 bool EncryptionGlobalHookExecutor::process(ColumnHookExecutor *column_hook_executor)
 {
@@ -194,7 +176,7 @@ bool EncryptionGlobalHookExecutor::process(ColumnHookExecutor *column_hook_execu
         return false;
     }
 
-    const CachedColumnSetting *cek = CachedColumnManager::get_instance().get_cached_column_setting_metadata(cekOid);
+    const CachedColumnSetting *cek = m_clientLogic.m_cached_column_manager->get_cached_column_setting_metadata(cekOid);
     if (!cek) {
         return false;
     }
@@ -218,21 +200,58 @@ void EncryptionGlobalHookExecutor::save_private_variables()
 {
     const char *got = m_values_map.find("key_store");
     if (got) {
-        check_strncpy_s(strncpy_s(m_keyStore, sizeof(m_keyStore), got, strlen(got)));
+        check_strncpy_s(strncpy_s(m_key_store, sizeof(m_key_store), got, strlen(got)));
     }
 
     got = m_values_map.find("key_path");
     if (got) {
-        check_strncpy_s(strncpy_s(m_keyPath, sizeof(m_keyPath), got, strlen(got)));
+        check_strncpy_s(strncpy_s(m_key_path, sizeof(m_key_path), got, strlen(got)));
+    }
+
+    got = m_values_map.find("algorithm");
+    if (got) {
+        check_strncpy_s(strncpy_s(m_key_algo, sizeof(m_key_algo), got, strlen(got)));
     }
 }
 
-const CmkKeyStore EncryptionGlobalHookExecutor::get_key_store() const
+const char *EncryptionGlobalHookExecutor::get_key_store() const
 {
-    return get_key_store_from_string(m_keyStore);
+    return m_key_store;
 }
 
 const char *EncryptionGlobalHookExecutor::get_key_path() const
 {
-    return m_keyPath;
+    return m_key_path;
+}
+
+const char *EncryptionGlobalHookExecutor::get_key_algo() const
+{
+    return m_key_algo;
+}
+
+bool EncryptionGlobalHookExecutor::deprocess_column_setting(const unsigned char *processed_data,
+    size_t processed_data_size, const char *key_store, const char *key_path, const char *key_algo, unsigned char **data,
+    size_t *data_size)
+{
+    CmkIdentity cmk_identify = {key_store, key_path, key_algo, 0, 1};
+    CmkemUStr cek_cipher = {(unsigned char *)processed_data, (size_t)processed_data_size};
+    CmkemUStr *cek_plain = NULL;
+    CmkemErrCode ret = CMKEM_SUCCEED;
+
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        /* this function is only called by gs_dump, so we can print errmsg on the terminal */
+        printf("ERROR: %s", get_cmkem_errmsg(ret));
+        return false;
+    }
+
+    if (decrypt_cek_cipher(&cek_cipher, &cmk_identify, &cek_plain) != CMKEM_SUCCEED) {
+        return false;
+    }
+
+    *data = cek_plain->ustr_val;
+    *data_size = cek_plain->ustr_len;
+
+    cmkem_free(cek_plain);
+    return true;
 }

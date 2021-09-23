@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  * snapmgr.c
- *		PostgreSQL snapshot manager
+ *		openGauss snapshot manager
  *
  * We keep track of snapshots in two ways: those "registered" by resowner.c,
  * and the "active snapshot" stack.  All snapshots in either of them live in
@@ -188,12 +188,14 @@ bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdSta
 
     *hintstatus = XID_INPROGRESS;
 
+#ifdef XIDVIS_DEBUG
     ereport(DEBUG1,
         (errmsg("XidVisibleInSnapshot xid %ld cur_xid %ld snapshot csn %lu xmax %ld",
             xid,
             GetCurrentTransactionIdIfAny(),
             snapshot->snapshotcsn,
             snapshot->xmax)));
+#endif
 
     /*
      * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
@@ -208,8 +210,9 @@ bool XidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, TransactionIdSta
     }
 
 loop:
-    csn = TransactionIdGetCommitSeqNo(xid, false, true, false);
+    csn = TransactionIdGetCommitSeqNo(xid, false, true, false, snapshot);
 
+#ifdef XIDVIS_DEBUG
     ereport(DEBUG1,
         (errmsg("XidVisibleInSnapshot xid %ld cur_xid %ld csn %ld snapshot"
                 "csn %ld xmax %ld",
@@ -218,6 +221,7 @@ loop:
             csn,
             snapshot->snapshotcsn,
             snapshot->xmax)));
+#endif
 
     if (COMMITSEQNO_IS_COMMITTED(csn)) {
         *hintstatus = XID_COMMITTED;
@@ -276,81 +280,6 @@ loop:
 }
 
 /*
- * XidVisibleInLocalSnapshot
- *		Is the given XID visible according to the local multi-version snapshot?
- *
- * On return whether or not it's not visible to us.
- */
-bool XidVisibleInLocalSnapshot(TransactionId xid, Snapshot snapshot)
-{
-    volatile CommitSeqNo csn;
-    bool looped = false;
-    TransactionId parentXid = InvalidTransactionId;
-
-    ereport(DEBUG1,
-        (errmsg("XidVisibleInSnapshot xid " XID_FMT " cur_xid " XID_FMT " snapshot csn " CSN_FMT " xmax " XID_FMT,
-            xid,
-            GetCurrentTransactionIdIfAny(),
-            snapshot->snapshotcsn,
-            snapshot->xmax)));
-
-    /*
-     * Any xid >= xmax is in-progress (or aborted, but we don't distinguish
-     * that here).
-     *
-     * We can't do anything useful with xmin, because the xmin only tells us
-     * whether we see it as completed. We have to check the transaction log to
-     * see if the transaction committed or aborted, in any case.
-     */
-    if (GTM_MODE && TransactionIdFollowsOrEquals(xid, snapshot->xmax)) {
-            return false;
-    }
-
-loop:
-    csn = TransactionIdGetCommitSeqNoNCache(xid, false, true, false);
-
-    ereport(DEBUG1,
-        (errmsg("XidVisibleInSnapshot xid " XID_FMT " cur_xid " XID_FMT " csn " CSN_FMT " snapshot"
-                "csn " CSN_FMT " xmax " XID_FMT,
-            xid,
-            GetCurrentTransactionIdIfAny(),
-            csn,
-            snapshot->snapshotcsn,
-            snapshot->xmax)));
-
-    if (COMMITSEQNO_IS_COMMITTED(csn)) {
-        if (csn < snapshot->snapshotcsn)
-            return true;
-        else
-            return false;
-    } else if (COMMITSEQNO_IS_COMMITTING(csn)) {
-        if (looped) {
-            ereport(DEBUG1, (errmsg("transaction id " XID_FMT "'s csn " CSN_FMT " is changed to ABORT after lockwait.", xid, csn)));
-            return false;
-        } else {
-            if (COMMITSEQNO_IS_SUBTRANS(csn)) {
-                parentXid = (TransactionId)GET_PARENTXID(csn);
-            }
-
-            if (u_sess->attr.attr_common.xc_maintenance_mode) {
-                return false;
-            }
-
-            /* Wait for txn end and check again. */
-            if (TransactionIdIsValid(parentXid))
-                SyncLocalXidWait(parentXid);
-            else
-                SyncLocalXidWait(xid);
-            looped = true;
-            parentXid = InvalidTransactionId;
-            goto loop;
-        }
-    } else {
-        return false;
-    }
-}
-
-/*
  * CommittedXidVisibleInSnapshot
  *		Is the given XID visible according to the snapshot?
  *
@@ -382,7 +311,7 @@ bool CommittedXidVisibleInSnapshot(TransactionId xid, Snapshot snapshot, Buffer 
     }
 
 loop:
-    csn = TransactionIdGetCommitSeqNo(xid, true, true, false);
+    csn = TransactionIdGetCommitSeqNo(xid, true, true, false, snapshot);
 
     if (COMMITSEQNO_IS_COMMITTING(csn)) {
         if (looped) {
@@ -612,40 +541,6 @@ Snapshot GetCatalogSnapshot()
 }
 
 /*
- * GetNonHistoricCatalogSnapshot
- *      Get a snapshot that is sufficiently up-to-date for scan of the system
- *      catalog with the specified OID, even while historic snapshots are set
- *      up.
- */
-Snapshot GetNonHistoricCatalogSnapshot(Oid relid)
-{
-    /*
-     * If the caller is trying to scan a relation that has no syscache,
-     * no catcache invalidations will be sent when it is updated.  For a
-     * a few key relations, snapshot invalidations are sent instead.  If
-     * we're trying to scan a relation for which neither catcache nor
-     * snapshot invalidations are sent, we must refresh the snapshot every
-     * time.
-     */
-    if (!u_sess->utils_cxt.CatalogSnapshotStale && !RelationInvalidatesSnapshotsOnly(relid) &&
-        !RelationHasSysCache(relid))
-        u_sess->utils_cxt.CatalogSnapshotStale = true;
-
-    if (u_sess->utils_cxt.CatalogSnapshotStale) {
-        /* Get new snapshot. */
-        u_sess->utils_cxt.CatalogSnapshot = GetSnapshotData(&CatalogSnapshotData, false);
-
-        /*
-         * Mark new snapshost as valid.  We must do this last, in case an
-         * ERROR occurs inside GetSnapshotData().
-         */
-        u_sess->utils_cxt.CatalogSnapshotStale = false;
-    }
-
-    return u_sess->utils_cxt.CatalogSnapshot;
-}
-
-/*
  * SnapshotSetCommandId
  *		Propagate CommandCounterIncrement into the static snapshots, if set
  */
@@ -810,6 +705,32 @@ static void FreeSnapshot(Snapshot snapshot)
     }
 
     pfree_ext(snapshot);
+}
+
+
+/*
+ * FreeSnapshot
+ *		Free the memory associated with snapshot members exclude snapshot struct.
+ */
+void FreeSnapshotDeepForce(Snapshot snap)
+{
+    if (snap->xip) {
+        pfree_ext(snap->xip);
+    }
+
+    if (snap->subxip) {
+        pfree_ext(snap->subxip);
+    }
+
+    if (snap->prepared_array) {
+        pfree_ext(snap->prepared_array);
+    }
+
+    if (snap->user_data) {
+        pfree_ext(snap->user_data);
+    }
+
+    pfree_ext(snap);
 }
 
 /*

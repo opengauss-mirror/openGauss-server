@@ -85,7 +85,7 @@
  *	defined), then we fall back on an emulation that uses SysV semaphores
  *	(see spin.c).  This emulation will be MUCH MUCH slower than a proper TAS()
  *	implementation, because of the cost of a kernel call per lock or unlock.
- *	An old report is that Postgres spends around 40% of its time in semop(2)
+ *	An old report is that openGauss spends around 40% of its time in semop(2)
  *	when using the SysV semaphore code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -1034,7 +1034,7 @@ extern int tas_sema(volatile slock_t* lock);
  * release may hurt performance significantly, so we use this implementation
  * only for platforms where we don't know of a suitable intrinsic.  For the
  * most part, those are relatively obscure platform/compiler combinations to
- * which the PostgreSQL project does not have access.
+ * which the openGauss project does not have access.
  */
 #define USE_DEFAULT_S_UNLOCK
 extern void s_unlock(volatile slock_t* lock);

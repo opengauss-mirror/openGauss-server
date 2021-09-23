@@ -30,27 +30,18 @@
 #include "client_logic_cache/icached_column.h"
 #include "expr_parts.h"
 #include "expr_parts_list.h"
+#include "func_name_data.h"
 
 class ExprPartsList;
 typedef struct StatementData StatementData;
 
-class ColumnRefData {
-public:
-    ColumnRefData();
-    ~ColumnRefData();
-    NameData m_catalog_name;
-    NameData m_schema_name;
-    NameData m_table_name;
-    NameData m_column_name;
-    char m_alias_fqdn[NAMEDATALEN * 4];
-    bool compare_with_cachecolumn(const ICachedColumn* cache_column) const;
-};
-
+class ColumnRefData;
 class exprProcessor {
 public:
     static bool expand_expr(const Node * const expr, StatementData *statement_data, ExprPartsList *expr_parts_list);
     static bool expand_column_ref(const ColumnRef *cref, ColumnRefData &column_ref_data);
     static bool expand_condition_expr(const Node * const expr, ExprPartsList *exprs_list);
+    static bool expand_function_name(const FuncCall *callref, func_name_data &func_name);
 private:
     static void expand_sub_link(const Node * const expr, StatementData *statement_data);
 };

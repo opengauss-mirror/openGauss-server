@@ -22,6 +22,7 @@
 
 #include "access/htup.h"
 #include "access/xlog_internal.h"
+#include "storage/smgr/segment.h"
 #include "access/xlogreader.h"
 #include "catalog/pg_control.h"
 #include <stdlib.h>
@@ -279,8 +280,9 @@ static void extractPageInfo(XLogReaderState* record)
         RelFileNode rnode;
         ForkNumber forknum;
         BlockNumber blkno;
+        XLogPhyBlock pblk;
 
-        if (!XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blkno))
+        if (!XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blkno, &pblk))
             continue;
 
         /* We only care about the main fork; others are copied in toto */
@@ -288,13 +290,22 @@ static void extractPageInfo(XLogReaderState* record)
             continue;
 
         pg_log(PG_DEBUG,
-            "; block%d: rel %u/%u/%u forknum %u blkno %u",
+            "; block%d: rel %u/%u/%u forknum %u blkno %u physical address[%u, %u]",
             block_id,
             rnode.spcNode,
             rnode.dbNode,
             rnode.relNode,
             forknum,
-            blkno);
+            blkno,
+            pblk.relNode,
+            pblk.block);
+
+        if (OidIsValid(pblk.relNode)) {
+            Assert(PhyBlockIsValid(pblk));
+            rnode.relNode = pblk.relNode;
+            rnode.bucketNode = SegmentBktId;
+            blkno = pblk.block;
+        }
 
         process_block_change(forknum, rnode, blkno);
     }

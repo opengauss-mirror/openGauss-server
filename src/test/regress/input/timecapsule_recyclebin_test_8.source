@@ -1,0 +1,635 @@
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+
+--$1:rcyoriginname   $2:rcyoperation    $3:offset
+CREATE OR REPLACE FUNCTION findRcyName(varchar, char, int8)
+  RETURNS varchar
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  ret varchar;
+begin
+  ret = (select t.rcyname from gs_recyclebin t where t.rcyoriginname = $1 and t.rcyoperation=$2 order by t.rcychangecsn asc offset ($3 -1 ) limit 1);
+  return ret;
+end;
+$BODY$;
+
+--$1: index/table   $2:findRcyName()
+CREATE OR REPLACE FUNCTION purgeTblName(varchar, varchar)
+  RETURNS varchar
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  sqlText text;
+begin
+  sqlText = 'purge '|| $1 ||' "' || $2 ||'"';
+  execute sqlText;
+  return 0;
+end;
+$BODY$;
+
+-------------------------------------------------------
+--TestCase 1 : simple cases -> drop table [purge]
+-------------------------------------------------------
+--test1: syntax and function
+create table tblggkk(a int);
+insert into tblggkk values(1);
+insert into tblggkk values(2);
+insert into tblggkk values(3);
+drop table tblggkk;
+select count(*) from gs_recyclebin where rcyoriginname = 'tblggkk' and rcyoperation = 'd'; -- expected 1 record
+timecapsule table tblggkk to before drop;
+select * from tblggkk order by a;
+drop table tblggkk purge;
+select count(*) from gs_recyclebin where rcyoriginname = 'tblggkk' and rcyoperation = 'd'; -- expected 0 record
+select count(*) from pg_class where relname = 'tblggkk'; -- expected 0 record
+
+--test2: physics and logic delete
+create table qwerty(a int, b int);
+create table asdfgh(c int, d int);
+create view qwerty_asdfgh_view as select * from qwerty, asdfgh;
+insert into qwerty values (1),(2),(3);
+insert into asdfgh values (1),(2),(3);
+
+drop table qwerty cascade;
+select count(*) from pg_views where viewname = 'qwerty_asdfgh_view';  --expected the value is 0
+select count(*) from gs_recyclebin where rcyoriginname = 'qwerty' and rcyoperation = 'd'; -- expected 1 record
+drop table asdfgh cascade;
+select count(*) from gs_recyclebin where rcyoriginname = 'asdfgh' and rcyoperation = 'd'; -- expected 1 record
+
+timecapsule table qwerty to before drop;
+timecapsule table asdfgh to before drop;
+select count(*) from pg_views where viewname = 'qwerty_asdfgh_view';  --expected the value is 0
+
+drop table qwerty;
+drop table asdfgh;
+purge table qwerty;
+purge table asdfgh;
+purge recyclebin;
+
+--test3: physics and logic delete
+create table aassddff1(a  int, b int);
+create table aassddff2(ac  int, bc  int);
+insert into aassddff1 values(1, 2);
+insert into aassddff2 values(1, 2);
+
+--mycount4
+CREATE OR REPLACE FUNCTION mycount4()
+    RETURNS INTEGER
+    LANGUAGE plpgsql
+AS
+$BODY$
+declare
+    count integer;
+begin
+    count = (SELECT count(*) FROM aassddff1, aassddff2);
+    return count;
+end;
+$BODY$;
+
+select mycount4();
+
+drop table aassddff1;
+select mycount4();  --expected error
+select count(*) from information_schema.routines where routine_name ='mycount4';  --expected the value is 1
+select count(*) from gs_recyclebin where rcyoriginname = 'aassddff1' and rcyoperation = 'd'; -- expected 1 record
+timecapsule table aassddff1 to before drop;
+select mycount4();  --expected ok
+
+--mycount3
+create or replace function mycount3()
+	returns integer as $BODY$
+declare
+	mysql text;
+	counts integer;
+begin
+	mysql:='select count(1) from "pg_class"';
+	execute mysql into counts;
+	return counts;
+end;
+$BODY$ language plpgsql;
+
+--mycount2
+CREATE OR REPLACE FUNCTION mycount2(int4,varchar)
+    RETURNS "varchar" 
+    LANGUAGE plpgsql
+AS
+$BODY$
+DECLARE
+    v_retval varchar;
+    v_length integer;
+BEGIN
+    v_length = $1;
+    v_retval := '' || v_length || 'Hello World' || $2;
+    return v_retval;
+END;
+$BODY$;
+
+--mycount1
+create or replace function mycount1(int8)
+	returns integer as $BODY$
+declare
+begin
+	return 10 * $1;
+end;
+$BODY$ language plpgsql;
+
+CREATE TABLE jdd_qsdwferg (
+   ID INT PRIMARY KEY     NOT NULL,
+   NAME           TEXT    NOT NULL,
+   AGE            INT     NOT NULL UNIQUE,
+   HEIGHT         INT     NOT NULL default 180,
+   ADDRESS        CHAR(50) NOT NULL default mycount2(12, '  BeiJing'),
+   SALARY         REAL    NOT NULL check(HEIGHT * SALARY + mycount3() > 0),
+   NUM            REAL    NOT NULL check(mycount1(NUM) > 0),
+   JDDPAL         REAL    NOT NULL check(JDDPAL > 0),
+   FEE            REAL    NOT NULL check(FEE * mycount4() > 0)
+);
+select count(*) from pg_constraint where consrc like '%mycount4%';  --expected the value is 1
+select count(*) from pg_constraint where consrc like '%mycount3%';  --expected the value is 1
+select count(*) from pg_constraint where consrc like '%mycount1%';  --expected the value is 1
+select count(*) from pg_constraint where consrc like '%jddpal%';  --expected the value is 1
+
+INSERT INTO jdd_qsdwferg VALUES(1, 'Paul', 32, 180, 'California', 20000.00, 1, 2, 8000.00 );
+INSERT INTO jdd_qsdwferg VALUES(2, 'Paul', 43, 180, 'California', 20000.00, 1, 2, 0);  -- expected error (FEE)
+INSERT INTO jdd_qsdwferg VALUES(3, 'Paul', 53, 180, 'California', -20000.00, 1, 2, 1000);  -- expected error (SALARY)
+INSERT INTO jdd_qsdwferg VALUES(4, 'Paul', 63, 180, 'California', 20000.00, -1, 2, 8000.00 );  -- expected error (NUM)
+INSERT INTO jdd_qsdwferg VALUES(5, 'Paul', 72, 180, 'California', 20000.00, 1, -2, 8000.00 );  --expected error (JDDPAL)
+
+drop table jdd_qsdwferg;
+select count(*) from pg_constraint where consrc like '%mycount4%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%mycount3%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%mycount1%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%jddpal%';  --expected the value is 1(logistic)
+select count(*) from information_schema.routines where routine_name ='mycount4';  --expected the value is 1
+select count(*) from information_schema.routines where routine_name ='mycount3';  --expected the value is 1
+select count(*) from information_schema.routines where routine_name ='mycount2';  --expected the value is 1
+select count(*) from information_schema.routines where routine_name ='mycount1';  --expected the value is 1
+
+select count(*) from gs_recyclebin where rcyoriginname = 'jdd_qsdwferg' and rcyoperation = 'd'; -- expected 1 record
+timecapsule table jdd_qsdwferg to before drop;
+select mycount4();  --expected ok
+
+
+select count(*) from pg_constraint where consrc like '%mycount4%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%mycount3%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%mycount1%';  --expected the value is 0(physics)
+select count(*) from pg_constraint where consrc like '%jddpal%';  --expected the value is 1(logistic)
+INSERT INTO jdd_qsdwferg VALUES(2, 'Paul', 43, 180, 'California', 20000.00, 1, 2, 0);  -- expected ok
+INSERT INTO jdd_qsdwferg VALUES(3, 'Paul', 53, 180, 'California', -20000.00, 1, 2, 1000);  -- expected ok
+INSERT INTO jdd_qsdwferg VALUES(4, 'Paul', 63, 180, 'California', 20000.00, -1, 2, 8000.00 );  -- expected ok
+INSERT INTO jdd_qsdwferg VALUES(5, 'Paul', 72, 180, 'California', 20000.00, 1, -2, 8000.00 );  --expected error
+
+
+drop table jdd_qsdwferg purge;
+drop table aassddff1 purge;
+drop table aassddff2 purge;
+drop function mycount1;
+drop function mycount2;
+drop function mycount3;
+drop function mycount4;
+purge recyclebin;
+
+-------------------------------------------------------
+--TestCase 2 : simple cases -> truncate table [purge]
+-------------------------------------------------------
+create table ffbbggss(a int);
+insert into ffbbggss values(1);
+insert into ffbbggss values(2);
+insert into ffbbggss values(3);
+
+truncate table ffbbggss;
+select count(*) from gs_recyclebin where rcyoriginname = 'ffbbggss' and rcyoperation = 't'; -- expected 1 record
+timecapsule table ffbbggss to before truncate;
+purge table ffbbggss;
+select * from ffbbggss;
+
+truncate table ffbbggss purge;
+select count(*) from gs_recyclebin where rcyoriginname = 'ffbbggss' and rcyoperation = 't'; -- expected 0 record
+drop table ffbbggss purge;
+
+
+-------------------------------------------------------
+--TestCase 3 : simple cases -> purge table
+-------------------------------------------------------
+--test1
+create table ttgghhuu(a int);
+insert into ttgghhuu values(1);
+drop table ttgghhuu;
+
+create table ttgghhuu(a int);
+insert into ttgghhuu values(2);
+drop table ttgghhuu;
+
+create table ttgghhuu(a int);
+insert into ttgghhuu values(3);
+drop table ttgghhuu;
+
+purge table ttgghhuu;
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 2 records
+
+purge table ttgghhuu;
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 1 records
+
+timecapsule table ttgghhuu to before drop;
+select * from ttgghhuu;    --expected the value is 3
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 0 records
+
+drop table ttgghhuu purge;
+
+
+
+
+--test2
+create table ttgghhuu(a int);
+insert into ttgghhuu values(1);
+drop table ttgghhuu;
+
+create table ttgghhuu(a int);
+insert into ttgghhuu values(2);
+drop table ttgghhuu;
+
+create table ttgghhuu(a int);
+insert into ttgghhuu values(3);
+drop table ttgghhuu;
+
+select purgeTblName('table', findRcyName('ttgghhuu', 'd', 3));
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 2 records
+
+select purgeTblName('table', findRcyName('ttgghhuu', 'd', 2));
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 1 records
+
+timecapsule table ttgghhuu to before drop;
+select * from ttgghhuu;    --expected the value is 1
+select count(*) from gs_recyclebin where rcyoriginname = 'ttgghhuu' and rcyoperation = 'd'; -- expected 0 records
+
+drop table ttgghhuu purge;
+
+
+--test3
+create table ttgghhuu1(a int);
+insert into ttgghhuu1 values(1);
+drop table ttgghhuu1;
+
+create table ttgghhuu2(a int);
+insert into ttgghhuu2 values(2);
+drop table ttgghhuu2;
+
+create table ttgghhuu3(a int);
+insert into ttgghhuu3 values(3);
+drop table ttgghhuu3;
+
+select purgeTblName('table', findRcyName('ttgghhuu1', 'd', 1));
+select count(*) from gs_recyclebin where rcyoriginname like 'ttgghhuu%' and rcyoperation = 'd'; -- expected 2 records
+select purgeTblName('table', findRcyName('ttgghhuu2', 'd', 1));
+select count(*) from gs_recyclebin where rcyoriginname like 'ttgghhuu%' and rcyoperation = 'd'; -- expected 1 records
+select purgeTblName('table', findRcyName('ttgghhuu3', 'd', 1));
+select count(*) from gs_recyclebin where rcyoriginname like 'ttgghhuu%' and rcyoperation = 'd'; -- expected 0 records
+
+drop table ttgghhuu1 purge;
+drop table ttgghhuu2 purge;
+drop table ttgghhuu3 purge;
+
+
+
+-------------------------------------------------------
+--TestCase 4 : simple cases -> purge index
+-------------------------------------------------------
+--test1
+purge recyclebin;
+create table ffvvhhrr(a int);
+insert into ffvvhhrr values(1);
+insert into ffvvhhrr values(2);
+insert into ffvvhhrr values(3);
+create unique index  ffvvhhrr_idx on ffvvhhrr(a);
+insert into ffvvhhrr values(3);   -- expected error.
+drop table ffvvhhrr;
+select count(*) from gs_recyclebin where rcyoriginname like 'ffvvhhrr%' and rcyoperation = 'd'; -- expected 2 records
+
+purge index ffvvhhrr_idx;
+select count(*) from gs_recyclebin where rcyoriginname like 'ffvvhhrr%' and rcyoperation = 'd'; -- expected 1 records
+timecapsule table ffvvhhrr to before drop;
+insert into ffvvhhrr values(3);  -- expected ok.
+select * from ffvvhhrr order by a;
+drop table ffvvhhrr purge;
+
+
+--test2
+create table ffvvhhrr(a int);
+insert into ffvvhhrr values(1);
+insert into ffvvhhrr values(2);
+insert into ffvvhhrr values(3);
+create unique index  ffvvhhrr_idx on ffvvhhrr(a);
+insert into ffvvhhrr values(3);   -- expected error.
+drop table ffvvhhrr;
+select count(*) from gs_recyclebin where rcyoriginname like 'ffvvhhrr%' and rcyoperation = 'd'; -- expected 2 records
+
+select purgeTblName('index', findRcyName('ffvvhhrr_idx', 'd', 1));
+select count(*) from gs_recyclebin where rcyoriginname like 'ffvvhhrr%' and rcyoperation = 'd'; -- expected 1 records
+timecapsule table ffvvhhrr to before drop;
+insert into ffvvhhrr values(3);  -- expected ok.
+select * from ffvvhhrr order by a;
+drop table ffvvhhrr purge;
+
+
+-------------------------------------------------------
+--TestCase 5 : simple cases -> purge recyclebin
+-------------------------------------------------------
+purge recyclebin;
+create table ffvvhhrr(a int);
+insert into ffvvhhrr values(1);
+drop table ffvvhhrr;
+
+select count(*) from gs_recyclebin where rcyoriginname = 'ffvvhhrr' and rcyoperation = 'd';
+purge recyclebin;
+purge recyclebin;
+purge recyclebin;
+
+purge recyclebin;
+create table ffvvhhrr(a int);
+insert into ffvvhhrr values(1);
+drop table ffvvhhrr;
+
+select count(*) from gs_recyclebin where rcyoriginname = 'ffvvhhrr' and rcyoperation = 'd';
+purge recyclebin;
+purge recyclebin;
+purge recyclebin;
+
+purge recyclebin;
+create table ffvvhhrr(a int);
+insert into ffvvhhrr values(1);
+drop table ffvvhhrr;
+
+select count(*) from gs_recyclebin where rcyoriginname = 'ffvvhhrr' and rcyoperation = 'd';
+purge recyclebin;
+purge recyclebin;
+purge recyclebin;
+
+drop table ffvvhhrr purge;
+
+-------------------------------------------------------
+--TestCase 6 : simple cases -> timecapsule to before drop
+-------------------------------------------------------
+--test1
+purge recyclebin;
+create table aabbgg(a int);
+insert into aabbgg values(1);
+create unique index aabbgg_idx on aabbgg(a);
+drop table aabbgg;
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 'd'; -- expected 2 records
+
+timecapsule idx aabbgg_idx to before drop;  --expected error
+timecapsule table aabbgg_idx to before drop;  --expected error
+timecapsule table aabbgg to before drop;
+select * from aabbgg;
+insert into aabbgg values(1);  --expected error
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 'd'; -- expected 0 records
+
+drop table aabbgg purge;
+
+
+--test2
+purge recyclebin;
+create table aabbgg(a int);
+create unique index aabbgg_idx on aabbgg(a);
+insert into aabbgg values(1);
+insert into aabbgg values(1);  --expected error
+insert into aabbgg values(2), (3);
+drop table aabbgg;
+select count(*) from pg_indexes where indexname = 'aabbgg_idx';  --expected value is 0
+insert into aabbgg values(1);  --expected error
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 'd'; -- expected 2 records
+
+timecapsule table aabbgg to before drop rename to aabbgg_new;
+select count(*) from pg_indexes where tablename = 'aabbgg_new';  --expected value is 1
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 'd'; -- expected 0 records
+select * from aabbgg order by a;  --expected error
+select * from aabbgg_new order by a;
+insert into aabbgg_new values(1);  --expected error
+
+drop table aabbgg purge;
+
+-------------------------------------------------------
+--TestCase 7 : simple cases -> timecapsule to before truncate
+-------------------------------------------------------
+--test1
+purge recyclebin;
+create table aabbgg(a int);
+create unique index aabbgg_idx on aabbgg(a);
+insert into aabbgg values(1);
+insert into aabbgg values(1);  --expected error
+insert into aabbgg values(2), (3);
+truncate table aabbgg;
+insert into aabbgg values(1);  --expected ok
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 't'; -- expected 2 records
+
+timecapsule idx aabbgg_idx to before truncate;  --expected error
+timecapsule table aabbgg_idx to before truncate;  --expected error
+timecapsule table aabbgg to before truncate;
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 't'; -- expected 2 records
+select * from aabbgg order by a;
+insert into aabbgg values(1);  --expected error
+
+drop index aabbgg_idx;
+select purgeTblName('table', findRcyName('aabbgg', 't', 1));
+select count(*) from gs_recyclebin where rcyoriginname like 'aabbgg%' and rcyoperation = 't'; -- expected 0 records
+
+drop table aabbgg purge;
+
+
+
+--test2
+purge recyclebin;
+create table aabbgg(a int);
+insert into aabbgg values(1);
+truncate table aabbgg;
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbgg' and rcyoperation = 't'; -- expected 1 records
+drop table aabbgg purge;
+timecapsule table aabbgg to before truncate;  --expected error
+
+drop table aabbgg purge;
+
+
+-------------------------------------------------------
+--TestCase 11 : repeated drop and create same table to test timecapsule
+-------------------------------------------------------
+---------------------1th
+create table xxyyaabb(a int);
+insert into xxyyaabb values(1);
+drop table xxyyaabb;
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 1 record
+
+create table xxyyaabb(a int);
+insert into xxyyaabb values(2);
+drop table xxyyaabb;
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 2 records
+
+create table xxyyaabb(a int);
+insert into xxyyaabb values(3);
+drop table xxyyaabb;
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 3 records
+
+timecapsule table xxyyaabb to before drop;
+select * from xxyyaabb order by a;    --expected the value is 1
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 2 records
+
+drop table xxyyaabb purge;  -- drop forever
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 2 records
+
+---------2th
+create table xxyyaabb(a int);
+insert into xxyyaabb values(4);
+drop table xxyyaabb;
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 3 records
+
+timecapsule table xxyyaabb to before drop;
+select * from xxyyaabb order by a; --expected the value is 2
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 2 records
+
+drop table xxyyaabb purge;
+timecapsule table xxyyaabb to before drop;
+select * from xxyyaabb order by a; --expected the value is 3
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 1 records
+
+drop table xxyyaabb purge;
+timecapsule table xxyyaabb to before drop;
+select * from xxyyaabb order by a; --expected the value is 4
+select count(*) from gs_recyclebin where rcyoriginname = 'xxyyaabb' and rcyoperation = 'd'; -- expected 0 record
+
+drop table xxyyaabb purge;
+
+-------------------------------------------------------
+--TestCase 12 : repeated truncate and create same table
+-------------------------------------------------------
+purge recyclebin;
+create table aabbxxyy(a int);
+insert into aabbxxyy values(1);
+truncate table aabbxxyy;
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 1 record
+
+insert into aabbxxyy values(2);
+truncate table aabbxxyy;
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 2 record
+
+insert into aabbxxyy values(3);
+truncate table aabbxxyy;
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 3 record
+
+timecapsule table aabbxxyy to before truncate;
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 3 record
+select * from aabbxxyy order by a; --expected the value is 1
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected the value is 2
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected the value is 3
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected 0 recored
+
+select purgeTblName('table', findRcyName('aabbxxyy', 't', 3));
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 2 record
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected the value is 1
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected the value is 2
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected 0 recored
+
+select purgeTblName('table', findRcyName('aabbxxyy', 't', 2));
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 1 record
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected the value is 1
+timecapsule table aabbxxyy to before truncate;
+select * from aabbxxyy order by a; --expected 0 recored
+
+select purgeTblName('table', findRcyName('aabbxxyy', 't', 1));
+select count(*) from gs_recyclebin where rcyoriginname = 'aabbxxyy' and rcyoperation = 't'; -- expected 0 record
+timecapsule table aabbxxyy to before truncate;  --expected error
+
+drop table aabbxxyy purge;
+
+
+-------------------------------------------------------
+--TestCase 13 : mixture "before truncate" and "before drop"
+-------------------------------------------------------
+purge recyclebin;
+
+create table yuyukk(a int);
+insert into yuyukk values(1);
+truncate table yuyukk;  --firstly, truncate
+select count(*) from gs_recyclebin where rcyoriginname = 'yuyukk'; -- expected 1 record
+drop table yuyukk;  --seconly, drop
+select count(*) from gs_recyclebin where rcyoriginname = 'yuyukk'; -- expected 2 record
+
+timecapsule table yuyukk to before truncate;  --expected error
+timecapsule table yuyukk to before drop;  --ok
+select count(*) from gs_recyclebin where rcyoriginname = 'yuyukk'; -- expected 1 record
+select * from yuyukk order by a;  --expected 0 record
+
+timecapsule table yuyukk to before truncate;  --ok
+select count(*) from gs_recyclebin where rcyoriginname = 'yuyukk'; -- expected 1 record
+select * from yuyukk order by a;  --expected the value is 1
+
+drop table yuyukk purge;
+purge recyclebin;
+
+-------------------------------------------------------
+--TestCase 14 : extra testcases
+-------------------------------------------------------
+--1th
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
+
+create table hhggffdd(a int);
+create index hhggffdd_idx on hhggffdd(a);
+insert into hhggffdd values(1);
+drop table hhggffdd;
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 0 record
+
+--2th
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+create table hhggffdd(a int);
+insert into hhggffdd values(1);
+drop table hhggffdd;
+
+create table hhggffdd(a int);
+insert into hhggffdd values(2);
+drop table hhggffdd;
+
+create table hhggffdd(a int);
+insert into hhggffdd values(3);
+drop table hhggffdd;
+
+create table hhggffdd(a int);
+insert into hhggffdd values(4);
+drop table hhggffdd;
+
+create table hhggffdd(a int);
+insert into hhggffdd values(5);
+drop table hhggffdd;
+
+create table hhggffdd(a int);
+insert into hhggffdd values(6);
+drop table hhggffdd;
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 6 record
+
+purge table hhggffdd; --delete '1'
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 5 record
+timecapsule table hhggffdd to before drop; --delete '2' and recover
+select * from hhggffdd order by a;  --expected the value is 2
+drop table hhggffdd purge;
+
+purge table hhggffdd; --delete '3'
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 3 record
+timecapsule table hhggffdd to before drop; --delete '4' and recover
+select * from hhggffdd order by a;  --expected the value is 4
+drop table hhggffdd purge;
+
+purge table hhggffdd; --delete '5'
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 1 record
+timecapsule table hhggffdd to before drop; --delete '6' and recover
+select * from hhggffdd order by a;  --expected the value is 6
+drop table hhggffdd purge;
+
+select count(*) from gs_recyclebin where rcyoriginname = 'hhggffdd'; -- expected 0 record
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1

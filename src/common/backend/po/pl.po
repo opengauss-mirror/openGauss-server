@@ -11869,8 +11869,8 @@ msgstr "nie można załadować pg_hba.conf"
 
 #: postmaster/postmaster.c:1156
 #, c-format
-msgid "%s: could not locate matching postgres executable"
-msgstr "%s: nie można odnaleźć pasującego programu wykonywalnego postgres"
+msgid "%s: could not locate matching openGauss executable"
+msgstr "%s: nie można odnaleźć pasującego programu wykonywalnego openGauss"
 
 #: postmaster/postmaster.c:1179 utils/misc/tzparser.c:325
 #, c-format
@@ -11960,7 +11960,7 @@ msgstr "niepoprawny układ pakietu uruchomieniowego: oczekiwano terminatora na o
 
 #: postmaster/postmaster.c:1707
 #, c-format
-msgid "no PostgreSQL user name specified in startup packet"
+msgid "no openGauss user name specified in startup packet"
 msgstr "brak użytkownika PostgreSQL wskazanego w pakiecie uruchomieniowym"
 
 #: postmaster/postmaster.c:1764

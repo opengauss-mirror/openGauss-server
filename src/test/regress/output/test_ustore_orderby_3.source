@@ -1,0 +1,477 @@
+set enable_default_ustore_table = on;
+create schema test_ustore_orderby_3;
+set current_schema='test_ustore_orderby_3';
+-- test left outer join with all supported data types
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop type if exists composite_type;
+NOTICE:  type "composite_type" does not exist, skipping
+create type composite_type as (int_type integer, char_type text, date_type date);
+---------------------------------------------------------------------------------
+-----------------             SUPPORTED TYPES SO FAR          -------------------
+---------------------------------------------------------------------------------
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+-- create tables for post data insertion verification
+drop table if exists t1_verification;
+NOTICE:  table "t1_verification" does not exist, skipping
+drop table if exists t2_verification;
+NOTICE:  table "t2_verification" does not exist, skipping
+drop table if exists t3_verification;
+NOTICE:  table "t3_verification" does not exist, skipping
+create table t1_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+create table t2_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+create table t3_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+----------------------------------------------------------------------------------
+--------------------           ALL DATA TYPES              -----------------------
+---------------------------------------------------------------------------------
+--create table t1
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--create table t2
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--create table t3
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+---- create table for post data insertion verification
+--drop table if exists t1_verification;
+--drop table if exists t2_verification;
+--drop table if exists t3_verification;
+--
+--create table t1_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+--
+--create table t2_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+--
+--create table t3_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+\COPY t1_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+-- t1 data verification
+create view except_t1_verification_view as (select * from t1 except select * from t1_verification);
+select * from except_t1_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+\COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+\COPY t2_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+-- t2 data verification
+create view except_t2_verification_view as (select * from t2 except select * from t2_verification);
+select * from except_t2_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+\COPY t3 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data3.data' delimiter '|';
+\COPY t3_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data3.data' delimiter '|';
+-- t3 data verification
+create view except_t3_verification_view as (select * from t3 except select * from t3_verification);
+select * from except_t3_verification_view;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+-- case 5: except with order by 
+create view except_view_case5_1 as ((select * from t1 except select * from t2 order by 1)
+except
+(select * from t1_verification except select * from t2_verification order by 1));
+create view except_view_case5_2 as ((select * from t1 where t1.c1=1 except select * from t2 where t2.c1=1 order by 2)
+except
+(select * from t1_verification where t1_verification.c1=1 except select * from t2_verification where t2_verification.c1=1 order by 2));
+create view except_view_case5_3 as (((select * from t1 order by t1.c1)
+except
+(select * from t2 order by t2.c1))
+except
+((select * from t1_verification order by t1_verification.c1)
+except
+(select * from t2_verification order by t2_verification.c1)));
+create view except_view_case5_4 as (((select * from t1 order by t1.c17)
+except
+(select * from t2 order by t2.c17))
+except
+((select * from t1_verification order by t1_verification.c17)
+except
+(select * from t2_verification order by t2_verification.c17)));
+create view except_view_case5_5 as (((select * from t1 order by t1.c12)
+except
+(select * from t2 order by t2.c12))
+except
+((select * from t1_verification order by t1_verification.c12)
+except
+(select * from t2_verification order by t2_verification.c12)));
+create view except_view_case5_6 as ((select * from (
+select * from t1 except select * from t2) as t1_except_t2
+where t1_except_t2.c1=1
+order by t1_except_t2.c1)
+except
+(select * from (
+select * from t1_verification except select * from t2_verification) as t1_verification_except_t2_verification
+where t1_verification_except_t2_verification.c1=1
+order by t1_verification_except_t2_verification.c1));
+create view except_view_case5_7 as (((select * from t1 where t1.c2 < (select max(t2.c1) from t2) order by t1.c3)
+except
+(select * from t1 where t1.c2 > (select min(t2.c1) from t2) order by t1.c4))
+except
+((select * from t1_verification where t1_verification.c2 < (select max(t2_verification.c1) from t2_verification) order by t1_verification.c3)
+except
+(select * from t1_verification where t1_verification.c2 > (select min(t2_verification.c1) from t2_verification) order by t1_verification.c4)));
+--create view except_view_case5_15 as (((select * from t1 order by t1.c13)
+--except
+--(select * from t2 order by t2.c13))
+--except
+--((select * from t1_verification order by t1_verification.c13)
+--except
+--(select * from t2_verification order by t2_verification.c13)));
+--
+--create view except_view_case5_16 as (((select * from t1 order by t1.c18)
+--except
+--(select * from t2 order by t2.c18))
+--except
+--((select * from t1_verification order by t1_verification.c18)
+--except
+--(select * from t2_verification order by t2_verification.c18)));
+select * from except_view_case5_1;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_2;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_3;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_4;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_5;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_6;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from except_view_case5_7;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+--select * from except_view_case5_15;
+--select * from except_view_case5_16;
+-- case 6: except with order by + join
+create view except_view_case6_1 as (((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c2=t2.c2 order by 1)
+except
+(select * from t1 inner join t2 on t1.c10=t2.c10))
+except
+((select t1_verification.c1 as t1_verification_c1, t1_verification.c2 as t1_verification_c2, t1_verification.c3 as t1_verification_c3, t1_verification.c4 as t1_verification_c4, t1_verification.c5 as t1_verification_c5, t1_verification.c6 as t1_verification_c6, t1_verification.c7 as t1_verification_c7, t1_verification.c8 as t1_verification_c8, t1_verification.c9 as t1_verification_c9, t1_verification.c10 as t1_verification_c10, t1_verification.c11 as t1_verification_c11, t1_verification.c12 as t1_verification_c12, t1_verification.c14 as t1_verification_c14, t1_verification.c15 as t1_verification_c15, t1_verification.c16 as t1_verification_c16, t1_verification.c17 as t1_verification_c17, t2_verification.c1 as t2_verification_c1, t2_verification.c2 as t2_verification_c2, t2_verification.c3 as t2_verification_c3, t2_verification.c4 as t2_verification_c4, t2_verification.c5 as t2_verification_c5, t2_verification.c6 as t2_verification_c6, t2_verification.c7 as t2_verification_c7, t2_verification.c8 as t2_verification_c8, t2_verification.c9 as t2_verification_c9, t2_verification.c10 as t2_verification_c10, t2_verification.c11 as t2_verification_c11, t2_verification.c12 as t2_verification_c12, t2_verification.c14 as t2_verification_c14, t2_verification.c15 as t2_verification_c15, t2_verification.c16 as t2_verification_c16, t2_verification.c17 as t2_verification_c17
+  from t1_verification full outer join t2_verification on t1_verification.c2=t2_verification.c2 order by 1)
+except
+(select * from t1_verification inner join t2_verification on t1_verification.c10=t2_verification.c10)));
+create view except_view_case6_2 as (((select * from
+(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 left outer join t2 on t1.c5=t2.c5 right outer join t3 on t1.c7=t2.c7 where t1.c6=false) as foo1)
+except
+(select * from
+(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c16=t2.c16 inner join t3 on t1.c15=t3.c15) as foo2))
+except
+((select * from
+(select t1_verification.c1 as t1_verification_c1, t1_verification.c2 as t1_verification_c2, t1_verification.c3 as t1_verification_c3, t1_verification.c4 as t1_verification_c4, t1_verification.c5 as t1_verification_c5, t1_verification.c6 as t1_verification_c6, t1_verification.c7 as t1_verification_c7, t1_verification.c8 as t1_verification_c8, t1_verification.c9 as t1_verification_c9, t1_verification.c10 as t1_verification_c10, t1_verification.c11 as t1_verification_c11, t1_verification.c12 as t1_verification_c12, t1_verification.c14 as t1_verification_c14, t1_verification.c15 as t1_verification_c15, t1_verification.c16 as t1_verification_c16, t1_verification.c17 as t1_verification_c17, t2_verification.c1 as t2_verification_c1, t2_verification.c2 as t2_verification_c2, t2_verification.c3 as t2_verification_c3, t2_verification.c4 as t2_verification_c4, t2_verification.c5 as t2_verification_c5, t2_verification.c6 as t2_verification_c6, t2_verification.c7 as t2_verification_c7, t2_verification.c8 as t2_verification_c8, t2_verification.c9 as t2_verification_c9, t2_verification.c10 as t2_verification_c10, t2_verification.c11 as t2_verification_c11, t2_verification.c12 as t2_verification_c12, t2_verification.c14 as t2_verification_c14, t2_verification.c15 as t2_verification_c15, t2_verification.c16 as t2_verification_c16, t2_verification.c17 as t2_verification_c17, t3_verification.c1 as t3_verification_c1, t3_verification.c2 as t3_verification_c2, t3_verification.c3 as t3_verification_c3, t3_verification.c4 as t3_verification_c4, t3_verification.c5 as t3_verification_c5, t3_verification.c6 as t3_verification_c6, t3_verification.c7 as t3_verification_c7, t3_verification.c8 as t3_verification_c8, t3_verification.c9 as t3_verification_c9, t3_verification.c10 as t3_verification_c10, t3_verification.c11 as t3_verification_c11, t3_verification.c12 as t3_verification_c12, t3_verification.c14 as t3_verification_c14, t3_verification.c15 as t3_verification_c15, t3_verification.c16 as t3_verification_c16, t3_verification.c17 as t3_verification_c17
+ from t1_verification left outer join t2_verification on t1_verification.c5=t2_verification.c5 right outer join t3_verification on t1_verification.c7=t2_verification.c7 where t1_verification.c6=false) as foo1)
+except
+(select * from
+(select t1_verification.c1 as t1_verification_c1, t1_verification.c2 as t1_verification_c2, t1_verification.c3 as t1_verification_c3, t1_verification.c4 as t1_verification_c4, t1_verification.c5 as t1_verification_c5, t1_verification.c6 as t1_verification_c6, t1_verification.c7 as t1_verification_c7, t1_verification.c8 as t1_verification_c8, t1_verification.c9 as t1_verification_c9, t1_verification.c10 as t1_verification_c10, t1_verification.c11 as t1_verification_c11, t1_verification.c12 as t1_verification_c12, t1_verification.c14 as t1_verification_c14, t1_verification.c15 as t1_verification_c15, t1_verification.c16 as t1_verification_c16, t1_verification.c17 as t1_verification_c17, t2_verification.c1 as t2_verification_c1, t2_verification.c2 as t2_verification_c2, t2_verification.c3 as t2_verification_c3, t2_verification.c4 as t2_verification_c4, t2_verification.c5 as t2_verification_c5, t2_verification.c6 as t2_verification_c6, t2_verification.c7 as t2_verification_c7, t2_verification.c8 as t2_verification_c8, t2_verification.c9 as t2_verification_c9, t2_verification.c10 as t2_verification_c10, t2_verification.c11 as t2_verification_c11, t2_verification.c12 as t2_verification_c12, t2_verification.c14 as t2_verification_c14, t2_verification.c15 as t2_verification_c15, t2_verification.c16 as t2_verification_c16, t2_verification.c17 as t2_verification_c17, t3_verification.c1 as t3_verification_c1, t3_verification.c2 as t3_verification_c2, t3_verification.c3 as t3_verification_c3, t3_verification.c4 as t3_verification_c4, t3_verification.c5 as t3_verification_c5, t3_verification.c6 as t3_verification_c6, t3_verification.c7 as t3_verification_c7, t3_verification.c8 as t3_verification_c8, t3_verification.c9 as t3_verification_c9, t3_verification.c10 as t3_verification_c10, t3_verification.c11 as t3_verification_c11, t3_verification.c12 as t3_verification_c12, t3_verification.c14 as t3_verification_c14, t3_verification.c15 as t3_verification_c15, t3_verification.c16 as t3_verification_c16, t3_verification.c17 as t3_verification_c17
+ from t1_verification full outer join t2_verification on t1_verification.c16=t2_verification.c16 inner join t3_verification on t1_verification.c15=t3_verification.c15) as foo2)));
+create view except_view_case6_3 as (((select * from
+(select t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t2 full outer join (select * from t3 where t3.c6=false) as t3 on t2.c1=t3.c1) as foo)
+except
+(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17  from t3 inner join (select * from t1 where t1.c1=1 group by t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 having t1.c6=false) as t1 on t3.c16=t1.c16))
+except
+((select * from
+(select t2_verification.c1 as t2_verification_c1, t2_verification.c2 as t2_verification_c2, t2_verification.c3 as t2_verification_c3, t2_verification.c4 as t2_verification_c4, t2_verification.c5 as t2_verification_c5, t2_verification.c6 as t2_verification_c6, t2_verification.c7 as t2_verification_c7, t2_verification.c8 as t2_verification_c8, t2_verification.c9 as t2_verification_c9, t2_verification.c10 as t2_verification_c10, t2_verification.c11 as t2_verification_c11, t2_verification.c12 as t2_verification_c12, t2_verification.c14 as t2_verification_c14, t2_verification.c15 as t2_verification_c15, t2_verification.c16 as t2_verification_c16, t2_verification.c17 as t2_verification_c17, t3_verification.c1 as t3_verification_c1, t3_verification.c2 as t3_verification_c2, t3_verification.c3 as t3_verification_c3, t3_verification.c4 as t3_verification_c4, t3_verification.c5 as t3_verification_c5, t3_verification.c6 as t3_verification_c6, t3_verification.c7 as t3_verification_c7, t3_verification.c8 as t3_verification_c8, t3_verification.c9 as t3_verification_c9, t3_verification.c10 as t3_verification_c10, t3_verification.c11 as t3_verification_c11, t3_verification.c12 as t3_verification_c12, t3_verification.c14 as t3_verification_c14, t3_verification.c15 as t3_verification_c15, t3_verification.c16 as t3_verification_c16, t3_verification.c17 as t3_verification_c17 from t2_verification full outer join (select * from t3_verification where t3_verification.c6=false) as t3_verification on t2_verification.c1=t3_verification.c1) as foo)
+except
+(select t1_verification.c1 as t1_verification_c1, t1_verification.c2 as t1_verification_c2, t1_verification.c3 as t1_verification_c3, t1_verification.c4 as t1_verification_c4, t1_verification.c5 as t1_verification_c5, t1_verification.c6 as t1_verification_c6, t1_verification.c7 as t1_verification_c7, t1_verification.c8 as t1_verification_c8, t1_verification.c9 as t1_verification_c9, t1_verification.c10 as t1_verification_c10, t1_verification.c11 as t1_verification_c11, t1_verification.c12 as t1_verification_c12, t1_verification.c14 as t1_verification_c14, t1_verification.c15 as t1_verification_c15, t1_verification.c16 as t1_verification_c16, t1_verification.c17 as t1_verification_c17, t3_verification.c1 as t3_verification_c1, t3_verification.c2 as t3_verification_c2, t3_verification.c3 as t3_verification_c3, t3_verification.c4 as t3_verification_c4, t3_verification.c5 as t3_verification_c5, t3_verification.c6 as t3_verification_c6, t3_verification.c7 as t3_verification_c7, t3_verification.c8 as t3_verification_c8, t3_verification.c9 as t3_verification_c9, t3_verification.c10 as t3_verification_c10, t3_verification.c11 as t3_verification_c11, t3_verification.c12 as t3_verification_c12, t3_verification.c14 as t3_verification_c14, t3_verification.c15 as t3_verification_c15, t3_verification.c16 as t3_verification_c16, t3_verification.c17 as t3_verification_c17 from t3_verification inner join (select * from t1_verification where t1_verification.c1=1 group by t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 having t1_verification.c6=false) as t1_verification on t3_verification.c16=t1_verification.c16)));
+select * from except_view_case6_1;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from except_view_case6_2;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from except_view_case6_3;
+ t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+-- drop all tables and views
+drop view except_t1_verification_view CASCADE;
+drop view except_t2_verification_view CASCADE;
+drop view except_t3_verification_view CASCADE;
+drop view except_view_case5_1 CASCADE;
+drop view except_view_case5_2 CASCADE;
+drop view except_view_case5_3 CASCADE;
+drop view except_view_case5_4 CASCADE;
+drop view except_view_case5_5 CASCADE;
+drop view except_view_case5_6 CASCADE;
+drop view except_view_case5_7 CASCADE;
+--drop view except_view_case5_15 CASCADE;
+--drop view except_view_case5_16 CASCADE;
+drop view except_view_case6_1 CASCADE;
+drop view except_view_case6_2 CASCADE;
+drop view except_view_case6_3 CASCADE;
+drop table t1 CASCADE;
+drop table t2 CASCADE;
+drop table t3 CASCADE;
+drop table t1_verification CASCADE;
+drop table t2_verification CASCADE;
+drop table t3_verification CASCADE;

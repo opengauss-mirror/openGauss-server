@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -53,6 +53,10 @@ struct copy_options {
     char* file;          /* NULL = stdin/stdout */
     bool psql_inout;     /* true = use psql stdin/stdout */
     bool from;           /* true = FROM, false = TO */
+    int parallel;        /* Concurrent Number, only for copy from now */
+    char* relName;       /* relation name. If enclosed in quotation marks, take out the value in the quotation marks,
+                          * otherwise convert to lowercase. only for copy from */
+    bool isFileBinary;   /* true if file format is binary, only for copy from */
 };
 
 static void free_copy_options(struct copy_options* ptr)
@@ -65,6 +69,8 @@ static void free_copy_options(struct copy_options* ptr)
     ptr->after_tofrom = NULL;
     free(ptr->file);
     ptr->file = NULL;
+    free(ptr->relName);
+    ptr->relName = NULL;
     free(ptr);
     ptr = NULL;
 }
@@ -96,6 +102,92 @@ static void xstrcat(char** var, const char* more)
     *var = newvar;
 }
 
+static bool AtoiStrictly(const char *str, int *num)
+{
+    size_t i;
+    for (i = 0; i < strlen(str); i++) {
+        if (str[i] < '0' || str[i] > '9') {
+            return false;
+        }
+    }
+
+    *num = atoi(str);
+    return true;
+}
+
+/* parse parallel settings */
+static bool ParseParallelOption(struct copy_options* result, char** errToken)
+{
+    const char* whitespace = " \t\n\r";
+    char *token = strtokx(nullptr, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
+
+    if (token == nullptr) {
+        return true;
+    }
+
+    result->after_tofrom = pg_strdup("");
+
+    if (pg_strcasecmp(token, "with") == 0) {
+        /* Do not copy "with" to result->after_tofrom */
+        token = strtokx(nullptr, whitespace, NULL, "\"", 0, false, false, pset.encoding);
+        if (token == nullptr)
+            return false;
+    }
+
+    for (;;) {
+        if (pg_strcasecmp(token, "parallel") == 0) {
+            token = strtokx(nullptr, whitespace, ";", "\"", 0, false, false, pset.encoding);
+            if (token == nullptr)
+                return false;
+
+            if (!AtoiStrictly(token, &result->parallel)) {
+                *errToken = token;
+                return false;
+            }
+
+            token = strtokx(nullptr, "", NULL, NULL, 0, false, false, pset.encoding);
+            if (token != nullptr) {
+                xstrcat(&result->after_tofrom, " ");
+                xstrcat(&result->after_tofrom, token);
+            }
+            return true;
+        }
+
+        if (pg_strcasecmp(token, "binary") == 0) {
+            result->isFileBinary = true;
+        }
+
+        xstrcat(&result->after_tofrom, " ");
+        xstrcat(&result->after_tofrom, token);
+
+        token = strtokx(nullptr, whitespace, NULL, NULL, 0, false, false, pset.encoding);
+        if (token == nullptr) {
+            return true;
+        }
+    }
+    return true;
+}
+
+/* if token is \"Xab\", then get Xab; if token is Xab, then get xab */
+static void GetRelNameWithCase(char** dest, const char* token)
+{
+    int len = strlen(token);
+    errno_t err = EOK;
+    
+    char* tokenCopy = (char*)pg_malloc(len + 1);
+    err = strcpy_s(tokenCopy, len + 1, token);
+    check_strcpy_s(err);
+    
+    if (token[0] == '\"') {
+        tokenCopy[len - 1] = '\0';
+        xstrcat(dest, tokenCopy + 1);
+    } else {
+        xstrcat(dest, pg_strtolower(tokenCopy));
+    }
+
+    free(tokenCopy);
+}
+
 static struct copy_options* parse_slash_copy(const char* args)
 {
     struct copy_options* result = NULL;
@@ -111,6 +203,8 @@ static struct copy_options* parse_slash_copy(const char* args)
     result = (struct copy_options*)pg_calloc(1, sizeof(struct copy_options));
 
     result->before_tofrom = pg_strdup(""); /* initialize for appending */
+    result->parallel = 0;
+    result->isFileBinary = false;
 
     token = strtokx(args, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
     if (token == NULL)
@@ -118,6 +212,7 @@ static struct copy_options* parse_slash_copy(const char* args)
 
     /* The following can be removed when we drop 7.3 syntax support */
     if (pg_strcasecmp(token, "binary") == 0) {
+        result->isFileBinary = true;
         xstrcat(&result->before_tofrom, token);
         token = strtokx(NULL, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
         if (token == NULL)
@@ -142,8 +237,11 @@ static struct copy_options* parse_slash_copy(const char* args)
         }
     }
 
+    result->relName = pg_strdup("");
+    
     xstrcat(&result->before_tofrom, " ");
     xstrcat(&result->before_tofrom, token);
+    GetRelNameWithCase(&result->relName, token);
     token = strtokx(NULL, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
     if (token == NULL)
         goto error;
@@ -155,10 +253,12 @@ static struct copy_options* parse_slash_copy(const char* args)
     if (token[0] == '.') {
         /* handle schema . table */
         xstrcat(&result->before_tofrom, token);
+        xstrcat(&result->relName, token);
         token = strtokx(NULL, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
         if (token == NULL)
             goto error;
         xstrcat(&result->before_tofrom, token);
+        GetRelNameWithCase(&result->relName, token);
         token = strtokx(NULL, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
         if (token == NULL)
             goto error;
@@ -207,10 +307,11 @@ static struct copy_options* parse_slash_copy(const char* args)
         expand_tilde(&result->file);
     }
 
-    /* Collect the rest of the line (COPY options) */
-    token = strtokx(NULL, "", NULL, NULL, 0, false, false, pset.encoding);
-    if (NULL != token)
-        result->after_tofrom = pg_strdup(token);
+    /* Subtract the parallel setting */
+    token = nullptr;
+    if (!ParseParallelOption(result, &token)) {
+        goto error;
+    }
 
     return result;
 
@@ -222,6 +323,50 @@ error:
     free_copy_options(result);
 
     return NULL;
+}
+
+static bool IsParallelCopyFrom(const struct copy_options* options)
+{
+    PGresult* result = nullptr;
+    char* query = nullptr;
+    char* val = nullptr;
+    
+    if (PQtransactionStatus(pset.db) != PQTRANS_IDLE) {
+        return false;
+    }
+    
+    if (!options->from || options->parallel == 0
+        || options->isFileBinary || pset.decryptInfo.encryptInclude) {
+        return false;
+    }
+
+    /* check if option->relName is temp table */
+    query = pg_strdup("SELECT relpersistence FROM pg_class WHERE relname=\'");
+    xstrcat(&query, options->relName);
+    xstrcat(&query, "\';");
+
+    result = PQexec(pset.db, query);
+    free(query);
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        psql_error("%s", PQerrorMessage(pset.db));
+        PQclear(result);
+        return false;
+    }
+
+    if (PQntuples(result) == 0) {
+        PQclear(result);
+        return true;
+    }
+    
+    val = PQgetvalue(result, 0, 0);
+    if (pg_strcasecmp(val, "t") == 0) {
+        PQclear(result);
+        return false;
+    }
+
+    PQclear(result);
+    
+    return true;
 }
 
 /*
@@ -236,7 +381,7 @@ bool do_copy(const char* args)
     FILE* save_file = NULL;
     FILE** override_file = NULL;
     struct copy_options* options = NULL;
-    bool success = false;
+    bool success = true;
     struct stat st;
 
     /* parse options */
@@ -299,7 +444,12 @@ bool do_copy(const char* args)
     /* Run it like a user command, interposing the data source or sink. */
     save_file = *override_file;
     *override_file = copystream;
-    success = SendQuery(query.data);
+    if (IsParallelCopyFrom(options)) {
+        success = MakeCopyWorker(query.data, options->parallel);
+    } else {
+        success = SendQuery(query.data);
+    }
+    
     *override_file = save_file;
     termPQExpBuffer(&query);
 
@@ -590,3 +740,110 @@ copyin_cleanup:
     return OK;
 }
 
+bool ParallelCopyIn(const CopyInArgs* copyarg, const char** errMsg)
+{
+    PGconn* conn = copyarg->conn;
+    FILE* copystream = pset.cur_cmd_source;
+    bool OK = true;
+    char buf[COPYBUFSIZ];
+    PGresult* res = NULL;
+    bool copydone = false;
+
+    while (!copydone) { /* for each input line ... */
+        bool firstload = false;
+        bool linedone = false;
+
+        firstload = true;
+        linedone = false;
+
+        while (!linedone) { /* for each bufferload in line ... */
+            size_t linelen;
+            char* fgresult = NULL;
+
+            pthread_mutex_lock(copyarg->stream_mutex);
+
+            if (pset.parallelCopyDone) {
+                copydone = true;
+                OK = pset.parallelCopyOk;
+                pthread_mutex_unlock(copyarg->stream_mutex);
+                break;
+            }
+
+            fgresult = fgets(buf, sizeof(buf), copystream);
+
+            if (fgresult == NULL) {
+                copydone = true;
+                pset.parallelCopyDone = true;
+                pthread_mutex_unlock(copyarg->stream_mutex);
+                break;
+            }
+
+            /* check for EOF marker, but not on a partial line */
+            if (firstload) {
+                if (strcmp(buf, "\\.\n") == 0 ||
+                    strcmp(buf, "\\.\r\n") == 0) {
+                    copydone = true;
+                    pset.parallelCopyDone = true;
+                    pthread_mutex_unlock(copyarg->stream_mutex);
+                    break;
+                }
+
+                firstload = false;
+            }
+
+            pthread_mutex_unlock(copyarg->stream_mutex);
+
+            linelen = strlen(buf);
+
+            /* current line is done? */
+            if (linelen > 0 && buf[linelen - 1] == '\n') {
+                linedone = true;
+            }
+
+            if (PQputCopyData(conn, buf, linelen) <= 0) {
+                OK = false;
+                copydone = true;
+                break;
+            }
+        }
+
+        pset.lineno++;
+    }
+
+    /* Check for read error */
+    if (ferror(copystream))
+        OK = false;
+    
+    pthread_mutex_lock(copyarg->stream_mutex);
+    pset.parallelCopyDone = true;
+    pset.parallelCopyOk = OK;
+    pthread_mutex_unlock(copyarg->stream_mutex);
+
+    /* Terminate data transfer */
+    if (PQputCopyEnd(conn, OK ? NULL : _("aborted because of read failure")) <= 0)
+        OK = false;
+
+    /*
+     * Check command status and return to normal libpq state
+     *
+     * We must not ever return with the status still PGRES_COPY_IN.  Our
+     * caller is unable to distinguish that situation from reaching the next
+     * COPY in a command string that happened to contain two consecutive COPY
+     * FROM STDIN commands.  XXX if something makes PQputCopyEnd() fail
+     * indefinitely while retaining status PGRES_COPY_IN, we get an infinite
+     * loop.  This is more realistic than handleCopyOut()'s counterpart risk.
+     */
+    while (res = PQgetResult(conn), PQresultStatus(res) == PGRES_COPY_IN) {
+        OK = false;
+        PQclear(res);
+
+        PQputCopyEnd(conn, _("trying to exit copy mode"));
+    }
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        *errMsg = PQerrorMessage(conn);
+        OK = false;
+    }
+    PQclear(res);
+
+    return OK;
+}

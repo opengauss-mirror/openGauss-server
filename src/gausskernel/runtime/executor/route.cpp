@@ -203,10 +203,10 @@ int SendRouter::CountNodeId(struct RouteMsg* attr)
                                           rel_loc_info->locatorType);
         i++;
     }
-    modulo = compute_modulo(abs((int)hash_value), BUCKETDATALEN);
     if (unlikely(rel_loc_info->buckets_ptr == NULL)) {
         InitBuckets(rel_loc_info, rel);
     }
+    modulo = compute_modulo(abs((int)hash_value), rel_loc_info->buckets_cnt);
     modulo = rel_loc_info->buckets_ptr[modulo];
     node_id = get_node_from_modulo(modulo, rel_loc_info->nodeList);
 

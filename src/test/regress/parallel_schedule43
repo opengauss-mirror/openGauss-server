@@ -1,0 +1,34 @@
+#test: test_unione_mix_type
+#test: test_unione_mix_table
+#
+#test: test_unione_leftjoin_mix_1
+#test: test_unione_leftjoin_mix_2
+#test: test_unione_rightjoin_mix_1
+#test: test_unione_rightjoin_mix_2
+#test: test_unione_fulljoin_mix_1
+#test: test_unione_fulljoin_mix_2
+#test: test_unione_innerjoin_mix_1
+#test: test_unione_innerjoin_mix_2
+#
+#test: test_unione_union_mix_1
+#test: test_unione_union_mix_2
+#test: test_unione_intersect_mix_1
+#test: test_unione_intersect_mix_2
+#test: test_unione_except_mix_1
+#test: test_unione_except_mix_2
+#
+#test: test_unione_insert_select_mix_1
+test: test_unione_insert_select_mix_2
+
+# long running tests
+test: test_unione_union_mix_3
+test: test_unione_union_mix_4
+test: test_unione_intersect_mix_3
+test: test_unione_intersect_mix_4
+test: test_unione_except_mix_3
+test: test_unione_except_mix_4
+
+test: test_unione_leftjoin_mix_3
+test: test_unione_rightjoin_mix_3
+test: test_unione_fulljoin_mix_3
+test: test_unione_innerjoin_mix_3

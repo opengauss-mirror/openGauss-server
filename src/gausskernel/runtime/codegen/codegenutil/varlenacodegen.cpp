@@ -99,7 +99,7 @@ llvm::Function* VarlenaCvtCodeGen()
     llvm::Value* Val0 = builder.CreateIntToPtr(arg, varattrib_1bPtrType);
     llvm::Value* argVals2[] = {int64_0, int32_0};
     llvm::Value* Val_header = builder.CreateInBoundsGEP(Val0, argVals2);
-    llvm::Value* Val1 = builder.CreateAlignedLoad(Val_header, 1);
+    llvm::Value* Val1 = builder.CreateLoad(int8Type, Val_header);
 
     llvm::Value* Val_conv = builder.CreateZExt(Val1, int32Type);
     Val1 = builder.CreateAnd(Val_conv, 1);
@@ -120,7 +120,7 @@ llvm::Function* VarlenaCvtCodeGen()
     Val0 = builder.CreateIntToPtr(arg, varattrib_4bPtrType);
     llvm::Value* data2 = builder.CreateInBoundsGEP(Val0, argVals3);
     Val_header = builder.CreateInBoundsGEP(Val0, argVals2);
-    llvm::Value* len2 = builder.CreateAlignedLoad(Val_header, 4);
+    llvm::Value* len2 = builder.CreateLoad(int32Type, Val_header);
     len2 = builder.CreateLShr(len2, 2);
     len2 = builder.CreateSub(len2, int32_4);
     builder.CreateBr(if_end);
@@ -510,12 +510,12 @@ llvm::Function* substr_codegen()
         builder.CreateCondBr(flag, be_null, bnot_null);
 
         builder.SetInsertPoint(be_null);
-        builder.CreateAlignedStore(null_true, isNull, 1);
+        builder.CreateStore(null_true, isNull);
         res1 = INT64_0;
         builder.CreateBr(ret_bb);
 
         builder.SetInsertPoint(bnot_null);
-        builder.CreateAlignedStore(null_false, isNull, 1);
+        builder.CreateStore(null_false, isNull);
         res2 = VarlenaGetDatumCodeGen(&builder, res_len, res_data);
         builder.CreateBr(ret_bb);
 
@@ -612,12 +612,12 @@ llvm::Function* rtrim1_codegen()
         builder.CreateCondBr(flag, be_null, bnot_null);
 
         builder.SetInsertPoint(be_null);
-        builder.CreateAlignedStore(null_true, isNull, 1);
+        builder.CreateStore(null_true, isNull);
         llvm::Value* res1 = Datum_0;
         builder.CreateBr(ret_bb);
 
         builder.SetInsertPoint(bnot_null);
-        builder.CreateAlignedStore(null_false, isNull, 1);
+        builder.CreateStore(null_false, isNull);
         llvm::Value* res2 = VarlenaGetDatumCodeGen(&builder, res_len, res_data);
         builder.CreateBr(ret_bb);
 
@@ -714,12 +714,12 @@ llvm::Function* btrim1_codegen()
         builder.CreateCondBr(flag, be_null, bnot_null);
 
         builder.SetInsertPoint(be_null);
-        builder.CreateAlignedStore(null_true, isNull, 1);
+        builder.CreateStore(null_true, isNull);
         llvm::Value* res1 = Datum_0;
         builder.CreateBr(ret_bb);
 
         builder.SetInsertPoint(bnot_null);
-        builder.CreateAlignedStore(null_false, isNull, 1);
+        builder.CreateStore(null_false, isNull);
         llvm::Value* res2 = VarlenaGetDatumCodeGen(&builder, res_len, res_data);
         builder.CreateBr(ret_bb);
 

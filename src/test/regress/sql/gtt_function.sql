@@ -374,6 +374,12 @@ create global temp table gtt_test10(c1 int) with(on_commit_delete_rows='ye');
 create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='o');
 create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 
+--ok
+create global temp table gtt_test12(c0 TEXT , c1 boolean , UNIQUE(c0, c1), CHECK(gtt_test12.c1));
+insert into gtt_test12(c0) values('8x');
+alter table only gtt_test12 alter c0 set data type CLOB;
+reindex index gtt_test12_c0_c1_key;
+
 reset search_path;
 
 drop schema gtt_function cascade;

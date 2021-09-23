@@ -1,5 +1,10 @@
 test: ce_kt_key_manage
 test: ce_kt_invalid_input
+test: ce_crt_cmk_by_gskt
+test: ce_crt_cmk_by_hwkms
+test: ce_crt_cek
+test: ce_crt_tbl
+
 test: ce_cmk_cek_test
 test: ce_cmk_search_path
 test: ce_column_constraint
@@ -33,3 +38,16 @@ test: ce_rlspolicy
 test: ce_same_column_name_different_schemas
 test: ce_searchpath
 test: ce_select_operators
+test: ce_functions_return_values
+test: ce_functions_hardcoded
+test: ce_functions_examples
+test: ce_functions_out_params
+test: ce_functions_input_params
+test: ce_plpgsql_functions_input_params
+test: ce_functions_in_out_params
+test: ce_functions_create_replace
+test: ce_functions_describe
+test: ce_functions_drop_function
+test: ce_functions_return_table
+test: ce_functions_return_variable
+#test: ce_proc_test

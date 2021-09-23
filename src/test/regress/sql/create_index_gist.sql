@@ -11,7 +11,6 @@ INSERT INTO POINT_TBL(f1) VALUES (NULL);
 
 CREATE INDEX gpointind ON point_tbl USING gist (f1);
 
--- SET enforce_two_phase_commit TO off;
 
 --CREATE TABLE gpolygon_tbl AS
 --    SELECT polygon(home_base) AS f1 FROM slow_emp4000;

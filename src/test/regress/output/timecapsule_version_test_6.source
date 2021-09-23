@@ -1,0 +1,1475 @@
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+create schema schema_test_ztt2;
+set search_path = schema_test_ztt2;
+drop table t_tmp;
+ERROR:  table "t_tmp" does not exist
+create table t_tmp(id int, snapcsn bigint);
+CREATE OR REPLACE FUNCTION saveCSN(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+begin
+    insert into t_tmp select $1, int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+	return 1;
+end;
+$BODY$;
+CREATE OR REPLACE FUNCTION findCsn(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count integer;
+begin
+  count = (select snapcsn from t_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+-- TEST TIMECAPSULE CSN
+-- TEST ALTER TABLE
+-- ADD CONSTRAINT
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+ERROR:  table "tab_x1" does not exist
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add constraint constraint_1 primary key (a);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "constraint_1" for table "tab_x1"
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 drop constraint constraint_1;
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- add constraint
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add constraint constraint_2 check(a<100000);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- rename constraint
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 rename constraint constraint_2 to constraint_2_r;
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 rename constraint constraint_2_r to constraint_2; 
+select * from tab_x1 timecapsule csn findCsn(4);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+-- drop constrain
+select saveCSN(5);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 drop constraint constraint_2;
+select * from tab_x1 timecapsule csn findCsn(5); 
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- add constraint
+drop table tab_x1;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(-1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create UNIQUE index index_tab_x1_1 on tab_x1(a);
+select * from tab_x1 timecapsule csn findCsn(-1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(-1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add constraint constraint_3 primary key using index index_tab_x1_1;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "index_tab_x1_1" to "constraint_3"
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- CLUSTER ON
+drop table tab_x1;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+create UNIQUE index index_tab_x1_2 on tab_x1(a);
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+alter table tab_x1 CLUSTER ON index_tab_x1_2;
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 owner to user1;
+create user user1 WITH ENCRYPTED PASSWORD 'gauss@123';
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 owner to user1;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 set tablespace new_tablespace_1;
+\! rm -rf @abs_srcdir@/new_tablespace_1
+CREATE TABLESPACE new_tablespace_1 location '@abs_srcdir@/new_tablespace_1';
+drop table tab_x1;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 set tablespace new_tablespace_1;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 DISABLE trigger insert_trigger;
+drop table tab_x1;
+select saveCSN(-1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(-1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+	$$
+	DECLARE
+	BEGIN
+	RETURN NEW;
+	END
+	$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+	BEFORE INSERT ON tab_x1
+	FOR EACH ROW
+	EXECUTE PROCEDURE tri_insert_func();
+select * from tab_x1 timecapsule csn findCsn(0); 
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 DISABLE trigger insert_trigger;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 enable trigger insert_trigger;
+select * from tab_x1 timecapsule csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 enable REPLICA trigger insert_trigger;
+select * from tab_x1 timecapsule csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(5);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 enable ALWAYS trigger insert_trigger;
+select * from tab_x1 timecapsule csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(6);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop trigger insert_trigger on tab_x1; 
+select * from tab_x1 timecapsule csn findCsn(6);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(6);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 DISABLE/ENABLE/FORCE/NO FORCE ROW LEVEL SECURITY; 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 DISABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 ENABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule csn findCsn(4);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(5); 
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 NO FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule csn findCsn(5);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 add/MODIFY/DROP
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6); 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add c varchar(10);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 MODIFY c int;
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 drop IF EXISTS c;
+select * from tab_x1 timecapsule csn findCsn(4);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select saveCSN(5); 
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add c int;
+select * from tab_x1 timecapsule csn findCsn(5);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter table tab_x1 add/MODIFY/DROP
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int); 
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6); 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add c varchar(10);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 MODIFY c int;
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 drop IF EXISTS c; 
+select * from tab_x1 timecapsule csn findCsn(4);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(5);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter table tab_x1 add c int;
+select * from tab_x1 timecapsule csn findCsn(5);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c TYPE int; 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c TYPE int;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c SET DEFAULT 1; 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET DEFAULT 1;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c set/drop not null; 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2,2),(3,4,4),(5,6,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c set not null;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+select saveCSN(4);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c drop not null;
+select * from tab_x1 timecapsule csn findCsn(4);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c SET STATISTICS -1; 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int); 
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2,3),(3,4,4),(5,6,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET STATISTICS -1;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ADD/delete STATISTICS ((b,c));
+ 
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int,c int); 
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ADD STATISTICS ((b,c));
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(3);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 DELETE STATISTICS ((b,c));
+select * from tab_x1 timecapsule csn findCsn(3);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c SET (n_distinct = 7);
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET (n_distinct = 7);
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c reset (n_distinct);
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+ select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c reset (n_distinct);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 ALTER COLUMN c SET STORAGE PLAIN;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int,c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET STORAGE PLAIN;
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 RENAME TO tab_x1_t;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int, c int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table IF EXISTS tab_x1_t;
+NOTICE:  table "tab_x1_t" does not exist, skipping
+ALTER TABLE tab_x1 RENAME TO tab_x1_t;
+select * from tab_x1_t timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1_t" has been changed.
+select * from tab_x1_t timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1_t" has been changed.
+timecapsule table tab_x1_t to csn findCsn(1);
+ERROR:  The table definition of "tab_x1_t" has been changed.
+timecapsule table tab_x1_t to csn findCsn(2);
+ERROR:  The table definition of "tab_x1_t" has been changed.
+truncate table t_tmp;
+-- ALTER TABLE tab_x1 RENAME a TO a_t;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+ERROR:  table "tab_x1" does not exist
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+ALTER TABLE tab_x1 RENAME a TO a_t;
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- test truncate table
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+truncate table tab_x1;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ a | b 
+---+---
+(0 rows)
+
+select * from tab_x1 timecapsule csn findCsn(2);  
+ a | b 
+---+---
+(0 rows)
+
+timecapsule table tab_x1 to csn findCsn(1);
+timecapsule table tab_x1 to csn findCsn(2);
+truncate table t_tmp;
+-- vacuum full tab_x1;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+vacuum full tab_x1;
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- create index index_tab_x1_b on tab_x1(b);
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int); 
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+ 
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b);
+ 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter index index_tab_x1_b rename to index_tab_x1_b_t;
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter index index_tab_x1_b rename to index_tab_x1_b_t;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter index index_tab_x1_b_t rename to index_tab_x1_b;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b_t on tab_x1(b);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter index index_tab_x1_b_t rename to index_tab_x1_b;
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter index index_tab_x1_b SET TABLESPACE new_tablespace_2;
+\! rm -rf @abs_srcdir@/new_tablespace_2
+CREATE TABLESPACE new_tablespace_2 location '@abs_srcdir@/new_tablespace_2';
+drop table tab_x1;
+select saveCSN(-1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(-1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(-1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter index index_tab_x1_b SET TABLESPACE new_tablespace_2;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter index index_tab_x1_b REBUILD;
+drop table tab_x1;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b);
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter index index_tab_x1_b REBUILD;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- alter index index_tab_x1_b UNUSABLE;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b); 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+alter index index_tab_x1_b UNUSABLE;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- reindex index index_tab_x1_b;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b); 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+reindex index index_tab_x1_b;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- drop index index_tab_x1_b;
+select saveCSN(0);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule csn findCsn(0);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(1);
+ savecsn 
+---------
+       1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b); 
+select * from tab_x1 timecapsule csn findCsn(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveCSN(2);
+ savecsn 
+---------
+       1
+(1 row)
+
+drop index index_tab_x1_b;
+select * from tab_x1 timecapsule csn findCsn(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to csn findCsn(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+-- END CASE
+drop table t_tmp cascade;
+drop table tab_x1 cascade;
+drop table tab_x1_t cascade;
+drop function saveCSN;
+drop function findCsn;
+drop function tri_insert_func();
+drop user user1 cascade;
+drop TABLESPACE new_tablespace_1;
+drop TABLESPACE new_tablespace_2;
+drop schema schema_test_ztt2;
+reset search_path;
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+

@@ -1,10 +1,4 @@
 --for LLT
---test call scanEreport and generate errmsg.h
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport 0
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport src/ src/errcodes.txt escan.txt
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../.. ereport.txt src/errcodes.txt escan.txt
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../.. ereport.txt @abs_srcdir@/../../../../src/common/backend/utils/errcodes.txt escan.txt
 --test gsqlerr error
 \! @abs_bindir@/gsqlerr
 \! @abs_bindir@/gsqlerr -a 11
@@ -12,7 +6,3 @@
 \! @abs_bindir@/gsqlerr -h
 --test gsql outer -v
 \! @abs_bindir@/gsqlerr -v
---test gsql outer -errcode
-\! @abs_bindir@/gsqlerr 0
-\! @abs_bindir@/gsqlerr 1
-\! @abs_bindir@/gsqlerr 9999

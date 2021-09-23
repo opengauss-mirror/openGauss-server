@@ -29,7 +29,7 @@
  * for the 1-byte-header format.  This means that the actual start position
  * of a varlena datum may vary depending on which format it has.  To determine
  * what is stored, we have to require that alignment padding bytes be zero.
- * (Postgres actually has always zeroed them, but now it's required!)  Since
+ * (openGauss actually has always zeroed them, but now it's required!)  Since
  * the first byte of a 1-byte-header varlena can never be zero, we can examine
  * the first byte after the previous datum to tell if it's a pad byte or the
  * start of a 1-byte-header varlena.
@@ -65,12 +65,14 @@
 #include "access/sysattr.h"
 #include "access/tuptoaster.h"
 #include "access/tableam.h"
+#include "access/ustore/knl_utuple.h"
 #include "catalog/pg_proc.h"
 #include "executor/tuptable.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/pagecompress.h"
 #include "utils/memutils.h"
 #include "utils/elog.h"
+#include "access/ustore/knl_utuple.h"
 
 #ifdef ENABLE_UT
 #define static
@@ -347,7 +349,14 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* do we have to walk attrs? */
     int off;                 /* current offset within data */
+    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
 
+    /*
+     * Ustore has different alignment rules so we force slow = true here.
+     * See the comments in heap_deform_tuple() for more information.
+     */
+    slow = heapToUHeap;
+    
     /* ----------------
      *	 Three cases:
      *
@@ -462,7 +471,7 @@ Datum nocachegetattr(HeapTuple tuple, uint32 attnum, TupleDesc tupleDesc)
 
         off = att[attnum]->attcacheoff;
     } else {
-        bool usecache = true;
+        bool usecache = !heapToUHeap;
         uint32 i;
 
         /*
@@ -593,7 +602,7 @@ Datum heap_getsysattr(HeapTuple tup, int attnum, TupleDesc tupleDesc, bool *isnu
  * The HeapTuple struct, tuple header, and tuple data are all allocated
  * as a single palloc() block.
  *
- * heap_copytuple is used for tuples uncompressed, For all Postgresql System Relations,
+ * heap_copytuple is used for tuples uncompressed, For all openGauss System Relations,
  * their tuples MUST be uncompressed.  And This is also suitable for that tuples which
  * are not compressed at all, for example, index tuples now.
  *
@@ -612,12 +621,14 @@ HeapTuple heap_copytuple(HeapTuple tuple)
     }
 
     Assert(!HEAP_TUPLE_IS_COMPRESSED(tuple->t_data));
-	newTuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + tuple->t_len);
+
+    newTuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + tuple->t_len);
     newTuple->t_len = tuple->t_len;
     newTuple->t_self = tuple->t_self;
     newTuple->t_tableOid = tuple->t_tableOid;
     newTuple->t_bucketId = tuple->t_bucketId;
     HeapTupleCopyBase(newTuple, tuple);
+
 #ifdef PGXC
     newTuple->t_xc_node_id = tuple->t_xc_node_id;
 #endif
@@ -733,7 +744,7 @@ HeapTuple heap_form_tuple(TupleDesc tupleDescriptor, Datum *values, bool *isnull
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
      */
-	tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
+    tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
     tuple->t_data = td = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
 
     /*
@@ -928,7 +939,23 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool
     char *tp = NULL;         /* ptr to tuple data */
     long off;                /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
-    bool slow = false;       /* can we use/set attcacheoff? */
+    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+
+    /*
+     * We need to default to slow if the TupleDesc type is UStore because
+     * UStore has different alignment rules than Heap.
+     *
+     * Consider a row data where the first column is INT (4 byte alignment)
+     * and the second column is a timestamp (8 byte alignment).
+     * In UStore, the atcacheoff (if set) for the first and second columns are
+     * 0 and 4, respectively because UStore does not do alignment padding for attbyval columns.
+     * However, this is not the case for Heap. For Heap, the 1st and 2nd columns will be
+     * at 0 and 8, respectively because of alignment padding. see heap_fill_tuple().
+     * So during heap_deform_tuple(), if atcacheoff is set for the second column,
+     * deform thinks the second column is at offset 4 because that is what the tupleDesc says
+     * when in fact the 2nd column was written at offset 8.
+    */
+    bool slow = heapToUHeap;       /* can we use/set attcacheoff? */
 
     Assert(!HEAP_TUPLE_IS_COMPRESSED(tup));
     natts = HeapTupleHeaderGetNatts(tup, tupleDesc);
@@ -945,7 +972,6 @@ void heap_deform_tuple(HeapTuple tuple, TupleDesc tupleDesc, Datum *values, bool
     }
 
     tp = (char *)tup + tup->t_hoff;
-
     off = 0;
 
     for (attnum = 0; attnum < natts; attnum++) {
@@ -1071,7 +1097,8 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
     long off;                /* offset in tuple data */
     bits8 *bp = tup->t_bits; /* ptr to null bitmap in tuple */
     bool slow = false;       /* can we use/set attcacheoff? */
-
+    bool heapToUHeap = tupleDesc->tdTableAmType == TAM_USTORE;
+	
     /*
      * Check whether the first call for this tuple, and initialize or restore
      * loop state.
@@ -1086,6 +1113,12 @@ static void slot_deform_tuple(TupleTableSlot *slot, uint32 natts)
         off = slot->tts_off;
         slow = slot->tts_slow;
     }
+
+    /*
+     * Ustore has different alignment rules so we force slow = true here.
+     * See the comments in heap_deform_tuple() for more information.
+     */
+    slow = heapToUHeap ? true : slow;
 
     tp = (char *)tup + tup->t_hoff;
 
@@ -1253,6 +1286,11 @@ static void slot_deform_datarow(TupleTableSlot *slot, bool need_transform_anyarr
         slot->tts_attinmeta = TupleDescGetAttInMetadata(slot->tts_tupleDescriptor);
     }
 
+    if (slot->tts_per_tuple_mcxt == NULL) {
+        slot->tts_per_tuple_mcxt = AllocSetContextCreate(slot->tts_mcxt, "SlotPerTupleMcxt", ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    }
+
     MemoryContextSwitchTo(slot->tts_per_tuple_mcxt);
     buffer = makeStringInfo();
     for (i = 0; i < attnum; i++) {
@@ -1324,21 +1362,22 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
     TupleDesc tupleDesc = slot->tts_tupleDescriptor;
     HeapTupleHeader tup;
 
+    /* XXXTAM: This will be moved into UHeapSlotGetAttr */
     /*
      * system attributes are handled by heap_getsysattr
      */
     if (attnum <= 0) {
         /* internal error */
         if (tuple == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot extract system attribute from virtual tuple")));
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from virtual tuple")));
         }
         /* internal error */
         if (tuple == &(slot->tts_minhdr)) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot extract system attribute from minimal tuple")));
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot extract system attribute from minimal tuple")));
         }
-        return heap_getsysattr(tuple, attnum, tupleDesc, isnull);
+        return tableam_tops_getsysattr(tuple, attnum, tupleDesc, isnull);
     }
 
     /*
@@ -1367,6 +1406,16 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
 #endif
 
     /*
+     * If the attribute's column has been dropped, we force a NULL result.
+     * This case should not happen in normal use, but it could happen if we
+     * are executing a plan cached before the column was dropped.
+     */
+    if (tupleDesc->attrs[attnum - 1]->attisdropped) {
+        *isnull = true;
+        return (Datum) 0;
+    }
+
+    /*
      * otherwise we had better have a physical tuple (tts_nvalid should equal
      * natts in all virtual-tuple cases)
      */
@@ -1385,39 +1434,29 @@ Datum heap_slot_getattr(TupleTableSlot *slot, int attnum, bool *isnull, bool nee
      */
     tup = tuple->t_data;
     if (attnum > (int)HeapTupleHeaderGetNatts(tup, tupleDesc)) {
-        /* get init default value from tupleDesc.
-         * The original Code is:
-         * example code: *isnull = true;
-         * example code: return (Datum) 0;
-         */
-        return heapGetInitDefVal(attnum, tupleDesc, isnull);
+            /* get init default value from tupleDesc.
+             * The original Code is:
+             * example code: *isnull = true;
+             * example code: return (Datum) 0;
+             */
+            return heapGetInitDefVal(attnum, tupleDesc, isnull);
     }
 
     /*
      * check if target attribute is null: no point in groveling through tuple
      */
     if (HeapTupleHasNulls(tuple) && att_isnull(((unsigned int)(attnum - 1)), tup->t_bits)) {
-        *isnull = true;
-        return (Datum)0;
-    }
-
-    /*
-     * If the attribute's column has been dropped, we force a NULL result.
-     * This case should not happen in normal use, but it could happen if we
-     * are executing a plan cached before the column was dropped.
-     */
-    if (tupleDesc->attrs[attnum - 1]->attisdropped) {
-        *isnull = true;
-        return (Datum)0;
+            *isnull = true;
+            return (Datum)0;
     }
 
     /*
      * Extract the attribute, along with any preceding attributes.
      */
-    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)((HeapTuple)slot->tts_tuple))->t_data)) {
-        slot_deform_cmprs_tuple(slot, attnum);
+    if (HEAP_TUPLE_IS_COMPRESSED(((HeapTuple)slot->tts_tuple)->t_data)) {
+            slot_deform_cmprs_tuple(slot, attnum);
     } else {
-        slot_deform_tuple(slot, attnum);
+            slot_deform_tuple(slot, attnum);
     }
 
     /*
@@ -1583,19 +1622,24 @@ bool heap_slot_attisnull(TupleTableSlot *slot, int attnum)
     /*
      * system attributes are handled by heap_attisnull
      */
-    if (attnum <= 0) {
-        /* internal error */
-        if (tuple == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot extract system attribute from virtual tuple")));
-        }
 
-        /* internal error */
-        if (tuple == &(slot->tts_minhdr)) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("cannot extract system attribute from minimal tuple")));
-        }
-        return heap_attisnull(tuple, attnum, NULL);
+    // XXXTAM Needs to be revisited as part of slot re-factoring
+    // We can then use tableam_tops_tuple_attisnull()
+    if (attnum <= 0) {
+            /* internal error */
+            if (tuple == NULL) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot extract system attribute from virtual tuple")));
+            }
+
+            /* internal error */
+            if (tuple == &(slot->tts_minhdr)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot extract system attribute from minimal tuple")));
+            }
+            return heap_attisnull(tuple, attnum, NULL);
     }
 
     /*
@@ -1784,7 +1828,7 @@ HeapTuple heap_tuple_from_minimal_tuple(MinimalTuple mtup)
     uint32 len = mtup->t_len + MINIMAL_TUPLE_OFFSET;
     errno_t rc = EOK;
 
-	result = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
+    result = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
     result->t_len = len;
     ItemPointerSetInvalid(&(result->t_self));
     result->t_tableOid = InvalidOid;
@@ -2168,7 +2212,7 @@ static HeapTuple HeapUncompressTup(HeapTuple srcTuple, TupleDesc tupleDesc, char
     int destDataLength = 0;
 
     if (destTuple == NULL) {
-	    destTuple = (HeapTuple)heaptup_alloc(MaxHeapTupleSize + HEAPTUPLESIZE);
+        destTuple = (HeapTuple)heaptup_alloc(MaxHeapTupleSize + HEAPTUPLESIZE);
         destTuple->t_data = (HeapTupleHeader)((char *)destTuple + HEAPTUPLESIZE);
     }
 
@@ -2435,8 +2479,8 @@ HeapTuple heap_form_cmprs_tuple(TupleDesc tupleDescriptor, FormCmprTupleData *cm
      * Allocate and zero the space needed.	Note that the tuple body and
      * HeapTupleData management structure are allocated in one chunk.
      */
-	tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
-    tuple->t_data = td = (HeapTupleHeader)((char *)tuple + HEAPTUPLESIZE);
+    tuple = (HeapTuple)heaptup_alloc(HEAPTUPLESIZE + len);
+    tuple->t_data = td = (HeapTupleHeader)((char*)tuple + HEAPTUPLESIZE);
 
     /*
      * And fill in the information.  Note we fill the Datum fields even though
@@ -2609,6 +2653,7 @@ HeapTuple heapCopyCompressedTuple(HeapTuple tuple, TupleDesc tupleDesc, Page pag
     Assert(HeapTupleIsValid(tuple) && (tuple->t_data != NULL));
     Assert(HEAP_TUPLE_IS_COMPRESSED(tuple->t_data));
     Assert((tupleDesc != NULL) && (page != NULL));
+    Assert(!PageIsEncrypt(page));
 
     /* we have to handle alter-table-instant case, because
      * HeapUncompressTup() don't think about that case
@@ -2744,6 +2789,11 @@ static void slot_deform_cmprs_tuple(TupleTableSlot *slot, uint32 natts)
 
     Assert(HEAP_TUPLE_IS_COMPRESSED(tup));
     Assert(BufferIsValid(slot->tts_buffer));
+
+    if (slot->tts_per_tuple_mcxt == NULL) {
+        slot->tts_per_tuple_mcxt = AllocSetContextCreate(slot->tts_mcxt, "SlotPerTupleMcxt", ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    }
 
     AutoContextSwitch memContextGuard(slot->tts_per_tuple_mcxt);
 
@@ -3223,7 +3273,6 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
     }
 }
 
-
 /*
  * Checks whether a dead tuple can be retained
  *
@@ -3259,4 +3308,24 @@ bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTup
     }
 
     return ret;
+}
+
+void HeapCopyTupleNoAlloc(HeapTuple dest, HeapTuple src)
+{
+    if (!HeapTupleIsValid(src) || src->t_data == NULL) {
+        return;
+    }
+
+    Assert(!HEAP_TUPLE_IS_COMPRESSED(src->t_data));
+
+    Assert(dest && dest->t_data);
+    dest->t_len = src->t_len;
+    dest->t_self = src->t_self;
+    dest->t_tableOid = src->t_tableOid;
+    dest->t_bucketId = src->t_bucketId;
+    dest->t_xc_node_id = src->t_xc_node_id;
+    HeapTupleCopyBase(dest, src);
+
+    errno_t errorNo = memcpy_s((char *) dest->t_data, src->t_len, (char *) src->t_data, src->t_len);
+    securec_check(errorNo, "\0", "\0");
 }

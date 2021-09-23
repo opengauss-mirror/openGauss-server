@@ -76,6 +76,29 @@ const char* RemoteReadErrMsg(int error_code)
     return error_msg;
 }
 
+void GetPrimaryServiceAddress(char *address, size_t address_len)
+{
+    if (address == NULL || address_len == 0 || t_thrd.walreceiverfuncs_cxt.WalRcv == NULL)
+        return;
+
+    bool is_running = false;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    int rc = 0;
+
+    SpinLockAcquire(&walrcv->mutex);
+    is_running = walrcv->isRuning;
+    SpinLockRelease(&walrcv->mutex);
+
+    if (walrcv->pid == 0 || !is_running)
+        return;
+
+    SpinLockAcquire(&walrcv->mutex);
+    rc = snprintf_s(address, address_len, (address_len - 1), "%s:%d", walrcv->conn_channel.remotehost,
+                    walrcv->conn_channel.remoteport);
+    securec_check_ss(rc, "\0", "\0");
+    SpinLockRelease(&walrcv->mutex);
+}
+
 /*
  * @Description: get remote address
  * @IN/OUT first_address: first address
@@ -84,7 +107,6 @@ const char* RemoteReadErrMsg(int error_code)
  */
 void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addressLen)
 {
-    char remoteHostname[MAX_IPADDR_LEN] = {0};
     char ip[MAX_IPADDR_LEN] = {0};
     char port[MAX_IPADDR_LEN] = {0};
     errno_t rc = EOK;
@@ -102,10 +124,9 @@ void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addres
         }
 
         if (t_thrd.postmaster_cxt.ReplConnArray[1]) {
-            GetHostnamebyIP(t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost, remoteHostname, MAX_IPADDR_LEN);
             rc = snprintf_s(firstAddress, addressLen, (addressLen - 1),
-                            "%s:%d", remoteHostname,
-                            t_thrd.postmaster_cxt.ReplConnArray[1]->remoteservice);
+                            "%s:%d", t_thrd.postmaster_cxt.ReplConnArray[1]->remotehost,
+                            t_thrd.postmaster_cxt.ReplConnArray[1]->remoteport);
             securec_check_ss(rc, "", "");
         }
     } else if (IS_DN_MULTI_STANDYS_MODE()) {
@@ -113,23 +134,20 @@ void GetRemoteReadAddress(char* firstAddress, char* secondAddress, size_t addres
             GetFastestReplayStandByServiceAddress(firstAddress, secondAddress, addressLen);
             if (firstAddress[0] != '\0') {
                 GetIPAndPort(firstAddress, ip, port, MAX_IPADDR_LEN);
-                GetHostnamebyIP(ip, remoteHostname, MAX_IPADDR_LEN);
-                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", remoteHostname, port);
+                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
 
             if (secondAddress[0] != '\0') {
                 GetIPAndPort(secondAddress, ip, port, MAX_IPADDR_LEN);
-                GetHostnamebyIP(ip, remoteHostname, MAX_IPADDR_LEN);
-                rc = snprintf_s(secondAddress, addressLen, (addressLen - 1), "%s:%s", remoteHostname, port);
+                rc = snprintf_s(secondAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
         } else if (serverMode == STANDBY_MODE) {
             GetPrimaryServiceAddress(firstAddress, addressLen);
             if (firstAddress[0] != '\0') {
                 GetIPAndPort(firstAddress, ip, port, MAX_IPADDR_LEN);
-                GetHostnamebyIP(ip, remoteHostname, MAX_IPADDR_LEN);
-                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", remoteHostname, port);
+                rc = snprintf_s(firstAddress, addressLen, (addressLen - 1), "%s:%s", ip, port);
                 securec_check_ss(rc, "", "");
             }
         }
@@ -157,31 +175,6 @@ void GetIPAndPort(char* address, char* ip, char* port, size_t len)
     return;
 }
 
-void GetHostnamebyIP(const char* ip, char* hostname, size_t hostnameLen)
-{
-    struct in_addr ipv4addr;
-    struct hostent hstEnt;
-    struct hostent* hp = NULL;
-    char buff[MAX_PATH_LEN];
-    int error = 0;
-    errno_t rc = EOK;
-
-    if (ip != NULL && ip[0] != '\0') {
-        inet_pton(AF_INET, ip, &ipv4addr);
-        int ret = gethostbyaddr_r((char*)&ipv4addr, sizeof(ipv4addr), AF_INET, &hstEnt, buff, MAX_PATH_LEN, &hp,
-                                  &error);
-        if (0 != ret || 0 != error) {
-            ereport(WARNING, (errmodule(MOD_REMOTE), errmsg("Fail to find the remote host.")));
-        } else {
-            if (strlen(hstEnt.h_name) < hostnameLen) {
-                rc = strcpy_s(hostname, MAX_IPADDR_LEN, hstEnt.h_name);
-                securec_check(rc, "", "");
-            }
-        }
-    }
-    return;
-}
-
 /*
  * @Description: have remote node to read
  * @Return: true if have remote node
@@ -196,15 +189,6 @@ bool CanRemoteRead()
         return true;
     }
     return false;
-}
-
-/*
- * @Description: check remote mode is auth
- * @Return: true if remote read is auth
- */
-bool IsRemoteReadModeAuth()
-{
-    return (g_instance.attr.attr_storage.remote_read_mode == REMOTE_READ_AUTH);
 }
 
 /*

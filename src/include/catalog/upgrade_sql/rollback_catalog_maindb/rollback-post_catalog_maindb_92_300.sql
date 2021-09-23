@@ -1,2 +1,0 @@
-DROP FUNCTION IF EXISTS pg_catalog.gs_decrypt(IN decryptstr text, IN keystr text, IN type text,OUT decrypt_result_str text) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.gs_encrypt(IN encryptstr text, IN keystr text, IN type text,OUT encrypt_result_str text) CASCADE;

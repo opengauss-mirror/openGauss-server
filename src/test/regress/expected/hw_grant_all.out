@@ -4,6 +4,7 @@ SET ROLE user1 PASSWORD 'wang@123';
 --can not drop schema user2 in General user
 DROP SCHEMA user2;
 ERROR:  permission denied for schema user2
+DETAIL:  N/A
 --can not drop user user2 in General user
 DROP USER user2;
 ERROR:  Permission denied to drop role.

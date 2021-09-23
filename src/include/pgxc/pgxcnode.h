@@ -264,8 +264,10 @@ extern void ensure_out_buffer_capacity(size_t bytes_needed, PGXCNodeHandle* hand
 extern int pgxc_node_send_threadid(PGXCNodeHandle* handle, uint32 threadid);
 extern int pgxc_node_send_queryid(PGXCNodeHandle* handle, uint64 queryid);
 extern int pgxc_node_send_unique_sql_id(PGXCNodeHandle* handle);
+extern int pgxc_node_send_global_session_id(PGXCNodeHandle *handle);
 extern int pgxc_node_send_query(PGXCNodeHandle* handle, const char* query, bool isPush = false,
-    bool trigger_ship = false, bool check_gtm_mode = false, const char *compressPlan = NULL, int cLen = 0);
+    bool isCreateSchemaPush = false, bool trigger_ship = false, bool check_gtm_mode = false,
+    const char *compressPlan = NULL, int cLen = 0);
 extern void pgxc_node_send_gtm_mode(PGXCNodeHandle* handle);
 extern int pgxc_node_send_plan_with_params(PGXCNodeHandle* handle, const char* query, short num_params,
     Oid* param_types, int paramlen, const char* params, int fetch_size);
@@ -298,8 +300,8 @@ extern int pgxc_node_send_snapshot(PGXCNodeHandle* handle, Snapshot snapshot, in
 extern int pgxc_node_send_ddl_params(PGXCNodeHandle* handle);
 extern int pgxc_node_send_timestamp(
     PGXCNodeHandle* handle, TimestampTz gtmstart_timestamp, TimestampTz stmtsys_timestamp);
-extern int pgxc_node_send_pushschema(PGXCNodeHandle* handle, bool* isPush);
-extern int pgxc_node_send_popschema(PGXCNodeHandle* handle);
+extern int pgxc_node_send_pushschema(PGXCNodeHandle* handle, bool* isPush, bool *isCreateSchemaPush);
+extern int pgxc_node_send_popschema(PGXCNodeHandle* handle, bool isPush);
 extern int pgxc_node_is_data_enqueued(PGXCNodeHandle* conn);
 extern int send_some(PGXCNodeHandle* handle, int len);
 extern int pgxc_node_flush(PGXCNodeHandle* handle);
@@ -325,7 +327,7 @@ extern void release_pgfdw_conn();
 extern int pgxc_node_send_userpl(PGXCNodeHandle* handle, int userpl);
 extern int pgxc_node_send_userpl(PGXCNodeHandle* handle, int64 userpl);
 extern int pgxc_node_send_cpconf(PGXCNodeHandle* handle, char* data);
-extern int  pgxc_send_bucket_map(PGXCNodeHandle* handle, uint2* bucketMap, int dnNodeIdx);
+extern int  pgxc_send_bucket_map(PGXCNodeHandle* handle, uint2* bucketMap, int dnNodeIdx, int bucketCnt);
 extern bool light_node_receive(PGXCNodeHandle* handle);
 extern bool light_node_receive_from_logic_conn(PGXCNodeHandle* handle);
 extern int pgxc_node_pgstat_send(PGXCNodeHandle* handle, char tag);

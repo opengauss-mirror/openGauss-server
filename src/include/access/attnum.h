@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * attnum.h
- *	  POSTGRES attribute number definitions.
+ *	  openGauss attribute number definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pg_list.h
- *	  interface for PostgreSQL generic linked list package
+ *	  interface for openGauss generic linked list package
  *
  * This package implements singly-linked homogeneous lists.
  *
@@ -281,6 +281,7 @@ extern List* list_union_int(const List* list1, const List* list2);
 extern List* list_union_oid(const List* list1, const List* list2);
 extern List* list_intersection_int(const List* list1, const List* list2);
 extern bool list_is_subset(List* list1, List* list2);
+extern bool list_is_subset_int(List* list1, List* list2);
 
 #ifdef PGXC
 /* Well... this is used by Postgres-XC */

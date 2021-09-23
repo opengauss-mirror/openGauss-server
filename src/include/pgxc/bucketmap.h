@@ -43,6 +43,7 @@ typedef struct BucketMapCache {
 
     /* bucketmap content, palloc()-ed form top memory context */
     uint2* bucketmap;
+    int    bucketcnt;
 } NodeGroupBucketMap;
 
 #define BUCKET_MAP_SIZE 32
@@ -50,9 +51,9 @@ typedef struct BucketMapCache {
 #define BUCKETMAP_MODE_REMAP 1
 
 extern void GenerateConsistentHashBucketmap(CreateGroupStmt* stmt, oidvector* nodes_array,
-     Relation pgxc_group_rel, HeapTuple tuple, uint2* bucket_ptr, int bucketmap_mode);
+     Relation pgxc_group_rel, HeapTuple tuple, uint2* bucket_ptr, int bucketmap_mode, int bucketCnt);
 extern void BucketMapCacheRemoveEntry(Oid groupoid);
-extern char* GetBucketString(uint2* bucket_ptr);
+extern char* GetBucketString(uint2* bucket_ptr, int bucketCnt);
 extern void PgxcCopyBucketsFromNew(const char* group_name, const char* src_group_name);
 
 #endif

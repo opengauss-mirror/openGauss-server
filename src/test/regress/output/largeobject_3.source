@@ -9,7 +9,7 @@ CREATE TABLE lotest_stash_values (loid oid, junk integer, fd integer);
 -- The mode arg to lo_creat is unused, some vestigal holdover from ancient times
 -- returns the large object id
 INSERT INTO lotest_stash_values (loid) VALUES( lo_creat(42) );
-ERROR:  Postgres-XC does not support large object yet
+ERROR:  openGauss does not support large object yet
 DETAIL:  The feature is not currently supported
 CONTEXT:  referenced column: loid
 -- NOTE: large objects require transactions
@@ -182,7 +182,7 @@ SELECT lo_unlink(loid) from lotest_stash_values;
 
 TRUNCATE lotest_stash_values;
 INSERT INTO lotest_stash_values (loid) VALUES( lo_import('@abs_srcdir@/data/tenk.data') );
-ERROR:  Postgres-XC does not support large object yet
+ERROR:  openGauss does not support large object yet
 DETAIL:  The feature is not currently supported
 CONTEXT:  referenced column: loid
 START TRANSACTION;
@@ -239,12 +239,12 @@ SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_va
 
 COPY lotest_stash_values TO '@abs_builddir@/results/lotest.txt';
 \lo_import '@abs_builddir@/results/lotest.txt'
-ERROR:  Postgres-XC does not support large object yet
+ERROR:  openGauss does not support large object yet
 DETAIL:  The feature is not currently supported
 \set newloid :LASTOID
 -- just make sure \lo_export does not barf
 \lo_export :newloid '@abs_builddir@/results/lotest2.txt'
-ERROR:  Postgres-XC does not support large object yet
+ERROR:  openGauss does not support large object yet
 DETAIL:  The feature is not currently supported
 -- This is a hack to test that export/import are reversible
 -- This uses knowledge about the inner workings of large object mechanism
@@ -262,6 +262,6 @@ SELECT lo_unlink(loid) FROM lotest_stash_values;
 (0 rows)
 
 \lo_unlink :newloid
-ERROR:  Postgres-XC does not support large object yet
+ERROR:  openGauss does not support large object yet
 DETAIL:  The feature is not currently supported
 TRUNCATE lotest_stash_values;

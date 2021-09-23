@@ -17,7 +17,8 @@
 #include "knl/knl_variable.h"
 #include <arpa/inet.h>
 #include <fnmatch.h>
-#include <libgen.h>
+#include <libgen.h> 
+#include "access/tableam.h"
 #include "access/heapam.h"
 #include "access/hash.h"
 #include "access/hbucket_am.h"
@@ -25,12 +26,14 @@
 #include "access/sysattr.h"
 #include "access/tableam.h"
 #include "access/xact.h"
+#include "access/tupdesc.h"
 #include "access/xlog.h"
 #include "bulkload/dist_fdw.h"
 #include "catalog/heap.h"
 #include "catalog/pgxc_class.h"
 #include "bulkload/dist_fdw.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_type.h"
 #ifdef PGXC
 #include "catalog/pg_trigger.h"
@@ -39,8 +42,9 @@
 #include "commands/copy.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "commands/copypartition.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "executor/spi.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -63,7 +67,7 @@
 #endif
 #include "replication/dataqueue.h"
 #include "rewrite/rewriteHandler.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/pagecompress.h"
 #include "tcop/tcopprot.h"
 #include "tcop/utility.h"
@@ -80,6 +84,7 @@
 #include "commands/formatter.h"
 #include "bulkload/roach_adpter.h"
 #include "storage/lmgr.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/datum.h"
@@ -97,9 +102,19 @@
 #include "parser/parsetree.h"
 #include "utils/partitionmap_gs.h"
 #include "access/tableam.h"
+#include "gs_ledger/ledger_utils.h"
+#include "gs_ledger/userchain.h"
+#include "gs_ledger/blockchain.h"
+#include "nodes/makefuncs.h"
+#include "parser/parse_coerce.h"
+#include "parser/parse_expr.h"
+#include "parser/parse_type.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/ts_store_insert.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
+#include "access/ustore/knl_uscan.h"
+#include "access/ustore/knl_uheap.h"
+#include "access/ustore/knl_whitebox_test.h"
 
 #define ISOCTAL(c) (((c) >= '0') && ((c) <= '7'))
 #define OCTVALUE(c) ((c) - '0')
@@ -214,19 +229,15 @@ static const char BinarySignature[15] = "PGCOPY\n\377\r\n\0";
 static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const char* queryString, List* attnamelist,
     List* options, bool is_copy = true);
 static void EndCopy(CopyState cstate);
-static CopyState BeginCopyTo(
+CopyState BeginCopyTo(
     Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options);
-static void EndCopyTo(CopyState cstate);
-static uint64 DoCopyTo(CopyState cstate);
+void EndCopyTo(CopyState cstate);
+uint64 DoCopyTo(CopyState cstate);
 static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast);
 static uint64 CopyToCompatiblePartions(CopyState cstate);
-static void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);
+void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);
 static uint64 CopyFrom(CopyState cstate);
 static void EstCopyMemInfo(Relation rel, UtilityDesc* desc);
-
-static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hi_options,
-    ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
-    HeapTuple* bufferedTuples, Partition partition, int2 bucketId);
 
 static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate, CommandId mycid, int hi_options,
     ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
@@ -263,7 +274,7 @@ static void ReceiveCopyBegin(CopyState cstate);
 static void SendCopyEnd(CopyState cstate);
 static void CopySendData(CopyState cstate, const void* databuf, int datasize);
 template <bool skipEol>
-static void CopySendEndOfRow(CopyState cstate);
+void CopySendEndOfRow(CopyState cstate);
 static int CopyGetData(CopyState cstate, void* databuf, int minread, int maxread);
 static int CopyGetDataDefault(CopyState cstate, void* databuf, int minread, int maxread);
 static void CopySendInt32(CopyState cstate, int32 val);
@@ -273,6 +284,9 @@ static bool CopyGetInt16(CopyState cstate, int16* val);
 static void InitCopyMemArg(CopyState cstate, MemInfoArg* CopyMem);
 static bool CheckCopyFileInBlackList(const char* filename);
 static char* FindFileName(const char* path);
+static void TransformColExpr(CopyState cstate);
+static void SetColInFunction(CopyState cstate, int attrno, const TypeName* type);
+static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid, int attrmod, Node *expr);
 
 #ifdef PGXC
 static RemoteCopyOptions* GetRemoteCopyOptions(CopyState cstate);
@@ -281,6 +295,7 @@ static void append_defvals(Datum* values, CopyState cstate);
 #endif
 
 static void serialize_begin(CopyState cstate, StringInfo buf, const char* filename, int ref);
+static void ExecTransColExpr(CopyState cstate, ExprContext* econtext, int numPhysAttrs, Datum* values, bool* nulls);
 
 List* getDataNodeTask(List* totalTask, const char* dnName);
 List* getPrivateModeDataNodeTask(List* urllist, const char* dnName);
@@ -458,7 +473,7 @@ static void SetEndOfLineType(CopyState cstate)
 }
 
 template <bool skipEol>
-static void CopySendEndOfRow(CopyState cstate)
+void CopySendEndOfRow(CopyState cstate)
 {
     StringInfo fe_msgbuf = cstate->fe_msgbuf;
     int ret = 0;
@@ -847,6 +862,35 @@ void CleanBulkloadStates()
 }
 
 /*
+ * Check permission for copy between tables and files.
+ */
+static void CheckCopyFilePermission()
+{
+    if (u_sess->attr.attr_storage.enable_copy_server_files) {
+        /* Only allow file copy to users with sysadmin privilege or the member of gs_role_copy_files role. */
+        if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_COPY_FILES)) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("must be system admin or a member of the gs_role_copy_files role to COPY to or from a file"),
+                    errhint("Anyone can COPY to stdout or from stdin. "
+                        "gsql's \\copy command also works for anyone.")));
+        }
+    } else {
+        /*
+         * Disallow file copy when enable_copy_server_files is set to false.
+         * NOTICE : system admin has copy permissions, which might cause security risks
+         * when privileges separation is used, e.g., config/audit file might be modified.
+         * Recommend setting enable_copy_server_files to false in such case.
+         */
+        if (!initialuser()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("COPY to or from a file is prohibited for security concerns"),
+                    errhint("Anyone can COPY to stdout or from stdin. "
+                        "gsql's \\copy command also works for anyone.")));
+        }
+    }
+}
+
+/*
  *	 DoCopy executes the SQL COPY statement
  *
  * Either unload or reload contents of table <relation>, depending on <from>.
@@ -858,8 +902,8 @@ void CleanBulkloadStates()
  * input/output stream. The latter could be either stdin/stdout or a
  * socket, depending on whether we're running under Postmaster control.
  *
- * Do not allow a Postgres user without superuser privilege to read from
- * or write to a file.
+ * Do not allow a openGauss user without sysadmin privilege or the member of gs_role_copy_files role
+ * to read from or write to a file.
  *
  * Do not allow the copy if user doesn't have proper permission to access
  * the table or the specifically requested columns.
@@ -873,7 +917,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
     uint64 processed = 0;
     RangeTblEntry* rte = NULL;
     Node* query = NULL;
-
+    stmt->hashstate.has_histhash = false;
     /*
      * we can't retry gsql \copy from command and JDBC 'CopyManager.copyIn' operation,
      * since these kinds of copy from fetch data from client, so we disallow CN Retry here.
@@ -882,30 +926,11 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         StmtRetrySetQuerytUnsupportedFlag();
     }
 
-    /*
-     * Disallow file COPY except to superusers.
-     * NOTICE : Independent user can also copy to/from file for functional integrity, but its not recommended.
-     */
-    if (!pipe && !superuser()) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("must be system admin to COPY to or from a file"),
-                errhint("Anyone can COPY to stdout or from stdin. "
-                        "gsql's \\copy command also works for anyone.")));
-    }
+    WHITEBOX_TEST_STUB("DoCopy_Begin", WhiteboxDefaultErrorEmit);
 
-    /*
-     * Disallow file copy when enable_copy_server_files is set to false.
-     * NOTICE : system admin has copy permissions, which might cause security risks
-     * when privileges separation is used, e.g., config/audit file might be modified.
-     * Recommend setting enable_copy_server_files to false in such case.
-     */
-    if (!pipe && !superuser_arg_no_seperation(GetUserId()) && !u_sess->attr.attr_storage.enable_copy_server_files) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("COPY to or from a file is prohibited for security concerns"),
-                errhint("Anyone can COPY to stdout or from stdin. "
-                        "gsql's \\copy command also works for anyone.")));
+    /* Disallow copy to/from files except to users with appropriate permission. */
+    if (!pipe) {
+        CheckCopyFilePermission();
     }
 
     if (stmt->relation) {
@@ -919,6 +944,8 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         /* Open and lock the relation, using the appropriate lock type. */
         rel = heap_openrv(stmt->relation, (is_from ? RowExclusiveLock : AccessShareLock));
 
+        TrForbidAccessRbObject(RelationRelationId, RelationGetRelid(rel), stmt->relation->relname);
+
         if (STMT_RETRY_ENABLED) {
         // do noting for now, if query retry is on, just to skip validateTempRelation here
         } else if (rel != NULL && rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP && !validateTempNamespace(rel->rd_rel->relnamespace)) {
@@ -928,6 +955,16 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
                     errmsg("Temp table's data is invalid because datanode %s restart. "
                        "Quit your session to clean invalid temp tables.", 
                        g_instance.attr.attr_common.PGXCNodeName)));
+        }
+
+        /* Table of COPY FROM can not be blockchain related table */
+        if (is_from && rel != NULL) {
+            Oid relid = RelationGetRelid(rel);
+            Oid nspid = RelationGetNamespace(rel);
+            if (nspid == PG_BLOCKCHAIN_NAMESPACE || relid == GsGlobalChainRelationId) {
+                ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg("Table %s of COPY FROM can not be blockchain related table.", rel->rd_rel->relname.data)));
+            }
         }
 
         /* @Online expansion: check if the table is in redistribution read only mode */
@@ -987,7 +1024,7 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
         /* set write for backend status for the thread, we will use it to check default transaction readOnly */
         pgstat_set_stmt_tag(STMTTAG_WRITE);
 
-        cstate = BeginCopyFrom(rel, stmt->filename, stmt->attlist, stmt->options, &stmt->memUsage);
+        cstate = BeginCopyFrom(rel, stmt->filename, stmt->attlist, stmt->options, &stmt->memUsage, queryString);
         cstate->range_table = list_make1(rte);
 
         /* Assign mem usage in datanode */
@@ -1004,6 +1041,14 @@ uint64 DoCopy(CopyStmt* stmt, const char* queryString)
             SyncBulkloadStates(cstate);
 
             processed = CopyFrom(cstate); /* copy from file to database */
+
+            /* Record copy from to gchain. */
+            if (cstate->hashstate.has_histhash) {
+                const char *query_string = t_thrd.postgres_cxt.debug_query_string;
+                ledger_gchain_append(RelationGetRelid(rel), query_string, cstate->hashstate.histhash);
+            }
+            stmt->hashstate.has_histhash = cstate->hashstate.has_histhash;
+            stmt->hashstate.histhash = cstate->hashstate.histhash;
         }
         PG_CATCH();
         {
@@ -1250,6 +1295,25 @@ static void CheckCopyIncompatibleOptions(CopyState cstate, int force_fix_width)
 
     return;
 }
+
+void GetTransSourceStr(CopyState cstate, int beginPos, int endPos)
+{
+    if (beginPos == -1 || endPos == -1) {
+        cstate->transform_query_string = NULL;
+        return;
+    }
+
+    /* valid length is endPos - beginPos + 1, extra 1 for \0 */
+    int transStrLen = endPos - beginPos + 2;
+    char *transString = (char *)palloc0(transStrLen * sizeof(char));
+    
+    errno_t rc = strncpy_s(transString, transStrLen, 
+                           cstate->source_query_string + beginPos, transStrLen - 1);
+    securec_check(rc, "\0", "\0");
+    
+    cstate->transform_query_string = transString;
+}
+
 
 /*
  * Process the statement option list for COPY.
@@ -1520,6 +1584,9 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
             }
 
             rejectLimitSpecified = true;
+        } else if (pg_strcasecmp((defel->defname), "transform") == 0) {
+            cstate->trans_expr_list = (List*)(defel->arg);
+            GetTransSourceStr(cstate, defel->begin_location, defel->end_location);
         } else if (pg_strcasecmp(defel->defname, optChunkSize) == 0) {
             if (obs_chunksize) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
@@ -1779,6 +1846,188 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
     }
 }
 
+/* transform the raw expr list into ExprState node Array. */
+static void TransformColExpr(CopyState cstate)
+{
+    ListCell* lc = NULL;
+    int colcounter = 0;
+    List* exprlist = cstate->trans_expr_list;
+    int colnum = list_length(exprlist);
+    
+    if (colnum == 0) {
+        return;
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    ListCell* cell = NULL;
+    RelationLocInfo* rel_loc_info = GetRelationLocInfo(cstate->rel->rd_id);
+    List* distributeCol = GetRelationDistribColumn(rel_loc_info);
+#endif
+
+    foreach (lc, exprlist) {
+        int attrno;
+        Oid attroid;
+        int attrmod;
+        bool execexpr = false;
+        Node* expr = NULL;
+        CopyColExpr *col = NULL;
+
+        col = (CopyColExpr *)lfirst(lc);
+        attrno = attnameAttNum(cstate->rel, col->colname, false);
+
+        if (attrno == InvalidAttrNumber)
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_COLUMN),
+                    errmsg("column \"%s\" of relation \"%s\" does not exist", col->colname,
+                           RelationGetRelationName(cstate->rel))));
+
+#ifdef ENABLE_MULTIPLE_NODES
+        foreach (cell, distributeCol) {
+            if (strcmp(col->colname, strVal(lfirst(cell))) == 0) {
+                ereport(ERROR,
+                    (errmodule(MOD_OPT),
+                     errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+                     errmsg("Distributed key column can't be transformed"),
+                     errdetail("Column %s is distributed key which can't be transformed", col->colname),
+                     errcause("There is a risk of violating uniqueness when transforming distribution columns."),
+                     erraction("Change transform column.")));
+            }
+        }
+#endif
+
+        attroid = attnumTypeId(cstate->rel, attrno);
+        attrmod = cstate->rel->rd_att->attrs[attrno - 1]->atttypmod;
+
+        if (col->typname != NULL) {
+            SetColInFunction(cstate, attrno, col->typname);
+
+            /* Build a ColumnRef in order to transform datatype */
+            if (col->colexpr == NULL &&
+                (attroid != cstate->trans_tupledesc->attrs[attrno - 1]->atttypid
+                || attrmod != cstate->as_typemods[attrno - 1].typemod)) {
+                ColumnRef *cref = makeNode(ColumnRef);
+
+                /* Build an unqualified ColumnRef with the given name */
+                cref->fields = list_make1(makeString(col->colname));
+                cref->location = -1;
+
+                expr = (Node *)cref;
+                execexpr = true;
+            }
+        }
+
+        if (col->colexpr != NULL) {
+            /* We don't need ColumnRef expr if any has colexpr */
+            expr = col->colexpr;
+            execexpr = true;
+        }
+
+        if (execexpr) {
+            cstate->transexprs[attrno - 1]  = ExecInitCopyColExpr(cstate, attrno, attroid, attrmod, expr);
+        }
+        colcounter++;
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    list_free_ext(distributeCol);
+#endif
+
+    Assert(colnum == colcounter);
+}
+
+/* obtain the type message and in_function by target column. */
+static void SetColInFunction(CopyState cstate, int attrno, const TypeName* type)
+{
+    Oid attroid;
+    int attrmod;
+    Oid infunc;
+    Type tup;
+
+    /* Make new typeid & typemod of Typename. */
+    tup = typenameType(NULL, type, &attrmod);
+    attroid = HeapTupleGetOid(tup);
+    
+    cstate->as_typemods[attrno - 1].assign = true;
+    cstate->as_typemods[attrno - 1].typemod = attrmod;
+
+    if (cstate->trans_tupledesc->attrs[attrno - 1]->atttypid != attroid) {
+        cstate->trans_tupledesc->attrs[attrno - 1]->atttypid =  attroid;
+        cstate->trans_tupledesc->attrs[attrno - 1]->atttypmod = attrmod;
+        cstate->trans_tupledesc->attrs[attrno - 1]->attalign = ((Form_pg_type)GETSTRUCT(tup))->typalign;
+        cstate->trans_tupledesc->attrs[attrno - 1]->attlen = ((Form_pg_type)GETSTRUCT(tup))->typlen;
+        cstate->trans_tupledesc->attrs[attrno - 1]->attbyval = ((Form_pg_type)GETSTRUCT(tup))->typbyval;
+        cstate->trans_tupledesc->attrs[attrno - 1]->attstorage = ((Form_pg_type)GETSTRUCT(tup))->typstorage;
+    }
+    ReleaseSysCache(tup);
+    
+
+    /* Fetch the input function and typioparam info */
+    if (IS_BINARY(cstate))
+        getTypeBinaryInputInfo(attroid, &infunc,
+                               &(cstate->typioparams[attrno - 1]));
+    else
+        getTypeInputInfo(attroid, &infunc,
+                         &(cstate->typioparams[attrno - 1]));
+
+    fmgr_info(infunc, &(cstate->in_functions[attrno - 1]));
+}
+
+/* prepare an column expression tree for execution */
+static ExprState* ExecInitCopyColExpr(CopyState cstate, int attrno, Oid attroid, int attrmod, Node *expr)
+{
+    int attrnum = cstate->rel->rd_att->natts;
+    ParseState* pstate = NULL;
+    RangeTblEntry* rte = NULL;
+    List* colLists = NIL;
+    List* colnames = NIL;
+    List* collations = NIL;
+    Form_pg_attribute attr;
+    Oid exprtype;
+    int i;
+
+    pstate = make_parsestate(NULL);
+
+    /* Make value: each attribute as same as target relation, except attrno-1 column. */
+    for (i = 0; i < attrnum; i++) {
+        Var* value;
+
+        if (i == attrno - 1)
+            attr = cstate->trans_tupledesc->attrs[i];
+        else
+            attr = cstate->rel->rd_att->attrs[i];
+
+        value = makeVar(0, i + 1, attr->atttypid, attr->atttypmod, attr->attcollation, 0);
+
+        colLists = lappend(colLists, value);
+        colnames = lappend(colnames, makeString(pstrdup(NameStr(attr->attname))));
+        collations = lappend_oid(collations, attr->attcollation);
+    }
+
+    rte = addRangeTableEntryForValues(pstate, list_make1(colLists), collations, NULL, false);
+    rte->eref->colnames = colnames;
+    addRTEtoQuery(pstate, rte, true, true, true);
+
+    expr = transformExpr(pstate, expr);
+    exprtype = exprType(expr);
+    expr = coerce_to_target_type(pstate, expr, exprtype, attroid, attrmod,
+                                 COERCION_EXPLICIT, COERCE_EXPLICIT_CAST, -1);
+    if (expr == NULL) {
+        ereport(ERROR,
+                (errmodule(MOD_OPT),
+                 errcode(ERRCODE_DATATYPE_MISMATCH),
+                 errmsg("cannot convert %s to %s",
+                        format_type_be(exprtype),
+                        format_type_be(attroid)),
+                 errdetail("column \"%s\" is of type %s, but expression is of type %s",
+                           NameStr(*attnumAttName(cstate->rel, attrno)),
+                           format_type_be(attroid),
+                           format_type_be(exprtype)),
+                 errcause("There is no conversion path in pg_cast."),
+                 erraction("Rewrite or cast the expression.")));
+    }
+    return ExecInitExpr((Expr *)expr, NULL);
+}
+
 static void ProcessCopyNotAllowedOptions(CopyState cstate)
 {
     if (cstate->out_filename_prefix) {
@@ -1918,6 +2167,8 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
 
     oldcontext = MemoryContextSwitchTo(cstate->copycontext);
 
+    cstate->source_query_string = queryString;
+
     /* Extract options from the statement node tree */
     ProcessCopyOptions(cstate, is_from, options);
     if (is_copy)
@@ -1990,7 +2241,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
 #ifdef PGXC
         /*
          * The grammar allows SELECT INTO, but we don't support that.
-         * Postgres-XC uses an INSERT SELECT command in this case
+         * openGauss uses an INSERT SELECT command in this case
          */
         if ((query->utilityStmt != NULL && IsA(query->utilityStmt, CreateTableAsStmt)) ||
             query->commandType == CMD_INSERT)
@@ -2132,6 +2383,10 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     /* parse time format specified by user */
     bulkload_init_time_format(cstate);
 
+    cstate->hashstate.has_histhash = false;
+    cstate->hashstate.histhash = 0;
+    cstate->trans_tupledesc = CreateTupleDescCopy(tupDesc);
+
     (void)MemoryContextSwitchTo(oldcontext);
 
     return cstate;
@@ -2218,7 +2473,7 @@ static char* FindFileName(const char* path)
 /*
  * Setup CopyState to read tuples from a table or a query for COPY TO.
  */
-static CopyState BeginCopyTo(
+CopyState BeginCopyTo(
     Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options)
 {
     CopyState cstate;
@@ -2327,7 +2582,7 @@ static CopyState BeginCopyTo(
  * This intermediate routine exists mainly to localize the effects of setjmp
  * so we don't need to plaster a lot of variables with "volatile".
  */
-static uint64 DoCopyTo(CopyState cstate)
+uint64 DoCopyTo(CopyState cstate)
 {
     bool pipe = (cstate->filename == NULL);
     bool fe_copy = (pipe && t_thrd.postgres_cxt.whereToSendOutput == DestRemote);
@@ -2361,7 +2616,7 @@ static uint64 DoCopyTo(CopyState cstate)
 /*
  * Clean up storage and release resources for COPY TO.
  */
-static void EndCopyTo(CopyState cstate)
+void EndCopyTo(CopyState cstate)
 {
     if (cstate->queryDesc != NULL) {
         /* Close down the query and free resources. */
@@ -2664,23 +2919,25 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
                 } else {
                     processed = CStoreCopyTo(cstate, tupDesc, values, nulls);
                 }
+            // XXXTAM: WE need to refactor this once we know what to do 
+            // with heap_deform_tuple2 in the heap case
             } else {
-                HeapTuple tuple;
+                Tuple tuple;
                 TableScanDesc scandesc;
                 scandesc = scan_handler_tbl_beginscan(cstate->curPartionRel, GetActiveSnapshot(), 0, NULL);
 
-                while ((tuple = (HeapTuple) scan_handler_tbl_getnext(scandesc, ForwardScanDirection, cstate->curPartionRel)) != NULL) {
+                while ((tuple = scan_handler_tbl_getnext(scandesc, ForwardScanDirection, cstate->curPartionRel)) != NULL) {
                     CHECK_FOR_INTERRUPTS();
-
+                
                     /* Deconstruct the tuple ... faster than repeated heap_getattr */
-                    heap_deform_tuple2(tuple, tupDesc, values, nulls, GetTableScanDesc(scandesc, cstate->curPartionRel)->rs_cbuf);
-
-                    /* Format and send the data */
-                    CopyOneRowTo(cstate, HeapTupleGetOid(tuple), values, nulls);
+                    tableam_tops_deform_tuple2(tuple, tupDesc, values, nulls, GetTableScanDesc(scandesc, cstate->curPartionRel)->rs_cbuf);
+                    
+                        /* Format and send the data */
+                    CopyOneRowTo(cstate, HeapTupleGetOid((HeapTuple)tuple), values, nulls);
                     processed++;
                 }
 
-                scan_handler_tbl_endscan(scandesc, cstate->curPartionRel);
+                scan_handler_tbl_endscan(scandesc);
             }
             pfree_ext(values);
             pfree_ext(nulls);
@@ -2772,7 +3029,7 @@ static uint64 CopyToCompatiblePartions(CopyState cstate)
 /*
  * Emit one row during CopyTo().
  */
-static void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls)
+void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls)
 {
     bool need_delim = false;
     FmgrInfo* out_functions = cstate->out_functions;
@@ -3064,7 +3321,10 @@ CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool
     mgr->isPartRel = RELATION_IS_PARTITIONED(heapRel) || RELATION_OWN_BUCKET(heapRel);
     if (!mgr->isPartRel) {
         CopyFromBulk bulk;
-        mgr->bulk = bulk = (CopyFromBulk)palloc(sizeof(CopyFromBulkData) + sizeof(HeapTuple) * MAX_BUFFERED_TUPLES);
+        
+        mgr->bulk = bulk =
+            (CopyFromBulk)palloc(sizeof(CopyFromBulkData) + sizeof(Tuple) * MAX_BUFFERED_TUPLES);
+
         mgr->LastFlush = false;
 
         bulk->maxTuples = MAX_BUFFERED_TUPLES;
@@ -3088,11 +3348,13 @@ CopyFromManager initCopyFromManager(MemoryContext parent, Relation heapRel, bool
         } else {
             bulk->memCxt = NULL;
         }
+
+        bulk->tuples = (Tuple *)((char *)bulk + sizeof(CopyFromBulkData));
+
         bulk->numTuples = 0;
         bulk->partOid = InvalidOid;
         bulk->bucketId = InvalidBktId;
         bulk->sizeTuples = 0;
-        bulk->tuples = (HeapTuple*)((char*)bulk + sizeof(CopyFromBulkData));
     } else {
         mgr->numMemCxt = 0;
         mgr->numFreeMemCxt = 0;
@@ -3214,7 +3476,9 @@ CopyFromBulk findBulk(CopyFromManager mgr, Oid partOid, int2 bucketId, bool* toF
         bulk->bucketId = bucketId;
         bulk->maxTuples = DEF_BUFFERED_TUPLES;
         oldCxt = MemoryContextSwitchTo(copyFromMemCxt->memCxtCandidate);
-        bulk->tuples = (HeapTuple*)palloc(sizeof(HeapTuple) * bulk->maxTuples);
+
+        bulk->tuples = (Tuple*)palloc(sizeof(Tuple) * bulk->maxTuples);
+        
         (void)MemoryContextSwitchTo(oldCxt);
 
         return bulk;
@@ -3279,7 +3543,7 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
             myslot,
             bistate,
             bulk->numTuples,
-            bulk->tuples,
+            (HeapTuple*)bulk->tuples,
             forceToFlush,
             insertRel,
             partition,
@@ -3300,7 +3564,7 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
         bulk->numTuples -= nInsertedTuples;
         bulk->sizeTuples = 0;
     } else {
-        CopyFromInsertBatch(insertRel,
+        tableam_tops_copy_from_insert_batch(insertRel,
             estate,
             mycid,
             hi_options,
@@ -3308,7 +3572,7 @@ void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* pcState
             myslot,
             bistate,
             bulk->numTuples,
-            bulk->tuples,
+            (Tuple*)bulk->tuples,
             partition,
             bulk->bucketId);
         bulk->numTuples = 0;
@@ -3373,12 +3637,140 @@ static void CStoreCopyConstraintsCheck(ResultRelInfo* resultRelInfo, Datum* valu
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Column Store unsupport CHECK constraint")));
 }
 
+
+template<bool isInsertSelect>
+void AddToBulk(CopyFromBulk bulk, HeapTuple tup, bool needCopy)
+{
+    MemoryContext oldCxt = NULL;
+    CopyFromMemCxt copyFromMemCxt = NULL;
+    HeapTuple newTuple = NULL;
+
+    Assert(bulk != NULL && tup != NULL);
+
+    Assert(TUPLE_IS_HEAP_TUPLE(tup)); 
+
+    if (needCopy) {
+#ifdef USE_ASSERT_CHECKING
+        int idx;
+        bool found = false;
+#endif
+        copyFromMemCxt = bulk->memCxt;
+        Assert(copyFromMemCxt != NULL);
+
+#ifdef USE_ASSERT_CHECKING
+        if (!isInsertSelect) {
+            for (idx = 0; idx < copyFromMemCxt->nextBulk; idx++) {
+                found = found || (copyFromMemCxt->chunk[idx] == bulk);
+            }
+            Assert(true == found);
+        }
+#endif
+
+        oldCxt = MemoryContextSwitchTo(copyFromMemCxt->memCxtCandidate);
+
+        newTuple = heap_copytuple(tup);
+        copyFromMemCxt->memCxtSize += newTuple->t_len;
+        if (bulk->numTuples == bulk->maxTuples) {
+            bulk->maxTuples *= 2;
+            bulk->tuples = (Tuple*)repalloc(bulk->tuples, sizeof(Tuple) * bulk->maxTuples);
+        }
+
+        (void)MemoryContextSwitchTo(oldCxt);
+    } else {
+        Assert(InvalidOid == bulk->partOid);
+        Assert(NULL == bulk->memCxt);
+        Assert(bulk->numTuples < MAX_BUFFERED_TUPLES);
+        Assert(bulk->sizeTuples < MAX_TUPLES_SIZE);
+        newTuple = tup;
+    }
+
+    Assert(bulk->numTuples < bulk->maxTuples);
+    bulk->tuples[bulk->numTuples] = (Tuple)newTuple;
+    bulk->sizeTuples += newTuple->t_len;
+    bulk->numTuples++;
+}
+
+template<bool isInsertSelect>
+void AddToUHeapBulk(CopyFromBulk bulk, UHeapTuple tup, bool needCopy)
+{
+    MemoryContext oldCxt = NULL;
+    CopyFromMemCxt copyFromMemCxt = NULL;
+    UHeapTuple newTuple = NULL;
+
+    Assert(bulk != NULL && tup != NULL);
+    Assert(tup->tupTableType == UHEAP_TUPLE);
+
+    if (needCopy) {
+#ifdef USE_ASSERT_CHECKING
+        int idx;
+        bool found = false;
+#endif
+        copyFromMemCxt = bulk->memCxt;
+        Assert(copyFromMemCxt != NULL);
+
+#ifdef USE_ASSERT_CHECKING
+        if (!isInsertSelect) {
+            for (idx = 0; idx < copyFromMemCxt->nextBulk; idx++) {
+                found = found || (copyFromMemCxt->chunk[idx] == bulk);
+            }
+            Assert(found == true);
+        }
+#endif
+
+        oldCxt = MemoryContextSwitchTo(copyFromMemCxt->memCxtCandidate);
+
+        newTuple = UHeapCopyTuple(tup);
+        copyFromMemCxt->memCxtSize += newTuple->disk_tuple_size;
+        if (bulk->numTuples == bulk->maxTuples) {
+            bulk->maxTuples *= 2;
+            bulk->tuples = (Tuple*)repalloc(bulk->tuples, sizeof(Tuple) * bulk->maxTuples);
+        }
+
+        (void)MemoryContextSwitchTo(oldCxt);
+    } else {
+        Assert(InvalidOid == bulk->partOid);
+        Assert(NULL == bulk->memCxt);
+        Assert(bulk->numTuples < MAX_BUFFERED_TUPLES);
+        Assert(bulk->sizeTuples < MAX_TUPLES_SIZE);
+        newTuple = tup;
+    }
+
+    Assert(bulk->numTuples < bulk->maxTuples);
+    bulk->tuples[bulk->numTuples] = (Tuple)newTuple;
+    bulk->sizeTuples += newTuple->disk_tuple_size;
+    bulk->numTuples++;
+}
+
+void UHeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy)
+{
+    UHeapTuple utuple = (UHeapTuple)tup;
+    AddToUHeapBulk<true>(bulk, utuple, needCopy);
+}
+
+void HeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy)
+{
+    HeapTuple tuple = (HeapTuple)tup;
+    AddToBulk<true>(bulk, tuple, needCopy);
+}
+
+void UHeapAddToBulk(CopyFromBulk bulk, Tuple tup, bool needCopy)
+{
+    UHeapTuple utuple = (UHeapTuple)tup;
+    AddToUHeapBulk<false>(bulk, utuple, needCopy);
+}
+
+void HeapAddToBulk(CopyFromBulk bulk, Tuple tup, bool needCopy)
+{
+    HeapTuple tuple = (HeapTuple)tup;
+    AddToBulk<false>(bulk, tuple, needCopy);
+}
+
 /*
  * Copy FROM file to relation.
  */
 static uint64 CopyFrom(CopyState cstate)
 {
-    HeapTuple tuple;
+    Tuple tuple;
     TupleDesc tupDesc;
     Datum* values = NULL;
     bool* nulls = NULL;
@@ -3408,6 +3800,8 @@ static uint64 CopyFrom(CopyState cstate)
     MemInfoArg* CopyMem = NULL;
     bool needflush = false;
     bool isForeignTbl = false; /* Whether this foreign table support COPY */
+    bool rel_isblockchain = false;
+    int hash_colno = -1;
     Assert(cstate->rel);
 
     if (cstate->rel->rd_rel->relkind != RELKIND_RELATION) {
@@ -3448,6 +3842,8 @@ static uint64 CopyFrom(CopyState cstate)
     }
 
     tupDesc = RelationGetDescr(cstate->rel);
+    rel_isblockchain = cstate->rel->rd_isblockchain;
+    hash_colno = user_hash_attrno(tupDesc);
 
     /* ----------
      * Check to see if we can avoid writing WAL
@@ -3516,7 +3912,8 @@ static uint64 CopyFrom(CopyState cstate)
     hasBucket = RELATION_OWN_BUCKET(resultRelationDesc);
     hasPartition = isPartitionRel || hasBucket;
     needflush = ((hi_options & TABLE_INSERT_SKIP_WAL) || enable_heap_bcm_data_replication()) 
-                && !RelationIsForeignTable(cstate->rel) && !RelationIsStream(cstate->rel);
+                && !RelationIsForeignTable(cstate->rel) && !RelationIsStream(cstate->rel)
+                && !RelationIsSegmentTable(cstate->rel);
 
     estate->es_result_relations = resultRelInfo;
     estate->es_num_result_relations = 1;
@@ -3538,8 +3935,8 @@ static uint64 CopyFrom(CopyState cstate)
      * inserting to, and act differently if the tuples that have already been
      * processed and prepared for insertion are not there.
      */
-    if ((resultRelInfo->ri_TrigDesc != NULL && (resultRelInfo->ri_TrigDesc->trig_insert_before_row ||
-                                                   resultRelInfo->ri_TrigDesc->trig_insert_instead_row)) ||
+    if ((resultRelInfo->ri_TrigDesc != NULL &&
+        (resultRelInfo->ri_TrigDesc->trig_insert_before_row || resultRelInfo->ri_TrigDesc->trig_insert_instead_row)) ||
         cstate->volatile_defexprs) {
         useHeapMultiInsert = false;
     } else {
@@ -3610,7 +4007,7 @@ static uint64 CopyFrom(CopyState cstate)
      * Push the relfilenode to the hash tab, when the transaction abort, we should heap_sync
      * the relation
      */
-    if (enable_heap_bcm_data_replication()) {
+    if (enable_heap_bcm_data_replication() && !RelationIsSegmentTable(cstate->rel)) {
         if (!RelationIsForeignTable(cstate->rel) && !RelationIsStream(cstate->rel))
             HeapSyncHashSearch(cstate->rel->rd_id, HASH_ENTER);
         LockRelFileNode(cstate->rel->rd_node, RowExclusiveLock);
@@ -3655,6 +4052,15 @@ static uint64 CopyFrom(CopyState cstate)
     }
 #ifdef ENABLE_MULTIPLE_NODES
     else if (RelationIsTsStore(cstate->rel) && IS_PGXC_DATANODE) {
+        if (!g_instance.attr.attr_common.enable_tsdb) {
+            ereport(ERROR, 
+                (errcode(ERRCODE_LOG),
+                errmsg("Can't copy data when 'enable_tsdb' is off"),
+                errdetail("When the guc is off, it is forbidden to insert to timeseries table"),
+                errcause("Unexpected error"),
+                erraction("Turn on the 'enable_tsdb'."),
+                errmodule(MOD_TIMESERIES)));
+        }
         oldcontext = MemoryContextSwitchTo(cstate->copycontext);
         /*Init copy mem, it will pass the allocated memory to copy datanode to use.*/
         InitCopyMemArg(cstate, CopyMem);
@@ -3675,6 +4081,9 @@ static uint64 CopyFrom(CopyState cstate)
         Relation heaprel = NULL;
 
         bool is_EOF = false;
+        bool has_hash = false;
+        uint64 res_hash = 0;
+
 
     retry_copy:
 
@@ -4040,22 +4449,30 @@ static uint64 CopyFrom(CopyState cstate)
                     IS_BINARY(cstate)))
                 ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("Copy failed on a Datanode")));
             processed++;
+            if (rel_isblockchain) {
+                uint64 hash;
+                if (get_copyfrom_line_relhash(cstate->line_buf.data, cstate->line_buf.len, hash_colno, '\t', &hash)) {
+                    cstate->hashstate.histhash += hash;
+                    cstate->hashstate.has_histhash = true;
+                }
+            }
 
             resetPerTupCxt = true;
         } else {
 #endif
 
             /* And now we can form the input tuple. */
-            tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, nulls, HEAP_TUPLE);
+            tuple = (Tuple)tableam_tops_form_tuple(tupDesc, values, nulls, tableam_tops_get_tuple_type(cstate->rel));
 
             if (loaded_oid != InvalidOid)
-                HeapTupleSetOid(tuple, loaded_oid);
+                HeapTupleSetOid((HeapTuple)tuple, loaded_oid);
 
             /* Triggers and stuff need to be invoked in query context. */
             (void)MemoryContextSwitchTo(oldcontext);
 
             /* Place tuple in tuple slot --- but slot shouldn't free it */
             slot = myslot;
+            // ExecStoreTuple already handles the tupe casting inside itself. Only need to pass in Tuple tuple
             (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
 
             skip_tuple = false;
@@ -4067,7 +4484,7 @@ static uint64 CopyFrom(CopyState cstate)
                 if (slot == NULL) /* "do nothing" */
                     skip_tuple = true;
                 else /* trigger might have changed tuple */
-                    tuple = ExecMaterializeSlot(slot);
+                    tuple = tableam_tslot_get_tuple_from_slot(cstate->rel, slot);
             }
 
             if (!skip_tuple && isForeignTbl) {
@@ -4080,7 +4497,10 @@ static uint64 CopyFrom(CopyState cstate)
                 if (resultRelInfo->ri_RelationDesc->rd_att->constr &&
                     resultRelInfo->ri_RelationDesc->rd_att->constr->has_generated_stored) {
                     ExecComputeStoredGenerated(resultRelInfo, estate, slot, tuple, CMD_INSERT);
-                    tuple = (HeapTuple)slot->tts_tuple;
+                    tuple = slot->tts_tuple;
+                }
+                if (rel_isblockchain) {
+                    tuple = set_user_tuple_hash((HeapTuple)tuple, resultRelationDesc, true);
                 }
 
                 /* Check the constraints of the tuple */
@@ -4088,7 +4508,7 @@ static uint64 CopyFrom(CopyState cstate)
                     ExecConstraints(resultRelInfo, slot, estate);
 
                 if (hasBucket) {
-                    bucketid = computeTupleBucketId(resultRelationDesc, tuple);
+                    bucketid = computeTupleBucketId(resultRelationDesc, (HeapTuple)tuple);
                 }
 
                 if (useHeapMultiInsert) {
@@ -4116,11 +4536,14 @@ static uint64 CopyFrom(CopyState cstate)
                             bistate);
                     }
 
+                    if (rel_isblockchain) {
+                        has_hash = hist_table_record_insert(resultRelationDesc, (HeapTuple)tuple, &res_hash);
+                    }
+
                     /* step 3: cache tuples as many as possible */
                     Assert(hasPartition == (InvalidOid != bulk->partOid));
-                    addToBulk<false>(bulk, tuple, hasPartition);
-                    PerTupCxtSize += tuple->t_len;
-
+                    tableam_tops_add_to_bulk(cstate->rel, bulk, (Tuple) tuple, hasPartition);
+                    PerTupCxtSize += ((HeapTuple)tuple)->t_len;
                     /* step 4: check and flush the full bulk */
                     if (isBulkFull(bulk)) {
                         resetPerTupCxt = CopyFromChunkInsert<false>(cstate,
@@ -4146,6 +4569,7 @@ static uint64 CopyFrom(CopyState cstate)
                 } else {
                     List* recheckIndexes = NIL;
                     Relation targetRel;
+                    ItemPointer pTSelf = NULL;
                     if (isPartitionRel) {
                         /* get partititon oid to insert the record */
                         partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
@@ -4161,7 +4585,9 @@ static uint64 CopyFrom(CopyState cstate)
                             searchHBucketFakeRelation(
                                 estate->esfRelations, estate->es_query_cxt, heaprel, bucketid, targetRel);
                         }
+
                         (void)tableam_tuple_insert(targetRel, tuple, mycid, 0, NULL);
+
                         if (needflush) {
                             partitionList = list_append_unique_oid(partitionList, partitionid);
                         }
@@ -4169,26 +4595,48 @@ static uint64 CopyFrom(CopyState cstate)
                         Assert(bucketid != InvalidBktId);
                         searchHBucketFakeRelation(
                             estate->esfRelations, estate->es_query_cxt, cstate->rel, bucketid, targetRel);
-                        (void)tableam_tuple_insert(targetRel, tuple, mycid, hi_options, bistate);
+                        (void)tableam_tuple_insert(targetRel, tuple, mycid, 0, NULL);
                     } else {
-                        (void)tableam_tuple_insert(cstate->rel, tuple, mycid, hi_options, bistate);
+                        targetRel = cstate->rel;
+                        (void)tableam_tuple_insert(targetRel, tuple, mycid, 0, NULL);
+                    }
+
+                    if (rel_isblockchain) {
+                        has_hash = hist_table_record_insert(targetRel, (HeapTuple)tuple, &res_hash);
+                    }
+
+                    pTSelf = tableam_tops_get_t_self(cstate->rel, tuple);
+
+                    /*
+                     * Global Partition Index stores the partition's tableOid with the index
+                     * tuple which is extracted from the tuple of the slot. Make sure it is set.
+                     */
+                    if (slot->tts_tupslotTableAm != TAM_USTORE) {
+                        ((HeapTuple)slot->tts_tuple)->t_tableOid = RelationGetRelid(targetRel);
+                    } else {
+                        ((UHeapTuple)slot->tts_tuple)->table_oid = RelationGetRelid(targetRel);
                     }
 
                     /* OK, store the tuple and create index entries for it */
                     if (resultRelInfo->ri_NumIndices > 0 && !RelationIsColStore(cstate->rel))
                         recheckIndexes = ExecInsertIndexTuples(slot,
-                            &(tuple->t_self),
+                            pTSelf,
                             estate,
                             isPartitionRel ? heaprel : NULL,
                             isPartitionRel ? partition : NULL,
-                            bucketid, NULL);
+                            bucketid, NULL, NULL);
 
                     /* AFTER ROW INSERT Triggers */
-                    ExecARInsertTriggers(estate, resultRelInfo, partitionid, bucketid, tuple, recheckIndexes);
+                    ExecARInsertTriggers(estate, resultRelInfo, partitionid, bucketid, (HeapTuple)tuple,
+                        recheckIndexes);
 
                     list_free(recheckIndexes);
 
                     resetPerTupCxt = true;
+                }
+                if (has_hash) {
+                    cstate->hashstate.has_histhash = true;
+                    cstate->hashstate.histhash += res_hash;
                 }
 
                 /*
@@ -4335,7 +4783,7 @@ static uint64 CopyFrom(CopyState cstate)
     }
 
     if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(cstate->rel)
-        && !RelationIsStream(cstate->rel))
+        && !RelationIsStream(cstate->rel) && !RelationIsSegmentTable(cstate->rel))
         HeapSyncHashSearch(cstate->rel->rd_id, HASH_REMOVE);
 
     list_free_ext(partitionList);
@@ -4550,7 +4998,7 @@ static void CopyFromUpdateIndexAndRunAfterRowTrigger(EState* estate, ResultRelIn
                 estate,
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
-                bucketid, NULL);
+                bucketid, NULL, NULL);
             ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketid, bufferedTuples[i], recheckIndexes);
             list_free(recheckIndexes);
         }
@@ -4571,7 +5019,7 @@ static void CopyFromUpdateIndexAndRunAfterRowTrigger(EState* estate, ResultRelIn
  * tuples to the heap. Also updates indexes and runs AFTER ROW INSERT
  * triggers.
  */
-static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hi_options,
+void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hi_options,
     ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
     HeapTuple* bufferedTuples, Partition partition, int2 bucketId)
 {
@@ -4617,12 +5065,13 @@ static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, i
 
             (void)ExecStoreTuple(bufferedTuples[i], myslot, InvalidBuffer, false);
             recheckIndexes = ExecInsertIndexTuples(myslot,
-                &(bufferedTuples[i]->t_self),
+                &(((HeapTuple)bufferedTuples[i])->t_self),
                 estate,
                 ispartitionedtable ? actualHeap : NULL,
                 ispartitionedtable ? partition : NULL,
-                bucketId, NULL);
-            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, bufferedTuples[i], recheckIndexes);
+                bucketId, NULL, NULL);
+            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, (HeapTuple)bufferedTuples[i],
+                recheckIndexes);
             list_free(recheckIndexes);
         }
     } else if (resultRelInfo->ri_TrigDesc != NULL && resultRelInfo->ri_TrigDesc->trig_insert_after_row) {
@@ -4631,7 +5080,92 @@ static void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, i
          * anyway.
          */
         for (i = 0; i < nBufferedTuples; i++)
-            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, bufferedTuples[i], NIL);
+            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, (HeapTuple)bufferedTuples[i], NIL);
+    }
+}
+
+/*
+ * A subroutine of CopyFrom, to write the current batch of buffered heap
+ * tuples to the heap. Also updates indexes and runs AFTER ROW INSERT
+ * triggers.
+ */
+void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hiOptions,
+    ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
+    UHeapTuple* bufferedTuples, Partition partition, int2 bucketId)
+{
+    MemoryContext oldcontext;
+    int i;
+    Relation actualHeap = resultRelInfo->ri_RelationDesc;
+    bool ispartitionedtable = false;
+    Oid partitionOid = InvalidOid;
+
+    if (bufferedTuples == NULL)
+        return;
+
+    partitionOid = OidIsValid(rel->parentId) ? RelationGetRelid(rel) : InvalidOid;
+    if (RELATION_IS_PARTITIONED(actualHeap)) {
+        actualHeap = estate->esCurrentPartition;
+        Assert(PointerIsValid(actualHeap));
+        ispartitionedtable = true;
+    }
+
+    if (bucketId != InvalidBktId) {
+        searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, rel, bucketId, rel);
+    }
+    /*
+     * heap_multi_insert leaks memory, so switch to short-lived memory context
+     * before calling it.
+     */
+    oldcontext = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+    /* 1. not to use page compression
+     * 2. not forbid page replication
+     */
+    tableam_tuple_multi_insert(rel,
+            NULL,
+            (Tuple*)bufferedTuples,
+            nBufferedTuples, 
+            mycid, 
+            hiOptions, 
+            bistate,
+            NULL);
+    MemoryContextSwitchTo(oldcontext);
+
+    /*
+     * If there are any indexes, update them for all the inserted tuples, and
+     * run AFTER ROW INSERT triggers.
+     */
+    if (resultRelInfo->ri_NumIndices > 0) {
+        for (i = 0; i < nBufferedTuples; i++) {
+            List* recheckIndexes = NIL;
+
+            (void)ExecStoreTuple(bufferedTuples[i], myslot, InvalidBuffer, false);
+
+            /*
+             * Global Partition Index stores the partition's tableOid with the index
+             * tuple which is extracted from the tuple of the slot. Make sure it is set.
+             */
+            if (myslot->tts_tupslotTableAm != TAM_USTORE) {
+                ((HeapTuple)myslot->tts_tuple)->t_tableOid = RelationGetRelid(rel);
+            } else {
+                ((UHeapTuple)myslot->tts_tuple)->table_oid = RelationGetRelid(rel);
+            }
+
+            recheckIndexes = ExecInsertIndexTuples(myslot,
+                &(((UHeapTuple)bufferedTuples[i])->ctid),
+                estate,
+                ispartitionedtable ? actualHeap : NULL,
+                ispartitionedtable ? partition : NULL,
+                bucketId, NULL, NULL);
+            list_free(recheckIndexes);
+        }
+    } else if (resultRelInfo->ri_TrigDesc != NULL && resultRelInfo->ri_TrigDesc->trig_insert_after_row) {
+        /*
+         * There's no indexes, but see if we need to run AFTER ROW INSERT triggers
+         * anyway.
+         */
+        for (i = 0; i < nBufferedTuples; i++) {
+            ExecARInsertTriggers(estate, resultRelInfo, partitionOid, bucketId, (HeapTuple)bufferedTuples[i], NIL);
+        }
     }
 }
 
@@ -4652,7 +5186,7 @@ void FlushInsertSelectBulk(DistInsertSelectState* node, EState* estate, bool can
     ExecSetSlotDescriptor(slot, RelationGetDescr(resultRelationDesc));
     
     if (enable_heap_bcm_data_replication() && !RelationIsForeignTable(resultRelationDesc)
-        && !RelationIsStream(resultRelationDesc)) {
+        && !RelationIsStream(resultRelationDesc) && !RelationIsSegmentTable(resultRelationDesc)) {
         needflush = true;
     }
     
@@ -4775,7 +5309,7 @@ static int CopyFromCompressAndInsertBatch(PageCompress* pcState, EState* estate,
 
     (void)MemoryContextSwitchTo(oldcontext);
 
-    /* according to Postgresql, After this buffer is handled, update index and run trigger one time */
+    /* according to openGauss, After this buffer is handled, update index and run trigger one time */
     partitionId = OidIsValid(heapRelation->parentId) ? RelationGetRelid(heapRelation) : InvalidOid;
     CopyFromUpdateIndexAndRunAfterRowTrigger(
         estate, resultRelInfo, myslot, bufferedTuples, total, partitionId, partition, bucketId);
@@ -4831,7 +5365,8 @@ bool IsTypeAcceptEmptyStr(Oid typeOid)
  *
  * Returns a CopyState, to be passed to NextCopyFrom and related functions.
  */
-CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, List* options, void* mem_info)
+CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
+                             List* options, void* mem_info, const char* queryString)
 {
     CopyState cstate;
     bool pipe = (filename == NULL);
@@ -4849,7 +5384,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
     AdaptMem* memUsage = (AdaptMem*)mem_info;
     bool volatile_defexprs = false;
 
-    cstate = BeginCopy(true, rel, NULL, NULL, attnamelist, options);
+    cstate = BeginCopy(true, rel, NULL, queryString, attnamelist, options);
     oldcontext = MemoryContextSwitchTo(cstate->copycontext);
 
     /* Initialize state variables */
@@ -4890,6 +5425,10 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
     accept_empty_str = (bool*)palloc(num_phys_attrs * sizeof(bool));
     defmap = (int*)palloc(num_phys_attrs * sizeof(int));
     defexprs = (ExprState**)palloc(num_phys_attrs * sizeof(ExprState*));
+    if (cstate->trans_expr_list != NULL) {
+        cstate->as_typemods = (AssignTypmod *)palloc0(num_phys_attrs * sizeof(AssignTypmod));
+        cstate->transexprs = (ExprState **)palloc0(num_phys_attrs * sizeof(ExprState*));
+    }
 
 #ifdef ENABLE_MULTIPLE_NODES
     /*
@@ -5047,6 +5586,9 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
     if (!IS_BINARY(cstate)) {
         cstate_fields_buffer_init(cstate);
     }
+
+    if (cstate->trans_expr_list != NULL)
+        TransformColExpr(cstate);
 
     (void)MemoryContextSwitchTo(oldcontext);
 
@@ -5330,6 +5872,8 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
     errno_t rc = 0;
     bool pseudoTsDistcol = false;
     int tgt_col_num = -1;
+    AssignTypmod *asTypemods = cstate->as_typemods;
+    int32 atttypmod;
 
     tupDesc = RelationGetDescr(cstate->rel);
     attr = tupDesc->attrs;
@@ -5454,8 +5998,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
 
             cstate->cur_attname = NameStr(attr[m]->attname);
             cstate->cur_attval = string;
+            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m]->atttypmod;
             values[m] =
-                InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], attr[m]->atttypmod);
+                InputFunctionCallForBulkload(cstate, &in_functions[m], string, typioparams[m], atttypmod);
             if (string != NULL)
                 nulls[m] = false;
             cstate->cur_attname = NULL;
@@ -5562,8 +6107,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
 
             cstate->cur_attname = NameStr(attr[m]->attname);
             i++;
+            atttypmod = (asTypemods != NULL && asTypemods[m].assign) ? asTypemods[m].typemod : attr[m]->atttypmod;
             values[m] =
-                CopyReadBinaryAttribute(cstate, i, &in_functions[m], typioparams[m], attr[m]->atttypmod, &nulls[m]);
+                CopyReadBinaryAttribute(cstate, i, &in_functions[m], typioparams[m], atttypmod, &nulls[m]);
             cstate->cur_attname = NULL;
         }
     }
@@ -5584,6 +6130,9 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
         values[defmap[i]] = ExecEvalExpr(defexprs[i], econtext, &nulls[defmap[i]], NULL);
     }
 
+    if (cstate->transexprs != NULL)
+        ExecTransColExpr(cstate, econtext, num_phys_attrs, values, nulls);
+
 #ifdef PGXC
     if (IS_PGXC_COORDINATOR) {
         /* Append default values to the data-row in output format. */
@@ -5592,6 +6141,38 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
 #endif
 
     return true;
+}
+
+/* execute transform expr on columns, only for copy from */
+static void ExecTransColExpr(CopyState cstate, ExprContext* econtext, int numPhysAttrs, Datum* values, bool* nulls)
+{
+    bool needTransform = false;
+    int i;
+    
+    for (i = 0; i < numPhysAttrs; i++) {
+        if (cstate->transexprs[i]) {
+            needTransform = true;
+            break;
+        }
+    }
+
+    if (needTransform) {
+        TupleTableSlot *slot = MakeSingleTupleTableSlot(cstate->trans_tupledesc);
+        HeapTuple tuple = heap_form_tuple(cstate->trans_tupledesc, values, nulls);
+        
+        ExecStoreTuple(tuple, slot, InvalidBuffer, false);
+        econtext->ecxt_scantuple = slot;
+        
+        for (i = 0; i < numPhysAttrs; i++) {
+            if (!cstate->transexprs[i])
+                continue;
+            
+            values[i] = ExecEvalExpr(cstate->transexprs[i], econtext,
+                                    &nulls[i], NULL);
+        }
+        
+        ExecDropSingleTupleTableSlot(slot);
+    }
 }
 
 #ifdef PGXC
@@ -7313,6 +7894,7 @@ static RemoteCopyOptions* GetRemoteCopyOptions(CopyState cstate)
     res->rco_eol_type = cstate->eol_type;
     res->rco_compatible_illegal_chars = cstate->compatible_illegal_chars;
     res->rco_fill_missing_fields = cstate->fill_missing_fields;
+    res->transform_query_string = NULL;
 
     if (cstate->delim)
         res->rco_delim = pstrdup(cstate->delim);
@@ -7336,6 +7918,8 @@ static RemoteCopyOptions* GetRemoteCopyOptions(CopyState cstate)
         res->rco_timestamp_format = pstrdup(cstate->timestamp_format.str);
     if (cstate->smalldatetime_format.str)
         res->rco_smalldatetime_format = pstrdup(cstate->smalldatetime_format.str);
+    if (cstate->transform_query_string)
+        res->transform_query_string = cstate->transform_query_string;
 
     return res;
 }
@@ -8803,6 +9387,7 @@ void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache)
             HeapTuple tup = NULL;
 
             CHECK_FOR_INTERRUPTS();
+
             tup = (HeapTuple)heap_form_tuple(err.m_desc, err.m_values, err.m_isNull);
             tableam_tuple_insert(rel, tup, estate->es_output_cid, 0, NULL);
             tableam_tops_free_tuple(tup);
@@ -8906,67 +9491,39 @@ void ProcessCopyErrorLogOptions(CopyState cstate, bool isRejectLimitSpecified)
  */
 void Log_copy_error_spi(CopyState cstate)
 {
-    int natts = RelationGetNumberOfAttributes(cstate->err_table);
     CopyError err;
+    Oid argtypes[] = {VARCHAROID, TIMESTAMPTZOID, VARCHAROID, INT8OID, TEXTOID, TEXTOID};
 
-    Assert(RelationGetNumberOfAttributes(cstate->err_table) == CopyError::MaxNumOfValue);
+    Assert (RelationGetNumberOfAttributes(cstate->err_table) == CopyError::MaxNumOfValue);
     err.m_desc = RelationGetDescr(cstate->err_table);
 
     /* Reset the offset of the logger. Read from 0. */
     cstate->logger->Reset();
 
     int ret;
-    if ((ret = SPI_connect()) < 0)
+    if ((ret = SPI_connect()) < 0) {
         /* internal error */
-        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
-
-    StringInfo query_buf_for_err = makeStringInfo();
+        ereport(ERROR,
+            (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
+            errmsg("SPI connect failure - returned %d", ret)));
+    }
 
     /* Read each line from the cache file and assemble the query string for spi to execute */
     while (cstate->logger->FetchError(&err) != EOF) {
-        int attnum;
-
-        resetStringInfo(query_buf_for_err);
-
-        CHECK_FOR_INTERRUPTS();
-
-        appendStringInfoString(query_buf_for_err, "insert into ");
-        appendStringInfoString(query_buf_for_err, COPY_ERROR_TABLE_SCHEMA);
-        appendStringInfoString(query_buf_for_err, ".");
-        appendStringInfoString(query_buf_for_err, COPY_ERROR_TABLE);
-        appendStringInfoString(query_buf_for_err, " values (");
-
-        for (attnum = 0; attnum < natts; attnum++) {
-            char* string = NULL;
-
-            appendStringInfoString(query_buf_for_err, "\'");
-
-            if (!err.m_isNull[attnum]) {
-                /*
-                 * Here since our TupleDesc is fixed for copy_error_log, our function call
-                 * will be using xxx_to_cstring, which will palloc the memory for result.
-                 * Thus, we pfree the result cstring just to be safe.
-                 */
-                string = OutputFunctionCall(&cstate->err_out_functions[attnum], err.m_values[attnum]);
-                appendStringInfoString(query_buf_for_err, string);
-                pfree_ext(string);
-            }
-
-            appendStringInfoString(query_buf_for_err, "\'");
-
-            appendStringInfoString(query_buf_for_err, ",");
+        /* note* values params must start from $1 not $0 */
+        if (err.m_values[err.RawDataIdx] == 0) {
+            err.m_values[err.RawDataIdx] = CStringGetTextDatum("");
         }
-
-        query_buf_for_err->data[query_buf_for_err->len - 1] = ')';
-
-        ret = SPI_exec(query_buf_for_err->data, 0);
-
-        if (ret != SPI_OK_INSERT)
+        char *querystr = "insert into public.pgxc_copy_error_log values($1,$2,$3,$4,$5,$6);";
+        ret = SPI_execute_with_args(querystr, err.MaxNumOfValue, argtypes, err.m_values, NULL,
+                                    false, 0, NULL);
+        if (ret != SPI_OK_INSERT) {
             ereport(ERROR,
                 (errcode(ERRCODE_SPI_EXECUTE_FAILURE),
                     errmsg("Error encountered while logging error into %s.%s.",
                         COPY_ERROR_TABLE_SCHEMA,
                         COPY_ERROR_TABLE)));
+        }
     }
 
     SPI_finish();

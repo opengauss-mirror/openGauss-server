@@ -1,0 +1,1061 @@
+-- test: sighup
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+create schema schema_test_3;
+set search_path = schema_test_3;
+-- test: create table dual
+create view dual as select 'X' dummy;
+-- test: gs_txn_snapshot
+\d gs_txn_snapshot
+         Table "pg_catalog.gs_txn_snapshot"
+   Column    |           Type           | Modifiers 
+-------------+--------------------------+-----------
+ snptime     | timestamp with time zone | not null
+ snpxmin     | bigint                   | not null
+ snpcsn      | bigint                   | not null
+ snpsnapshot | text                     | 
+Indexes:
+    "gs_txn_snapshot_csn_xmin_index" btree (snpcsn DESC, snpxmin) TABLESPACE pg_default
+    "gs_txn_snapshot_time_csn_index" btree (snptime DESC, snpcsn) TABLESPACE pg_default
+    "gs_txn_snapshot_xmin_index" btree (snpxmin) TABLESPACE pg_default
+Replica Identity: NOTHING
+
+select relname, relnamespace, relisshared from pg_class where relname = 'gs_txn_snapshot';
+     relname     | relnamespace | relisshared 
+-----------------+--------------+-------------
+ gs_txn_snapshot |           11 | f
+(1 row)
+
+-- test: gs_txid_oldestxmin
+\df gs_txid_oldestxmin
+                                                   List of functions
+   Schema   |        Name        | Result data type | Argument data types |  Type  | fencedmode | propackage | prokind 
+------------+--------------------+------------------+---------------------+--------+------------+------------+---------
+ pg_catalog | gs_txid_oldestxmin | bigint           |                     | normal | f          | f          | f
+(1 row)
+
+delete from gs_txn_snapshot;
+select pg_sleep(10);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - gs_txid_oldestxmin() < 0);
+ dummy 
+-------
+(0 rows)
+
+select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - gs_txid_oldestxmin() < 10000 - 1000);
+ dummy 
+-------
+(0 rows)
+
+select * from dual where exists (select 1 from gs_txn_snapshot where snpxmin - gs_txid_oldestxmin() >= 10000 - 1000);
+ dummy 
+-------
+ X
+(1 row)
+
+-- test: syntax - [timecapsule { timestamp | csn } expression ]
+select * from dual timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+select * from dual timecapsule csn 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+timecapsule table dual to timestamp 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+timecapsule table dual to csn 0; 
+ERROR:  timecapsule feature does not support non-ordinary table
+drop table if exists tv_tmp_t1;
+NOTICE:  table "tv_tmp_t1" does not exist, skipping
+create temp table tv_tmp_t1 (c1 int);
+select * from tv_tmp_t1 timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support non-permanent table
+select * from tv_tmp_t1 timecapsule csn 0;
+ERROR:  timecapsule feature does not support non-permanent table
+timecapsule table tv_tmp_t1 to timestamp 0;
+ERROR:  timecapsule feature does not support non-permanent table
+timecapsule table tv_tmp_t1 to csn 0;
+ERROR:  timecapsule feature does not support non-permanent table
+drop table if exists tv_tmp_t1;
+drop table if exists tv_unlogged_t1;
+NOTICE:  table "tv_unlogged_t1" does not exist, skipping
+create unlogged table tv_unlogged_t1 (c1 int);
+select * from tv_unlogged_t1 timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support non-permanent table
+select * from tv_unlogged_t1 timecapsule csn 0;
+ERROR:  timecapsule feature does not support non-permanent table
+timecapsule table tv_unlogged_t1 to timestamp 0;
+ERROR:  timecapsule feature does not support non-permanent table
+timecapsule table tv_unlogged_t1 to csn 0;
+ERROR:  timecapsule feature does not support non-permanent table
+drop table if exists tv_unlogged_t1;
+drop sequence if exists tv_s;
+NOTICE:  sequence "tv_s" does not exist, skipping
+create sequence tv_s;
+select * from tv_s timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+select * from tv_s timecapsule csn 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+timecapsule table tv_s to timestamp 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+timecapsule table tv_s to csn 0;
+ERROR:  timecapsule feature does not support non-ordinary table
+drop sequence if exists tv_s;
+drop table if exists tv_web_returns_p2;
+NOTICE:  table "tv_web_returns_p2" does not exist, skipping
+create table tv_web_returns_p2
+(
+    ca_address_sk       integer                  not null   ,
+    ca_address_id       character(16)            not null   ,
+    ca_street_number    character(10)                       ,
+    ca_street_name      character varying(60)               ,
+    ca_street_type      character(15)                       ,
+    ca_suite_number     character(10)                       ,
+    ca_city             character varying(60)               ,
+    ca_county           character varying(30)               ,
+    ca_state            character(2)                        ,
+    ca_zip              character(10)                       ,
+    ca_country           character varying(20)               ,
+    ca_gmt_offset       numeric(5,2)                        ,
+    ca_location_type    character(20)
+)
+partition by range (ca_address_sk)
+(
+        partition p1 values less than(5000),
+        partition p2 values less than(10000),
+        partition p3 values less than(15000),
+        partition p4 values less than(20000),
+        partition p5 values less than(25000),
+        partition p6 values less than(30000),
+        partition p7 values less than(40000),
+        partition p8 values less than(maxvalue)
+)
+enable row movement;
+select * from tv_web_returns_p2 timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support partitioned table
+select * from tv_web_returns_p2 timecapsule csn 0;
+ERROR:  timecapsule feature does not support partitioned table
+timecapsule table tv_web_returns_p2 to timestamp 0;
+ERROR:  timecapsule feature does not support partitioned table
+timecapsule table tv_web_returns_p2 to csn 0;
+ERROR:  timecapsule feature does not support partitioned table
+drop table if exists tv_web_returns_p2;
+select * from pg_class timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support system table
+select * from pg_class timecapsule csn 0;
+ERROR:  timecapsule feature does not support system table
+timecapsule table pg_class to timestamp 0;
+ERROR:  timecapsule feature does not support system table
+timecapsule table pg_class to csn 0;
+ERROR:  timecapsule feature does not support system table
+drop table if exists tv_lineitem;
+NOTICE:  table "tv_lineitem" does not exist, skipping
+create table tv_lineitem
+(
+    l_orderkey    bigint not null
+  , l_partkey     bigint not null
+)
+with (orientation = column)
+; 
+select * from tv_lineitem timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support non-row oriented table
+select * from tv_lineitem timecapsule csn 0;
+ERROR:  timecapsule feature does not support non-row oriented table
+timecapsule table tv_lineitem to timestamp 0;
+ERROR:  timecapsule feature does not support non-row oriented table
+timecapsule table tv_lineitem to csn 0;
+ERROR:  timecapsule feature does not support non-row oriented table
+drop table if exists tv_lineitem;
+drop table if exists tv_cities;
+NOTICE:  table "tv_cities" does not exist, skipping
+create table tv_cities (
+    name            text,
+    population      float,
+    altitude        int
+);
+drop table if exists tv_cities;
+create table tv_capitals (
+    state           char(2)
+) inherits (cities);
+ERROR:  CREATE TABLE ... INHERITS is not yet supported.
+drop table if exists tv_capitals;
+NOTICE:  table "tv_capitals" does not exist, skipping
+drop table if exists tv_lineitem;
+NOTICE:  table "tv_lineitem" does not exist, skipping
+create table tv_lineitem
+(
+    l_orderkey    bigint primary key
+  , l_partkey     bigint not null
+)
+; 
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tv_lineitem_pkey" for table "tv_lineitem"
+alter table tv_lineitem add partial cluster key(l_orderkey);
+ERROR:  partial cluster key constraint does not support row/timeseries store
+drop table if exists tv_lineitem;
+drop table if exists tv_t1;
+NOTICE:  table "tv_t1" does not exist, skipping
+create table tv_t1 (c1 int);
+start transaction isolation level serializable;
+select * from tv_t1 timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support in non READ COMMITTED transaction
+rollback;
+start transaction isolation level serializable;
+select * from tv_t1 timecapsule csn 0;
+ERROR:  timecapsule feature does not support in non READ COMMITTED transaction
+rollback; 
+start transaction isolation level repeatable read;
+select * from tv_t1 timecapsule timestamp 0;
+ERROR:  timecapsule feature does not support in non READ COMMITTED transaction
+rollback;
+start transaction isolation level repeatable read;
+select * from tv_t1 timecapsule csn 0;
+ERROR:  timecapsule feature does not support in non READ COMMITTED transaction
+rollback; 
+drop table if exists tv_t1;
+drop table if exists tv_t1;
+NOTICE:  table "tv_t1" does not exist, skipping
+create table tv_t1 (c1 int);
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+prepare p1(int) as select * from tv_t1 timecapsule csn :1;
+prepare p2(timestamp) as select * from tv_t1 timecapsule timestamp :1;
+execute p1(1);
+ERROR:  restore point not found
+execute p2(now());
+ c1 
+----
+(0 rows)
+
+deallocate p1;
+deallocate p2;
+timecapsule table tv_t1 to timestamp :1;
+ERROR:  there is no parameter $1
+timecapsule table tv_t1 to csn :1;
+ERROR:  there is no parameter $1
+prepare p1(int) as timecapsule table tv_t1 to timestamp :1; 
+ERROR:  syntax error at or near "timecapsule"
+LINE 1: prepare p1(int) as timecapsule table tv_t1 to timestamp :1;
+                           ^
+prepare p2(timestamp) as timecapsule table tv_t1 to csn :1; 
+ERROR:  syntax error at or near "timecapsule"
+LINE 1: prepare p2(timestamp) as timecapsule table tv_t1 to csn :1;
+                                 ^
+prepare p1(int) as select * from tv_t1 timecapsule csn :1 + (select count(1) from tv_t1);
+ERROR:  timecapsule clause not support sublink.
+prepare p2(timestamp) as select * from tv_t1 timecapsule timestamp (select :1 from tv_t1);
+ERROR:  timecapsule clause not support sublink.
+drop table if exists tv_t1;
+drop table if exists tv_t1;
+NOTICE:  table "tv_t1" does not exist, skipping
+create table tv_t1 (c1 int); 
+drop view if exists tv_v;
+NOTICE:  view "tv_v" does not exist, skipping
+create view tv_v as select 1 from tv_t1 as a timecapsule timestamp now(), tv_t1 as b timecapsule csn 1;
+\dS+ tv_v
+               View "schema_test_3.tv_v"
+  Column  |  Type   | Modifiers | Storage | Description 
+----------+---------+-----------+---------+-------------
+ ?column? | integer |           | plain   | 
+View definition:
+ SELECT 1 AS "?column?"
+   FROM tv_t1 a TIMECAPSULE TIMESTAMP now(), tv_t1 b TIMECAPSULE CSN 1;
+
+drop view if exists tv_v;
+drop table if exists tv_t1;
+-- timecapsule query with invalid scn
+drop table if exists fb_qtbl_invalid_1;
+NOTICE:  table "fb_qtbl_invalid_1" does not exist, skipping
+create table fb_qtbl_invalid_1 (id int);
+insert into fb_qtbl_invalid_1 values(1);
+select * from fb_qtbl_invalid_1;
+ id 
+----
+  1
+(1 row)
+
+select * from fb_qtbl_invalid_1 timecapsule csn 0;
+ERROR:  restore point not found
+select * from fb_qtbl_invalid_1 timecapsule csn 1;
+ERROR:  restore point not found
+select * from fb_qtbl_invalid_1 timecapsule csn 9999999999999999;
+ERROR:  invalid csn specified
+select * from fb_qtbl_invalid_1 timecapsule csn 9999999999999998 + 1/1;
+ERROR:  invalid csn specified
+select * from fb_qtbl_invalid_1 timecapsule csn 'asdfgag';
+ERROR:  invalid input syntax for type bigint: "asdfgag"
+LINE 1: select * from fb_qtbl_invalid_1 timecapsule csn 'asdfgag';
+                                                        ^
+select * from fb_qtbl_invalid_1 timecapsule csn (select next_csn from gs_get_next_xid_csn());
+ERROR:  timecapsule clause not support sublink.
+select * from fb_qtbl_invalid_1 timecapsule csn -1;
+ERROR:  invalid csn specified
+drop table fb_qtbl_invalid_1;
+--timecapsule query with invalid timestamp
+drop table if exists fb_qtbl_invalid_2;
+NOTICE:  table "fb_qtbl_invalid_2" does not exist, skipping
+create table fb_qtbl_invalid_2 (id int);
+insert into fb_qtbl_invalid_2 values(1);
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_qtbl_invalid_2;
+ id 
+----
+  1
+(1 row)
+
+select * from fb_qtbl_invalid_2 timecapsule timestamp 0;
+ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type integer
+LINE 1: select * from fb_qtbl_invalid_2 timecapsule timestamp 0;
+                                                              ^
+select * from fb_qtbl_invalid_2 timecapsule timestamp 123.45678;
+ERROR:  argument of TIMESTAMP must be type timestamp with time zone, not type numeric
+LINE 1: ...ct * from fb_qtbl_invalid_2 timecapsule timestamp 123.45678;
+                                                             ^
+select * from fb_qtbl_invalid_2 timecapsule timestamp 'asdfgag';
+ERROR:  invalid input syntax for type timestamp with time zone: "asdfgag"
+LINE 1: ...ct * from fb_qtbl_invalid_2 timecapsule timestamp 'asdfgag';
+                                                             ^
+select * from fb_qtbl_invalid_2 timecapsule timestamp now() - 1/24;
+ERROR:  cannot find the restore point
+select * from fb_qtbl_invalid_2 timecapsule timestamp now() + 1/24;
+ERROR:  invalid timestamp specified
+drop table fb_qtbl_invalid_2;
+--timecapsule query to before ddl
+drop table if exists fb_qtbl_invalid_3;
+NOTICE:  table "fb_qtbl_invalid_3" does not exist, skipping
+create table fb_qtbl_invalid_3 (id int);
+insert into fb_qtbl_invalid_3 values(1);
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create index idx_fb_qtbl_invalid_3 on fb_qtbl_invalid_3 (id);
+drop index idx_fb_qtbl_invalid_3;
+select * from fb_qtbl_invalid_3 timecapsule timestamp now() - 1/(24*60*60) order by id;
+ERROR:  The table definition of "fb_qtbl_invalid_3" has been changed.
+drop table fb_qtbl_invalid_3;
+drop table if exists fb_qtbl_invalid_4;
+NOTICE:  table "fb_qtbl_invalid_4" does not exist, skipping
+create table fb_qtbl_invalid_4 (id int)
+partition by range (id)
+(
+partition p1 values less than (10),
+partition p2 values less than (20)
+);
+insert into fb_qtbl_invalid_4 values(1);
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+alter table fb_qtbl_invalid_4 add partition p3 values less than (30);
+select * from fb_qtbl_invalid_4 timecapsule timestamp now() - 1/(24*60*60);
+ERROR:  timecapsule feature does not support partitioned table
+drop table fb_qtbl_invalid_4;
+--timecapsule query normal table
+drop table if exists fb_qtbl_normal_1;
+NOTICE:  table "fb_qtbl_normal_1" does not exist, skipping
+create table fb_qtbl_normal_1 (id int);
+insert into fb_qtbl_normal_1 values(1);
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_qtbl_normal_1 set id = 2 where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_qtbl_normal_1 order by id;
+ id 
+----
+  2
+(1 row)
+
+select * from fb_qtbl_normal_1 timecapsule timestamp now() - 1/(24*60*60) order by id;
+ id 
+----
+  1
+(1 row)
+
+drop table fb_qtbl_normal_1;
+--timecapsule query normal table with index
+drop table if exists fb_qtbl_normal_2;
+NOTICE:  table "fb_qtbl_normal_2" does not exist, skipping
+create table fb_qtbl_normal_2 (id int);
+create index idx_fb_qtbl_normal_2 on fb_qtbl_normal_2 (id);
+insert into fb_qtbl_normal_2 values(1);
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_qtbl_normal_2 set id = 2 where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+insert into fb_qtbl_normal_2 values (10);
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_qtbl_normal_2 order by id;
+ id 
+----
+  2
+ 10
+(2 rows)
+
+select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where id > 0 order by id;
+ id 
+----
+  1
+(1 row)
+
+explain (costs off) select * from fb_qtbl_normal_2 timecapsule timestamp now() - 1/(24*60*60) where id > 0;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Bitmap Heap Scan on fb_qtbl_normal_2
+   Recheck Cond: (id > 0)
+   ->  Bitmap Index Scan on idx_fb_qtbl_normal_2
+         Index Cond: (id > 0)
+(4 rows)
+
+explain (costs off) select * from fb_qtbl_normal_2 where id > 0;
+                   QUERY PLAN                    
+-------------------------------------------------
+ Bitmap Heap Scan on fb_qtbl_normal_2
+   Recheck Cond: (id > 0)
+   ->  Bitmap Index Scan on idx_fb_qtbl_normal_2
+         Index Cond: (id > 0)
+(4 rows)
+
+drop table fb_qtbl_normal_2;
+--timecapsule to before ddl
+drop table if exists fb_tbl_invalid_3;
+NOTICE:  table "fb_tbl_invalid_3" does not exist, skipping
+create table fb_tbl_invalid_3 (id int);
+insert into fb_tbl_invalid_3 values(1);
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create or replace procedure pro_timecapsule1()
+as
+scn_num varchar2(200);
+begin
+    select to_char(now(), 'yyyy-mm-dd hh24:mi:ss') into scn_num from dual;
+    insert into temp values(scn_num);
+end;
+/
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+create index idx_fb_tbl_invalid_3 on fb_tbl_invalid_3 (id);
+drop index idx_fb_tbl_invalid_3;
+create or replace procedure pro_fb_tbl_invalid_3()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_invalid_3 to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_invalid_3();
+ERROR:  The table definition of "fb_tbl_invalid_3" has been changed.
+--?CONTEXT:  SQL statement "timecapsule table fb_tbl_invalid_3 to timestamp to_timestamp.*
+PL/pgSQL function pro_fb_tbl_invalid_3() line 5 at EXECUTE statement
+drop table temp;
+drop table fb_tbl_invalid_3;
+--timecapsule normal table
+drop table if exists fb_tbl_normal_1;
+NOTICE:  table "fb_tbl_normal_1" does not exist, skipping
+create table fb_tbl_normal_1 (id int);
+insert into fb_tbl_normal_1 values(1);
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+update fb_tbl_normal_1 set id = 2 where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal_1 order by id;
+ id 
+----
+  2
+(1 row)
+
+create or replace procedure pro_fb_tbl_normal_1()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_normal_1 to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_1();
+ pro_fb_tbl_normal_1 
+---------------------
+ 
+(1 row)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from fb_tbl_normal_1 order by id;
+ id 
+----
+  1
+(1 row)
+
+drop table temp;
+drop table fb_tbl_normal_1;
+drop table if exists fb_tbl_normal_2;
+NOTICE:  table "fb_tbl_normal_2" does not exist, skipping
+create table fb_tbl_normal_2 (id int);
+create index idx_fb_tbl_normal_2 on fb_tbl_normal_2 (id);
+insert into fb_tbl_normal_2 values(1);
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+update fb_tbl_normal_2 set id = 2 where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+insert into fb_tbl_normal_2 values (10);
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal_2 order by id;
+ id 
+----
+  2
+ 10
+(2 rows)
+
+create or replace procedure pro_fb_tbl_normal_2()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_normal_2 to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_2();
+ pro_fb_tbl_normal_2 
+---------------------
+ 
+(1 row)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from fb_tbl_normal_2 where id > 0 order by id;
+ id 
+----
+  2
+(1 row)
+
+explain (costs off) select * from fb_tbl_normal_2 where id > 0;
+                   QUERY PLAN                   
+------------------------------------------------
+ Bitmap Heap Scan on fb_tbl_normal_2
+   Recheck Cond: (id > 0)
+   ->  Bitmap Index Scan on idx_fb_tbl_normal_2
+         Index Cond: (id > 0)
+(4 rows)
+
+drop table temp;
+drop table fb_tbl_normal_2;
+--timecapsule normal table with index and lob
+drop table if exists fb_tbl_normal_3;
+NOTICE:  table "fb_tbl_normal_3" does not exist, skipping
+create table fb_tbl_normal_3 (id int, tt clob);
+create index idx_fb_tbl_normal_3 on fb_tbl_normal_3 (id);
+insert into fb_tbl_normal_3 values(1,'adgasdfasg');
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_tbl_normal_3 set id = 2, tt = 'afagadghh' where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+insert into fb_tbl_normal_3 values (10, 'qwetyuuqer');
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal_3;
+ id |     tt     
+----+------------
+  2 | afagadghh
+ 10 | qwetyuuqer
+(2 rows)
+
+create or replace procedure pro_fb_tbl_normal_3()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_normal_3 to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_3();
+ pro_fb_tbl_normal_3 
+---------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal_3 order by id;
+ id |    tt     
+----+-----------
+  2 | afagadghh
+(1 row)
+
+drop table temp;
+drop table fb_tbl_normal_3;
+--re-timecapsule normal table
+drop table if exists fb_tbl_normal_re1;
+NOTICE:  table "fb_tbl_normal_re1" does not exist, skipping
+create table fb_tbl_normal_re1 (id int, tt clob);
+create index idx_fb_tbl_normal_re1 on fb_tbl_normal_re1 (id);
+insert into fb_tbl_normal_re1 values(1,'adgasdfasg');
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create or replace procedure pro_timecapsule1()
+as
+scn_num varchar2(200);
+begin
+    select to_char(now(), 'yyyy-mm-dd hh24:mi:ss') into scn_num from dual;
+    insert into temp values(scn_num);
+end;
+/
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_tbl_normal_re1 set id = 2, tt = 'afagadghh' where id = 1;
+commit;
+WARNING:  there is no transaction in progress
+insert into fb_tbl_normal_re1 values (10, 'qwetyuuqer');
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal_re1 order by id;
+ id |     tt     
+----+------------
+  2 | afagadghh
+ 10 | qwetyuuqer
+(2 rows)
+
+create or replace procedure pro_fb_tbl_normal_re1()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_normal_re1 to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_re1();
+ pro_fb_tbl_normal_re1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal_re1 order by id;
+ id |     tt     
+----+------------
+  1 | adgasdfasg
+(1 row)
+
+drop table temp;
+drop table fb_tbl_normal_re1;
+--timecapsule normal table to the same scn more times
+drop table if exists fb_tbl_normal;
+NOTICE:  table "fb_tbl_normal" does not exist, skipping
+create table fb_tbl_normal (id int, tt text);
+create index idx_fb_tbl_normal on fb_tbl_normal (id);
+insert into fb_tbl_normal values(1,'adgasdfasg');
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(a varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+create or replace procedure pro_timecapsule1()
+as
+scn_num varchar2(200);
+begin
+    select to_char(now(), 'yyyy-mm-dd hh24:mi:ss') into scn_num from dual;
+    insert into temp values(scn_num);
+end;
+/
+call pro_timecapsule1();
+ pro_timecapsule1 
+------------------
+ 
+(1 row)
+
+update fb_tbl_normal set id = 2, tt = 'afagadghh' where id = 1;
+insert into fb_tbl_normal values (10, 'qwetyuuqer');
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  2 | afagadghh
+ 10 | qwetyuuqer
+(2 rows)
+
+create or replace procedure pro_fb_tbl_normal_rb1()
+as
+scn_num varchar2(200);
+begin
+    select a into scn_num from temp;
+    execute immediate 'timecapsule table fb_tbl_normal to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_rb1();
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  1 | adgasdfasg
+(1 row)
+
+update fb_tbl_normal set id = 3, tt = 'afagadghh' where id = 1;
+insert into fb_tbl_normal values (20, 'qwetyuuqer');
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  3 | afagadghh
+ 20 | qwetyuuqer
+(2 rows)
+
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+call pro_fb_tbl_normal_rb1();
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  1 | adgasdfasg
+(1 row)
+
+drop table temp;
+drop table fb_tbl_normal;
+--timecapsule normal table to the scn1, excute dml, timecapsule to scn2, excute dml, timecapsule to scn3, excute dml, timecapsule to scn1
+drop table if exists fb_tbl_normal;
+NOTICE:  table "fb_tbl_normal" does not exist, skipping
+create table fb_tbl_normal (id int, tt text);
+create index idx_fb_tbl_normal on fb_tbl_normal (id);
+insert into fb_tbl_normal values(1,'adgasdfasg');
+commit;
+WARNING:  there is no transaction in progress
+drop table if exists temp;
+NOTICE:  table "temp" does not exist, skipping
+create table temp(id int, name varchar2(200));
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+insert into temp select 1, to_char(now(), 'yyyy-mm-dd hh24:mi:ss');
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_tbl_normal set id = 10 where id = 1;
+insert into fb_tbl_normal values(100, 'sfgsafjhaf');
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+insert into temp select 2, to_char(now(), 'yyyy-mm-dd hh24:mi:ss');
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+update fb_tbl_normal set id = 20 where id = 10;
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+insert into temp select 3, to_char(now(), 'yyyy-mm-dd hh24:mi:ss');
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+commit;
+WARNING:  there is no transaction in progress
+select * from fb_tbl_normal order by id;
+ id  |     tt     
+-----+------------
+  20 | adgasdfasg
+ 100 | sfgsafjhaf
+(2 rows)
+
+create or replace procedure pro_fb_tbl_normal_rb1(v_id int)
+as
+scn_num varchar2(200);
+begin
+    select name into scn_num from temp where id = v_id;
+    execute immediate 'timecapsule table fb_tbl_normal to timestamp to_timestamp (''' || scn_num || ''',''yyyy-mm-dd hh24:mi:ss'')';
+end;
+/
+call pro_fb_tbl_normal_rb1(1);
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id |     tt     
+----+------------
+  1 | adgasdfasg
+(1 row)
+
+call pro_fb_tbl_normal_rb1(2);
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id  |     tt     
+-----+------------
+  10 | adgasdfasg
+ 100 | sfgsafjhaf
+(2 rows)
+
+call pro_fb_tbl_normal_rb1(3);
+ pro_fb_tbl_normal_rb1 
+-----------------------
+ 
+(1 row)
+
+select * from fb_tbl_normal order by id;
+ id  |     tt     
+-----+------------
+  20 | adgasdfasg
+ 100 | sfgsafjhaf
+(2 rows)
+
+drop table temp;
+drop table fb_tbl_normal;
+drop view dual;
+drop schema schema_test_3 cascade;
+NOTICE:  drop cascades to 7 other objects
+DETAIL:  drop cascades to function pro_fb_tbl_invalid_3()
+drop cascades to function pro_fb_tbl_normal_1()
+drop cascades to function pro_fb_tbl_normal_2()
+drop cascades to function pro_fb_tbl_normal_3()
+drop cascades to function pro_fb_tbl_normal_re1()
+drop cascades to function pro_timecapsule1()
+drop cascades to function pro_fb_tbl_normal_rb1(integer)
+reset search_path;
+-- reset vacuum_defer_cleanup_age
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+

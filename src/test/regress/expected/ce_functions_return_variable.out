@@ -1,0 +1,43 @@
+\! gs_ktool -d all
+DELETE ALL
+
+\! gs_ktool -g
+GENERATE
+1
+DROP CLIENT MASTER KEY IF EXISTS ret_cmk3 CASCADE;
+NOTICE:  client master key "ret_cmk3" does not exist
+CREATE CLIENT MASTER KEY ret_cmk3 WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY ret_cek3 WITH VALUES (CLIENT_MASTER_KEY = ret_cmk3, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+create table accounts (
+    id serial,
+    name varchar(100) not null ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ret_cek3, ENCRYPTION_TYPE = DETERMINISTIC),
+    balance dec(15,2) not null ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ret_cek3, ENCRYPTION_TYPE = DETERMINISTIC),
+    primary key(id)
+);
+NOTICE:  CREATE TABLE will create implicit sequence "accounts_id_seq" for serial column "accounts.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "accounts_pkey" for table "accounts"
+insert into accounts(name,balance) values('Bob',10000); 
+insert into accounts(name,balance) values('Alice',10000);
+CREATE OR REPLACE FUNCTION f_processed_in_plpgsql(a varchar(100), b dec(15,2)) 
+RETURNS varchar(100) AS $$
+declare
+c varchar(100);
+BEGIN
+    SELECT into c name from accounts where name=$1 or balance=$2 LIMIT 1;
+    RETURN c;
+END; $$
+LANGUAGE plpgsql;
+SELECT f_processed_in_plpgsql('Bob', 10000);
+ERROR:  value too long for type character varying(100)
+CONTEXT:  PL/pgSQL function f_processed_in_plpgsql(byteawithoutorderwithequalcol,byteawithoutorderwithequalcol) line 5 at SQL statement
+referenced column: f_processed_in_plpgsql
+CALL f_processed_in_plpgsql('Bob',10000);
+ERROR:  value too long for type character varying(100)
+CONTEXT:  PL/pgSQL function f_processed_in_plpgsql(byteawithoutorderwithequalcol,byteawithoutorderwithequalcol) line 5 at SQL statement
+DROP FUNCTION f_processed_in_plpgsql();
+DROP TABLE accounts;
+DROP COLUMN ENCRYPTION KEY ret_cek3;
+DROP CLIENT MASTER KEY ret_cmk3;
+\! gs_ktool -d all
+DELETE ALL
+ 1

@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * alarm.h
- *        POSTGRES alarm reporting/logging definitions.
+ *        openGauss alarm reporting/logging definitions.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -83,6 +83,9 @@ typedef enum AlarmId {
     ALM_AI_StorageDilatationAlarmMajor = 0x404F005E,
 
     ALM_AI_FeaturePermissionDenied = 0x404F0050, /* No permission to invoke specific features. */
+    ALM_AI_DNReduceSyncList = 0x404F005F,
+    ALM_AI_DNIncreaseSyncList = 0x404F0060,
+    ALM_AI_PgxcNodeMismatch = 0x404F0061,
     ALM_AI_BUTT = 0x7FFFFFFFFFFFFFFF             /*force compiler to decide AlarmId as uint64*/
 } AlarmId;
 

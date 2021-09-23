@@ -48,6 +48,10 @@ struct SafeRestartPoint {
     XLogRecPtr restartPoint;
 };
 
+typedef enum {
+    DataPageWorker,
+    UndoLogZidWorker,
+} RedoWorkerRole;
 struct PageRedoWorker {
     /*
      * The last successfully applied log record's end position + 1 as an
@@ -71,6 +75,11 @@ struct PageRedoWorker {
     gs_thread_t tid;
     /* The proc struct of this worker thread. */
     PGPROC* proc;
+
+    /* Role of page redo worker */
+    RedoWorkerRole role;
+
+    bool replay_undo; /* only apply undo */
 
     /* ---------------------------------------------
      * Initial context
@@ -178,6 +187,8 @@ bool IsPageRedoWorkerProcess(int argc, char* argv[]);
 void AdaptArgvForPageRedoWorker(char* argv[]);
 void GetThreadNameIfPageRedoWorker(int argc, char* argv[], char** threadNamePtr);
 
+extern bool DoPageRedoWorkerReplayUndo();
+
 uint32 GetMyPageRedoWorkerOrignId();
 PGPROC* GetPageRedoWorkerProc(PageRedoWorker* worker);
 
@@ -215,5 +226,6 @@ void GetCompletedReadEndPtr(PageRedoWorker* worker, XLogRecPtr *readPtr, XLogRec
 void UpdateRecordGlobals(RedoItem* item, HotStandbyState standbyState);
 void redo_dump_worker_queue_info();
 
+void WaitAllPageWorkersQueueEmpty();
 }
 #endif

@@ -198,5 +198,96 @@ DATA(insert OID = 4262 (4239    int1_ops         PGNSP    PGUID));
 DATA(insert OID = 4263 (4239    bool_ops         PGNSP    PGUID));
 DATA(insert OID = 4264 (4239    smalldatetime_ops  PGNSP  PGUID));
 
+/* ubtree index */
+#define BTREE_UBTREE_FAM_OID_DIFF 5000
+#define BTREE_UBTREE_FAM_OID_SPECIAL_DIFF 4000
+#define UBTREE_FAM_START_OID 5000
+
+static const int specialListLen = 4;
+static const Oid specialList[specialListLen] = {5535, 5536, 5570, 5571};
+
+static inline bool OpFamilyIsUBTreeFam(Oid oid)
+{
+    if (oid < UBTREE_FAM_START_OID) {
+        return false;
+    }
+    for (int i = 0; i < specialListLen; i++) {
+        if (oid == specialList[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static inline Oid OpFamilyToBtree(Oid oid)
+{
+    for (int i = 0; i < specialListLen; i++) {
+        if (oid == specialList[i] + BTREE_UBTREE_FAM_OID_SPECIAL_DIFF) {
+            return specialList[i];
+        }
+    }
+    return oid - BTREE_UBTREE_FAM_OID_DIFF;
+}
+
+inline bool OpFamilyEquals(Oid oid1, Oid oid2)
+{
+    if (OpFamilyIsUBTreeFam(oid1)) {
+        oid1 = OpFamilyToBtree(oid1);
+    }
+    if (OpFamilyIsUBTreeFam(oid2)) {
+        oid2 = OpFamilyToBtree(oid2);
+    }
+    return oid1 == oid2;
+}
+
+DATA(insert OID = 5421 (4439        abstime_ops        PGNSP PGUID));
+DATA(insert OID = 5397 (4439        array_ops        PGNSP PGUID));
+DATA(insert OID = 5423 (4439       bit_ops            PGNSP PGUID));
+DATA(insert OID = 5424 (4439       bool_ops        PGNSP PGUID));
+#define BOOL_UBTREE_FAM_OID 5424
+DATA(insert OID = 5426 (4439       bpchar_ops        PGNSP PGUID));
+#define BPCHAR_UBTREE_FAM_OID 5426
+DATA(insert OID = 5428 (4439       bytea_ops        PGNSP PGUID));
+#define BYTEA_UBTREE_FAM_OID 5428
+DATA(insert OID = 5436 (4439       byteawithoutorderwithequalcol_ops PGNSP PGUID));
+#define ENCRYPTEDCOL_UBTREE_FAM_OID 5436
+DATA(insert OID = 5429 (4439       char_ops        PGNSP PGUID));
+DATA(insert OID = 5434 (4439       datetime_ops    PGNSP PGUID));
+DATA(insert OID = 6970 (4439       float_ops        PGNSP PGUID));
+DATA(insert OID = 6974 (4439       network_ops        PGNSP PGUID));
+#define NETWORK_UBTREE_FAM_OID 6974
+DATA(insert OID = 6976 (4439       integer_ops        PGNSP PGUID));
+#define INTEGER_UBTREE_FAM_OID 6976
+DATA(insert OID = 6982 (4439       interval_ops    PGNSP PGUID));
+DATA(insert OID = 6984 (4439       macaddr_ops        PGNSP PGUID));
+DATA(insert OID = 6986 (4439       name_ops        PGNSP PGUID));
+#define NAME_UBTREE_FAM_OID 6986
+DATA(insert OID = 6988 (4439       numeric_ops        PGNSP PGUID));
+DATA(insert OID = 6989 (4439       oid_ops            PGNSP PGUID));
+#define OID_UBTREE_FAM_OID 6989
+DATA(insert OID = 6991 (4439       oidvector_ops    PGNSP PGUID));
+DATA(insert OID = 7994 (4439       record_ops        PGNSP PGUID));
+DATA(insert OID = 6994 (4439       text_ops        PGNSP PGUID));
+#define TEXT_UBTREE_FAM_OID 6994
+DATA(insert OID = 6996 (4439       time_ops        PGNSP PGUID));
+DATA(insert OID = 7000 (4439       timetz_ops        PGNSP PGUID));
+DATA(insert OID = 7002 (4439       varbit_ops        PGNSP PGUID));
+DATA(insert OID = 7095 (4439       text_pattern_ops    PGNSP PGUID));
+#define TEXT_PATTERN_UBTREE_FAM_OID 7095
+DATA(insert OID = 7097 (4439       bpchar_pattern_ops    PGNSP PGUID));
+#define BPCHAR_PATTERN_UBTREE_FAM_OID 7097
+DATA(insert OID = 7099 (4439       money_ops        PGNSP PGUID));
+DATA(insert OID = 7789 (4439       tid_ops            PGNSP PGUID));
+DATA(insert OID = 7233 (4439       reltime_ops        PGNSP PGUID));
+DATA(insert OID = 7234 (4439       tinterval_ops    PGNSP PGUID));
+DATA(insert OID = 7968 (4439       uuid_ops        PGNSP PGUID));
+DATA(insert OID = 8522 (4439       enum_ops        PGNSP PGUID));
+DATA(insert OID = 8626 (4439       tsvector_ops    PGNSP PGUID));
+DATA(insert OID = 8683 (4439       tsquery_ops        PGNSP PGUID));
+DATA(insert OID = 8901 (4439       range_ops        PGNSP PGUID));
+DATA(insert OID = 8806 (4439       raw_ops         PGNSP PGUID));
+DATA(insert OID = 9535 (4439       int1_ops         PGNSP PGUID));
+DATA(insert OID = 9570 (4439       smalldatetime_ops         PGNSP PGUID));
+
 #endif   /* PG_OPFAMILY_H */
 

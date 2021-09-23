@@ -20,6 +20,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_matview.h"
 #include "catalog/gs_model.h"
 #include "catalog/heap.h"
@@ -51,6 +52,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_synonym.h"
@@ -95,6 +97,7 @@
 #include "parser/parsetree.h"
 #include "rewrite/rewriteRemove.h"
 #include "storage/lmgr.h"
+#include "storage/tcap.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -104,6 +107,7 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "datasource/datasource.h"
+#include "postmaster/rbcleaner.h"
 
 /*
  * This constant table maps ObjectClasses to the corresponding catalog OIDs.
@@ -150,10 +154,6 @@ static const Oid object_classes[MAX_OCLASS] = {
 
 };
 
-static void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressStack* stack,
-    ObjectAddresses* targetObjects, const ObjectAddresses* pendingObjects, Relation* depRel);
-static void reportDependentObjects(
-    const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject);
 #ifdef ENABLE_MULTIPLE_NODES
 namespace Tsdb {
 static void findTsDependentObjects(ObjectAddresses* targetObjects, Relation depRel);
@@ -161,7 +161,6 @@ static void findTsDependentObjects(ObjectAddresses* targetObjects, Relation depR
 #endif   /* ENABLE_MULTIPLE_NODES */
 static void deleteOneObject(const ObjectAddress* object, Relation* depRel, int32 flags);
 static void doDeletion(const ObjectAddress* object, int flags);
-static void AcquireDeletionLock(const ObjectAddress* object, int flags);
 static void ReleaseDeletionLock(const ObjectAddress* object);
 static bool find_expr_references_walker(Node* node, find_expr_references_context* context);
 static void eliminate_duplicate_dependencies(ObjectAddresses* addrs);
@@ -351,6 +350,14 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
 
     for (i = 0; i < objects->numrefs; i++) {
         const ObjectAddress* thisobj = objects->refs + i;
+        if (getObjectClass(thisobj) == OCLASS_SCHEMA) {
+            AcquireDeletionLock(thisobj, flags);
+            RbCltPurgeSchema(thisobj->objectId);
+        }
+    }
+
+    for (i = 0; i < objects->numrefs; i++) {
+        const ObjectAddress* thisobj = objects->refs + i;
 
         /*
          * Acquire deletion lock on each target object.  (Ideally the caller
@@ -358,6 +365,13 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
          */
         AcquireDeletionLock(thisobj, flags);
 
+        /*
+         * Purge all the rb objects in the proper order.
+         */
+
+        /*
+         * Find dependent objects recursively.
+         */
         findDependentObjects(thisobj,
             DEPFLAG_ORIGINAL,
             NULL, /* empty stack */
@@ -509,7 +523,7 @@ void deleteWhatDependsOn(const ObjectAddress* object, bool showNotices)
  *			not necessarily in targetObjects yet (can be NULL if none)
  *	*depRel: already opened pg_depend relation
  */
-static void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressStack* stack,
+void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressStack* stack,
     ObjectAddresses* targetObjects, const ObjectAddresses* pendingObjects, Relation* depRel)
 {
     ScanKeyData key[3];
@@ -820,7 +834,7 @@ static void findDependentObjects(const ObjectAddress* object, int flags, ObjectA
  *	origObject: base object of deletion, or NULL if not available
  *		(the latter case occurs in DROP OWNED)
  */
-static void reportDependentObjects(
+void reportDependentObjects(
     const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject)
 {
     bool ok = true;
@@ -1268,6 +1282,11 @@ static void doDeletion(const ObjectAddress* object, int flags)
             RemoveFunctionById(object->objectId);
             break;
 
+        case OCLASS_PACKAGE:
+            /* if objectId same as objectSubId, it's doing drop package body */
+            RemovePackageById(object->objectId, (int32)object->objectId == object->objectSubId);
+            break;
+
         case OCLASS_TYPE:
             RemoveTypeById(object->objectId);
             break;
@@ -1370,7 +1389,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
             break;
 #ifdef PGXC
         case OCLASS_PGXC_CLASS:
-            RemovePgxcClass(object->objectId);
+            RemovePgxcClass(object->objectId, IS_PGXC_DATANODE);
             /* 
              * pgxc_slice is the extended information for pgxc_class,
              * so need to delete the related tuples in pgxc_slice.
@@ -1425,6 +1444,9 @@ static void doDeletion(const ObjectAddress* object, int flags)
         case OCLASS_DB4AI_MODEL:
             remove_model_by_oid(object->objectId);
             break;
+        case OCLASS_GS_CL_PROC:
+            remove_encrypted_proc_by_id(object->objectId);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized object class: %u", object->classId)));
@@ -1438,7 +1460,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
  * else.  Note that dependency.c is not concerned with deleting any kind of
  * shared-across-databases object, so we have no need for LockSharedObject.
  */
-static void AcquireDeletionLock(const ObjectAddress* object, int flags)
+void AcquireDeletionLock(const ObjectAddress* object, int flags)
 {
     if (object->classId == RelationRelationId) {
         /*
@@ -2083,6 +2105,53 @@ static void add_object_address(ObjectClass oclass, Oid objectId, int32 subId, Ob
     item->classId = object_classes[oclass];
     item->objectId = objectId;
     item->objectSubId = subId;
+    item->rbDropMode = RB_DROP_MODE_INVALID;
+    addrs->numrefs++;
+}
+
+/*
+ * Add an entry to an ObjectAddresses array.
+ *
+ * It is convenient to specify the class by ObjectClass rather than directly
+ * by catalog OID.
+ */
+void add_object_address_ext(Oid classId, Oid objectId, int32 subId, char deptype, ObjectAddresses* addrs)
+{
+    ObjectAddress* item = NULL;
+
+    /* enlarge array if needed */
+    if (addrs->numrefs >= addrs->maxrefs) {
+        addrs->maxrefs *= 2;
+        addrs->refs = (ObjectAddress*)repalloc(addrs->refs, addrs->maxrefs * sizeof(ObjectAddress));
+        Assert(!addrs->extras);
+    }
+    /* record this item */
+    item = addrs->refs + addrs->numrefs;
+    item->classId = classId;
+    item->objectId = objectId;
+    item->objectSubId = subId;
+    item->deptype = deptype;
+    item->rbDropMode = RB_DROP_MODE_INVALID;
+    addrs->numrefs++;
+}
+
+void add_object_address_ext1(const ObjectAddress *obj, ObjectAddresses* addrs)
+{
+    ObjectAddress* item = NULL;
+
+    /* enlarge array if needed */
+    if (addrs->numrefs >= addrs->maxrefs) {
+        addrs->maxrefs *= 2;
+        addrs->refs = (ObjectAddress*)repalloc(addrs->refs, addrs->maxrefs * sizeof(ObjectAddress));
+        Assert(!addrs->extras);
+    }
+    /* record this item */
+    item = addrs->refs + addrs->numrefs;
+    item->classId = obj->classId;
+    item->objectId = obj->objectId;
+    item->objectSubId = obj->objectSubId;
+    item->deptype = obj->deptype;
+    item->rbDropMode = obj->rbDropMode;
     addrs->numrefs++;
 }
 
@@ -2251,7 +2320,8 @@ void free_object_addresses(ObjectAddresses* addrs)
 ObjectClass getObjectClass(const ObjectAddress* object)
 {
     /* only pg_class entries can have nonzero objectSubId */
-    if (object->classId != RelationRelationId && object->objectSubId != 0)
+    if (object->classId != PackageRelationId && object->classId != RelationRelationId 
+                                             && object->objectSubId != 0)
         ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("invalid objectSubId 0 for object class %u", object->classId)));
 
@@ -2263,6 +2333,9 @@ ObjectClass getObjectClass(const ObjectAddress* object)
         case ProcedureRelationId:
             return OCLASS_PROC;
 
+         case PackageRelationId:
+            return OCLASS_PACKAGE;
+            
         case TypeRelationId:
             return OCLASS_TYPE;
 
@@ -2376,6 +2449,8 @@ ObjectClass getObjectClass(const ObjectAddress* object)
             return OCLASS_COLUMN_SETTING_ARGS;
         case ModelRelationId:
             return OCLASS_DB4AI_MODEL;
+        case ClientLogicProcId:
+            return OCLASS_GS_CL_PROC;
         default:
             break;
     }
@@ -2406,6 +2481,10 @@ char* getObjectDescription(const ObjectAddress* object)
 
         case OCLASS_PROC:
             appendStringInfo(&buffer, _("function %s"), format_procedure(object->objectId));
+            break;
+
+        case OCLASS_PACKAGE:
+             appendStringInfo(&buffer, _("package %s"), format_procedure(object->objectId));
             break;
 
         case OCLASS_TYPE:

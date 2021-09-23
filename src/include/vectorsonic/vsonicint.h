@@ -265,7 +265,7 @@ void SonicIntTemplateDatumArray<T>::setNthDatum(uint32 nth, ScalarValue* val)
 
     // Make sure the space is already allocated.
     Assert(&(((T*)m_arr[arrIndx]->data)[atomIndx]));
-    ((T*)m_arr[arrIndx]->data)[atomIndx] = (T)*val;
+    ((T*)m_arr[arrIndx]->data)[atomIndx] = *((T*)val);
 }
 
 /*

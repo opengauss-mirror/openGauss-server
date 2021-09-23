@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * itup.h
- *	  POSTGRES index tuple definitions.
+ *	  openGauss index tuple definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -51,6 +51,20 @@ typedef struct IndexTupleData {
 
 typedef IndexTupleData* IndexTuple;
 
+/* full 8B xid used in Create Index */
+typedef struct IndexTransInfo {
+    TransactionId xmin;
+    TransactionId xmax;
+} IndexTransInfo;
+
+/* short 4B xid used in IndexTuple */
+typedef struct UstoreIndexXidData {
+    ShortTransactionId xmin;
+    ShortTransactionId xmax;
+} UstoreIndexXidData;
+
+typedef UstoreIndexXidData* UstoreIndexXid;
+
 typedef struct IndexAttributeBitMapData {
     bits8 bits[(INDEX_MAX_KEYS + 8 - 1) / 8];
 } IndexAttributeBitMapData;
@@ -69,6 +83,10 @@ typedef IndexAttributeBitMapData* IndexAttributeBitMap;
 #define IndexTupleDSize(itup) ((Size)((itup).t_info & INDEX_SIZE_MASK))
 #define IndexTupleHasNulls(itup) ((((IndexTuple)(itup))->t_info & INDEX_NULL_MASK))
 #define IndexTupleHasVarwidths(itup) ((((IndexTuple)(itup))->t_info & INDEX_VAR_MASK))
+
+#define IndexTupleSetSize(itup, newsz) (itup->t_info = ((itup->t_info) & (~INDEX_SIZE_MASK)) | (newsz))
+
+#define UstoreIndexTupleGetXid(itup) (((char*)(itup)) + (IndexTupleSize(itup)))
 
 /*
  * Takes an infomask as argument (primarily because this needs to be usable
@@ -114,6 +132,11 @@ extern IndexTuple index_form_tuple(TupleDesc tuple_descriptor, Datum* values, co
 extern Datum nocache_index_getattr(IndexTuple tup, uint32 attnum, TupleDesc tuple_desc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tuple_descriptor, Datum* values, bool* isnull);
 extern IndexTuple index_truncate_tuple(TupleDesc tupleDescriptor, IndexTuple olditup, int new_indnatts);
+extern IndexTuple UBTreeIndexTruncateTuple(TupleDesc tupleDescriptor, IndexTuple olditup, int new_indnatts,
+    bool itup_extended);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
+extern Oid index_getattr_tableoid(Relation irel, IndexTuple itup);
+extern int2 index_getattr_bucketid(Relation irel, IndexTuple itup);
+extern IndexTuple CopyIndexTupleAndReserveSpace(IndexTuple source, Size reserved_size);
 
 #endif /* ITUP_H */

@@ -1,8 +1,9 @@
 /* -------------------------------------------------------------------------
  *
  * relcache.c
- *	  POSTGRES relation descriptor cache code
+ *	  openGauss relation descriptor cache code
  *
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
@@ -84,7 +85,9 @@
 #include "catalog/pg_partition.h"
 #include "catalog/pg_pltemplate.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_range.h"
+#include "catalog/pg_recyclebin.h"
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_rlspolicy.h"
@@ -115,6 +118,7 @@
 #include "catalog/gs_masking_policy_actions.h"
 #include "catalog/gs_masking_policy_filters.h"
 
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_column_keys_args.h"
@@ -123,7 +127,9 @@
 
 #include "catalog/gs_matview.h"
 #include "catalog/gs_matview_dependency.h"
+#include "catalog/pg_snapshot.h"
 #include "catalog/gs_opt_model.h"
+#include "catalog/gs_global_chain.h"
 #ifdef PGXC
 #include "catalog/pgxc_class.h"
 #include "catalog/gs_global_config.h"
@@ -160,8 +166,10 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "threadpool/threadpool.h"
+#include "storage/tcap.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -177,6 +185,7 @@
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 #include "utils/resowner.h"
+#include "utils/evp_cipher.h"
 #include "access/cstore_am.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/makefuncs.h"
@@ -268,6 +277,9 @@ static const FormData_pg_attribute Desc_pg_job_proc[Natts_pg_job_proc] = {Schema
 static const FormData_pg_attribute Desc_pg_object[Natts_pg_object] = {Schema_pg_object};
 static const FormData_pg_attribute Desc_pg_synonym[Natts_pg_synonym] = {Schema_pg_synonym};
 static const FormData_pg_attribute Desc_pg_hashbucket[Natts_pg_hashbucket] = {Schema_pg_hashbucket};
+static const FormData_pg_attribute Desc_pg_snapshot[Natts_pg_snapshot] = {Schema_gs_txn_snapshot};
+static const FormData_pg_attribute Desc_pg_recyclebin[Natts_pg_recyclebin] = {Schema_gs_recyclebin};
+static const FormData_pg_attribute Desc_gs_global_chain[Natts_gs_global_chain] = {Schema_gs_global_chain};
 static const FormData_pg_attribute Desc_gs_global_config[Natts_gs_global_config] = {Schema_gs_global_config};
 static const FormData_pg_attribute Desc_streaming_stream[Natts_streaming_stream] = {Schema_streaming_stream};
 static const FormData_pg_attribute Desc_streaming_cont_query[Natts_streaming_cont_query] = {Schema_streaming_cont_query};
@@ -291,10 +303,12 @@ static const FormData_pg_attribute Desc_gs_column_keys_args[Natts_gs_column_keys
 static const FormData_pg_attribute Desc_gs_encrypted_columns[Natts_gs_encrypted_columns] = {Schema_gs_encrypted_columns};
 static const FormData_pg_attribute Desc_gs_client_global_keys[Natts_gs_client_global_keys] = {Schema_gs_client_global_keys};
 static const FormData_pg_attribute Desc_gs_client_global_keys_args[Natts_gs_client_global_keys_args] = {Schema_gs_client_global_keys_args};
+static const FormData_pg_attribute Desc_gs_encrypted_proc[Natts_gs_encrypted_proc] = {Schema_gs_encrypted_proc};
 
 static const FormData_pg_attribute Desc_gs_opt_model[Natts_gs_opt_model] = {Schema_gs_opt_model};
 static const FormData_pg_attribute Desc_gs_model_warehouse[Natts_gs_model_warehouse] = {Schema_gs_model_warehouse};
 
+static const FormData_pg_attribute Desc_gs_package[Natts_gs_package] = {Schema_gs_package};
 /* Please add to the array in ascending order of oid value */
 static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{DefaultAclRelationId,
                                                                               "pg_default_acl",
@@ -806,6 +820,33 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_pg_obsscaninfo,
         false,
         true},
+    {GsGlobalChainRelationId,
+        "gs_global_chain",
+        GsGlobalChainRelationId_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_global_chain,
+        Desc_gs_global_chain,
+        false,
+        true},
+    {RecyclebinRelationId,
+        "gs_recyclebin",
+        RecyclebinRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_pg_recyclebin,
+        Desc_pg_recyclebin,
+        false,
+        true},
+    {SnapshotRelationId,
+        "gs_txn_snapshot",
+        SnapshotRelation_Rowtype_Id,
+        true,
+        false,
+        Natts_pg_snapshot,
+        Desc_pg_snapshot,
+        false,
+        true},
     {PgxcClassRelationId,
         "pgxc_class",
         PgxcClassRelation_Rowtype_Id,
@@ -1041,6 +1082,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_gs_column_keys_args,
         false,
         true},
+    {ClientLogicProcId,
+        "gs_encrypted_proc",
+        ClientLogicProcId_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_encrypted_proc,
+        Desc_gs_encrypted_proc,
+        false,
+        true},
     {MatviewRelationId,
         "gs_matview",
         MatviewRelationId_Rowtype_Id,
@@ -1066,6 +1116,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         Natts_gs_opt_model,
         Desc_gs_opt_model,
+        false,
+        true},
+    {PackageRelationId,
+        "gs_package",
+        PackageRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_package,
+        Desc_gs_package,
         false,
         true}};
 
@@ -1221,11 +1280,8 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
      * relfilenode of non mapped system relations during decoding.
      */
     snapshot = SnapshotNow;
-    if (HistoricSnapshotActive()) {
-        if (force_non_historic)
-            snapshot = GetNonHistoricCatalogSnapshot(RelationRelationId);
-        else
-            snapshot = GetCatalogSnapshot();
+    if (HistoricSnapshotActive() && !force_non_historic) {
+        snapshot = GetCatalogSnapshot();
     }
 
     /*
@@ -1568,7 +1624,7 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
      * attribute: it must be zero.	This eliminates the need for special cases
      * for attnum=1 that used to exist in fastgetattr() and index_getattr().
      */
-    if (RelationGetNumberOfAttributes(relation) > 0)
+    if (!RelationIsUstoreFormat(relation) && RelationGetNumberOfAttributes(relation) > 0)
         relation->rd_att->attrs[0]->attcacheoff = 0;
 
     /*
@@ -2072,8 +2128,11 @@ static Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
 
     /*  get the table access method type from reloptions
      * and populate them in relation and tuple descriptor */
-    relation->rd_tam_type = get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind);
+    relation->rd_tam_type =
+        get_tableam_from_reloptions(relation->rd_options, relation->rd_rel->relkind, relation->rd_rel->relam);
     relation->rd_att->tdTableAmType = relation->rd_tam_type;
+
+    relation->rd_indexsplit = get_indexsplit_from_reloptions(relation->rd_options, relation->rd_rel->relam);
 
     /* get row level security policies for this relation */
     if (RelationEnableRowSecurity(relation))
@@ -2118,6 +2177,12 @@ static Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
     else
         relation->rd_isscannable = true;
 
+    /* Get createcsn and changecsn from pg_object */
+    ObjectCSN csnInfo = {InvalidCommitSeqNo, InvalidCommitSeqNo};
+    GetObjectCSN(targetRelId, relation, relation->rd_rel->relkind, &csnInfo);
+    relation->rd_createcsn = csnInfo.createcsn;
+    relation->rd_changecsn = csnInfo.changecsn;
+
     /*
      * now we can free the memory allocated for pg_class_tuple
      */
@@ -2128,6 +2193,19 @@ static Relation RelationBuildDesc(Oid targetRelId, bool insertIt, bool buildkey)
      */
     if (!IsCatalogRelation(relation)) {
         relation->rd_mlogoid = find_matview_mlog_table(relid);
+    }
+
+    /*
+     * Check if rel is in blockchain schema.
+     * Only regular table, partition table, replication table, hash table, hash bucket, list table allowed.
+     * Not allowed column orientation, ORC orientation, timeseries, unlog table, temp table etc.
+     */
+    if (relation->rd_id >= FirstNormalObjectId && relation->rd_rel->relkind == RELKIND_RELATION &&
+        IsLedgerNameSpace(relation->rd_rel->relnamespace) && !RelationIsUstoreFormat(relation) &&
+        relation->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT && RelationIsRowFormat(relation)) {
+        relation->rd_isblockchain = true;
+    } else {
+        relation->rd_isblockchain = false;
     }
 
     /*
@@ -2161,13 +2239,22 @@ RelationInitBucketInfo(Relation relation, HeapTuple tuple)
                          &isNull);
     if (isNull) {
         relation->rd_bucketoid = InvalidOid;
+        relation->storage_type = HEAP_DISK;
     } else {
         relation->rd_bucketoid = DatumGetObjectId(datum);
-        Assert(OidIsValid(relation->rd_bucketoid));
+        relation->storage_type = SEGMENT_PAGE;
+        if (relation->rd_bucketoid == VirtualSegmentOid) {
+            relation->rd_bucketoid = InvalidOid;
+        }
+        if (BUCKET_OID_IS_VALID(relation->rd_bucketoid) && RelationIsRelation(relation)) {
+            relation->rd_bucketmapsize = searchBucketMapSizeByOid(relation->rd_bucketoid);
+        } else if (RelationIsRelation(relation) && relation->rd_locator_info != NULL) {
+            relation->rd_bucketmapsize = relation->rd_locator_info->buckets_cnt;
+        }
     }
 }
 
-static int16 *relationGetHBucketKey(HeapTuple tuple, int *nColumn)
+int16 *relationGetHBucketKey(HeapTuple tuple, int *nColumn)
 {
     Datum       bkey_raw;
     bool        isNull = false;
@@ -2327,8 +2414,11 @@ static void RelationInitPhysicalAddr(Relation relation)
                         RelationGetRelationName(relation),
                         relation->rd_id)));
     }
-    
-    relation->rd_node.bucketNode = RELATION_CREATE_BUCKET(relation) ? DIR_BUCKET_ID : InvalidBktId;
+
+    relation->rd_node.bucketNode = InvalidBktId;
+    if (!RelationIsPartitioned(relation) && relation->storage_type == SEGMENT_PAGE) {
+        relation->rd_node.bucketNode = SegmentBktId;
+    }
 }
 
 static void IndexRelationInitKeyNums(Relation relation)
@@ -2509,6 +2599,7 @@ void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple)
     relation->rd_exclprocs = NULL;
     relation->rd_exclstrats = NULL;
     relation->rd_amcache = NULL;
+    relation->rd_rootcache = InvalidBuffer;
 }
 
 /*
@@ -2824,7 +2915,8 @@ static void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     }
 
     /* initialize first attribute's attcacheoff, cf RelationBuildTupleDesc */
-    relation->rd_att->attrs[0]->attcacheoff = 0;
+    if (!RelationIsUstoreFormat(relation))
+        relation->rd_att->attrs[0]->attcacheoff = 0;
 
     /* mark not-null status */
     if (has_not_null) {
@@ -2849,6 +2941,8 @@ static void formrdesc(const char* relationName, Oid relationReltype, bool isshar
     if (IsBootstrapProcessingMode())
         RelationMapUpdateMap(RelationGetRelid(relation), RelationGetRelid(relation), isshared, true);
 
+    relation->storage_type = HEAP_DISK;
+    
     /*
      * initialize the relation lock manager information
      */
@@ -3067,6 +3161,7 @@ static void RelationReloadIndexInfo(Relation relation)
     if (relation->rd_amcache)
         pfree_ext(relation->rd_amcache);
     relation->rd_amcache = NULL;
+    relation->rd_rootcache = InvalidBuffer;
 
     /*
      * If it's a shared index, we might be called before backend startup has
@@ -3106,6 +3201,7 @@ static void RelationReloadIndexInfo(Relation relation)
     RelationParseRelOptions(relation, pg_class_tuple);
     /* fetch bucket info from pgclass tuple */
     RelationInitBucketInfo(relation, pg_class_tuple);
+
     /* We must recalculate physical address in case it changed */
     RelationInitPhysicalAddr(relation);
     relation->rd_isscannable = true;
@@ -3623,6 +3719,12 @@ static void RelationClearRelation(Relation relation, bool rebuild)
 
         /* mlog OID override must be preserved */
         SWAPFIELD(Oid, rd_mlogoid);
+
+        /* newcbi flag and its related information must be preserved */
+        if (newrel->newcbi) {
+            SWAPFIELD(bool, newcbi);
+            relation->rd_node.bucketNode = newrel->rd_node.bucketNode;
+        }
 #undef SWAPFIELD
 
         /* And now we can throw away the temporary entry */
@@ -3862,6 +3964,39 @@ void RelationCloseSmgrByOid(Oid relationId)
         return; /* not in cache, nothing to do */
 
     RelationCloseSmgr(relation);
+}
+
+TransactionId RelationGetRelFrozenxid64(Relation r)
+{
+    Relation classRel;
+    HeapTuple tuple;
+    Datum datum;
+    bool isNull;
+    TransactionId relfrozenxid64;
+
+    tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(RelationGetRelid(r)));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("cache lookup failed for relation %u", RelationGetRelid(r))));
+    }
+
+    classRel = heap_open(RelationRelationId, AccessShareLock);
+
+    datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(classRel), &isNull);
+    if (isNull) {
+        relfrozenxid64 = r->rd_rel->relfrozenxid;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid64) ||
+            !TransactionIdIsNormal(relfrozenxid64))
+            relfrozenxid64 = FirstNormalTransactionId;
+    } else {
+        relfrozenxid64 = DatumGetTransactionId(datum);
+    }
+    
+    heap_close(classRel, AccessShareLock);
+    ReleaseSysCache(tuple);
+
+    return relfrozenxid64;
 }
 
 Oid RelationGetBucketOid(Relation relation)
@@ -4111,7 +4246,7 @@ void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTrans
  */
 Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, TupleDesc tupDesc, Oid relid,
     Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence, char relkind,
-    int8 row_compress, TableAmType tam_type)
+    int8 row_compress, TableAmType tam_type, int8 relindexsplit, StorageType storage_type)
 {
     Relation rel;
     MemoryContext oldcxt;
@@ -4195,6 +4330,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
      */
     rel->rd_att = CreateTupleDescCopy(tupDesc);
     rel->rd_tam_type = tam_type;
+    rel->rd_indexsplit = relindexsplit;
     rel->rd_att->tdTableAmType = tam_type;
     rel->rd_att->tdrefcount = 1; /* mark as refcounted */
     has_not_null = false;
@@ -4275,6 +4411,8 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
         row_compress = REL_CMPRS_NOT_SUPPORT;
     }
     RELATION_SET_CMPRS_ATTR(rel, row_compress);
+
+    rel->storage_type = storage_type;
 
     RelationInitLockInfo(rel); /* see lmgr.c */
 
@@ -4387,6 +4525,7 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
     bool replaces[Natts_pg_class];
     errno_t rc = EOK;
     bool modifyPgClass = !RELATION_IS_GLOBAL_TEMP(relation);
+    bool isbucket;
     /* Indexes, sequences must have Invalid frozenxid; other rels must not */
     Assert(((RelationIsIndex(relation) || relation->rd_rel->relkind == RELKIND_SEQUENCE)
                    ? freezeXid == InvalidTransactionId
@@ -4394,8 +4533,15 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
            relation->rd_rel->relkind == RELKIND_RELATION);
 
     /* Allocate a new relfilenode */
-    newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace, NULL, relation->rd_rel->relpersistence);
-
+    if (!IsSegmentFileNode(relation->rd_node)) {
+        newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace, NULL, relation->rd_rel->relpersistence);
+    } else {
+        /* segment storage */
+        isbucket = BUCKET_OID_IS_VALID(relation->rd_bucketoid) && !RelationIsCrossBucketIndex(relation);
+        newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(relation->rd_rel->reltablespace),
+            u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+    }
+    
     // We must consider cudesc relation and delta relation when it is a CStore relation
     // We skip main partitioned table for setting new filenode, as relcudescrelid and reldeltarelid are zero when
     // constructing partitioned table.
@@ -4451,8 +4597,15 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
     newrnode.node = relation->rd_node;
     newrnode.node.relNode = newrelfilenode;
     newrnode.backend = relation->rd_backend;
+
+    if (RelationIsCrossBucketIndex(relation)) {
+        relation->newcbi = true;
+    }
+
     RelationCreateStorage(newrnode.node, relation->rd_rel->relpersistence,
-        relation->rd_rel->relowner, relation->rd_bucketoid, newrelfilenode, relation);
+        relation->rd_rel->relowner,
+        RelationIsPartitioned(relation) ? InvalidOid : relation->rd_bucketoid,
+        relation);
     smgrclosenode(newrnode);
 
     /*
@@ -4520,6 +4673,93 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
     relation->rd_newRelfilenodeSubid = GetCurrentSubTransactionId();
     /* ... and now we have eoxact cleanup work to do */
     u_sess->relcache_cxt.need_eoxact_work = true;
+}
+
+RelFileNodeBackend CreateNewRelfilenode(Relation relation, TransactionId freezeXid)
+{
+    Oid newrelfilenode;
+    RelFileNodeBackend newrnode;
+
+    /* Allocate a new relfilenode */
+    /*
+     * Create storage for the main fork of the new relfilenode.
+     *
+     * NOTE: any conflict in relfilenode value will be caught here, if
+     * GetNewRelFileNode messes up for any reason.
+     */
+
+    newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace, NULL, relation->rd_rel->relpersistence);
+
+    newrnode.node = relation->rd_node;
+    newrnode.node.relNode = newrelfilenode;
+    newrnode.backend = relation->rd_backend;
+    RelationCreateStorage(
+        newrnode.node, relation->rd_rel->relpersistence, relation->rd_rel->relowner, relation->rd_bucketoid);
+    smgrclosenode(newrnode);
+
+    return newrnode;
+}
+
+void UpdatePgclass(Relation relation, TransactionId freezeXid, const RelFileNodeBackend *rnode)
+{
+    Relation pg_class;
+    HeapTuple tuple;
+    Form_pg_class classform;
+    HeapTuple nctup;
+    Datum values[Natts_pg_class];
+    bool nulls[Natts_pg_class];
+    bool replaces[Natts_pg_class];
+    errno_t rc;
+
+    pg_class = heap_open(RelationRelationId, RowExclusiveLock);
+    tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(RelationGetRelid(relation)));
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("could not find tuple for relation %u", RelationGetRelid(relation))));
+    classform = (Form_pg_class)GETSTRUCT(tuple);
+
+    ereport(LOG,
+        (errmsg("Relation %s(%u) set newfilenode %u oldfilenode %u xid %lu",
+            RelationGetRelationName(relation),
+            RelationGetRelid(relation),
+            rnode->node.relNode,
+            relation->rd_node.relNode,
+            GetCurrentTransactionIdIfAny())));
+
+    classform->relfilenode = rnode->node.relNode;
+
+    /* These changes are safe even for a mapped relation */
+    if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
+        classform->relpages = 0; /* it's empty until further notice */
+        classform->reltuples = 0;
+        classform->relallvisible = 0;
+    }
+
+    /* set classform's relfrozenxid and relfrozenxid64 */
+    classform->relfrozenxid = (ShortTransactionId)InvalidTransactionId;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
+    values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+
+    nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
+
+    simple_heap_update(pg_class, &nctup->t_self, nctup);
+    CatalogUpdateIndexes(pg_class, nctup);
+
+    heap_freetuple_ext(nctup);
+    heap_freetuple_ext(tuple);
+
+    heap_close(pg_class, RowExclusiveLock);
+
+    return;
 }
 
 /*
@@ -5071,7 +5311,7 @@ static void AttrDefaultFetch(Relation relation)
     ScanKeyInit(&skey, Anum_pg_attrdef_adrelid, BTEqualStrategyNumber, F_OIDEQ,
         ObjectIdGetDatum(RelationGetRelid(relation)));
     Relation adrel = heap_open(AttrDefaultRelationId, AccessShareLock);
-    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, SnapshotNow, 1, &skey);
+    SysScanDesc adscan = systable_beginscan(adrel, AttrDefaultIndexId, true, NULL, 1, &skey);
 
     while (HeapTupleIsValid(htup = systable_getnext(adscan))) {
         Form_pg_attrdef adform = (Form_pg_attrdef)GETSTRUCT(htup);
@@ -5218,6 +5458,26 @@ List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal)
     return result;
 }
 
+List* RelationGetLocalCbiList(Relation relation)
+{
+    ListCell* indList = NULL;
+    List* result = NULL;
+    List* indexOidList = RelationGetIndexList(relation);
+    /* Ask the relcache to produce a list of the indexes of the rel */
+    foreach (indList, indexOidList) {
+        Oid indexId = lfirst_oid(indList);
+        Relation currentIndex;
+        /* Open the index relation; use exclusive lock, just to be sure */
+        currentIndex = index_open(indexId, AccessShareLock);
+        if (RelationIsCrossBucketIndex(currentIndex) && !RelationIsGlobalIndex(currentIndex)) {
+            result = insert_ordered_oid(result, indexId);
+        }
+        index_close(currentIndex, AccessShareLock);
+    }
+    list_free_ext(indexOidList);
+    return result;
+}
+
 /*
  * RelationGetIndexList -- get a list of OIDs of indexes on this relation
  *
@@ -5249,7 +5509,7 @@ List* RelationGetSpecificKindIndexList(Relation relation, bool isGlobal)
  * it is the pg_class OID of a unique index on OID when the relation has one,
  * and InvalidOid if there is no such index.
  */
-List* RelationGetIndexList(Relation relation)
+List* RelationGetIndexList(Relation relation, bool inc_unused)
 {
     Relation indrel;
     SysScanDesc indscan;
@@ -5265,7 +5525,7 @@ List* RelationGetIndexList(Relation relation)
     Assert(!RelationIsBucket(relation) && !RelationIsPartition(relation));
 
     /* Quick exit if we already computed the list. */
-    if (relation->rd_indexvalid != 0)
+    if (relation->rd_indexvalid != 0 && !inc_unused)
         return list_copy(relation->rd_indexlist);
 
     bool isNull = false;
@@ -5313,7 +5573,7 @@ List* RelationGetIndexList(Relation relation)
          * HOT-safety decisions.  It's unsafe to touch such an index at all
          * since its catalog entries could disappear at any instant.
          */
-        if (!IndexIsLive(index))
+        if (!IndexIsLive(index) && !inc_unused)
             continue;
 
         /* Add index's OID to result list in the proper order */
@@ -5371,7 +5631,10 @@ List* RelationGetIndexList(Relation relation)
     heap_close(indrel, AccessShareLock);
 
     /* Now save a copy of the completed list in the relcache entry. */
-    SaveCopyList(relation, result, oidIndex);
+    if (!inc_unused) {
+        SaveCopyList(relation, result, oidIndex);
+    }
+    
     return result;
 }
 
@@ -6011,6 +6274,61 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
 }
 
 /*
+ * IndexGetAttrBitmap -- get a bitmap of the given index's attribute columns
+ *
+ * The result has a bit set for each attribute used in the index.
+ *
+ * Caller had better hold at least RowShareLock on the index to ensure that
+ * the index columns won't be changed by DDL statements.
+ *
+ * The returned result is palloc'd in the caller's memory context and should
+ * be bms_free'd when not needed anymore.
+ */
+Bitmapset* IndexGetAttrBitmap(Relation relation, IndexInfo *indexInfo)
+{
+    Bitmapset* indexattrs = NULL;
+    MemoryContext oldcxt;
+
+    /* make sure relation is a index relation */
+    Assert(relation->rd_rel->relam != 0);
+
+    /*
+     * Quick exit if we already computed the result.
+     *      Note: this field is shared with heap relation.
+     */
+    if (relation->rd_indexattr != NULL) {
+        return bms_copy(relation->rd_indexattr);
+    }
+
+    /* Collect simple attribute references */
+    for (int i = 0; i < indexInfo->ii_NumIndexAttrs; i++) {
+        int attrnum = indexInfo->ii_KeyAttrNumbers[i];
+        /*
+         * Since we have covering indexes with non-key columns, we must
+         * handle them accurately here. non-key columns must be added into
+         * indexattrs, since they are in index, and HOT-update shouldn't
+         * miss them.
+         */
+        if (attrnum != 0) {
+            indexattrs = bms_add_member(indexattrs, attrnum - FirstLowInvalidHeapAttributeNumber);
+        }
+    }
+
+    /* Collect all attributes used in expressions, too */
+    pull_varattnos((Node*)indexInfo->ii_Expressions, 1, &indexattrs);
+
+    /* Collect all attributes in the index predicate, too */
+    pull_varattnos((Node*)indexInfo->ii_Predicate, 1, &indexattrs);
+
+    /* Now save copies of the bitmaps in the relcache entry */
+    oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    relation->rd_indexattr = bms_copy(indexattrs);
+    (void)MemoryContextSwitchTo(oldcxt);
+
+    return indexattrs;
+}
+
+/*
  * RelationGetExclusionInfo -- get info about index's exclusion constraint
  *
  * This should be called only for an index that is known to have an
@@ -6194,7 +6512,7 @@ static bool load_relcache_init_file(bool shared)
     int i;
     errno_t rc;
 
-    if (shared)
+    if (shared) 
         rc = snprintf_s(initfilename,
             sizeof(initfilename),
             sizeof(initfilename) - 1,
@@ -6209,6 +6527,7 @@ static bool load_relcache_init_file(bool shared)
             u_sess->proc_cxt.DatabasePath,
             RELCACHE_INIT_FILENAME,
             GRAND_VERSION_NUM);
+    
     securec_check_ss(rc, "\0", "\0");
 
     fp = AllocateFile(initfilename, PG_BINARY_R);
@@ -6356,7 +6675,7 @@ static bool load_relcache_init_file(bool shared)
             if (len > HEAPTUPLESIZE + MaxIndexTuplesPerPage) {
                 goto read_failed;
             }
-            rel->rd_indextuple = (HeapTuple)palloc(len);
+            rel->rd_indextuple = (HeapTuple)heaptup_alloc(len);
             if (fread(rel->rd_indextuple, 1, len, fp) != len)
                 goto read_failed;
 
@@ -6507,6 +6826,7 @@ static bool load_relcache_init_file(bool shared)
         rel->rd_createSubid = InvalidSubTransactionId;
         rel->rd_newRelfilenodeSubid = InvalidSubTransactionId;
         rel->rd_amcache = NULL;
+        rel->rd_rootcache = InvalidBuffer;
         rel->pgstat_info = NULL;
 
         /*
@@ -6952,7 +7272,7 @@ static void unlink_initfile(const char* initfilename)
     }
 }
 
-List* PartitionGetPartIndexList(Partition part)
+List* PartitionGetPartIndexList(Partition part, bool inc_unused)
 {
     Relation partrel;
     SysScanDesc indscan;
@@ -7015,7 +7335,7 @@ List* PartitionGetPartIndexList(Partition part)
         /*
          * Ignore any indexes that are currently being dropped or unusable index
          */
-        if (!IndexIsLive(indexform)) {
+        if (!IndexIsLive(indexform) && !inc_unused) {
             ReleaseSysCache(classTup);
             ReleaseSysCache(indexTup);
             continue;
@@ -7383,3 +7703,40 @@ Relation tuple_get_rel(HeapTuple pg_class_tuple, LOCKMODE lockmode, TupleDesc tu
     }
     return relation;
 }
+
+void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info)
+{
+    Assert(tde_info != NULL);
+    errno_t rc = 0;
+    rc = memset_s(tde_info, sizeof(TdeInfo), 0, sizeof(TdeInfo));
+    securec_check(rc, "\0", "\0");
+
+    const char* dek_cipher = RelationGetDekCipher(rel);
+    const char* cmk_id = RelationGetCmkId(rel);
+    const char* algo = RelationGetAlgo(rel);
+    Assert(dek_cipher != NULL);
+    Assert(cmk_id != NULL);
+    Assert(algo != NULL);
+
+    if (dek_cipher == NULL || cmk_id == NULL || algo == NULL) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+            errmsg("Failed to get tde info from relation \"%s\".", RelationGetRelationName(rel)),
+            errdetail("N/A"),
+            errcause("System error."),
+            erraction("Contact engineer to support.")));
+        return;
+    }
+
+    rc = strcpy_s(tde_info->dek_cipher, DEK_CIPHER_LEN, dek_cipher);
+    securec_check(rc, "\0", "\0");
+    rc = strcpy_s(tde_info->cmk_id, CMK_ID_LEN, cmk_id);
+    securec_check(rc, "\0", "\0");
+    if (pg_strcasecmp((char*)algo, "AES_128_CTR") == 0) {
+        tde_info->algo = (uint8)TDE_ALGO_AES_128_CTR;
+    } else if (pg_strcasecmp((char*)algo, "SM4_CTR") == 0) {
+        tde_info->algo = (uint8)TDE_ALGO_SM4_CTR;
+    } else {
+        tde_info->algo = (uint8)TDE_ALGO_NONE;
+    }
+}
+

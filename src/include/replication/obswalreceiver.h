@@ -28,6 +28,7 @@
 #include "postgres.h"
 #include "access/xlogdefs.h"
 #include "replication/walprotocol.h"
+#include "replication/slot.h"
 
 
 extern int32 pg_atoi(char* s, int size, int c);
@@ -47,18 +48,20 @@ extern void obs_disconnect(void);
 #define OBS_XLOG_SLICE_FILE_SIZE (OBS_XLOG_SLICE_BLOCK_SIZE + OBS_XLOG_SLICE_HEADER_SIZE)
 #define OBS_XLOG_SAVED_FILES_NUM 25600 /* 100G*1024*1024*1024/OBS_XLOG_SLICE_BLOCK_SIZE */
 #define IS_DISASTER_RECOVER_MODE \
-    (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&  !XLogArchivingActive() && getObsReplicationSlot())
+    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && getObsRecoverySlot())
 #define IS_CNDISASTER_RECOVER_MODE \
-    (IS_PGXC_COORDINATOR &&  !XLogArchivingActive() && getObsReplicationSlot())
+    (IS_PGXC_COORDINATOR  && getObsRecoverySlot())
 
 
 extern int obs_replication_receive(XLogRecPtr startPtr, char **buffer,
                                     int *bufferLength, int timeout_ms, char* inner_buff);
 extern int obs_replication_archive(const ArchiveXlogMessage *xlogInfo);
-extern int obs_replication_cleanup(XLogRecPtr recPtr);
+extern void obs_update_archive_start_end_location_file(XLogRecPtr endPtr, TimestampTz endTime);
+extern int obs_replication_cleanup(XLogRecPtr recPtr, ObsArchiveConfig *obs_config = NULL);
 extern void update_recovery_barrier();
 extern void update_stop_barrier();
-extern int obs_replication_get_last_xlog(ArchiveXlogMessage *xloginfo);
-extern bool obs_replication_read_barrier(const char* barrierFile, char* barrierOut);
+extern int obs_replication_get_last_xlog(ArchiveXlogMessage *xloginfo, ObsArchiveConfig* archive_obs);
+extern bool obs_replication_read_file(const char* fileName, char* content, int contentLen, const char *slotName = NULL);
+extern char* get_local_key_cn(void);
 
 #endif

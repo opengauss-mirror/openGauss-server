@@ -1,0 +1,56 @@
+-- test simple lock for update
+create table test_lock_for_update (c1 int) with (storage_type=USTORE);
+insert into test_lock_for_update values (1);
+\parallel on 2
+begin
+    delete from test_lock_for_update;
+    perform pg_sleep(2);
+end;
+/
+declare
+    col1 int;
+begin
+    perform pg_sleep(1);
+    select c1 into col1 from test_lock_for_update for update;
+    raise notice 'count is %', col1;
+end;
+/
+\parallel off
+WARNING:  UHeapLockTuple returned 5
+CONTEXT:  SQL statement "select c1           from test_lock_for_update for update"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+WARNING:  UHeapLockTuple returned 4
+CONTEXT:  SQL statement "select c1           from test_lock_for_update for update"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+ERROR:  query returned no rows when process INTO
+CONTEXT:  PL/pgSQL function inline_code_block line 4 at SQL statement
+drop table test_lock_for_update;
+-- test lock for update / update concurrently
+create table test_lock_for_update (c1 int) with (storage_type=USTORE);
+insert into test_lock_for_update values (1);
+\parallel on 2
+begin
+    update test_lock_for_update set c1 = 2;
+    perform pg_sleep(2);
+end;
+/
+declare
+    col1 int;
+begin
+    perform pg_sleep(1);
+    select c1 into col1 from test_lock_for_update for update;
+    raise notice 'col1 is %', col1;
+end;
+/
+\parallel off
+WARNING:  UHeapLockTuple returned 5
+CONTEXT:  SQL statement "select c1           from test_lock_for_update for update"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+WARNING:  UHeapLockTuple returned 3
+CONTEXT:  SQL statement "select c1           from test_lock_for_update for update"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+WARNING:  UHeapLockTuple returned 3
+CONTEXT:  SQL statement "select c1           from test_lock_for_update for update"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+NOTICE:  col1 is 2
+drop table test_lock_for_update;

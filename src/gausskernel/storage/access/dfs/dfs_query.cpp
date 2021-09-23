@@ -173,7 +173,7 @@ OpExpr *MakeOperatorExpression(Var *variable, int16 strategyNumber)
     Oid typeModId = variable->vartypmod;
     Oid collationId = variable->varcollid;
 
-    Oid accessMethodId = BTREE_AM_OID;
+    Oid accessMethodId = BTREE_AM_OID; 
     Oid OpId = InvalidOid;
     Const *ConstValue = NULL;
     OpExpr *expr = NULL;

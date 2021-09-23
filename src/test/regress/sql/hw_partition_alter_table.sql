@@ -577,13 +577,13 @@ ALTER TABLE TEST_CON ADD CONSTRAINT TEST_EXCLUDE_VALID EXCLUDE (A WITH =); -- ER
 -- ERROR: unique index columns must contain the partition key and the collation must be default collation
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A)) LOCAL;
 --ERROR: partitioned table does not support global index
-CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A));
+-- NEEDTOADJUST -- CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A));
 
 -- partitioned index does not support partial index
 -- ERROR: syntax error at or near "LOCAL"
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100) LOCAL;
 -- ERROR: partitioned table does not support global index
-CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100);
+-- NEEDTOADJUST -- CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100);
 
 -- partitioned index does not support b-tree index without default sort ordering
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A DESC NULLS LAST) LOCAL;

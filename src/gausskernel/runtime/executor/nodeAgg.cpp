@@ -129,7 +129,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
@@ -2064,6 +2064,7 @@ AggState* ExecInitAgg(Agg* node, EState* estate, int eflags)
     if (node->aggstrategy == AGG_HASHED)
         eflags &= ~EXEC_FLAG_REWIND;
     outerPlan = outerPlan(node);
+
     outerPlanState(aggstate) = ExecInitNode(outerPlan, estate, eflags);
 
     /*
@@ -2693,7 +2694,8 @@ void ExecReScanAgg(AggState* node)
     errno_t rc;
 
     /* Already reset, just rescan lefttree */
-    if (node->ss.ps.recursive_reset && node->ss.ps.state->es_recursive_next_iteration) {
+    bool isRescan = node->ss.ps.recursive_reset && node->ss.ps.state->es_recursive_next_iteration;
+    if (isRescan) {
         if (node->ss.ps.lefttree->chgParam == NULL)
             ExecReScan(node->ss.ps.lefttree);
 

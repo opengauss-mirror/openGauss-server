@@ -16,7 +16,7 @@
 #include "dfsdesc.h"
 #include "storage/dfs/dfs_connector.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "storage/lmgr.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
@@ -26,14 +26,15 @@
 #define DFS_STOR_FLAG  -1
 
 extern void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid = InvalidOid,
-                                  Oid relfilenode=InvalidOid, Relation rel = NULL);
+    Relation rel = NULL);
 extern void RelationDropStorage(Relation rel, bool isDfsTruncate = false);
 extern void RelationPreserveStorage(RelFileNode rnode, bool atCommit);
 extern void RelationTruncate(Relation rel, BlockNumber nblocks);
 extern void PartitionTruncate(Relation parent, Partition  part, BlockNumber nblocks);
 extern void PartitionDropStorage(Relation rel, Partition part);
-extern void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid, Oid relfilenode);
-extern void BucketDropStorage(Relation relation, Partition partition);
+extern void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid);
+extern void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,
+    _in_ Oid ownerid, _in_ bool atCommit, _in_ bool isDfsTruncate = false, Relation rel = NULL);
 
 #ifdef ENABLE_MULTIPLE_NODES
 namespace Tsdb {
@@ -54,9 +55,9 @@ extern void DfsStoreRelCreateStorage(RelFileNode* rnode, AttrNumber attrnum, cha
  * naming
  */
 extern void smgrDoPendingDeletes(bool isCommit);
-extern int	smgrGetPendingDeletes(bool forCommit, ColFileNodeRel **ptr);
+extern int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel **ptr, bool skipTemp, int *numTempRel);
 extern void AtSubCommit_smgr(void);
-extern void AtSubAbort_smgr(void);
+extern void AtSubAbort_smgr();
 extern void PostPrepare_smgr(void);
 
 extern void InsertIntoPendingDfsDelete(const char* filename, bool atCommit, Oid ownerid, uint64 filesize);

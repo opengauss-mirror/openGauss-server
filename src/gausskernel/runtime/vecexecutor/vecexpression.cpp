@@ -28,9 +28,9 @@
 #include "access/tupconvert.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
-#include "executor/execdebug.h"
-#include "executor/nodeSubplan.h"
-#include "executor/nodeAgg.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeSubplan.h"
+#include "executor/node/nodeAgg.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -55,6 +55,7 @@
 #include "pgxc/pgxc.h"
 #endif
 #include "postmaster/fencedudf.h"
+#include "catalog/pg_proc_fn.h"
 
 extern void initVectorFcache(Oid foid, Oid input_collation, FuncExprState* fcache, MemoryContext fcacheCxt);
 
@@ -1497,9 +1498,6 @@ static ScalarVector* ExecEvalVecHashFilter(
     int null_value_dn_index = (NULL != hfstate->nodelist) ? hfstate->nodelist[0]
                                                           : /* fetch first dn in group's dn list */
                                   0;                        /* fetch first dn index */
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
 
     /* Get hash value for each row, and deside whether it filter or not. */
     for (rowindex = 0; rowindex < econtext->align_rows; rowindex++) {
@@ -1514,7 +1512,8 @@ static ScalarVector* ExecEvalVecHashFilter(
             }
         } else {
             // pick up exec node based on bucket list in pgxc_group
-            modulo = hfstate->bucketMap[(unsigned int)abs((int)hashValue[rowindex]) & (uint32)(BUCKETDATALEN - 1)];
+            modulo = hfstate->bucketMap[(unsigned int)abs((int)hashValue[rowindex]) & 
+                                        (uint32)(hfstate->bucketCnt - 1)];
             nodeIndex = hfstate->nodelist[modulo];
 
             SET_NOTNULL(pVector->m_flag[rowindex]);
@@ -2752,6 +2751,10 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                         ptr = DispatchCoerceIOFunc<CSTRINGOID>(outputFunc);
                         break;
 
+                    case NAMEOID:
+                        ptr = DispatchCoerceIOFunc<NAMEOID>(outputFunc);
+                        break;
+                    
                     default:
                         ptr = DispatchCoerceIOFunc<VARCHAROID>(outputFunc);
                         break;
@@ -2866,11 +2869,12 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 if (HeapTupleIsValid(tp)) {
                     Form_pg_proc functup = (Form_pg_proc)GETSTRUCT(tp);
                     int nargs;
+                    oidvector* proargs = ProcedureGetArgTypes(tp);
                     nargs = functup->pronargs;
                     mstate->cfunc.genericRuntime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
                     InitGenericFunRuntimeInfo(*(mstate->cfunc.genericRuntime), nargs);
                     for (int j = 0; j < nargs; j++) {
-                        mstate->cfunc.genericRuntime->args[j].argType = functup->proargtypes.values[j];
+                        mstate->cfunc.genericRuntime->args[j].argType = proargs->values[j];
                     }
 
                     ReleaseSysCache(tp);
@@ -2921,7 +2925,9 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
             }
 
             hstate->arg = outlist;
-            hstate->bucketMap = get_bucketmap_by_execnode(parent->plan->exec_nodes, parent->state->es_plannedstmt);
+            hstate->bucketMap = get_bucketmap_by_execnode(parent->plan->exec_nodes, 
+                                                          parent->state->es_plannedstmt, 
+                                                          &hstate->bucketCnt);
             hstate->nodelist = (uint2*)palloc(list_length(htest->nodeList) * sizeof(uint2));
             foreach (l, htest->nodeList)
                 hstate->nodelist[idx++] = lfirst_int(l);
@@ -3127,11 +3133,12 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                     if (HeapTupleIsValid(tp)) {
                         Form_pg_proc functup = (Form_pg_proc)GETSTRUCT(tp);
                         int nargs;
+                        oidvector* proargs = ProcedureGetArgTypes(tp);
                         nargs = functup->pronargs;
                         rstate->funcs[i].genericRuntime = (GenericFunRuntime*)palloc0(sizeof(GenericFunRuntime));
                         InitGenericFunRuntimeInfo(*(rstate->funcs[i].genericRuntime), nargs);
                         for (int j = 0; j < nargs; j++) {
-                            rstate->funcs[i].genericRuntime->args[j].argType = functup->proargtypes.values[j];
+                            rstate->funcs[i].genericRuntime->args[j].argType = proargs->values[j];
                         }
 
                         ReleaseSysCache(tp);

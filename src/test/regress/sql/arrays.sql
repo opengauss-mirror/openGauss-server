@@ -103,7 +103,6 @@ SELECT a,b,c FROM arrtest ORDER BY a, b, c;
 -- test array extension
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 -- CREATE TEMP TABLE arrtest1 (i int[], t text[]);
 CREATE  TABLE arrtest1 (i int[], t text[]);

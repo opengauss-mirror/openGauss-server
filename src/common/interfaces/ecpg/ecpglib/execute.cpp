@@ -158,7 +158,7 @@ static enum ARRAY_TYPE ecpg_is_type_an_array(int type, const struct statement* s
 
     if ((stmt->connection->cache_head) == NULL) {
         /*
-         * Text like types are not an array for ecpg, but postgres counts them
+         * Text like types are not an array for ecpg, but openGauss counts them
          * as an array. This define reminds you to not 'correct' these values.
          */
 #define not_an_array_in_ecpg ECPG_ARRAY_NONE

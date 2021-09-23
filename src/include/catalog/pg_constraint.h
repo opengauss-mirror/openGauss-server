@@ -37,7 +37,7 @@ CATALOG(pg_constraint,2606) BKI_SCHEMA_MACRO
      * conname + connamespace is deliberately not unique; we allow, for
      * example, the same name to be used for constraints of different
      * relations.  This is partly for backwards compatibility with past
-     * Postgres practice, and partly because we don't want to have to obtain a
+     * openGauss practice, and partly because we don't want to have to obtain a
      * global lock to generate a globally unique name for a nameless
      * constraint.    We associate a namespace with constraint names only for
      * SQL-spec compatibility.

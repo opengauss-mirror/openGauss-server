@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * prs2lock.h
- *	  data structures for POSTGRES Rule System II (rewrite rules only)
+ *	  data structures for openGauss Rule System II (rewrite rules only)
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California

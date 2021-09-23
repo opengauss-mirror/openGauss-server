@@ -394,7 +394,7 @@ int parse_version(const char* versionString)
 }
 
 /*
- * Deconstruct the text representation of a 1-dimensional Postgres array
+ * Deconstruct the text representation of a 1-dimensional openGauss array
  * into individual items.
  *
  * On success, returns true and sets *itemarray and *nitems to describe

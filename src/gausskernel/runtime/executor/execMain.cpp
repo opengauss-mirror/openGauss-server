@@ -46,12 +46,13 @@
 #include "access/tableam.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/ustore/knl_uheap.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/namespace.h"
 #include "commands/trigger.h"
-#include "executor/execdebug.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "foreign/fdwapi.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
@@ -90,6 +91,8 @@
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
 #endif
+#include "gs_ledger/ledger_utils.h"
+#include "gs_policy/gs_policy_masking.h"
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
 THR_LOCAL ExecutorStart_hook_type ExecutorStart_hook = NULL;
@@ -123,7 +126,7 @@ static void ExecuteVectorizedPlan(EState *estate, PlanState *planstate, CmdType 
 static bool ExecCheckRTEPerms(RangeTblEntry *rte);
 static bool ExecCheckRTEPermsModified(Oid relOid, Oid userid, Bitmapset *modifiedCols, AclMode requiredPerms);
 void ExecCheckXactReadOnly(PlannedStmt *plannedstmt);
-static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree);
+static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree, bool isUHeap = false);
 
 extern char* ExecBuildSlotValueDescription(
     Oid reloid, TupleTableSlot *slot, TupleDesc tupdesc, Bitmapset *modifiedCols, int maxfieldlen);
@@ -173,7 +176,6 @@ static void report_iud_time(QueryDesc *query)
         if (OidIsValid(rid) == false || rid < FirstNormalObjectId) {
             continue;
         }
-
         Relation rel = NULL;
         rel = heap_open(rid, AccessShareLock);
         if (rel->rd_rel->relkind == RELKIND_RELATION) {
@@ -295,10 +297,8 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
 
-#ifdef ENABLE_LLVM_COMPILE
     /* Initialize the actual CodeGenObj */
     CodeGenThreadRuntimeSetup();
-#endif
 
     /*
      * Fill in external parameters, if any, from queryDesc; and allocate
@@ -362,8 +362,8 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
         estate->es_bloom_filter.bfarray = (filter::BloomFilter **)palloc0(bloom_size * sizeof(filter::BloomFilter *));
     }
 #ifdef ENABLE_MULTIPLE_NODES
-    /* statement always start from CN */
-    if (IS_PGXC_COORDINATOR) {
+    /* statement always start from CN or dn connected by client directly. */
+    if (IS_PGXC_COORDINATOR || IsConnFromApp()) {
 #else
     /* statement always start in non-stream thread */
     if (!StreamThreadAmI()) {
@@ -540,7 +540,6 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
      */
     old_context = MemoryContextSwitchTo(estate->es_query_cxt);
 
-#ifdef ENABLE_LLVM_COMPILE
     /*
      * Generate machine code for this query.
      */
@@ -553,7 +552,6 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
             CodeGenThreadRuntimeCodeGenerate();
         }
     }
-#endif
 
     /* Allow instrumentation of Executor overall runtime */
     if (queryDesc->totaltime) {
@@ -585,8 +583,10 @@ void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long co
 
     if (queryDesc->plannedstmt->bucketMap != NULL) {
         u_sess->exec_cxt.global_bucket_map = queryDesc->plannedstmt->bucketMap[0];
+        u_sess->exec_cxt.global_bucket_cnt = queryDesc->plannedstmt->bucketCnt[0];
     } else {
         u_sess->exec_cxt.global_bucket_map = NULL;
+        u_sess->exec_cxt.global_bucket_cnt = 0;
     }
 
     (void)INSTR_TIME_SET_CURRENT(starttime);
@@ -715,7 +715,7 @@ void ExecutorEnd(QueryDesc *queryDesc)
 
 /*
  * description: get the plan node id of stream thread
- * return value: 0: in postgres thread
+ * return value: 0: in openGauss thread
  *             >=1: in stream thread
  */
 int ExecGetPlanNodeid(void)
@@ -764,11 +764,9 @@ void standard_ExecutorEnd(QueryDesc *queryDesc)
     UnregisterSnapshot(estate->es_snapshot);
     UnregisterSnapshot(estate->es_crosscheck_snapshot);
 
-#ifdef ENABLE_LLVM_COMPILE
     if (!t_thrd.codegen_cxt.g_runningInFmgr) {
         CodeGenThreadTearDown();
     }
-#endif
 
     /*
      * Must switch out of context before destroying it
@@ -936,6 +934,14 @@ static bool ExecCheckRTEPerms(RangeTblEntry *rte)
             gstrace_exit(GS_TRC_ID_ExecCheckRTEPerms);
             return true;
         }
+    }
+
+    /*
+     * If relation is in ledger schema, avoid procedure or function on it.
+     */
+    if (u_sess->SPI_cxt._connected > -1 && is_ledger_usertable(rte->relid)) {
+        gstrace_exit(GS_TRC_ID_ExecCheckRTEPerms);
+        return false;
     }
 
     /*
@@ -1309,6 +1315,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
      * Initialize the executor's tuple table to empty.
      */
     estate->es_tupleTable = NIL;
+    estate->es_epqTupleSlot = NULL;
     estate->es_trig_tuple_slot = NULL;
     estate->es_trig_oldtup_slot = NULL;
     estate->es_trig_newtup_slot = NULL;
@@ -1446,6 +1453,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
         destroyPruningResult(estate->pruningResult);
         estate->pruningResult = NULL;
     }
+
     /*
      * Get the tuple descriptor describing the type of tuples to return.
      */
@@ -1516,6 +1524,11 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
 
     switch (resultRel->rd_rel->relkind) {
         case RELKIND_RELATION:
+            if (u_sess->exec_cxt.is_exec_trigger_func && is_ledger_related_rel(resultRel)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("cannot change ledger relation \"%s\"", RelationGetRelationName(resultRel))));
+            }
             /* OK */
             break;
         case RELKIND_SEQUENCE:
@@ -2433,12 +2446,16 @@ void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
         for (attrChk = 1; attrChk <= natts; attrChk++) {
             if (tupdesc->attrs[attrChk - 1]->attnotnull && tableam_tslot_attisnull(slot, attrChk)) {
                 char *val_desc = NULL;
+                bool rel_masked = u_sess->attr.attr_security.Enable_Security_Policy &&
+                    is_masked_relation_enabled(RelationGetRelid(rel));
 
                 insertedCols = GetInsertedColumns(resultRelInfo, estate);
                 updatedCols = GetUpdatedColumns(resultRelInfo, estate);
                 modifiedCols = bms_union(insertedCols, updatedCols);
-                val_desc =
-                    ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
+                if (!rel_masked) {
+                    val_desc =
+                        ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
+                }
 
                 ereport(ERROR, (errcode(ERRCODE_NOT_NULL_VIOLATION),
                     errmsg("null value in column \"%s\" violates not-null constraint",
@@ -2458,13 +2475,32 @@ void ExecConstraints(ResultRelInfo *resultRelInfo, TupleTableSlot *slot, EState 
     }
 
     char *val_desc = NULL;
+    bool rel_masked = u_sess->attr.attr_security.Enable_Security_Policy &&
+        is_masked_relation_enabled(RelationGetRelid(rel));
     insertedCols = GetInsertedColumns(resultRelInfo, estate);
     updatedCols = GetUpdatedColumns(resultRelInfo, estate);
     modifiedCols = bms_union(insertedCols, updatedCols);
-    val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
-    ereport(ERROR, (errcode(ERRCODE_CHECK_VIOLATION),
-        errmsg("new row for relation \"%s\" violates check constraint \"%s\"", RelationGetRelationName(rel), failed),
-        val_desc ? errdetail("Failing row contains %s.", val_desc) : 0));
+    if (!rel_masked) {
+        val_desc = ExecBuildSlotValueDescription(RelationGetRelid(rel), slot, tupdesc, modifiedCols, maxfieldlen);
+    }
+    /* client_min_messages < NOTICE show error details. */
+    if (client_min_messages < NOTICE) {
+        ereport(ERROR, 
+            (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CHECK_VIOLATION),
+                errmsg("new row for relation \"%s\" violates check constraint \"%s\"",
+                    RelationGetRelationName(rel), failed),
+                val_desc ? errdetail("Failing row contains %s.", val_desc) : 0,
+                errcause("some rows copy failed"),
+                erraction("check table defination")));
+    } else {
+        ereport(ERROR, 
+            (errmodule(MOD_EXECUTOR), errcode(ERRCODE_CHECK_VIOLATION),
+                errmsg("new row for relation \"%s\" violates check constraint \"%s\"",
+                    RelationGetRelationName(rel), failed),
+                errdetail("N/A"),
+                errcause("some rows copy failed"),
+                erraction("set client_min_messages = info for more details")));
+    }
 }
 
 /*
@@ -2687,6 +2723,43 @@ ExecAuxRowMark *ExecBuildAuxRowMark(ExecRowMark *erm, List *targetlist)
     return aerm;
 }
 
+TupleTableSlot *EvalPlanQualUHeap(EState *estate, EPQState *epqstate, Relation relation, Index rti, ItemPointer tid,
+    TransactionId priorXmax)
+{
+    TupleTableSlot *slot     = NULL;
+    UHeapTuple     copyTuple = NULL;
+
+    Assert(rti > 0);
+
+    copyTuple =
+        UHeapLockUpdated(estate->es_output_cid, relation, LockTupleExclusive, tid, priorXmax, estate->es_snapshot);
+
+    if (copyTuple == NULL) {
+        return NULL;
+    }
+
+    Assert(copyTuple->tupTableType = UHEAP_TUPLE);
+
+    *tid = copyTuple->ctid;
+
+    EvalPlanQualBegin(epqstate, estate);
+
+    EvalPlanQualSetTuple(epqstate, rti, copyTuple);
+
+    EvalPlanQualFetchRowMarks(epqstate);
+
+    slot = EvalPlanQualNext(epqstate);
+
+    // materialize the slot
+    if (!TupIsNull(slot)) {
+        ExecGetUHeapTupleFromSlot(slot);
+    }
+
+    EvalPlanQualSetTuple(epqstate, rti, NULL);
+
+    return slot;
+}
+
 /*
  * EvalPlanQual logic --- recheck modified tuple(s) to see if we want to
  * process the updated version under READ COMMITTED rules.
@@ -2713,15 +2786,15 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
     TransactionId priorXmax, bool partRowMoveUpdate)
 {
     TupleTableSlot *slot = NULL;
-    HeapTuple copyTuple;
+    Tuple copyTuple;
 
     Assert(rti > 0);
 
     /*
      * Get and lock the updated version of the row; if fail, return NULL.
      */
-    copyTuple = heap_lock_updated(estate->es_output_cid, 
-        relation, LockTupleExclusive, tid, priorXmax);
+    copyTuple = tableam_tuple_lock_updated(estate->es_output_cid, relation, LockTupleExclusive, tid, priorXmax,
+        estate->es_snapshot);
 
     if (copyTuple == NULL) {
         /*
@@ -2744,7 +2817,7 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
      * For UPDATE/DELETE we have to return tid of actual row we're executing
      * PQ for.
      */
-    *tid = copyTuple->t_self;
+    *tid = ((HeapTuple)copyTuple)->t_self;
 
     /*
      * Need to run a recheck subquery.	Initialize or reinitialize EPQ state.
@@ -2775,7 +2848,7 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
      * is to guard against early re-use of the EPQ query.
      */
     if (!TupIsNull(slot)) {
-        (void)ExecMaterializeSlot(slot);
+        (void)tableam_tslot_get_tuple_from_slot(relation, slot);
     }
 
     /*
@@ -3028,6 +3101,7 @@ void EvalPlanQualInit(EPQState *epqstate, EState *estate, Plan *subplan, List *a
     epqstate->plan = subplan;
     epqstate->arowMarks = auxrowmarks;
     epqstate->epqParam = epqParam;
+    epqstate->parentestate = estate;
 }
 
 /*
@@ -3050,7 +3124,7 @@ void EvalPlanQualSetPlan(EPQState *epqstate, Plan *subplan, List *auxrowmarks)
  *
  * NB: passed tuple must be palloc'd; it may get freed later
  */
-void EvalPlanQualSetTuple(EPQState *epqstate, Index rti, HeapTuple tuple)
+void EvalPlanQualSetTuple(EPQState *epqstate, Index rti, Tuple tuple)
 {
     EState *estate = epqstate->estate;
     Assert(rti > 0);
@@ -3069,11 +3143,189 @@ void EvalPlanQualSetTuple(EPQState *epqstate, Index rti, HeapTuple tuple)
 /*
  * Fetch back the current test tuple (if any) for the specified RTI
  */
-HeapTuple EvalPlanQualGetTuple(EPQState *epqstate, Index rti)
+Tuple EvalPlanQualGetTuple(EPQState *epqstate, Index rti)
 {
     EState *estate = epqstate->estate;
     Assert(rti > 0);
     return estate->es_epqTuple[rti - 1];
+}
+
+/*
+ * Return, and create if necessary, a slot for an EPQ test tuple.
+ */
+TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index rti)
+{
+    TupleTableSlot **slot;
+
+    // To adapt inplacetuple and tuple,we have to use slot instead of tuple here
+    slot = &epqstate->estate->es_epqTupleSlot[rti - 1];
+
+    if (*slot == NULL) {
+        MemoryContext oldcontext = MemoryContextSwitchTo(epqstate->parentestate->es_query_cxt);
+
+        *slot = ExecAllocTableSlot(&epqstate->estate->es_tupleTable, TAM_USTORE);
+        if (relation)
+            ExecSetSlotDescriptor(*slot, RelationGetDescr(relation));
+        else
+            ExecSetSlotDescriptor(*slot, epqstate->origslot->tts_tupleDescriptor);
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    (*slot)->tts_tupslotTableAm = TAM_USTORE;
+
+    return *slot;
+}
+
+void EvalPlanQualFetchRowMarksUHeap(EPQState *epqstate)
+{
+    ListCell *l = NULL;
+    UHeapTupleData utuple;
+
+    union {
+        UHeapDiskTupleData hdr;
+        char data[MaxPossibleUHeapTupleSize];
+    } tbuf;
+
+    errno_t errorno = EOK;
+    errorno = memset_s(&tbuf, sizeof(tbuf), 0, sizeof(tbuf));
+    securec_check(errorno, "\0", "\0");
+    utuple.disk_tuple = &(tbuf.hdr);
+
+    Assert(epqstate->origslot != NULL);
+
+    foreach (l, epqstate->arowMarks) {
+        ExecAuxRowMark *aerm = (ExecAuxRowMark *)lfirst(l);
+        ExecRowMark *erm = aerm->rowmark;
+        Datum datum;
+        bool isNull;
+        TupleTableSlot *slot = NULL;
+        Oid tableoid = InvalidOid;
+
+        if (RowMarkRequiresRowShareLock(erm->markType)) {
+            elog(ERROR, "EvalPlanQual doesn't support locking rowmarks");
+        }
+
+        /* clear any leftover test tuple for this rel */
+        slot = EvalPlanQualUSlot(epqstate, erm->relation, erm->rti);
+        ExecClearTuple(slot);
+
+        if (erm->rti != erm->prti) {
+            datum = ExecGetJunkAttribute(epqstate->origslot, aerm->toidAttNo, &isNull);
+
+            if (isNull) {
+                continue;
+            }
+
+            tableoid = DatumGetObjectId(datum);
+            if (tableoid != RelationGetRelid(erm->relation)) {
+                continue;
+            }
+        }
+
+        if (erm->markType == ROW_MARK_REFERENCE) {
+            Assert(erm->relation != NULL);
+
+            if (RELATION_IS_PARTITIONED(erm->relation)) {
+                datum = ExecGetJunkAttribute(epqstate->origslot, aerm->toidAttNo, &isNull);
+
+                /* non-locked rels could be on the inside of outer joins */
+                if (isNull) {
+                    continue;
+                }
+                tableoid = DatumGetObjectId(datum);
+            }
+
+            datum = ExecGetJunkAttribute(epqstate->origslot, aerm->ctidAttNo, &isNull);
+
+            /* non-locked rels could be on the inside of outer joins */
+            if (isNull) {
+                continue;
+            }
+
+            /* fetch requests on foreign tables must be passed to their FDW */
+            if (erm->relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE) {
+            } else if (RELATION_IS_PARTITIONED(erm->relation)) {
+            } else {
+                if (!UHeapFetchRow(erm->relation, (ItemPointer)DatumGetPointer(datum), epqstate->estate->es_snapshot,
+                    slot, &utuple)) {
+                    elog(ERROR, "failed to fetch tuple for EvalPlanQual recheck");
+                }
+            }
+        } else {
+            if (erm->markType == ROW_MARK_COPY) {
+                HeapTupleData tuple;
+                HeapTupleHeader td;
+
+                Assert(erm->markType == ROW_MARK_COPY);
+
+                /* fetch the whole-row Var for the relation */
+                datum = ExecGetJunkAttribute(epqstate->origslot, aerm->wholeAttNo, &isNull);
+
+                /* non-locked rels could be on the inside of outer joins */
+                if (isNull) {
+                    continue;
+                }
+
+                td = DatumGetHeapTupleHeader(datum);
+                tuple.t_len = HeapTupleHeaderGetDatumLength(td);
+                tuple.t_self = td->t_ctid;
+                tuple.t_data = td;
+
+                ExecClearTuple(slot);
+
+                tableam_tops_deform_tuple(&tuple, slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+                ExecStoreVirtualTuple(slot);
+            } else {
+                Assert(erm->markType == ROW_MARK_COPY_DATUM);
+
+                HeapTupleHeader td;
+                HeapTupleData tuple;
+                MemoryContext oldcxt;
+                TupleDesc tupdesc;
+
+                Datum *data = (Datum *)palloc0(sizeof(Datum) * erm->numAttrs);
+                bool *null = (bool *)palloc0(sizeof(bool) * erm->numAttrs);
+
+                oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+                tupdesc = (TupleDesc)palloc0(sizeof(tupleDesc));
+                MemoryContextSwitchTo(oldcxt);
+
+                for (int i = 0; i < erm->numAttrs; i++) {
+                    data[i] = ExecGetJunkAttribute(epqstate->origslot, aerm->wholeAttNo + i, &null[i]);
+                }
+
+                tupdesc->natts = erm->numAttrs;
+                tupdesc->attrs = &epqstate->origslot->tts_tupleDescriptor->attrs[aerm->wholeAttNo - 1];
+                tupdesc->tdhasoid = false;
+                ExecSetSlotDescriptor(slot, tupdesc);
+
+                if (!slot->tts_per_tuple_mcxt) {
+                    slot->tts_per_tuple_mcxt = AllocSetContextCreate(slot->tts_mcxt, "SlotPerTupleMcxt",
+                        ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+                }
+
+                /*
+                 * This memory is freed during ExecClearTuple().
+                 * Note that we cannot free tmptuple right after deform_tuple because
+                 * values in slot->tts_values would be pointing to it.
+                 */
+                oldcxt = MemoryContextSwitchTo(slot->tts_per_tuple_mcxt);
+                HeapTuple tmptuple = heap_form_tuple(tupdesc, data, null);
+                MemoryContextSwitchTo(oldcxt);
+
+                td = (HeapTupleHeader)((char *)tmptuple + HEAPTUPLESIZE);
+                tuple.t_len = HeapTupleHeaderGetDatumLength(td);
+                tuple.t_self = td->t_ctid;
+                tuple.t_data = td;
+                pfree_ext(data);
+                pfree_ext(null);
+
+                tableam_tops_deform_tuple(&tuple, slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+                ExecStoreVirtualTuple(slot);
+            }
+        }
+    }
 }
 
 /*
@@ -3189,7 +3441,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
             }
 
             /* successful, copy and store tuple */
-            EvalPlanQualSetTuple(epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
+            EvalPlanQualSetTuple(epqstate, erm->rti, tableam_tops_copy_tuple(&tuple));
             ReleaseBuffer(buffer);
         } else {
             HeapTupleHeader td;
@@ -3234,7 +3486,7 @@ void EvalPlanQualFetchRowMarks(EPQState *epqstate)
             tuple.t_data = td;
 
             /* copy and store tuple */
-            EvalPlanQualSetTuple(epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
+            EvalPlanQualSetTuple(epqstate, erm->rti, tableam_tops_copy_tuple(&tuple));
         }
     }
 }
@@ -3256,14 +3508,14 @@ TupleTableSlot *EvalPlanQualNext(EPQState *epqstate)
 /*
  * Initialize or reset an EvalPlanQual state tree
  */
-void EvalPlanQualBegin(EPQState *epqstate, EState *parentestate)
+void EvalPlanQualBegin(EPQState *epqstate, EState *parentestate, bool isUHeap)
 {
     EState *estate = epqstate->estate;
     errno_t rc = 0;
 
     if (estate == NULL) {
         /* First time through, so create a child EState */
-        EvalPlanQualStart(epqstate, parentestate, epqstate->plan);
+        EvalPlanQualStart(epqstate, parentestate, epqstate->plan, isUHeap);
     } else {
         /*
          * We already have a suitable child EPQ tree, so just reset it.
@@ -3299,25 +3551,8 @@ void EvalPlanQualBegin(EPQState *epqstate, EState *parentestate)
  * This is a cut-down version of ExecutorStart(): we copy some state from
  * the top-level estate rather than initializing it fresh.
  */
-static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree)
+void Setestate(EState *estate, EState *parentestate)
 {
-    EState *estate = NULL;
-    int rtsize;
-    MemoryContext old_context;
-    ListCell *l = NULL;
-
-    rtsize = list_length(parentestate->es_range_table);
-
-    epqstate->estate = estate = CreateExecutorState();
-
-    old_context = MemoryContextSwitchTo(estate->es_query_cxt);
-
-    /*
-     * Child EPQ EStates share the parent's copy of unchanging state such as
-     * the snapshot, rangetable, result-rel info, and external Param info.
-     * They need their own copies of local state, including a tuple table,
-     * es_param_exec_vals, etc.
-     */
     estate->es_direction = ForwardScanDirection;
     estate->es_snapshot = parentestate->es_snapshot;
     estate->es_crosscheck_snapshot = parentestate->es_crosscheck_snapshot;
@@ -3349,6 +3584,27 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *pl
      * already set from other parts of the parent's plan tree.
      */
     estate->es_param_list_info = parentestate->es_param_list_info;
+}
+
+static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *planTree, bool isUHeap)
+{
+    EState *estate = NULL;
+    int rtsize;
+    MemoryContext old_context;
+    ListCell *l = NULL;
+
+    rtsize = list_length(parentestate->es_range_table);
+
+    epqstate->estate = estate = CreateExecutorState();
+
+    old_context = MemoryContextSwitchTo(estate->es_query_cxt);
+    Setestate(estate, parentestate);
+    /*
+     * Child EPQ EStates share the parent's copy of unchanging state such as
+     * the snapshot, rangetable, result-rel info, and external Param info.
+     * They need their own copies of local state, including a tuple table,
+     * es_param_exec_vals, etc.
+     */
     if (parentestate->es_plannedstmt->nParamExec > 0) {
         int i = parentestate->es_plannedstmt->nParamExec;
 
@@ -3370,7 +3626,7 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *pl
         estate->es_epqTuple = parentestate->es_epqTuple;
         estate->es_epqTupleSet = parentestate->es_epqTupleSet;
     } else {
-        estate->es_epqTuple = (HeapTuple *)palloc0(rtsize * sizeof(HeapTuple));
+        estate->es_epqTuple = (Tuple *)palloc0(rtsize * sizeof(HeapTuple));
         estate->es_epqTupleSet = (bool *)palloc0(rtsize * sizeof(bool));
     }
 
@@ -3378,6 +3634,13 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate, Plan *pl
      * Each estate also has its own tuple table.
      */
     estate->es_tupleTable = NIL;
+
+    if (isUHeap) {
+        if (estate->es_epqTupleSlot == NULL) {
+            estate->es_epqTupleSlot =
+                (TupleTableSlot **)MemoryContextAllocZero(CurrentMemoryContext, rtsize * sizeof(TupleTableSlot *));
+        }
+    }
 
     /*
      * Initialize private state information for each SubPlan.  We must do this

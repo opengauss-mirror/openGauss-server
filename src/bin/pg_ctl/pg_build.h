@@ -49,6 +49,7 @@ int find_gucoption(
 void get_conninfo(const char* filename);
 
 extern PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term = 0);
+extern PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 term = 0);
 int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 extern int replconn_num;
@@ -58,6 +59,7 @@ extern ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
 char** readfile(const char* path);
 extern char* pg_strdup(const char* in);
 extern void pg_free(void* ptr);
+extern bool GetPaxosValue(const char *filename);
 extern void get_slot_name(char* slotname, size_t len);
 extern bool libpqRotateCbmFile(PGconn* connObj, XLogRecPtr lsn);
 extern int fsync_fname(const char *fname, bool isdir);

@@ -23,7 +23,7 @@
 #include "miscadmin.h"
 #include "access/tableam.h"
 #include "executor/executor.h"
-#include "executor/nodeSubplan.h"
+#include "executor/node/nodeSubplan.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "utils/array.h"
@@ -241,6 +241,16 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
         planstate->chgParam = bms_add_member(planstate->chgParam, paramid);
     }
 
+    /*   
+     * When the correlated subplan is running under vector engine, subplan should skip early free
+     * OrigValue stores the value of the outermost subplan, should also skip early deinit consumer.
+     */
+    bool orig_early_free = planstate->state->es_skip_early_free;
+    bool orig_early_deinit = planstate->state->es_skip_early_deinit_consumer;
+
+    planstate->state->es_skip_early_free = true;
+    planstate->state->es_skip_early_deinit_consumer = true;
+
     /*
      * Now that we've set up its parameters, we can reset the subplan.
      */
@@ -269,16 +279,6 @@ static Datum ExecScanSubPlan(SubPlanState* node, ExprContext* econtext, bool* is
      */
     result = BoolGetDatum(sub_link_type == ALL_SUBLINK);
     *isNull = false;
-
-    /*
-     * When the correlated subplan is running under vector engine, subplan should skip early free
-     * OrigValue stores the value of the outermost subplan, should also skip early deinit consumer.
-     */
-    bool orig_early_free = planstate->state->es_skip_early_free;
-    bool orig_early_deinit = planstate->state->es_skip_early_deinit_consumer;
-
-    planstate->state->es_skip_early_free = true;
-    planstate->state->es_skip_early_deinit_consumer = true;
 
     for (slot = ExecProcNode(planstate); !TupIsNull(slot); slot = ExecProcNode(planstate)) {
         TupleDesc tdesc = slot->tts_tupleDescriptor;
@@ -489,16 +489,16 @@ void buildSubPlanHash(SubPlanState* node, ExprContext* econtext)
     oldcontext = MemoryContextSwitchTo(econtext->ecxt_per_query_memory);
 
     /*
-     * Reset subplan to start.
-     */
-    ExecReScan(planstate);
-
-    /*
      * Scan the subplan and load the hash table(s).  Note that when there are
      * duplicate rows coming out of the sub-select, only one copy is stored.
      */
     bool orig_early_free = planstate->state->es_skip_early_free;
     planstate->state->es_skip_early_free = true;
+
+    /*
+     * Reset subplan to start.
+     */
+    ExecReScan(planstate);
 
     for (slot = ExecProcNode(planstate); !TupIsNull(slot); slot = ExecProcNode(planstate)) {
         int col = 1;

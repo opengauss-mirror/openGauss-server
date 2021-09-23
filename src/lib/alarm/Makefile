@@ -46,7 +46,7 @@ alarmclient.a: $(OBJS)
 	
 utalarm: $(OBJS)
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) -o libutalarm.so
-	mv libutalarm.so $(top_builddir)/src/distribute/test/ut/lib
+	mv libutalarm.so $(top_builddir)/../distribute/test/ut/lib
 	
 install: all installdirs
 	$(INSTALL_DATA) alarmItem.conf '$(DESTDIR)$(bindir)/alarmItem.conf'

@@ -37,7 +37,7 @@
 #include "miscadmin.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/snapmgr.h"
 #include "nodes/parsenodes.h"
@@ -130,10 +130,10 @@ inline PlannedStmt* GetPlanStmt(Query* query, ParamListInfo params)
 #ifdef ENABLE_MULTIPLE_NODES
     plan = pg_plan_query(query, 0, NULL);
 #else
-    int outerdop = u_sess->attr.attr_sql.query_dop_tmp;
-    u_sess->attr.attr_sql.query_dop_tmp = 1;
+    int outerdop = u_sess->opt_cxt.query_dop;
+    u_sess->opt_cxt.query_dop = 1;
     plan = pg_plan_query(query, 0, params);
-    u_sess->attr.attr_sql.query_dop_tmp = outerdop;
+    u_sess->opt_cxt.query_dop = outerdop;
 #endif
     return plan;
 }
@@ -263,7 +263,7 @@ int64 MlogGetMaxSeqno(Oid mlogid)
     indexScan = index_beginscan(mlog, mlogidx, SnapshotAny, 0, 0);
     index_rescan(indexScan, NULL, 0, NULL, 0);
 
-    while ((tuple = index_getnext(indexScan, BackwardScanDirection)) != NULL) {
+    if ((tuple = (HeapTuple)index_getnext(indexScan, BackwardScanDirection)) != NULL) {
         Datum num = heap_getattr(tuple,
                                 MlogAttributeSeqno,
                                 RelationGetDescr(mlog),
@@ -275,7 +275,6 @@ int64 MlogGetMaxSeqno(Oid mlogid)
                     errmsg("seqno should not be NULL when scan mlog table")));
         }
         result = DatumGetInt64(num);
-        break;
     }
 
     list_free_ext(indexoidlist);
@@ -406,7 +405,7 @@ static void ExecHandleIncIndex(TupleTableSlot *slot, Relation matview, HeapTuple
     estate->es_result_relation_info = relinfo;
     ExecOpenIndices(relinfo, false);
 
-    indexes = ExecInsertIndexTuples(slot, &(copy_tuple->t_self), estate, NULL, NULL, InvalidBktId, NULL);
+    indexes = ExecInsertIndexTuples(slot, &(copy_tuple->t_self), estate, NULL, NULL, InvalidBktId, NULL, NULL);
 
     ExecCloseIndices(relinfo);
     (void)MemoryContextSwitchTo(old_context);
@@ -487,7 +486,8 @@ static void ExecutorMatDelete(Oid matviewid, ItemPointer ctid)
  * 1. find matview tuple in matmap based on relid, rel_ctid and matviewid
  * 2. delete tuple from matview based on ctid from matmap.
  */
-static void ExecutorMatMapDelete(Oid mapid, Oid relid, ItemPointer rel_ctid, Oid matviewid, TransactionId xmin)
+static void ExecutorMatMapDelete(Oid mapid, Oid relid, ItemPointer rel_ctid,
+                                Oid matviewid, TransactionId xmin , bool qualsExist)
 {
     SysScanDesc scan;
     HeapTuple tuple;
@@ -541,7 +541,8 @@ static void ExecutorMatMapDelete(Oid mapid, Oid relid, ItemPointer rel_ctid, Oid
                     RelationGetRelationName(mapRel))));
         }
     } else {
-        ereport(WARNING,
+        int mode = qualsExist ? DEBUG2 : WARNING;
+        ereport(mode,
                 (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                 errmsg("Not found ctid(%d, %d), xmin is %lu of relid %u in matviewmap %s when ExecutorMatMapDelete",
                 ItemPointerGetBlockNumber(rel_ctid),
@@ -591,7 +592,7 @@ static bool mlog_form_tuple(Relation mlog, HeapTuple mlogTup, Relation rel, Heap
  * For every tuple pullup from mlog-table execute epq.
  */
 static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid relid,
-                                Datum curtime, Relation matview, Oid mapid)
+                                Datum curtime, Relation matview, Oid mapid, bool qualsExist)
 {
     char act;
     Oid indexoid;
@@ -634,7 +635,7 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
     indexScan = index_beginscan(mlog, mlogidx, GetTransactionSnapshot(), 0, 0);
     index_rescan(indexScan, NULL, 0, NULL, 0);
 
-    while ((tuple = index_getnext(indexScan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)index_getnext(indexScan, ForwardScanDirection)) != NULL) {
         Datum refreshTime = heap_getattr(tuple,
                                         MlogAttributeTime,
                                         RelationGetDescr(mlog),
@@ -683,7 +684,7 @@ static void ExecutorMatRelInc(QueryDesc* queryDesc, Index index, Oid mlogid, Oid
                  */
                 CommandCounterIncrement();
 
-                ExecutorMatMapDelete(mapid, relid, c_ptr, mvid, xid);
+                ExecutorMatMapDelete(mapid, relid, c_ptr, mvid, xid, qualsExist);
             } else if (mlog_form_tuple(mlog, tuple, rel, &reltuple)) {
                 HeapTuple copyTuple = reltuple;
                 copyTuple->t_self = *c_ptr;
@@ -750,6 +751,8 @@ static void ExecutorRefreshMatInc(QueryDesc* queryDesc, Query *query,
     /* find all based rels. */
     relids = pull_up_rels_recursive((Node *)query);
 
+    bool qualsExist = CheckMatviewQuals(query);
+
     foreach (lc, relids) {
         relid = (Oid)lfirst_oid(lc);
 
@@ -766,7 +769,7 @@ static void ExecutorRefreshMatInc(QueryDesc* queryDesc, Query *query,
             continue;
         }
 
-        ExecutorMatRelInc(queryDesc, index, mlogid, relid, curtime, matview, mapid);
+        ExecutorMatRelInc(queryDesc, index, mlogid, relid, curtime, matview, mapid, qualsExist);
     }
 
     return;
@@ -1169,7 +1172,14 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
         scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
 
         while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+            HeapTuple tmpTuple = NULL;
             /* here we want handle every tuple. */
+            if (rel->rd_tam_type == TAM_USTORE) {
+                tmpTuple = UHeapToHeap(rel->rd_att, (UHeapTuple)tuple);
+                tmpTuple->t_xid_base = ((UHeapTuple)tuple)->t_xid_base;
+                HeapTupleSetXmin(tmpTuple, ((UHeapTuple)tuple)->disk_tuple->xid);
+                tuple = tmpTuple;
+            }
             HeapTuple copyTuple = heap_copytuple(tuple);
 
             /*
@@ -1186,6 +1196,10 @@ static void ExecCreateMatInc(QueryDesc*queryDesc, Query *query, Relation matview
             EvalPlanQualSetTuple(epqstate, index, copyTuple);
             ExecutorMatEpqs(epqstate, copyTuple, relid, mapid, HeapTupleGetRawXmin(copyTuple), matview, ActionCreateMat);
             EvalPlanQualSetTuple(epqstate, index, NULL);
+            if (tmpTuple != NULL) {
+                tableam_tops_free_tuple(tmpTuple);
+                tmpTuple = NULL;
+            }
         }
 
         tableam_scan_end(scan);
@@ -1577,7 +1591,6 @@ static Oid create_mlog_table(Oid relid)
         NULL,
         REL_CMPRS_NOT_SUPPORT,
         NULL,
-        NULL,
         true);
 
     /* make the mlog relation visible, else heap_open will fail */
@@ -1602,6 +1615,7 @@ static Oid create_mlog_table(Oid relid)
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
+    indexInfo->ii_ParallelWorkers = 0;
 
     collationObjectId[0] = InvalidOid;
     classObjectId[0] = INT8_BTREE_OPS_OID;
@@ -1629,7 +1643,8 @@ static Oid create_mlog_table(Oid relid)
         true,
         false,
         false,
-        &extra);
+        &extra,
+        false);
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR) {
@@ -1801,7 +1816,6 @@ Oid create_matview_map(Oid matviewoid)
         NULL,
         REL_CMPRS_NOT_SUPPORT,
         NULL,
-        NULL,
         true);
 
     CommandCounterIncrement();
@@ -1826,6 +1840,7 @@ Oid create_matview_map(Oid matviewoid)
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
+    indexInfo->ii_ParallelWorkers = 0;
 
     Oid collationObjectId[3] = {InvalidOid, InvalidOid, InvalidOid};
     Oid classObjectId[3] = {OID_BTREE_OPS_OID, OID_BTREE_OPS_OID, GetDefaultOpClass(TIDOID, BTREE_AM_OID)};
@@ -1853,7 +1868,8 @@ Oid create_matview_map(Oid matviewoid)
                         true,
                         false,
                         false,
-                        &extra);
+                        &extra,
+                        false);
 
     heap_close(mapRel, ShareLock);
 
@@ -2115,7 +2131,7 @@ static void update_mlog_time_all(Oid mlogid, Datum curtime)
     indexScan = index_beginscan(mlog, mlogidx, SnapshotNow, 0, 0);
     index_rescan(indexScan, NULL, 0, NULL, 0);
 
-    while ((tuple = index_getnext(indexScan, ForwardScanDirection)) != NULL) {
+    while ((tuple = (HeapTuple)index_getnext(indexScan, ForwardScanDirection)) != NULL) {
         Datum refreshTime = heap_getattr(tuple,
                                         MlogAttributeTime,
                                         RelationGetDescr(mlog),
@@ -2415,6 +2431,13 @@ void check_basetable(Query *query, bool isCreateMatview, bool isIncremental)
 #endif
 
             Relation rel = heap_open(rte->relid, AccessShareLock);
+            if (RelationisEncryptEnable(rel)) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("create matview on TDE table failed"),
+                            errdetail("materialized views do not support TDE feature"),
+                                errcause("create materialized views is not supported on TDE table"),
+                                    erraction("check CREATE syntax about create the materialized views")));
+            }
             if (RelationUsesLocalBuffers(rel)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

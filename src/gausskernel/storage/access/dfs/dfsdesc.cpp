@@ -902,7 +902,7 @@ void DFSDescHandler::FlushDelMap()
     Assert(NewTup);
     if (NewTup) {
         Result = tableam_tuple_update(DfsDescRel, NULL, &OldTupCtid, NewTup, GetCurrentCommandId(true),
-                                      InvalidSnapshot, InvalidSnapshot, true, &tmfd, NULL, false);
+                                      InvalidSnapshot, InvalidSnapshot, true, NULL, &tmfd, NULL, NULL, false);
 
         switch (Result) {
             case TM_SelfModified: {

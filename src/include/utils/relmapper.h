@@ -34,8 +34,19 @@
 #define RELMAPPER_FILENAME_BAK "pg_filenode.map.backup"
 
 #define RELMAPPER_FILEMAGIC 0x592717 /* version ID value */
+#define RELMAPPER_FILEMAGIC_4K 0x592718 /* version ID value */
 
-#define MAX_MAPPINGS 62 /* 62 * 8 + 16 = 512 */
+#define IS_NEW_RELMAP(magic) (magic == RELMAPPER_FILEMAGIC_4K)
+#define IS_MAGIC_EXIST(magic) (magic == RELMAPPER_FILEMAGIC_4K || magic == RELMAPPER_FILEMAGIC)
+
+#define MAX_MAPPINGS 62         /* old relmap 62 * 8 + 16 = 512 */
+#define MAX_MAPPINGS_4K 510     /* new relmap 510 * 8 + 16 = 4096 */
+
+#define MAPPING_LEN_OLDMAP_HEAD (offsetof(RelMapFile, mappings) + MAX_MAPPINGS * sizeof(RelMapping))
+#define MAPPING_LEN_TAIL (8)
+
+#define RELMAP_SIZE_OLD (MAPPING_LEN_OLDMAP_HEAD + MAPPING_LEN_TAIL)
+#define RELMAP_SIZE_NEW (sizeof(RelMapFile))
 
 typedef struct RelMapping {
     Oid mapoid;      /* OID of a catalog */
@@ -45,11 +56,16 @@ typedef struct RelMapping {
 typedef struct RelMapFile {
     int32 magic;        /* always RELMAPPER_FILEMAGIC */
     int32 num_mappings; /* number of valid RelMapping entries */
-    RelMapping mappings[MAX_MAPPINGS];
+    RelMapping mappings[MAX_MAPPINGS_4K];  /* old relmap only use MAX_MAPPINGS */
     int32 crc; /* CRC of all above */
     int32 pad; /* to make the struct size be 512 exactly */
 } RelMapFile;
 
+typedef struct RelMapVerTag {
+    int32 relMagic;
+    int32 relMaxMappings;
+    int32 relSize;
+} RelMapVerTag;
 /* ----------------
  *		relmap-related XLOG entries
  * ----------------

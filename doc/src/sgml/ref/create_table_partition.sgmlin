@@ -25,7 +25,9 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
 PARTITION BY { 
 	{VALUES (partition_key)} | 
 	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_less_than_item [, ... ] )} |
-	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_start_end_item [, ... ] )}
+	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_start_end_item [, ... ] )} |
+	{LIST | HASH (partition_key) (PARTITION partition_name [VALUES (list_values_clause)] opt_table_space )}
+	NOTICE: LIST/HASH partition is only avaliable in CENTRALIZED mode!
 } [ { ENABLE | DISABLE } ROW MOVEMENT ];
 
 where column_constraint can be:

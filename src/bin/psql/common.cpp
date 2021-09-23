@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "postgres_fe.h"
 #include "common.h"
+#include "libpq/pqexpbuffer.h"
 
 #include <ctype.h>
 #include <signal.h>
@@ -29,6 +30,10 @@
 
 #ifndef WIN32
 #include "libpq/libpq-int.h"
+#endif
+
+#ifdef ENABLE_UT
+#define static
 #endif
 
 bool canAddHist = true;
@@ -456,6 +461,39 @@ void ResetCancelConn(void)
 #endif
 }
 
+static bool ISPGresultValid(const PGresult* result)
+{
+    bool ret = false;
+    
+    if (!result) {
+        return false;
+    }
+    
+    switch (PQresultStatus(result)) {
+        case PGRES_COMMAND_OK:
+        case PGRES_TUPLES_OK:
+        case PGRES_EMPTY_QUERY:
+        case PGRES_COPY_IN:
+        case PGRES_COPY_OUT:
+            /* Fine, do nothing */
+            ret = true;
+            break;
+
+        case PGRES_BAD_RESPONSE:
+        case PGRES_NONFATAL_ERROR:
+        case PGRES_FATAL_ERROR:
+            ret = false;
+            break;
+
+        default:
+            ret = false;
+            psql_error("unexpected PQresultStatus: %d\n", PQresultStatus(result));
+            break;
+    }
+
+    return ret;
+}
+
 /*
  * AcceptResult
  *
@@ -466,56 +504,69 @@ void ResetCancelConn(void)
  */
 static bool AcceptResult(const PGresult* result, bool print_error)
 {
-    bool OK = false;
+    bool valid = ISPGresultValid(result);
 
-    if (NULL == result)
-        OK = false;
-    else
-        switch (PQresultStatus(result)) {
-            case PGRES_COMMAND_OK:
-            case PGRES_TUPLES_OK:
-            case PGRES_EMPTY_QUERY:
-            case PGRES_COPY_IN:
-            case PGRES_COPY_OUT:
-                /* Fine, do nothing */
-                OK = true;
-                break;
-
-            case PGRES_BAD_RESPONSE:
-            case PGRES_NONFATAL_ERROR:
-            case PGRES_FATAL_ERROR:
-                OK = false;
-                break;
-
-            default:
-                OK = false;
-                psql_error("unexpected PQresultStatus: %d\n", PQresultStatus(result));
-                break;
-        }
-
-    if (!OK) {
-        const char* error = PQerrorMessage(pset.db);
-
-        if (strlen(error)) {
-            // If the query need retry, should not report error.
-            //
-            if (pset.max_retry_times > 0 && PQTRANS_IDLE == PQtransactionStatus(pset.db) &&
-                IsQueryNeedRetry((const char*)pset.db->last_sqlstate) && pset.retry_times < pset.max_retry_times) {
-                // Cache the sqlstate and set retry on.
-                //
-                errno_t ss_rc = strcpy_s(pset.retry_sqlstate, sizeof(pset.retry_sqlstate), pset.db->last_sqlstate);
-                securec_check_c(ss_rc, "\0", "\0");
-                pset.retry_on = true;
-            } else if (print_error) {
-                psql_error("%s", error);
-            }
-        }
-
-        (void)CheckConnection();
+    if (valid) {
+        return true;
     }
 
-    return OK;
+    const char* error = PQerrorMessage(pset.db);
+
+    if (strlen(error)) {
+        // If the query need retry, should not report error.
+        if (pset.max_retry_times > 0 && PQTRANS_IDLE == PQtransactionStatus(pset.db) &&
+            IsQueryNeedRetry((const char*)pset.db->last_sqlstate) && pset.retry_times < pset.max_retry_times) {
+            // Cache the sqlstate and set retry on.
+            errno_t ss_rc = strcpy_s(pset.retry_sqlstate, sizeof(pset.retry_sqlstate), pset.db->last_sqlstate);
+            securec_check_c(ss_rc, "\0", "\0");
+            pset.retry_on = true;
+        } else if (print_error) {
+            psql_error("%s", error);
+        }
+    }
+
+    (void)CheckConnection();
+
+    return valid;
 }
+
+/*
+ * AcceptResultWithErrMsg
+ *
+ * Checks whether a result is valid, giving an error to errMsg if necessary;
+ * and ensures that the connection to the backend is still up.
+ *
+ * Returns true for valid result, false for error state.
+ */
+
+static bool AcceptResultWithErrMsg(const PGresult* result, 
+                                           const char** errMsg, PGconn* conn)
+{
+    bool valid = ISPGresultValid(result);
+
+    if (valid) {
+        return true;
+    }
+
+    const char* error = PQerrorMessage(conn);
+    if (strlen(error)) {
+        // If the query need retry, should not report error.
+        if (pset.max_retry_times > 0 && PQTRANS_IDLE == PQtransactionStatus(conn) &&
+            IsQueryNeedRetry((const char*)conn->last_sqlstate) && pset.retry_times < pset.max_retry_times) {
+
+            // Cache the sqlstate and set retry on.
+            errno_t ssRc = strcpy_s(pset.retry_sqlstate, sizeof(pset.retry_sqlstate), conn->last_sqlstate);
+            securec_check_c(ssRc, "\0", "\0");
+            pset.retry_on = true;
+        }
+        *errMsg = error;
+    }
+
+    (void)CheckConnection();
+    
+    return valid;
+}
+
 
 /*
  * PSQLexec
@@ -937,10 +988,8 @@ static bool CheckPoolerConnectionStatus()
     if (decode_pwd != NULL) {
         rc = memset_s(decode_pwd, strlen(decode_pwd), 0, strlen(decode_pwd));
         securec_check_c(rc, "\0", "\0");
-        if (decode_pwd != NULL) {
-            OPENSSL_free(decode_pwd);
-            decode_pwd = NULL;
-        }
+        OPENSSL_free(decode_pwd);
+        decode_pwd = NULL;
 
         // Revert the old value for next retry connection.
         pset.connInfo.values[3] = old_conninfo_values;
@@ -1263,6 +1312,300 @@ bool SendQuery(const char* query, bool is_print, bool print_error)
     PrintNotifications();
 
     return OK;
+}
+
+/*
+ * SendQuery: send the query string to the backend
+ * (and print out results)
+ *
+ * Note: This is the "front door" way to send a query. That is, use it to
+ * send queries actually entered by the user. These queries will be subject to
+ * single step mode.
+ * To send "the door in back" queries (generated by slash commands, etc.) in a
+ * controlled way, use PSQLexec().
+ *
+ * print_error: Should gsql print error message to stderr with this query ?
+ *
+ * Returns true if the query executed successfully, false otherwise.
+ */
+static void* StartCopyFrom(void *arg)
+{
+    auto *copyarg = (CopyInArgs *) arg;
+    PGresult* results = NULL;
+    bool success = true;
+    PGresult* next_result = NULL;
+    bool first_cycle = true;
+    PQExpBufferData errMsgBuff;
+    const char* errMsg = NULL;
+    char* retMsg = nullptr;
+    
+    initPQExpBuffer(&errMsgBuff);
+
+    pthread_mutex_lock(copyarg->stream_mutex);
+    
+    results = PQexec(copyarg->conn, "START TRANSACTION");
+    if (PQresultStatus(results) != PGRES_COMMAND_OK) {
+        printfPQExpBuffer(&errMsgBuff, "%s", PQerrorMessage(copyarg->conn));
+        PQclear(results);
+
+        copyarg->result = false;
+        pthread_mutex_unlock(copyarg->stream_mutex);
+        retMsg = pg_strdup(errMsgBuff.data);
+        termPQExpBuffer(&errMsgBuff);
+        return retMsg;
+    }
+
+    PQclear(results);
+    
+    results = PQexec(copyarg->conn, copyarg->query);
+    pthread_mutex_unlock(copyarg->stream_mutex);
+
+    do {
+        ExecStatusType result_status;
+        bool is_copy = false;
+
+        if (!AcceptResultWithErrMsg(results, &errMsg, copyarg->conn)) {
+            /*
+             * Failure at this point is always a server-side failure or a
+             * failure to submit the command string.  Either way, we're
+             * finished with this command string.
+             */
+            success = false;
+            if (errMsg) {
+                appendPQExpBufferStr(&errMsgBuff, errMsg);
+            }
+            break;
+        }
+
+        result_status = PQresultStatus(results);
+        switch (result_status) {
+            case PGRES_EMPTY_QUERY:
+            case PGRES_COMMAND_OK:
+            case PGRES_TUPLES_OK:
+                is_copy = false;
+                break;
+
+            case PGRES_COPY_IN:
+                is_copy = true;
+                break;
+
+            default:
+                /* AcceptResult() should have caught anything else. */
+                is_copy = false;
+                printfPQExpBuffer(&errMsgBuff, "unexpected PQresultStatus: %d\n", result_status);
+                break;
+        }
+
+        if (is_copy) {
+            /*
+             * Marshal the COPY data.  Either subroutine will get the
+             * connection out of its COPY state, then call PQresultStatus()
+             * once and report any error.
+             */
+            success = ParallelCopyIn(copyarg, &errMsg) && success;
+            
+            if (errMsg) {
+                appendPQExpBufferStr(&errMsgBuff, errMsg);
+            }
+
+            /*
+             * Call PQgetResult() once more.  In the typical case of a
+             * single-command string, it will return NULL.	Otherwise, we'll
+             * have other results to process that may include other COPYs.
+             */
+            PQclear(results);
+            results = next_result = PQgetResult(copyarg->conn);
+        } else if (first_cycle) {
+            /* fast path: no COPY commands; PQexec visited all results */
+            break;
+        } else if ((next_result = PQgetResult(copyarg->conn)) != NULL) {
+            /* non-COPY command(s) after a COPY: keep the last one */
+            PQclear(results);
+            results = next_result;
+        }
+
+        first_cycle = false;
+    } while (NULL != next_result);
+
+    /* may need this to recover from conn loss during COPY */
+    if (!first_cycle && !CheckConnection())
+        success = false;
+
+    PQclear(results);
+
+    copyarg->result = success;
+
+    if (errMsgBuff.len) {
+        retMsg = pg_strdup(errMsgBuff.data);
+        termPQExpBuffer(&errMsgBuff);
+        return retMsg;
+    }
+    
+    termPQExpBuffer(&errMsgBuff);
+    return NULL;
+}
+
+static void ProcessCopyInResult(const CopyInArgs *copyargs, int nclients)
+{
+    int index;
+    bool allThreadsSucc = true;
+    const char* endMsg = NULL;
+    PGresult* result = NULL;
+    
+    for (index = 0; index < nclients; index++) {
+        if (!copyargs[index].result) {
+            allThreadsSucc = false;
+            break;
+        }
+    }
+
+    endMsg = allThreadsSucc ? "commit" : "rollback";
+
+    for (index = 0; index < nclients; index++) {
+        result = PQexec(copyargs[index].conn, endMsg);
+        if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+            psql_error("%s", PQerrorMessage(copyargs[index].conn));
+        }
+        
+        PQclear(result);
+    }
+}
+
+bool MakeCopyWorker(const char* query, int nclients)
+{
+    CopyInArgs *copyargs = nullptr;
+    int index;
+    pthread_mutex_t mutexLock;
+    char* decode_pwd = nullptr;
+    GS_UINT32 pwd_len = 0;
+    errno_t rc = EOK;
+    char* old_conninfo_values = nullptr;
+    void* retVal = nullptr;
+    bool errPrinted = false;
+    bool success = true;
+    PGconn* oldConn = NULL;
+
+    /*
+     * We clamp manually-set values to at least 1 client & at most 8 clients,
+     * if parallel parameter out of range.
+     */
+    if (nclients < 1) {
+        nclients = 1;
+    }
+    if (nclients > 8) {
+        nclients = 8;
+    }
+
+
+    /* We decode the passwd for parallel connection in child thread . */
+    if (pset.connInfo.values[3] != NULL) {
+        decode_pwd = SEC_decodeBase64(pset.connInfo.values[3], &pwd_len);
+        if (decode_pwd == NULL) {
+            psql_error("%s: decode the parallel connect value failed.", pset.progname);
+            return false;
+        }
+        old_conninfo_values = pset.connInfo.values[3];
+        pset.connInfo.values[3] = decode_pwd;
+    }
+
+    copyargs = (CopyInArgs *) malloc(sizeof(CopyInArgs) * nclients);
+    if (copyargs == NULL) {
+        psql_error("out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /* Get the connection for child process with parent's conninfo. */
+    for (index = 0; index < nclients; index++) {
+        PGconn* conn = PQconnectdbParams(pset.connInfo.keywords, pset.connInfo.values, true);
+        if (PQstatus(conn) == CONNECTION_BAD) {
+            free(copyargs);
+            psql_error("%s: %s", pset.progname, (char*)PQerrorMessage(conn));
+            PQfinish(conn);
+            return false;
+        }
+
+        copyargs[index].conn = conn;
+    }
+
+    /* Clear sensitive memory of decode_pwd. */
+    if (decode_pwd != NULL) {
+        rc = memset_s(decode_pwd, strlen(decode_pwd), 0, strlen(decode_pwd));
+        securec_check_c(rc, "\0", "\0");
+        OPENSSL_free(decode_pwd);
+        decode_pwd = NULL;
+
+        // Revert the old value for next retry connection.
+        pset.connInfo.values[3] = old_conninfo_values;
+    }
+
+    oldConn = pset.db;
+    for (index = 0; index < nclients; index++) {
+        pset.db = copyargs[index].conn;
+
+        /* Send all SET/RESET statements to subthreads with no print.
+         * Here we ignore the set statements errors, as something maybe change
+         * after user did so.
+         */
+        for (int j = 0; j < pset.num_guc_stmt; j++) {
+            (void)SendQuery(pset.guc_stmt[j], false, false);
+        }
+    }
+    pset.db = oldConn;
+
+    pthread_mutex_init(&mutexLock, NULL);
+    pset.parallelCopyDone = false;
+    pset.parallelCopyOk = true;
+
+    for (index = 0; index < nclients; index++) {
+        CopyInArgs *arg = &copyargs[index];
+        arg->result = 0;
+        arg->query = query;
+        arg->stream_mutex = &mutexLock;
+        rc = pthread_create(&arg->thread, NULL, StartCopyFrom, arg);
+    }
+
+    /*
+     * Establish longjmp destination for long wait, the main thread set flag to end subthreads. 
+     * (This is only effective while sigint_interrupt_enabled is TRUE.)
+     */
+    if (sigsetjmp(sigint_interrupt_jmp, 1) != 0) {
+        pthread_mutex_lock(&mutexLock);
+        pset.parallelCopyDone = true;
+        pset.parallelCopyOk = false;
+        pthread_mutex_unlock(&mutexLock);
+    }
+
+    sigint_interrupt_enabled = true;
+
+    for (index = 0; index < nclients; index++) {
+        pthread_join(copyargs[index].thread, &retVal);
+        
+        if (retVal) {
+            if (!errPrinted) {
+                errPrinted = true;
+                success = false;
+                psql_error("%s", (char*)retVal);
+            }
+
+            free(retVal);
+            retVal = nullptr;
+        }
+    }
+
+    sigint_interrupt_enabled = false;
+
+    /* When all subThreads succeed, send "commit" to all conns; or send rollback to them */
+    ProcessCopyInResult(copyargs, nclients);
+
+    for (index = 0; index < nclients; index++) {
+        PQfinish(copyargs[index].conn);
+    }
+
+    pthread_mutex_destroy(&mutexLock);
+
+    free(copyargs);
+
+    return success;
 }
 
 /*
@@ -1859,7 +2202,9 @@ void expand_tilde(char** filename)
         if (*(fn + 1) == '\0') {
             (void)get_home_path(home, sizeof(home)); /* ~ or ~/ only */
         } else if ((pw = getpwnam(fn + 1)) != NULL) {
-            strlcpy(home, pw->pw_dir, sizeof(home)); /* ~user */
+            errno_t err = EOK;
+            err = strcpy_s(home, sizeof(home), pw->pw_dir); /* ~user */
+            check_strcpy_s(err);
         }
 
         *p = oldp;
@@ -2269,4 +2614,29 @@ static int DestroyMutexForParallel()
     pset.parallelMutex = NULL;
 
     return ret;
+}
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (len == 0) {
+            return NULL;
+        }
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
 }

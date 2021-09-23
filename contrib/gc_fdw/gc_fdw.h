@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * gc_fdw.h
- *		  Foreign-data wrapper for remote PostgreSQL servers
+ *		  Foreign-data wrapper for remote openGauss servers
  *
  * IDENTIFICATION
  *		  contrib/gc_fdw/gc_fdw.h

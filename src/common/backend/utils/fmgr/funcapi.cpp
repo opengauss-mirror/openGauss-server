@@ -12,8 +12,9 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "access/sysattr.h"
 #include "knl/knl_variable.h"
-
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -28,10 +29,11 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "catalog/pg_proc_fn.h"
 
 static void shutdown_multi_func_call(Datum arg);
-static TypeFuncClass internal_get_result_type(
-    Oid funcid, Node* call_expr, ReturnSetInfo* rsinfo, Oid* resultTypeId, TupleDesc* resultTupleDesc);
+static TypeFuncClass internal_get_result_type(Oid funcid, Node* call_expr, ReturnSetInfo* rsinfo, Oid* resultTypeId,
+    TupleDesc* resultTupleDesc, int4* resultTypeId_orig);
 static bool resolve_polymorphic_tupdesc(TupleDesc tupdesc, oidvector* declared_args, Node* call_expr);
 static TypeFuncClass get_type_func_class(Oid typid);
 
@@ -197,21 +199,24 @@ TypeFuncClass get_call_result_type(FunctionCallInfo fcinfo, Oid* resultTypeId, T
         fcinfo->flinfo->fn_expr,
         (ReturnSetInfo*)fcinfo->resultinfo,
         resultTypeId,
-        resultTupleDesc);
+        resultTupleDesc,
+        NULL);
 }
 
 /*
  * get_expr_result_type
  *		As above, but work from a calling expression node tree
  */
-TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc)
+TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc, int4* resultTypeId_orig)
 {
     TypeFuncClass result;
 
     if (expr && IsA(expr, FuncExpr)) {
-        result = internal_get_result_type(((FuncExpr*)expr)->funcid, expr, NULL, resultTypeId, resultTupleDesc);
+        result = internal_get_result_type(((FuncExpr*)expr)->funcid, expr, NULL, resultTypeId, resultTupleDesc, 
+            resultTypeId_orig);
     } else if (expr && IsA(expr, OpExpr)) {
-        result = internal_get_result_type(get_opcode(((OpExpr*)expr)->opno), expr, NULL, resultTypeId, resultTupleDesc);
+        result = internal_get_result_type(get_opcode(((OpExpr*)expr)->opno), expr, NULL, resultTypeId, resultTupleDesc,
+            NULL);
     } else {
         /* handle as a generic expression; no chance to resolve RECORD */
         Oid typid = exprType(expr);
@@ -241,7 +246,7 @@ TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* res
  */
 TypeFuncClass get_func_result_type(Oid functionId, Oid* resultTypeId, TupleDesc* resultTupleDesc)
 {
-    return internal_get_result_type(functionId, NULL, NULL, resultTypeId, resultTupleDesc);
+    return internal_get_result_type(functionId, NULL, NULL, resultTypeId, resultTupleDesc, NULL);
 }
 
 /*
@@ -252,14 +257,15 @@ TypeFuncClass get_func_result_type(Oid functionId, Oid* resultTypeId, TupleDesc*
  * *resultTupleDesc, if we cannot deduce the complete result rowtype from
  * the available information.
  */
-static TypeFuncClass internal_get_result_type(
-    Oid funcid, Node* call_expr, ReturnSetInfo* rsinfo, Oid* resultTypeId, TupleDesc* resultTupleDesc)
+static TypeFuncClass internal_get_result_type(Oid funcid, Node* call_expr, ReturnSetInfo* rsinfo, Oid* resultTypeId,
+    TupleDesc* resultTupleDesc, int4* resultTypeId_orig)
 {
     TypeFuncClass result;
     HeapTuple tp;
     Form_pg_proc procform;
     Oid rettype;
     TupleDesc tupdesc;
+    int4 rettype_orig = -1;
 
     /* First fetch the function's pg_proc row to inspect its rettype */
     tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
@@ -269,6 +275,16 @@ static TypeFuncClass internal_get_result_type(
 
     procform = (Form_pg_proc)GETSTRUCT(tp);
     rettype = procform->prorettype;
+    if (IsClientLogicType(rettype)) {
+        HeapTuple gstup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(funcid));
+        if (!HeapTupleIsValid(gstup)) /* should not happen */
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
+        Form_gs_encrypted_proc gsform = (Form_gs_encrypted_proc)GETSTRUCT(gstup);
+
+        rettype_orig = gsform->prorettype_orig;
+        ReleaseSysCache(gstup);
+    }
     /* Check for OUT parameters defining a RECORD result */
     tupdesc = build_function_result_tupdesc_t(tp);
     if (tupdesc) {
@@ -279,9 +295,14 @@ static TypeFuncClass internal_get_result_type(
          */
         if (resultTypeId != NULL) {
             *resultTypeId = rettype;
+            if (IsClientLogicType(rettype) && resultTypeId_orig != NULL) {
+                *resultTypeId_orig = rettype_orig;
+            }
         }
 
-        if (resolve_polymorphic_tupdesc(tupdesc, &procform->proargtypes, call_expr)) {
+        oidvector* proargs = ProcedureGetArgTypes(tp);
+
+        if (resolve_polymorphic_tupdesc(tupdesc, proargs, call_expr)) {
             if (tupdesc->tdtypeid == RECORDOID && tupdesc->tdtypmod < 0) {
                 assign_record_type_typmod(tupdesc);
             }
@@ -321,6 +342,9 @@ static TypeFuncClass internal_get_result_type(
 
     if (resultTypeId != NULL) {
         *resultTypeId = rettype;
+        if (IsClientLogicType(rettype) && resultTypeId_orig != NULL) {
+            *resultTypeId_orig = rettype_orig;
+        }
     }
 
     if (resultTupleDesc != NULL) {
@@ -747,7 +771,6 @@ static TypeFuncClass get_type_func_class(Oid typid)
  */
 int get_func_arg_info(HeapTuple procTup, Oid** p_argtypes, char*** p_argnames, char** p_argmodes)
 {
-    Form_pg_proc procStruct = (Form_pg_proc)GETSTRUCT(procTup);
     Datum proallargtypes;
     Datum proargmodes;
     Datum proargnames;
@@ -774,18 +797,19 @@ int get_func_arg_info(HeapTuple procTup, Oid** p_argtypes, char*** p_argnames, c
         if (ARR_NDIM(arr) != 1 || numargs < 0 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID) {
             ereport(ERROR, (errcode(ERRCODE_ARRAY_ELEMENT_ERROR), errmsg("proallargtypes is not a 1-D Oid array")));
         }
-        Assert(numargs >= procStruct->pronargs);
+        Assert(numargs >= ((Form_pg_proc)GETSTRUCT(procTup))->pronargs);
         *p_argtypes = (Oid*)palloc(numargs * sizeof(Oid));
         rc = memcpy_s(*p_argtypes, numargs * sizeof(Oid), ARR_DATA_PTR(arr), numargs * sizeof(Oid));
         securec_check(rc, "\0", "\0");
     } else {
         /* If no proallargtypes, use proargtypes */
-        numargs = procStruct->proargtypes.dim1;
-        Assert(numargs == procStruct->pronargs);
+        oidvector* proargs = ProcedureGetArgTypes(procTup);
+        numargs = proargs->dim1;
+        Assert(numargs == ((Form_pg_proc)GETSTRUCT(procTup))->pronargs);
         *p_argtypes = (Oid*)palloc(numargs * sizeof(Oid));
 
         if (numargs > 0) {
-            rc = memcpy_s(*p_argtypes, numargs * sizeof(Oid), procStruct->proargtypes.values, numargs * sizeof(Oid));
+            rc = memcpy_s(*p_argtypes, numargs * sizeof(Oid), proargs->values, numargs * sizeof(Oid));
             securec_check(rc, "\0", "\0");
         }
     }
@@ -1036,12 +1060,41 @@ TupleDesc build_function_result_tupdesc_t(HeapTuple proc_tuple)
     proargmodes = SysCacheGetAttr(PROCOID, proc_tuple, Anum_pg_proc_proargmodes, &isnull);
     Assert(!isnull);
     proargnames = SysCacheGetAttr(PROCOID, proc_tuple, Anum_pg_proc_proargnames, &isnull);
-
     if (isnull) {
         proargnames = PointerGetDatum(NULL); /* just to be sure */
     }
+    Datum funcid = 0;
+    funcid = SysCacheGetAttr(PROCOID, proc_tuple, ObjectIdAttributeNumber, &isnull);
+    return build_function_result_tupdesc_d(proallargtypes, proargmodes, proargnames, funcid);
+}
 
-    return build_function_result_tupdesc_d(proallargtypes, proargmodes, proargnames);
+bool read_origin_type(Datum funcid, int4** argtypes_orig, int4** outargtypes_orig, int numargs)
+{
+    HeapTuple gstup = SearchSysCache1(GSCLPROCID, funcid);
+    if (!HeapTupleIsValid(gstup)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("failed to read gs_encrypted_proc catalog table")));
+        return false;
+    }
+    bool isnull = false;
+    Datum proallargtypes_orig =
+        SysCacheGetAttr(GSCLPROCID, gstup, Anum_gs_encrypted_proc_proallargtypes_orig, &isnull);
+    if (proallargtypes_orig == PointerGetDatum(NULL)) {
+        ReleaseSysCache(gstup);
+        ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH),
+            errmsg("failed to read proallargtypes_orig attribute in gs_encrypted_proc catalog table")));
+        return false;
+    }
+    ArrayType* arr = DatumGetArrayTypeP(proallargtypes_orig); /* ensure not toasted */
+    *argtypes_orig = (int4*)ARR_DATA_PTR(arr);
+    *outargtypes_orig = (int4*)palloc(numargs * sizeof(int4));
+    if (*outargtypes_orig == NULL) {
+        ReleaseSysCache(gstup);
+        return false;
+    }
+    securec_check(memset_s(*outargtypes_orig, numargs * sizeof(int4), -1, numargs * sizeof(int4)), "", "");
+    ReleaseSysCache(gstup);
+    return true;
 }
 
 /*
@@ -1054,18 +1107,20 @@ TupleDesc build_function_result_tupdesc_t(HeapTuple proc_tuple)
  *
  * Returns NULL if there are not at least two OUT or INOUT arguments.
  */
-TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmodes, Datum proargnames)
+TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmodes, Datum proargnames, Datum funcid)
 {
     TupleDesc desc;
     ArrayType* arr = NULL;
-    int numargs;
+    int numargs = 0;
     Oid* argtypes = NULL;
+    int4* argtypes_orig = NULL;
     char* argmodes = NULL;
     Datum* argnames = NULL;
     Oid* outargtypes = NULL;
-    char** outargnames;
-    int numoutargs;
-    int nargnames;
+    int4* outargtypes_orig = NULL;
+    char** outargnames = NULL;
+    int numoutargs = 0;
+    int nargnames = 0;
     int i;
 
     /* Can't have output args if columns are null */
@@ -1102,8 +1157,11 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
         Assert(nargnames == numargs);
     }
 
-    /* zero elements probably shouldn't happen, but handle it gracefully */
-    if (numargs <= 0) {
+    /*
+     * If there is no output argument, or only one, the function does not return tuples.
+     * If the number of total arguments is less than 2 than the number of output parameters is less than 2.
+     */
+    if (numargs < 2) {
         return NULL;
     }
 
@@ -1111,22 +1169,39 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
     outargtypes = (Oid*)palloc(numargs * sizeof(Oid));
     outargnames = (char**)palloc(numargs * sizeof(char*));
     numoutargs = 0;
+    bool gs_cl_proc_was_read = false;
 
     for (i = 0; i < numargs; i++) {
         char* pname = NULL;
 
-        if (argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_VARIADIC) {
+        bool is_only_input_params = argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_VARIADIC;
+        if (is_only_input_params) {
             continue;
         }
 
         Assert(argmodes[i] == PROARGMODE_OUT || argmodes[i] == PROARGMODE_INOUT || argmodes[i] == PROARGMODE_TABLE);
         outargtypes[numoutargs] = argtypes[i];
-
-        if (argnames != NULL) {
-            pname = TextDatumGetCString(argnames[i]);
-        } else {
-            pname = NULL;
+        /*
+         * if any OUT arguments are client-logic arguments, then 
+         * 1. read the original data types from gs_cl_proc into the argtypes_orig array 
+         * 2. initialize the outargtypes_orig array that we are building in parallel to the outargtypes array
+         * if funcid == 0 then there is no need to check the original data types
+         */
+        bool need_to_read = funcid > 0 && !gs_cl_proc_was_read && IsClientLogicType(argtypes[i]);
+        if (need_to_read) {
+            if (!read_origin_type(funcid, &argtypes_orig, &outargtypes_orig, numargs)) {
+                return NULL;
+            }
+            gs_cl_proc_was_read = true;
         }
+        /*
+            add original data type to the array of original data types
+        */
+        if (gs_cl_proc_was_read && IsClientLogicType(argtypes[i])) {
+            outargtypes_orig[numoutargs] = argtypes_orig[i];
+        }
+
+        pname = (argnames != NULL) ? TextDatumGetCString(argnames[i]) : NULL;
 
         if (pname == NULL || pname[0] == '\0') {
             /* Parameter is not named, so gin up a column name */
@@ -1153,8 +1228,13 @@ TupleDesc build_function_result_tupdesc_d(Datum proallargtypes, Datum proargmode
      * accessed via tam type in tuple descriptor.
      */
     desc = CreateTemplateTupleDesc(numoutargs, false, TAM_HEAP);
-    for (i = 0; i < numoutargs; i++) {
-        TupleDescInitEntry(desc, i + 1, outargnames[i], outargtypes[i], -1, 0);
+    for (int i = 0; i < numoutargs; i++) {
+        if (outargtypes_orig != NULL) {
+            /* in case of a client-logic parameter, we pass the original data type in the typmod field */
+            TupleDescInitEntry(desc, i + 1, outargnames[i], outargtypes[i], outargtypes_orig[i], 0);
+        } else {
+            TupleDescInitEntry(desc, i + 1, outargnames[i], outargtypes[i], -1, 0);
+        }
     }
 
     return desc;

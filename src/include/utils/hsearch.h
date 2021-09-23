@@ -102,6 +102,7 @@ typedef struct HASHCTL {
 #define HASH_DEALLOC 0x10000       /* Set memory deallocator */
 #define HASH_BLOBS 0x20000         /* Select support functions for binary keys */
 #define HASH_NOEXCEPT 0x40000      /* Do not throw exception when malloc memory */
+#define HASH_PACKAGE 0x80000      /* Set user defined hash package */
 
 /* max_dsize value to indicate expansible directory */
 #define NO_MAX_DSIZE (-1)

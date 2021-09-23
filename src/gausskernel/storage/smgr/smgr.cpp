@@ -3,7 +3,7 @@
  * smgr.cpp
  *    public interface routines to storage manager switch.
  *
- *    All file system operations in POSTGRES dispatch through these
+ *    All file system operations in openGauss dispatch through these
  *    routines.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -24,7 +24,8 @@
 #include "replication/dataqueue.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "threadpool/threadpool.h"
 #include "utils/hsearch.h"
 #include "utils/inval.h"
@@ -43,24 +44,21 @@
 typedef struct f_smgr {
     void (*smgr_init)(void);     /* may be NULL */
     void (*smgr_shutdown)(void); /* may be NULL */
-    void (*smgr_close)(SMgrRelation reln, ForkNumber forknum);
+    void (*smgr_close)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum);
     void (*smgr_create)(SMgrRelation reln, ForkNumber forknum, bool isRedo);
-    bool (*smgr_exists)(SMgrRelation reln, ForkNumber forknum);
-    void (*smgr_unlink)(const RelFileNodeBackend &rnode, ForkNumber forknum, bool isRedo);
-    void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer,
-                        bool skipFsync);
+    bool (*smgr_exists)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum);
+    void (*smgr_unlink)(const RelFileNodeBackend &rnode, ForkNumber forknum, bool isRedo, BlockNumber blockNum);
+    void (*smgr_extend)(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum, char *buffer, bool skipFsync);
     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
-    void (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
+    SMGR_READ_STATUS (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer);
     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync);
     void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
     void (*smgr_truncate)(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks);
     void (*smgr_immedsync)(SMgrRelation reln, ForkNumber forknum);
-    void (*smgr_pre_ckpt)(void);  /* may be NULL */
-    void (*smgr_sync)(void);      /* may be NULL */
-    void (*smgr_post_ckpt)(void); /* may be NULL */
     void (*smgr_async_read)(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dList, int32 dn);
     void (*smgr_async_write)(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **dList, int32 dn);
+    void (*smgr_move_buckets)(const RelFileNodeBackend &dest, const RelFileNodeBackend &src, List *bList);
 } f_smgr;
 
 static const f_smgr smgrsw[] = {
@@ -79,14 +77,64 @@ static const f_smgr smgrsw[] = {
       mdnblocks,
       mdtruncate,
       mdimmedsync,
-      mdpreckpt,
-      mdsync,
-      mdpostckpt,
       mdasyncread,
-      mdasyncwrite }
+      mdasyncwrite,
+      NULL
+    },
+
+    /* undo file */
+    {
+        InitUndoFile,
+        NULL,
+        CloseUndoFile,
+        CreateUndoFile,
+        CheckUndoFileExists,
+        UnlinkUndoFile,
+        ExtendUndoFile,
+        PrefetchUndoFile,
+        ReadUndoFile,
+        WriteUndoFile,
+        WritebackUndoFile,
+        GetUndoFileNblocks,
+        NULL,
+        NULL
+    }, 
+
+    /* segment-page */
+    {
+        seg_init,
+        seg_shutdown,
+        seg_close,
+        seg_create,
+        seg_exists,
+        seg_unlink,
+        seg_extend,
+        seg_prefetch,
+        seg_read,
+        seg_write,
+        seg_writeback,
+        seg_nblocks,
+        seg_truncate,
+        seg_immedsync,
+        seg_async_read,
+        seg_async_write,
+        seg_move_buckets
+    },
 };
 
 static const int NSmgr = lengthof(smgrsw);
+
+static inline int ChooseSmgrManager(RelFileNode rnode)
+{
+    if (rnode.dbNode == UNDO_DB_OID || rnode.dbNode == UNDO_SLOT_DB_OID) {
+        return UNDO_MANAGER;
+    } else if (IsSegmentFileNode(rnode)) {
+        return SEGMENT_MANAGER;
+    } else {
+        return MD_MANAGER;
+    }
+    return MD_MANAGER;
+}
 
 /* local function prototypes */
 static void smgrshutdown(int code, Datum arg);
@@ -113,6 +161,8 @@ void smgrinit(void)
     if (!IS_THREAD_POOL_SESSION) {
         on_proc_exit(smgrshutdown, 0);
     }
+
+    InitSync();
 }
 
 /*
@@ -129,128 +179,17 @@ static void smgrshutdown(int code, Datum arg)
     }
 }
 
-static inline HTAB *_smgr_hashtbl_create(const char *tabname, long nelem)
-{
-    HASHCTL hashCtrl;
-
-    errno_t rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
-    securec_check(rc, "", "");
-    hashCtrl.keysize = sizeof(RelFileNodeBackend);
-    hashCtrl.entrysize = sizeof(SMgrRelationData);
-    hashCtrl.hash = tag_hash;
-    hashCtrl.hcxt = (MemoryContext)u_sess->cache_mem_cxt;
-
-    return hash_create(tabname, nelem, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
-}
-
-static void _smgr_init(SMgrRelation reln, int col = 0)
-{
-    /* hash_search already filled in the lookup key */
-    reln->smgr_owner = NULL;
-    reln->smgr_targblock = InvalidBlockNumber;
-    reln->smgr_fsm_nblocks = InvalidBlockNumber;
-    reln->smgr_vm_nblocks = InvalidBlockNumber;
-    reln->smgr_cached_nblocks = InvalidBlockNumber;
-
-    reln->smgr_which = 0; /* we only have md.c at present */
-
-    if (reln->smgr_rnode.node.bucketNode != DIR_BUCKET_ID) {
-        int bcmarray_size = col + 1;
-        reln->smgr_bcm_nblocks = (BlockNumber *)MemoryContextAllocZero(
-            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), bcmarray_size * sizeof(BlockNumber));
-        reln->smgr_bcmarry_size = bcmarray_size;
-
-        for (int colnum = 0; colnum < reln->smgr_bcmarry_size; colnum++)
-            reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
-
-        /* mark it not open */
-        int fd_needed_cnt = 1 + MAX_FORKNUM + col;
-        reln->md_fdarray_size = fd_needed_cnt;
-        reln->md_fd = (struct _MdfdVec **)MemoryContextAllocZero(
-            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), fd_needed_cnt * sizeof(struct _MdfdVec *));
-        for (int forknum = 0; forknum < reln->md_fdarray_size; forknum++) {
-            reln->md_fd[forknum] = NULL;
-        }
-
-        reln->bucketnodes_smgrhash = NULL;
-    } else {
-        reln->smgr_bcmarry_size = 0;
-        reln->smgr_bcm_nblocks = NULL;
-
-        reln->md_fdarray_size = 0;
-        reln->md_fd = NULL;
-
-        /* initialize the bucket nodes smgr hash table for bucket dir node */
-        reln->bucketnodes_smgrhash = _smgr_hashtbl_create("smgr bucketnodes hashtbl", 400);
-    }
-}
-
-static inline SMgrRelation _smgr_get_upper_reln(const RelFileNode &rnode, BackendId backend, int col = 0)
-{
-    RelFileNodeBackend brnode;
-    bool found = false;
-
-    brnode.node = rnode;
-    brnode.backend = backend;
-
-    /* change hashbucket node for find smgr in global hash table */
-    if (brnode.node.bucketNode > InvalidBktId) {
-        brnode.node.bucketNode = DIR_BUCKET_ID;
-    }
-
-    SMgrRelation upper_reln = (SMgrRelation)hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&brnode,
-                                                        HASH_ENTER, &found);
-
-    /* Initialize it if not present before */
-    if (!found) {
-        _smgr_init(upper_reln, col);
-        /* Open the upper relation, so it has no owner yet */
-        dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &upper_reln->node);
-    }
-
-    return upper_reln;
-}
-
-static void _smgr_insert_bucketnodes_table(SMgrRelation upper_reln, const oidvector *bucketlist = NULL)
-{
-    if (upper_reln->smgr_rnode.node.bucketNode == InvalidBktId) {
-        Assert(bucketlist == NULL);
-        return;
-    }
-
-    Assert(upper_reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID);
-    Assert(upper_reln->bucketnodes_smgrhash != NULL);
-    if (bucketlist == NULL) {
-        return;
-    }
-
-    RelFileNodeBackend rnode_tmp = upper_reln->smgr_rnode;
-    for (int i = 0; i < bucketlist->dim1; i++) {
-        bool found_inner = false;
-        rnode_tmp.node.bucketNode = bucketlist->values[i];
-        SMgrRelation bktnode_smgr = (SMgrRelation)hash_search(upper_reln->bucketnodes_smgrhash, (void *)&rnode_tmp,
-                                                              HASH_ENTER, &found_inner);
-        if (found_inner == true) {
-            continue;
-        }
-
-        _smgr_init(bktnode_smgr);
-        Assert(bktnode_smgr->bucketnodes_smgrhash == NULL);
-    }
-}
-
 /*
  *  smgropen() -- Return an SMgrRelation object, creating it if need be.
  *
  *      This does not attempt to actually open the underlying file.
  */
-SMgrRelation smgropen(const RelFileNode &rnode, BackendId backend, int col /* = 0 */,
-                      const oidvector *bucketlist /* = null */)
+SMgrRelation smgropen(const RelFileNode& rnode, BackendId backend, int col /* = 0 */)
 {
-    SMgrRelation upper_reln = NULL;
-    SMgrRelation reln = NULL;
-    int temp = 0;
+    RelFileNodeBackend brnode;
+    SMgrRelation reln;
     bool found = false;
+    int temp = 0;
 
     /* at least *fdNeeded* is *MAX_FORKNUM* plus 1.
      * for column table also include all the columns.
@@ -260,58 +199,114 @@ SMgrRelation smgropen(const RelFileNode &rnode, BackendId backend, int col /* = 
 
     if (u_sess->storage_cxt.SMgrRelationHash == NULL) {
         /* First time through: initialize the hash table */
-        u_sess->storage_cxt.SMgrRelationHash = _smgr_hashtbl_create("smgr relation table", 400);
+        HASHCTL hashCtrl;
+
+        errno_t rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
+        securec_check(rc, "", "");
+        hashCtrl.keysize = sizeof(RelFileNodeBackend);
+        hashCtrl.entrysize = sizeof(SMgrRelationData);
+        hashCtrl.hash = tag_hash;
+        hashCtrl.hcxt = (MemoryContext)u_sess->cache_mem_cxt;
+        u_sess->storage_cxt.SMgrRelationHash =
+            hash_create("smgr relation table", 400, &hashCtrl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
         dlist_init(&u_sess->storage_cxt.unowned_reln);
     }
 
     START_CRIT_SECTION();
     {
-        /* Look up or create an smgr entry. Guranted that the smgr has been initialized */
-        upper_reln = _smgr_get_upper_reln(rnode, backend, col);
+        /* Look up or create an entry */
+        brnode.node = rnode;
+        brnode.backend = backend;
+        reln = (SMgrRelation)hash_search(u_sess->storage_cxt.SMgrRelationHash, (void*)&brnode, HASH_ENTER, &found);
 
-        _smgr_insert_bucketnodes_table(upper_reln, bucketlist);
+        /* Initialize it if not present before */
+        if (!found) {
+            int forknum;
+            int colnum;
 
-        if (rnode.bucketNode > InvalidBktId) {
-            /* get the smgr of this specific bucket node from bucketnodes table in the upper bucket dir smgr */
-            RelFileNodeBackend bkt_brnode;
-            bkt_brnode.node = rnode;
-            bkt_brnode.backend = backend;
-            reln = (SMgrRelation)hash_search(upper_reln->bucketnodes_smgrhash, (void *)&bkt_brnode, HASH_ENTER, &found);
-            if (found == false) {
-                _smgr_init(reln, col);
-                Assert(reln->bucketnodes_smgrhash == NULL);
+            /* hash_search already filled in the lookup key */
+            reln->smgr_owner = NULL;
+            reln->smgr_targblock = InvalidBlockNumber;
+            reln->smgr_prevtargblock = InvalidBlockNumber;
+            reln->smgr_fsm_nblocks = InvalidBlockNumber;
+            reln->smgr_vm_nblocks = InvalidBlockNumber;
+            reln->encrypt = false;
+            temp = col + 1;
+            reln->smgr_bcm_nblocks = (BlockNumber*)MemoryContextAllocZero(
+                                            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), 
+                                            temp * sizeof(BlockNumber));
+            reln->smgr_bcmarry_size = temp;
+            for (colnum = 0; colnum < reln->smgr_bcmarry_size; colnum++) {
+                reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
             }
-        } else {
-            reln = upper_reln;
+
+            reln->smgr_which = ChooseSmgrManager(rnode);
+            /* used for undofile.c */
+            reln->fileState = NULL;
+
+            /* mark it not open */
+            temp = fdNeeded;
+            if (reln->smgr_which == SEGMENT_MANAGER) {
+                reln->seg_desc = (struct SegmentDesc **)MemoryContextAllocZero(
+                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), temp * sizeof(struct SegmentDesc *));
+                reln->md_fd = NULL;
+            } else {
+                reln->md_fd = (struct _MdfdVec**)MemoryContextAllocZero(
+                                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), temp * sizeof(struct _MdfdVec*));
+                reln->seg_desc = NULL;
+            }
+
+            reln->seg_space = NULL;
+            reln->md_fdarray_size = temp;
+            for (forknum = 0; forknum < reln->md_fdarray_size; forknum++) {
+                if (reln->smgr_which == SEGMENT_MANAGER) {
+                    reln->seg_desc[forknum] = NULL;
+                } else {
+                    reln->md_fd[forknum] = NULL;
+                }
+            }
+
+            /* it has no owner yet */
+            dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &reln->node);
+
+            /* If it is a bucket smgr node, it should be linked in its parent smgr node */
+            dlist_init(&reln->bucket_smgr_head);
+            if (IsBucketFileNode(rnode)) {
+                RelFileNode parent_rnode = rnode;
+                parent_rnode.bucketNode = SegmentBktId;
+                SMgrRelation parent_smgr = smgropen(parent_rnode, backend);
+                dlist_push_tail(&parent_smgr->bucket_smgr_head, &reln->bucket_smgr_node);
+            }
         }
 
-        /* Bucket Dir Smgr need not handle this */
-        if (reln->smgr_bcmarry_size < col + 1 && !BUCKET_ID_IS_DIR(rnode.bucketNode)) {
-            Assert(rnode.bucketNode == InvalidBktId);
+        if (reln->smgr_bcmarry_size < col + 1) {
             int old_bcmarry_size = reln->smgr_bcmarry_size;
             temp = reln->smgr_bcmarry_size * 2;
             temp = Max(temp, (col + 1));
+            reln->smgr_bcm_nblocks = (BlockNumber *)repalloc((void *)reln->smgr_bcm_nblocks, temp * sizeof(BlockNumber));
             reln->smgr_bcmarry_size = temp;
-            reln->smgr_bcm_nblocks = (BlockNumber *)repalloc((void *)reln->smgr_bcm_nblocks,
-                                                             temp * sizeof(BlockNumber));
+
             for (int colnum = old_bcmarry_size; colnum < reln->smgr_bcmarry_size; colnum++)
                 reln->smgr_bcm_nblocks[colnum] = InvalidBlockNumber;
         }
 
-        if (reln->md_fdarray_size < fdNeeded && !BUCKET_ID_IS_DIR(rnode.bucketNode)) {
+        if (reln->smgr_which == UNDO_MANAGER) {
+            fdNeeded = 1;
+        }
+
+        if (reln->md_fdarray_size < fdNeeded) {
             Assert(rnode.bucketNode == InvalidBktId);
             int old_fdarray_size = reln->md_fdarray_size;
             temp = reln->md_fdarray_size * 2;
             temp = Max(temp, fdNeeded);
+            reln->md_fd = (struct _MdfdVec**)repalloc((void*)reln->md_fd, temp * sizeof(struct _MdfdVec*));
             reln->md_fdarray_size = temp;
-            reln->md_fd = (struct _MdfdVec **)repalloc((void *)reln->md_fd, temp * sizeof(struct _MdfdVec *));
-            for (int forknum = old_fdarray_size; forknum < reln->md_fdarray_size; forknum++) {
+
+            for (int forknum = old_fdarray_size; forknum < reln->md_fdarray_size; forknum++)
                 reln->md_fd[forknum] = NULL;
-            }
         }
     }
     END_CRIT_SECTION();
-
     return reln;
 }
 
@@ -337,7 +332,7 @@ void smgrsetowner(SMgrRelation *owner, SMgrRelation reln)
      */
     if (reln->smgr_owner) {
         *(reln->smgr_owner) = NULL;
-    } else if (reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID || reln->smgr_rnode.node.bucketNode == InvalidBktId) {
+    } else {
         dlist_delete(&reln->node);
         DListNodeInit(&reln->node);
     }
@@ -362,153 +357,76 @@ void smgrclearowner(SMgrRelation *owner, SMgrRelation reln)
 
     /* unset our reference to the owner */
     reln->smgr_owner = NULL;
-    if (reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID || reln->smgr_rnode.node.bucketNode == InvalidBktId) {
-        dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &reln->node);
-    }
+
+    dlist_push_tail(&u_sess->storage_cxt.unowned_reln, &reln->node);
 }
 
 /*
  *	smgrexists() -- Does the underlying file for a fork exist?
  */
-bool smgrexists(SMgrRelation reln, ForkNumber forknum)
+bool smgrexists(SMgrRelation reln, ForkNumber forknum, BlockNumber blockNum)
 {
     if (reln == NULL) {
         return false;
     }
-    return (*(smgrsw[reln->smgr_which].smgr_exists))(reln, forknum);
+    return (*(smgrsw[reln->smgr_which].smgr_exists))(reln, forknum, blockNum);
 }
 
-static inline void _smgr_close_normal_table_smgr(SMgrRelation reln)
+/*
+ * Hashbucket table's SMgrRelation may have children as smgr nodes of each bucket
+ */
+static bool smgrhaschildern(SMgrRelation reln)
 {
-    Assert(reln->smgr_rnode.node.bucketNode == InvalidBktId);
-    Assert(reln->bucketnodes_smgrhash == NULL);
-
-    SMgrRelation *owner = NULL;
-    owner = reln->smgr_owner;
-
-    for (int forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
-        (*(smgrsw[reln->smgr_which].smgr_close))(reln, (ForkNumber)forknum);
-    }
-
-    if (owner == NULL) {
-        dlist_delete(&reln->node);
-        DListNodeInit(&reln->node);
-    }
-
-    if (hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&(reln->smgr_rnode), HASH_REMOVE, NULL) == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SMgrRelation hashtable corrupted")));
-    }
-
-    pfree_ext(reln->smgr_bcm_nblocks);
-    pfree_ext(reln->md_fd);
-
-    /*
-     * Unhook the owner pointer, if any.  We do this last since in the remote
-     * possibility of failure above, the SMgrRelation object will still exist.
-     */
-    if (owner != NULL) {
-        *owner = NULL;
-    }
-}
-
-static void _smgr_close_bktnode_smgr(SMgrRelation bktnode_smgr)
-{
-    Assert(bktnode_smgr->smgr_rnode.node.bucketNode > InvalidBktId);
-    Assert(bktnode_smgr->bucketnodes_smgrhash == NULL);
-
-    SMgrRelation *owner = NULL;
-    owner = bktnode_smgr->smgr_owner;
-
-    RelFileNodeBackend relnode = bktnode_smgr->smgr_rnode;
-    relnode.node.bucketNode = DIR_BUCKET_ID;
-
-    SMgrRelation upper_reln = (SMgrRelation)hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&(relnode),
-                                                        HASH_FIND, NULL);
-    if (upper_reln == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SMgrRelation hashtable not find")));
-    }
-
-    for (int forknum = 0; forknum < (int)(bktnode_smgr->md_fdarray_size); forknum++) {
-        (*(smgrsw[bktnode_smgr->smgr_which].smgr_close))(bktnode_smgr, (ForkNumber)forknum);
-    }
-
-    Assert(upper_reln->bucketnodes_smgrhash != NULL);
-    SMgrRelation match_reln = (SMgrRelation)hash_search(upper_reln->bucketnodes_smgrhash,
-                                                        (void *)&(bktnode_smgr->smgr_rnode), HASH_REMOVE, NULL);
-    if (match_reln == NULL || match_reln != bktnode_smgr) {
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED),
-                        errmsg("Bktnode smgr not found in bktnodes hastbl of upper relation")));
-    }
-
-    pfree_ext(bktnode_smgr->smgr_bcm_nblocks);
-    pfree_ext(bktnode_smgr->md_fd);
-
-    /*
-     * Unhook the owner pointer, if any.  We do this last since in the remote
-     * possibility of failure above, the SMgrRelation object will still exist.
-     */
-    if (owner != NULL) {
-        *owner = NULL;
-    }
-}
-
-static void _smgr_close_btkdir_smgr(SMgrRelation reln)
-{
-    Assert(reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID);
-    Assert(reln->bucketnodes_smgrhash != NULL);
-    Assert(reln->md_fd == NULL);
-
-    SMgrRelation *owner = NULL;
-    owner = reln->smgr_owner;
-
-    HASH_SEQ_STATUS status;
-    SMgrRelation item;
-    hash_seq_init(&status, reln->bucketnodes_smgrhash);
-    while ((item = (SMgrRelation)hash_seq_search(&status)) != NULL) {
-        Assert(item->smgr_rnode.node.bucketNode > InvalidBktId);
-        Assert(item->bucketnodes_smgrhash == NULL);
-        _smgr_close_bktnode_smgr(item);
-    }
-
-    if (owner == NULL) {
-        dlist_delete(&reln->node);
-        DListNodeInit(&reln->node);
-    }
-
-    /* move dir smgr at last */
-    if (hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&(reln->smgr_rnode), HASH_REMOVE, NULL) == NULL)
-        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SMgrRelation hashtable corrupted")));
-
-    hash_destroy(reln->bucketnodes_smgrhash);
-    reln->bucketnodes_smgrhash = NULL;
-
-    /*
-     * Unhook the owner pointer, if any.  We do this last since in the remote
-     * possibility of failure above, the SMgrRelation object will still exist.
-     */
-    if (owner != NULL) {
-        *owner = NULL;
-    }
+    return IsSegmentFileNode(reln->smgr_rnode.node) && !dlist_is_empty(&reln->bucket_smgr_head);
 }
 
 /*
  *  smgrclose() -- Close and delete an SMgrRelation object.
  */
-void smgrclose(SMgrRelation reln)
+void smgrclose(SMgrRelation reln, BlockNumber blockNum)
 {
-    if (reln == nullptr) {
-        return;
+    ereport(DEBUG5, (errmsg("smgr close %p", reln)));
+    SMgrRelation* owner = NULL;
+    int forknum;
+
+    for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
+        (*(smgrsw[reln->smgr_which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
+    }
+    owner = reln->smgr_owner;
+
+    if (owner == NULL) {
+        dlist_delete(&reln->node);
+        DListNodeInit(&reln->node);
     }
 
-    if(reln->smgr_rnode.node.bucketNode == InvalidBktId) {
-        _smgr_close_normal_table_smgr(reln);
-    } else if (reln->smgr_rnode.node.bucketNode > InvalidBktId) {
-        _smgr_close_bktnode_smgr(reln);
-    } else if (reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID) {
-        _smgr_close_btkdir_smgr(reln);
+    if (IsBucketFileNode(reln->smgr_rnode.node)) {
+        dlist_delete(&reln->bucket_smgr_node);
+    }
+
+    if (smgrhaschildern(reln)) {
+        /* If this smgr node is a bucket relation node, it should close all its childern. */
+        dlist_mutable_iter iter;
+        dlist_foreach_modify(iter, &reln->bucket_smgr_head)
+        {
+            SMgrRelation rel = dlist_container(SMgrRelationData, bucket_smgr_node, iter.cur);
+            smgrclose(rel);
+        }
+    }
+
+    if (hash_search(u_sess->storage_cxt.SMgrRelationHash, (void *)&(reln->smgr_rnode), HASH_REMOVE, NULL) == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("SMgrRelation hashtable corrupted")));
     } else {
-        ereport(ERROR,
-                (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unknow bucketnode %d.", reln->smgr_rnode.node.bucketNode)));
+        pfree_ext(reln->smgr_bcm_nblocks);
+        pfree_ext(reln->seg_desc);
+        pfree_ext(reln->md_fd);
+    }
+
+    /*
+     * Unhook the owner pointer, if any.  We do this last since in the remote
+     * possibility of failure above, the SMgrRelation object will still exist.
+     */
+    if (owner != NULL) {
+        *owner = NULL;
     }
 }
 
@@ -516,7 +434,7 @@ void smgrclose(SMgrRelation reln)
  *  smgrcloseall() -- Close all existing SMgrRelation objects.
  */
 void smgrcloseall(void)
-{
+{   
     HASH_SEQ_STATUS status;
     SMgrRelation reln;
 
@@ -525,11 +443,29 @@ void smgrcloseall(void)
         return;
     }
 
+    bool smgr_has_children = false;
     hash_seq_init(&status, u_sess->storage_cxt.SMgrRelationHash);
 
     while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
-        Assert(reln->smgr_rnode.node.bucketNode <= InvalidBktId);
-        smgrclose(reln);
+        if (smgrhaschildern(reln)) {
+            /* 
+             * if the smgr node has children, it may incur close of all its children.
+             * we can not close it in the first loop, otherwise the hashtable iterator is broken.
+             */
+            smgr_has_children = true;
+        } else {
+            smgrclose(reln);
+        }
+    }
+
+    if (smgr_has_children) {
+        hash_seq_init(&status, u_sess->storage_cxt.SMgrRelationHash);
+
+        while ((reln = (SMgrRelation)hash_seq_search(&status)) != NULL) {
+            /* In the second loop, there are only hash bucket parent nodes existing in the hashtable. */
+            Assert(IsSegmentFileNode(reln->smgr_rnode.node));
+            smgrclose(reln);
+        }
     }
 }
 
@@ -568,7 +504,13 @@ void smgrclosenode(const RelFileNodeBackend &rnode)
  */
 void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo)
 {
-    int which = reln->smgr_which;
+    /*
+     * Exit quickly in WAL replay mode if we've already opened the file. If
+     * it's open, it surely must exist.
+     */
+    if (isRedo && reln->md_fd[forknum] != NULL)
+        return;
+
     /*
      * We may be using the target table space for the first time in this
      * database, so create a per-database subdirectory if needed.
@@ -578,25 +520,11 @@ void smgrcreate(SMgrRelation reln, ForkNumber forknum, bool isRedo)
      * should be here and not in commands/tablespace.c?  But that would imply
      * importing a lot of stuff that smgr.c oughtn't know, either.
      */
-    TablespaceCreateDbspace(reln->smgr_rnode.node, isRedo);
+    TablespaceCreateDbspace(reln->smgr_rnode.node.spcNode, 
+                            reln->smgr_rnode.node.dbNode,
+                            isRedo);
 
-    (*(smgrsw[which].smgr_create))(reln, (ForkNumber)forknum, isRedo);
-}
-
-void smgrcreatebuckets(SMgrRelation reln, ForkNumber forknum, bool isRedo)
-{
-    int which = reln->smgr_which;
-    Assert(reln->smgr_rnode.node.bucketNode == DIR_BUCKET_ID);
-    Assert(reln->bucketnodes_smgrhash != NULL);
-    Assert(reln->md_fd == NULL);
-
-    HASH_SEQ_STATUS status;
-    SMgrRelation item = NULL;
-    hash_seq_init(&status, reln->bucketnodes_smgrhash);
-    while ((item = (SMgrRelation)hash_seq_search(&status)) != NULL) {
-        Assert(item->smgr_rnode.node.bucketNode > InvalidBktId);
-        (*(smgrsw[which].smgr_create))(item, (ForkNumber)forknum, isRedo);
-    }
+    (*(smgrsw[reln->smgr_which].smgr_create))(reln, forknum, isRedo);
 }
 
 /*
@@ -611,29 +539,20 @@ void smgrcreatebuckets(SMgrRelation reln, ForkNumber forknum, bool isRedo)
  *      This is equivalent to calling smgrdounlinkfork for each fork, but
  *      it's significantly quicker so should be preferred when possible.
  */
-void smgrdounlink(SMgrRelation reln, bool isRedo)
+void smgrdounlink(SMgrRelation reln, bool isRedo, BlockNumber blockNum)
 {
     RelFileNodeBackend rnode = reln->smgr_rnode;
     int which = reln->smgr_which;
     int forknum;
 
     /* Close the forks at smgr level */
-    if (rnode.node.bucketNode == DIR_BUCKET_ID) {
-        Assert(reln->md_fd == NULL);
-        Assert(reln->bucketnodes_smgrhash != NULL);
-        HASH_SEQ_STATUS status;
-        SMgrRelation item = NULL;
-        hash_seq_init(&status, reln->bucketnodes_smgrhash);
-        while ((item = (SMgrRelation)hash_seq_search(&status)) != NULL) {
-            Assert(item->smgr_rnode.node.bucketNode > InvalidBktId);
-            for (forknum = 0; forknum < (int)(item->md_fdarray_size); forknum++) {
-                (*(smgrsw[which].smgr_close))(item, (ForkNumber)forknum);
-            }
-        }
-    } else {
-        for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
-            (*(smgrsw[which].smgr_close))(reln, (ForkNumber)forknum);
-        }
+    for (forknum = 0; forknum < (int)(reln->md_fdarray_size); forknum++) {
+        (*(smgrsw[which].smgr_close))(reln, (ForkNumber)forknum, blockNum);
+    }
+
+    if (which == UNDO_MANAGER) {
+        /* Drop undo buffer is excuted in ReleaseUndoSpace. */
+        goto unlink_file;
     }
 
     /*
@@ -665,12 +584,8 @@ void smgrdounlink(SMgrRelation reln, bool isRedo)
      * ERROR, because we've already decided to commit or abort the current
      * xact.
      */
-    if (rnode.node.bucketNode == DIR_BUCKET_ID) {
-        /* rm bucket dir directly */
-        (*(smgrsw[which].smgr_unlink))(rnode, MAIN_FORKNUM, isRedo);
-    } else {
-        (*(smgrsw[which].smgr_unlink))(rnode, InvalidForkNumber, isRedo);
-    }
+unlink_file:
+    (*(smgrsw[which].smgr_unlink))(rnode, InvalidForkNumber, isRedo, blockNum);
 }
 
 /*
@@ -689,7 +604,7 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
     int which = reln->smgr_which;
 
     /* Close the fork at smgr level */
-    (*(smgrsw[which].smgr_close))(reln, forknum);
+    (*(smgrsw[which].smgr_close))(reln, forknum, InvalidBlockNumber);
 
     /*
      * Get rid of any remaining buffers for the fork.  bufmgr will just drop
@@ -720,7 +635,7 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
      * ERROR, because we've already decided to commit or abort the current
      * xact.
      */
-    (*(smgrsw[which].smgr_unlink))(rnode, forknum, isRedo);
+    (*(smgrsw[which].smgr_unlink))(rnode, forknum, isRedo, InvalidBlockNumber);
 }
 
 /*
@@ -732,7 +647,8 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
  *		EOF).  Note that we assume writing a block beyond current EOF
  *		causes intervening file space to become filled with zeroes.
  */
-void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char *buffer, bool skipFsync)
+void smgrextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
+                char *buffer, bool skipFsync)
 {
     (*(smgrsw[reln->smgr_which].smgr_extend))(reln, forknum, blocknum, buffer, skipFsync);
 }
@@ -768,11 +684,11 @@ void smgrasyncwrite(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t **d
  *
  * This routine is called from the buffer manager in order to
  * instantiate pages in the shared buffer cache.  All storage managers
- * return pages in the format that POSTGRES expects.
+ * return pages in the format that openGauss expects.
  */
-void smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer)
+SMGR_READ_STATUS smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char *buffer)
 {
-    (*(smgrsw[reln->smgr_which].smgr_read))(reln, forknum, blocknum, buffer);
+    return (*(smgrsw[reln->smgr_which].smgr_read))(reln, forknum, blocknum, buffer);
 }
 
 /*
@@ -842,12 +758,22 @@ smgrnblocks_cached(SMgrRelation reln, ForkNumber forknum)
     return InvalidBlockNumber;
 }
 
+BlockNumber smgrtotalblocks(SMgrRelation reln, ForkNumber forknum)
+{
+    Assert(IsSegmentSmgrRelation(reln));
+    if (forknum == INIT_FORKNUM) {
+        return 0;
+    }
+    return seg_totalblocks(reln, forknum);
+}
+
 void smgrtruncatefunc(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
     CacheInvalidateSmgr(reln->smgr_rnode);
 
     (*(smgrsw[reln->smgr_which].smgr_truncate))(reln, forknum, nblocks);
 }
+
 /*
  *	smgrtruncate() -- Truncate supplied relation to the specified number
  *					  of blocks
@@ -913,51 +839,26 @@ void smgrimmedsync(SMgrRelation reln, ForkNumber forknum)
     (*(smgrsw[reln->smgr_which].smgr_immedsync))(reln, forknum);
 }
 
-/*
- *	smgrpreckpt() -- Prepare for checkpoint.
- */
-void smgrpreckpt(void)
-{
-    int i;
-
-    for (i = 0; i < NSmgr; i++) {
-        if (smgrsw[i].smgr_pre_ckpt) {
-            (*(smgrsw[i].smgr_pre_ckpt))();
-        }
-    }
-}
 
 /*
- *	smgrsync() -- Sync files to disk during checkpoint.
+ *	smgrmovebuckets() -- Move buckets between two relation.
  */
-void smgrsync(void)
+void smgrmovebuckets(SMgrRelation reln1, SMgrRelation reln2, List *bList)
 {
-    int i;
-
-    for (i = 0; i < NSmgr; i++) {
-        if (smgrsw[i].smgr_sync) {
-            (*(smgrsw[i].smgr_sync))();
-        }
-    }
-}
-
-/*
- *	smgrpostckpt() -- Post-checkpoint cleanup.
- */
-void smgrpostckpt(void)
-{
-    int i;
-
-    for (i = 0; i < NSmgr; i++) {
-        if (smgrsw[i].smgr_post_ckpt) {
-            (*(smgrsw[i].smgr_post_ckpt))();
-        }
-    }
+    (*(smgrsw[reln1->smgr_which].smgr_move_buckets))(reln1->smgr_rnode, reln2->smgr_rnode, bList);
 }
 
 void partition_create_new_storage(Relation rel, Partition part, const RelFileNodeBackend &filenode)
 {
-    RelationCreateStorage(filenode.node, rel->rd_rel->relpersistence, rel->rd_rel->relowner, rel->rd_bucketoid);
+    if (RelationIsCrossBucketIndex(rel) || IsCreatingCrossBucketIndex(part)) {
+        RelationData dummyrel;
+        dummyrel.rd_id = InvalidOid;
+        dummyrel.newcbi = true;
+        RelationCreateStorage(filenode.node, rel->rd_rel->relpersistence, rel->rd_rel->relowner, rel->rd_bucketoid,
+                              &dummyrel);
+    } else {
+        RelationCreateStorage(filenode.node, rel->rd_rel->relpersistence, rel->rd_rel->relowner, rel->rd_bucketoid);
+    }
     smgrclosenode(filenode);
 
     /*
@@ -980,15 +881,16 @@ void partition_create_new_storage(Relation rel, Partition part, const RelFileNod
  */
 void AtEOXact_SMgr(void)
 {
-    dlist_mutable_iter iter;
-
     /*
-     * Zap all unowned SMgrRelations.  We rely on smgrclose() to remove each
-     * one from the list.
+     * We rely on smgrclose() to remove each one from the list.
+     *
+     * We do not use dlist_foreach_modify because closing hash bucket parent nodes
+     * incurs closing all its children node. dlist_foreach_modify does not allow
+     * removing the adjacent nodes.
      */
-    dlist_foreach_modify(iter, &u_sess->storage_cxt.unowned_reln)
-    {
-        SMgrRelation rel = dlist_container(SMgrRelationData, node, iter.cur);
+    while (!dlist_is_empty(&u_sess->storage_cxt.unowned_reln)) {
+        dlist_node *cur = u_sess->storage_cxt.unowned_reln.head.next;
+        SMgrRelation rel = dlist_container(SMgrRelationData, node, cur);
         Assert(rel->smgr_owner == NULL);
         smgrclose(rel);
     }

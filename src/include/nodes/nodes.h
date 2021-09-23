@@ -129,7 +129,7 @@ typedef enum NodeTag {
     T_CreateSecurityPolicyStmt,
 	T_AlterSecurityPolicyStmt,
 	T_DropSecurityPolicyStmt,
-    
+    T_AlterSchemaStmt,
     /*
      * TAGS FOR PLAN STATE NODES (execnodes.h)
      *
@@ -147,6 +147,8 @@ typedef enum NodeTag {
     T_BitmapAndState,
     T_BitmapOrState,
     T_ScanState,
+    T_SeqScanState,
+    T_IndexScanState,
     T_IndexOnlyScanState,
     T_BitmapIndexScanState,
     T_BitmapHeapScanState,
@@ -394,6 +396,8 @@ typedef enum NodeTag {
     T_DropForeignStmt,
 #endif
     T_TruncateStmt,
+    T_PurgeStmt,
+    T_TimeCapsuleStmt,
     T_CommentStmt,
     T_FetchStmt,
     T_IndexStmt,
@@ -485,7 +489,10 @@ typedef enum NodeTag {
 #endif
     T_CreateWeakPasswordDictionaryStmt,
     T_DropWeakPasswordDictionaryStmt,
-
+    T_CreatePackageStmt,
+    T_CreatePackageBodyStmt,
+    T_AddTableIntoCBIState,
+    
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)
      */
@@ -506,6 +513,7 @@ typedef enum NodeTag {
     T_RangeSubselect,
     T_RangeFunction,
     T_RangeTableSample,
+    T_RangeTimeCapsule,
     T_TypeName,
     T_ColumnDef,
     T_IndexElem,
@@ -513,6 +521,7 @@ typedef enum NodeTag {
     T_DefElem,
     T_RangeTblEntry,
     T_TableSampleClause,
+    T_TimeCapsuleClause,
     T_SortGroupClause,
     T_GroupingSet,
     T_WindowClause,
@@ -531,6 +540,7 @@ typedef enum NodeTag {
     T_Position,
     T_MergeWhenClause,
 	T_UpsertClause,
+	T_CopyColExpr,
     /*
      * TAGS FOR REPLICATION GRAMMAR PARSE NODES (replnodes.h)
      */
@@ -661,8 +671,6 @@ typedef enum NodeTag {
     T_VecMaterialState,
     T_VecMergeJoinState,
     T_VecWindowAggState,
-    T_SeqScanState,
-    T_IndexScanState,
 
     // this must put last for vector engine runtime state
     T_VecEndState,
@@ -682,7 +690,7 @@ typedef enum NodeTag {
     T_GroupingId,
     T_GroupingIdExprState,
     T_BloomFilterSet,
-    /* Hint type. */
+    /* Hint type. Please only append new tag after the last hint type and never change the order. */
     T_HintState,
     T_OuterInnerRels,
     T_JoinMethodHint,
@@ -693,7 +701,13 @@ typedef enum NodeTag {
     T_ScanMethodHint,
     T_MultiNodeHint,
     T_PredpushHint,
+    T_SkewHint,
     T_RewriteHint,
+    T_GatherHint,
+    T_SetHint,
+    T_PlanCacheHint,
+    T_NoExpandHint,
+    T_NoGPCHint,
 
     /*
      * pgfdw
@@ -702,7 +716,6 @@ typedef enum NodeTag {
 
     /* Create table like. */
     T_TableLikeCtx,
-    T_SkewHint,
 
     /* Skew Hint Transform Info */
     T_SkewHintTransf,
@@ -736,6 +749,14 @@ typedef enum NodeTag {
     T_KMeans,
     T_KMeansState,
     // End DB4AI
+
+    /* Plpgsql */
+    T_PLDebug_variable,
+    T_PLDebug_breakPoint,
+    T_PLDebug_frame,
+
+    T_TdigestData,
+    T_CentroidPoint
 } NodeTag;
 
 /* if you add to NodeTag also need to add nodeTagToString */
@@ -967,5 +988,23 @@ typedef enum UpsertAction
     UPSERT_NOTHING,         /* DUPLICATE KEY UPDATE NOTHING */
     UPSERT_UPDATE           /* DUPLICATE KEY UPDATE ... */
 }UpsertAction;
+
+struct CentroidPoint {
+    double mean;
+    int64 count;
+};
+
+struct TdigestData {
+    int32 vl_len_;
+    double compression; 
+    int cap;
+    int merged_nodes;
+    int unmerged_nodes;
+    double merged_count;
+    double unmerged_count;
+   
+    double valuetoc;
+    CentroidPoint nodes[0];
+};
 
 #endif /* NODES_H */

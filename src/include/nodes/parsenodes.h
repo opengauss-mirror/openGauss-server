@@ -204,11 +204,13 @@ typedef enum RTEKind {
     RTE_JOIN,     /* join */
     RTE_FUNCTION, /* function in FROM */
     RTE_VALUES,   /* VALUES (<exprlist>), (<exprlist>), ... */
-    RTE_CTE       /* common table expr (WITH list element) */
+    RTE_CTE,       /* common table expr (WITH list element) */
 #ifdef PGXC
-    ,
-    RTE_REMOTE_DUMMY /* RTEs created by remote plan reduction */
+    RTE_REMOTE_DUMMY, /* RTEs created by remote plan reduction */
 #endif               /* PGXC */
+    RTE_RESULT       /* RTE represents an empty FROM clause; such
+                      * RTEs are added by the planner, they're not
+                      * present during parsing or rewriting */
 } RTEKind;
 
 typedef struct RangeTblEntry {
@@ -246,6 +248,7 @@ typedef struct RangeTblEntry {
     char relkind;                   /* relation kind (see pg_class.relkind) */
     bool isResultRel;       /* used in target of SELECT INTO or similar */
     TableSampleClause* tablesample; /* sampling method and parameters */
+    TimeCapsuleClause* timecapsule; /* user-specified time capsule point */
 
     bool ispartrel; /* is it a partitioned table */
 
@@ -321,6 +324,7 @@ typedef struct RangeTblEntry {
     Bitmapset* insertedCols;    /* columns needing INSERT permission */
     Bitmapset* updatedCols;     /* columns needing UPDATE permission */
     RelOrientation orientation; /* column oriented or row oriented */
+    bool is_ustore;             /* is a ustore rel */
 
     char* mainRelName;
     char* mainRelNameSpace;
@@ -337,6 +341,7 @@ typedef struct RangeTblEntry {
     /* For hash buckets */
     bool relhasbucket; /* the rel has underlying buckets, get from pg_class */
     bool isbucket;	  /* the sql only want some buckets from the rel */
+    int  bucketmapsize;
     List* buckets;	  /* the bucket id wanted */
 
     bool isexcluded; /* the rel is the EXCLUDED relation for UPSERT */
@@ -561,6 +566,7 @@ typedef enum GrantObjectType {
     ACL_OBJECT_FDW,            /* foreign-data wrapper */
     ACL_OBJECT_FOREIGN_SERVER, /* foreign server */
     ACL_OBJECT_FUNCTION,       /* function */
+    ACL_OBJECT_PACKAGE,        /* package */
     ACL_OBJECT_LANGUAGE,       /* procedural language */
     ACL_OBJECT_LARGEOBJECT,    /* largeobject */
     ACL_OBJECT_NAMESPACE,      /* namespace */
@@ -641,7 +647,6 @@ typedef struct AlterDefaultPrivilegesStmt {
 typedef struct VariableShowStmt {
     NodeTag type;
     char* name;
-    char* likename;
 } VariableShowStmt;
 
 /* ----------------------
@@ -652,27 +657,6 @@ typedef struct ShutdownStmt {
     NodeTag type;
     char* mode;
 } ShutdownStmt;
-
-typedef struct ListPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of list partition */
-    List* boundary;       /* the boundary of a list partition */
-    char* tablespacename; /* table space to use, or NULL */
-} ListPartitionDefState;
-
-typedef struct HashPartitionDefState {
-    NodeTag type;
-    char* partitionName;  /* name of hash partition */
-    List* boundary;       /* the boundary of a hash partition */
-    char* tablespacename; /* table space to use, or NULL */
-} HashPartitionDefState;
-
-typedef struct RangePartitionindexDefState {
-    NodeTag type;
-    char* name;
-    char* tablespace;
-} RangePartitionindexDefState;
-
 
 /* ----------
  * Definitions for constraints in CreateStmt
@@ -704,10 +688,6 @@ typedef struct RangePartitionindexDefState {
  * Constraint node.
  * ----------
  */
-
-#define CSTORE_SUPPORT_CONSTRAINT(type) \
-    ((type) == CONSTR_NULL || (type) == CONSTR_NOTNULL || (type) == CONSTR_DEFAULT || \
-     (type) == CONSTR_CLUSTER || (type) == CONSTR_PRIMARY || (type) == CONSTR_UNIQUE)
 
 #define GetConstraintType(type)                \
     ({                                         \
@@ -1020,15 +1000,6 @@ typedef struct CreateRoleStmt {
     List* options;          /* List of DefElem nodes */
 } CreateRoleStmt;
 
-typedef struct DropRoleStmt {
-    NodeTag type;
-    List* roles;              /* List of roles to remove */
-    bool missing_ok;          /* skip error if a role is missing? */
-    bool is_user;             /* drop user or role */
-    bool inherit_from_parent; /* whether user is inherited from parent user */
-    DropBehavior behavior;    /* CASCADE or RESTRICT */
-} DropRoleStmt;
-
 /* ----------------------
  *		{Create|Alter} SEQUENCE Statement
  * ----------------------
@@ -1154,6 +1125,7 @@ typedef struct TruncateStmt {
     List* relations;       /* relations (RangeVars) to be truncated */
     bool restart_seqs;     /* restart owned sequences? */
     DropBehavior behavior; /* RESTRICT or CASCADE behavior */
+    bool purge;
 } TruncateStmt;
 
 /* ----------------------
@@ -1244,13 +1216,14 @@ typedef struct IndexStmt {
     List* partIndexOldNodes;    /* partition relfilenode of existing storage, if any */
     List* partIndexOldPSortOid; /* partition psort oid, if any */
     Node* partClause;           /* partition index define */
-
+    bool* partIndexUsable;      /* is partition index usable */
     /* @hdfs
      * is a partitioned index? The foreign table dose not index. The isPartitioned
      * value is false when relation is a foreign table.
      */
     bool isPartitioned;
     bool isGlobal;                            /* is GLOBAL partition index */
+    bool crossbucket;                         /* is crossbucket index */
     bool unique;                              /* is index unique? */
     bool primary;                             /* is index a primary key? */
     bool isconstraint;                        /* is it for a pkey/unique constraint? */
@@ -1281,17 +1254,6 @@ typedef struct AlterFunctionStmt {
     FuncWithArgs* func; /* name and args of function */
     List* actions;      /* list of DefElem */
 } AlterFunctionStmt;
-
-/* ----------------------
- *		DO Statement
- *
- * DoStmt is the raw parser output, InlineCodeBlock is the execution-time API
- * ----------------------
- */
-typedef struct DoStmt {
-    NodeTag type;
-    List* args; /* List of DefElem nodes */
-} DoStmt;
 
 typedef struct InlineCodeBlock {
     NodeTag type;
@@ -1697,10 +1659,12 @@ typedef struct DropNodeStmt {
 typedef struct CreateGroupStmt {
     NodeTag type;
     char* group_name;
+    char* group_parent;
     char* src_group_name;
     List* nodes;
     List* buckets;
-    bool vcgroup;
+    int   bucketcnt;
+    bool  vcgroup;
 } CreateGroupStmt;
 
 /*
@@ -1886,6 +1850,13 @@ typedef struct DropMaskingPolicyStmt
     bool        if_exists;
     List        *policy_names;
 } DropMaskingPolicyStmt;
+
+typedef struct AlterSchemaStmt {
+    NodeTag type;
+    char *schemaname; /* the name of the schema to create */
+    char *authid;      /* the owner of the created schema */
+    bool hasBlockChain;  /* whether this schema has blockchain */
+} AlterSchemaStmt;
 
 /*
  * ----------------------

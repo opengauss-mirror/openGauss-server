@@ -1,0 +1,1 @@
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_security_policy=on" >/dev/null 2>&1

@@ -1,0 +1,180 @@
+CREATE TABLE abalone (
+    id INT,
+    sex_f SMALLINT,
+    sex_i SMALLINT,
+    sex_m SMALLINT,
+    length DOUBLE PRECISION,
+    diameter DOUBLE PRECISION,
+    height DOUBLE PRECISION,
+    whole DOUBLE PRECISION,
+    shucked DOUBLE PRECISION,
+    viscera DOUBLE PRECISION,
+    shell DOUBLE PRECISION,
+    rings INT
+);
+\copy abalone FROM '@abs_srcdir@/data/abalone.txt' DELIMITER ',';
+SELECT * FROM abalone ORDER BY id LIMIT 5;
+ id  | sex_f | sex_i | sex_m | length | diameter | height | whole | shucked | viscera | shell | rings 
+-----+-------+-------+-------+--------+----------+--------+-------+---------+---------+-------+-------
+ 209 |     1 |     0 |     0 |   .525 |     .415 |    .17 | .8325 |   .2755 |   .1685 |   .31 |    13
+ 335 |     1 |     0 |     0 |    .74 |       .6 |   .195 | 1.974 |    .598 |   .4085 |   .71 |    16
+ 359 |     0 |     0 |     1 |   .745 |     .585 |   .215 | 2.499 |   .9265 |    .472 |    .7 |    17
+ 549 |     1 |     0 |     0 |   .565 |      .45 |    .16 |  .795 |   .3605 |   .1555 |   .23 |    12
+ 552 |     0 |     1 |     0 |   .615 |      .49 |   .155 | .9885 |   .4145 |    .195 |  .345 |    13
+(5 rows)
+
+SELECT COUNT(*) FROM abalone;
+ count 
+-------
+    60
+(1 row)
+
+-- prepare snapshots
+SET db4ai_snapshot_mode = CSS;
+CREATE SNAPSHOT abalone AS
+    SELECT * FROM abalone;
+ schema |     name      
+--------+---------------
+ public | abalone@1.0.0
+(1 row)
+
+SELECT COUNT(*) FROM abalone@1.0.0;
+ count 
+-------
+    60
+(1 row)
+
+-- SELECT * FROM abalone@1.0.0 ORDER BY id LIMIT 10;
+SELECT setseed(0.28);
+ setseed 
+---------
+ 
+(1 row)
+
+CREATE SNAPSHOT abalone@train FROM @1.0.0 USING (
+    DELETE WHERE RANDOM() <= 0.2;
+    );
+ schema |     name      
+--------+---------------
+ public | abalone@train
+(1 row)
+
+SELECT COUNT(*),SUM(rings) FROM abalone@train;
+ count | sum 
+-------+-----
+    50 | 498
+(1 row)
+
+-- SELECT * FROM abalone@train ORDER BY id LIMIT 10;
+CREATE SNAPSHOT abalone@test FROM @1.0.0 USING (
+    DELETE WHERE id IN (SELECT id FROM abalone@train);
+    );
+ schema |     name     
+--------+--------------
+ public | abalone@test
+(1 row)
+
+SELECT COUNT(*),SUM(rings) FROM abalone@test;
+ count | sum 
+-------+-----
+    10 |  95
+(1 row)
+
+-- SELECT * FROM abalone@test ORDER BY id LIMIT 10;
+SELECT id, parent_id, matrix_id, root_id, schema, name, commands,
+       comment, published, archived, row_count
+  FROM db4ai.snapshot;
+ id | parent_id | matrix_id | root_id | schema |     name      |                       commands                        | comment | published | archived | row_count 
+----+-----------+-----------+---------+--------+---------------+-------------------------------------------------------+---------+-----------+----------+-----------
+  0 |           |         0 |       0 | public | abalone@1.0.0 | {"SELECT *","FROM abalone",NULL}                      |         | t         | f        |        60
+  1 |         0 |         0 |       0 | public | abalone@train | {DELETE,"WHERE RANDOM() <= 0.2"}                      |         | f         | f        |        50
+  2 |         0 |         0 |       0 | public | abalone@test  | {DELETE,"WHERE id IN (SELECT id FROM abalone@train)"} |         | f         | f        |        10
+(3 rows)
+
+-- linear regression
+CREATE MODEL abalone USING linear_regression
+       FEATURES sex_f, sex_i, sex_m, length, diameter, height,
+                whole, shucked, viscera, shell
+       TARGET rings
+       FROM abalone@train
+       WITH seed = 1;
+NOTICE:  Hyperparameter batch_size takes value DEFAULT (1000)
+NOTICE:  Hyperparameter decay takes value DEFAULT (0.950000)
+NOTICE:  Hyperparameter learning_rate takes value DEFAULT (0.800000)
+NOTICE:  Hyperparameter max_iterations takes value DEFAULT (100)
+NOTICE:  Hyperparameter max_seconds takes value DEFAULT (0)
+NOTICE:  Hyperparameter optimizer takes value DEFAULT (gd)
+NOTICE:  Hyperparameter tolerance takes value DEFAULT (0.000500)
+NOTICE:  Hyperparameter seed takes value 1
+NOTICE:  Hyperparameter verbose takes value DEFAULT (FALSE)
+NOTICE:  GD shuffle cache size 379
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
+       hyperparametersnames,  hyperparametersvalues, hyperparametersoids, coefnames, coefvalues, coefoids,
+       trainingscoresname, trainingscoresvalue, modeldescribe
+  FROM gs_model_warehouse;
+ modelname | processedtuples | discardedtuples | iterations | outputtype |     modeltype     |                             query                              | modeldata |                                          weight                                           |                                     hyperparametersnames                                     |        hyperparametersvalues         |        hyperparametersoids        | coefnames | coefvalues | coefoids | trainingscoresname | trainingscoresvalue | modeldescribe 
+-----------+-----------------+-----------------+------------+------------+-------------------+----------------------------------------------------------------+-----------+-------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------+-----------------------------------+-----------+------------+----------+--------------------+---------------------+---------------
+ abalone   |              50 |               0 |         59 |         23 | linear_regression | CREATE MODEL abalone USING linear_regression                  +|           | {1.90244,.435078,2.12253,2.23828,1.8411,.734881,1.63897,-.233642,.218489,1.07668,4.46004} | {batch_size,decay,learning_rate,max_iterations,max_seconds,optimizer,tolerance,seed,verbose} | {1000,.95,.8,100,0,gd,.0005,1,false} | {23,701,701,23,23,1043,701,23,16} |           |            |          | {mse}              | {5.90028}           | 
+           |                 |                 |            |            |                   |        FEATURES sex_f, sex_i, sex_m, length, diameter, height,+|           |                                                                                           |                                                                                              |                                      |                                   |           |            |          |                    |                     | 
+           |                 |                 |            |            |                   |                 whole, shucked, viscera, shell                +|           |                                                                                           |                                                                                              |                                      |                                   |           |            |          |                    |                     | 
+           |                 |                 |            |            |                   |        TARGET rings                                           +|           |                                                                                           |                                                                                              |                                      |                                   |           |            |          |                    |                     | 
+           |                 |                 |            |            |                   |        FROM abalone@train                                     +|           |                                                                                           |                                                                                              |                                      |                                   |           |            |          |                    |                     | 
+           |                 |                 |            |            |                   |        WITH seed = 1;                                          |           |                                                                                           |                                                                                              |                                      |                                   |           |            |          |                    |                     | 
+(1 row)
+
+SELECT id, target, prediction, abs(prediction-target) as residual
+FROM (
+    SELECT id, rings AS target,
+           PREDICT BY abalone
+                (FEATURES sex_f, sex_i, sex_m, length, diameter, height,
+                          whole, shucked, viscera, shell)
+                AS prediction
+    FROM abalone@test
+)
+ORDER BY id;
+  id  | target | prediction | residual 
+------+--------+------------+----------
+  209 |     13 |         10 |        3
+  335 |     16 |         13 |        3
+ 1305 |      9 |         10 |        1
+ 1587 |     10 |          7 |        3
+ 1739 |     11 |         12 |        1
+ 2448 |      6 |          6 |        0
+ 3381 |      5 |          5 |        0
+ 3703 |     11 |         12 |        1
+ 3751 |      8 |          7 |        1
+ 3984 |      6 |         10 |        4
+(10 rows)
+
+-- done
+DROP MODEL abalone;
+PURGE SNAPSHOT abalone@test;
+ schema |     name     
+--------+--------------
+ public | abalone@test
+(1 row)
+
+PURGE SNAPSHOT abalone@train;
+ schema |     name      
+--------+---------------
+ public | abalone@train
+(1 row)
+
+PURGE SNAPSHOT abalone@1.0.0;
+ schema |     name      
+--------+---------------
+ public | abalone@1.0.0
+(1 row)
+
+SELECT * FROM db4ai.snapshot;
+ id | parent_id | matrix_id | root_id | schema | name | owner | commands | comment | published | archived | created | row_count 
+----+-----------+-----------+---------+--------+------+-------+----------+---------+-----------+----------+---------+-----------
+(0 rows)
+
+DROP TABLE abalone;
+SELECT 'DB4AI GD SNAPSHOTS TEST COMPLETED';
+             ?column?              
+-----------------------------------
+ DB4AI GD SNAPSHOTS TEST COMPLETED
+(1 row)
+

@@ -45,11 +45,13 @@ all:
 
 scanEreport: $(OBJS1) | submake-libpgport
 	$(CC) $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X) $(LIBS)
+ifeq ($(enable_multiple_nodes), yes)
+	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ../distribute_ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt ../distribute_escan.txt distribute
+endif
 	$(top_builddir)/$(subdir)/scanEreport $(top_srcdir) ereport.txt $(top_srcdir)/src/common/backend/utils/errcodes.txt escan.txt
-
 utscanEreport: $(OBJS1) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS1) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutscanEreport.so -lsecurec
-	mv libutscanEreport.so $(top_builddir)/src/distribute/test/ut/lib
+	mv libutscanEreport.so $(top_builddir)/../distribute/test/ut/lib
 
 OBJS=   gsqlerr.o $(WIN32RES)
 
@@ -58,7 +60,7 @@ gsqlerr: $(OBJS) | submake-libpgport
 
 utgsqlerr: $(OBJS) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutgsqlerr.so -lsecurec
-	mv libutgsqlerr.so $(top_builddir)/src/distribute/test/ut/lib
+	mv libutgsqlerr.so $(top_builddir)/../distribute/test/ut/lib
 
 ifeq ($(enable_multiple_nodes), yes)
 install: all installdirs
@@ -74,4 +76,11 @@ endif
 clean distclean maintainer-clean:
 	rm -f gsqlerr$(X) $(OBJS) *.depend
 	rm -f scanEreport$(X) $(OBJS1)
-
+	rm -f distribute_errmsg.log
+	rm -f distribute_errmsg_old.txt
+	rm -f distribute_errmsg_result.txt
+	rm -f distribute_errmsg_new.txt
+	rm -f errmsg.log
+	rm -f errmsg_old.txt
+	rm -f errmsg_new.txt
+	rm -f errmsg_result.txt

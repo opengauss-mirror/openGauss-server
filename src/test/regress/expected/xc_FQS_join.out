@@ -1033,15 +1033,15 @@ FROM rt1
 WHERE EXISTS (
 SELECT 1
 );
-          QUERY PLAN          
-------------------------------
+--?.*
+--?.*
  Result
-   Output: a
+   Output: rt1.a
    One-Time Filter: $0
    InitPlan 1 (returns $0)
      ->  Result
    ->  Seq Scan on public.rt1
-         Output: a, b, c, d
+         Output: rt1.a, rt1.b, rt1.c, rt1.d
 (7 rows)
 
 SELECT a

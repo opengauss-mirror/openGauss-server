@@ -59,7 +59,7 @@ typedef struct DataQueueData {
 
 typedef struct DataElementHeaderData {
     RelFileNodeOld rnode;
-    BlockNumber blocknum;
+    BlockNumber blocknum; /* Upper 2 bit store StorageType */
     int attid; /* column storage id */
     StorageEngine type;
 
@@ -76,7 +76,7 @@ typedef struct DataElementHeaderData {
 
 typedef struct BCMElementData {
     RelFileNodeOld rnode;
-    BlockNumber blocknum;
+    BlockNumber blocknum; /* Upper 2 bit store StorageType */
     int attid; /* column storage id */
     StorageEngine type;
     uint64 offset;    /* offset the element to be written */

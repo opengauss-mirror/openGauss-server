@@ -41,14 +41,19 @@ bool GlobalHookExecutor::pre_create(const StringArgs &args, const GlobalHookExec
     return true;
 }
 
+bool GlobalHookExecutor::post_create(const StringArgs& args)
+{
+    return true;
+}
+
+bool GlobalHookExecutor::deprocess_column_setting(const unsigned char *processed_data, size_t processed_data_size, 
+    const char *key_store, const char *key_path, const char *key_algo, unsigned char **data, size_t *data_size)
+{
+    return true;
+}
+
 bool GlobalHookExecutor::set_deletion_expected()
 {
     return true;
 }
 
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool GlobalHookExecutor::get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len)
-{
-    return true;
-}
-#endif

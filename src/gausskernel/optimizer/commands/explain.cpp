@@ -27,12 +27,12 @@
 #include "commands/createas.h"
 #include "commands/defrem.h"
 #include "commands/prepare.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "executor/hashjoin.h"
 #include "executor/lightProxy.h"
-#include "executor/nodeAgg.h"
-#include "executor/nodeRecursiveunion.h"
-#include "executor/nodeSetOp.h"
+#include "executor/node/nodeAgg.h"
+#include "executor/node/nodeRecursiveunion.h"
+#include "executor/node/nodeSetOp.h"
 #include "foreign/dummyserver.h"
 #include "foreign/fdwapi.h"
 #include "nodes/print.h"
@@ -162,6 +162,7 @@ static void show_merge_sort_keys(PlanState* state, List* ancestors, ExplainState
 static void show_sort_info(SortState* sortstate, ExplainState* es);
 static void show_hash_info(HashState* hashstate, ExplainState* es);
 static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es);
+static void show_tidbitmap_info(BitmapHeapScanState *planstate, ExplainState *es);
 static void show_instrumentation_count(const char* qlabel, int which, const PlanState* planstate, ExplainState* es);
 static void show_removed_rows(int which, const PlanState* planstate, int idx, int smpIdx, int* removeRows);
 static void show_foreignscan_info(ForeignScanState* fsstate, ExplainState* es);
@@ -691,8 +692,26 @@ static void ExplainOneQuery(
 
     PlannedStmt* plan = NULL;
 
-    /* plan the query */
-    plan = pg_plan_query(query, 0, params, true);
+    /*
+     * plan the query
+     * Temporarily apply SET hint using PG_TRY for later recovery
+     */
+    int nest_level = apply_set_hint(query);
+    AFTER_EXPLAIN_APPLY_SET_HINT();
+    PG_TRY();
+    {
+        plan = pg_plan_query(query, 0, params, true);
+    }
+    PG_CATCH();
+    {
+        recover_set_hint(nest_level);
+        AFTER_EXPLAIN_RECOVER_SET_HINT();
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
+    recover_set_hint(nest_level);
+    AFTER_EXPLAIN_RECOVER_SET_HINT();
     CleanHotkeyCandidates(true);
 
     check_gtm_free_plan((PlannedStmt *)plan, es->analyze ? ERROR : WARNING);
@@ -766,13 +785,11 @@ static void GetNodeList(QueryDesc* qd)
          * when execute pbe query, rq->exec_nodes->nodeList could be NIL,
          * so we should get nodeLists through FindExecNodesInPBE function.
          */
-        if (rq->exec_nodes != NULL && rq->exec_nodes->nodeList == NIL) {
-            foreach (lc2, qd->estate->es_remotequerystates) {
-                RemoteQueryState* rqs = (RemoteQueryState*)lfirst(lc2);
+        foreach (lc2, qd->estate->es_remotequerystates) {
+            RemoteQueryState* rqs = (RemoteQueryState*)lfirst(lc2);
 
-                /* find node_lists and fill in exec_nodes */
-                FindExecNodesInPBE(rqs, rq->exec_nodes, EXEC_ON_DATANODES);
-            }
+            /* find node_lists and fill in exec_nodes */
+            FindExecNodesInPBE(rqs, rq->exec_nodes, EXEC_ON_DATANODES);
         }
     }
 }
@@ -844,7 +861,7 @@ void ReorganizeSqlStatement(
         verbose,
         costs,
         num_nodes);
-    if (es->isexplain_execute && !CheckPrepared(rq, nodeoid)) {
+    if (es->isexplain_execute && (!CheckPrepared(rq, nodeoid) || ENABLE_GPC)) {
         /*
          * When execute firstly explain pbe statement in dfx, we should send
          * prepared statement and execute statement at the same time.
@@ -994,7 +1011,7 @@ void ExplainOnePlan(
     ExecutorStart(queryDesc, eflags);
 
     if (u_sess->attr.attr_common.max_datanode_for_plan > 0 && IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
-        !es->analyze) {
+        !es->analyze && es->is_explain_gplan) {
         GetNodeList(queryDesc);
     }
 
@@ -1190,8 +1207,11 @@ void ExplainOnePlan(
     if (es->analyze) {
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL) {
-                appendStringInfo(es->str, "Total runtime: %.3f ms, Peak Memory :%ld (KB)\n", 1000.0 * totaltime, (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024));
-
+                if (MEMORY_TRACKING_QUERY_PEAK)
+                    appendStringInfo(es->str, "Total runtime: %.3f ms, Peak Memory: %ld KB\n", 1000.0 * totaltime,
+                                     (int64)(t_thrd.utils_cxt.peakedBytesInQueryLifeCycle/1024));
+                else
+                    appendStringInfo(es->str, "Total runtime: %.3f ms\n", 1000.0 * totaltime);
             }
             else if (es->planinfo != NULL && es->planinfo->m_query_summary) {
                 appendStringInfo(es->planinfo->m_query_summary->info_str,
@@ -1479,11 +1499,6 @@ static void show_bucket_info(PlanState* planstate, ExplainState* es, bool is_pre
     Scan* scanplan = (Scan*)planstate->plan;
     BucketInfo* bucket_info = scanplan->bucketInfo;
     int selected_buckets = list_length(bucket_info->buckets);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     if (selected_buckets == 0) {
         /* 0 means all buckets */
         selected_buckets = BUCKETDATALEN;
@@ -2496,6 +2511,9 @@ static void ExplainNode(
             show_scan_qual(plan->qual, "Filter", planstate, ancestors, es);
             if (plan->qual)
                 show_instrumentation_count("Rows Removed by Filter", 1, planstate, es);
+            if (nodeTag(plan) == T_BitmapHeapScan && es->analyze) {
+                show_tidbitmap_info((BitmapHeapScanState*)planstate, es);
+            }
             show_llvm_info(planstate, es);
             break;
         case T_SeqScan:
@@ -3385,6 +3403,7 @@ static void show_bloomfilter(Plan* plan, PlanState* planstate, List* ancestors, 
 
 static void show_skew_optimization(const PlanState* planstate, ExplainState* es)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     int skew_opt = SKEW_RES_NONE;
     char* skew_txt = NULL;
 
@@ -3462,6 +3481,9 @@ static void show_skew_optimization(const PlanState* planstate, ExplainState* es)
     }
 
     pfree_ext(str.data);
+#else
+    return;
+#endif
 }
 
 /**
@@ -7098,6 +7120,28 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
 
     return;
 }
+
+static void show_tidbitmap_info(BitmapHeapScanState *planstate, ExplainState *es)
+{
+    if (es->format != EXPLAIN_FORMAT_TEXT)
+    {
+        ExplainPropertyLong("Exact Heap Blocks", planstate->exact_pages, es);
+        ExplainPropertyLong("Lossy Heap Blocks", planstate->lossy_pages, es);
+    } else {
+        if (planstate->exact_pages > 0 || planstate->lossy_pages > 0) {
+            appendStringInfoSpaces(es->str, es->indent * 2);
+            appendStringInfoString(es->str, "Heap Blocks:");
+            if (planstate->exact_pages > 0) {
+                appendStringInfo(es->str, " exact=%ld", planstate->exact_pages);
+            }
+            if (planstate->lossy_pages > 0) {
+                appendStringInfo(es->str, " lossy=%ld", planstate->lossy_pages);
+            }
+            appendStringInfoChar(es->str, '\n');
+        }
+    }
+}
+
 /*
  * If it's EXPLAIN ANALYZE, show instrumentation information for a plan node
  *
@@ -7386,7 +7430,9 @@ static void show_dfs_block_info(PlanState* planstate, ExplainState* es)
                     instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
                     if (instr == NULL)
                         continue;
-                    if (instr->localBlock > 0 || instr->remoteBlock > 0 || storage_has_cached_info(instr)) {
+                    bool blockOrHasCachedInfo = instr->localBlock > 0 || instr->remoteBlock > 0 ||
+                        storage_has_cached_info(instr);
+                    if (blockOrHasCachedInfo) {
                         if (has_info == false)
                             ExplainOpenGroup("Dfs Block Detail", "Dfs Block Detail", false, es);
                         has_info = true;

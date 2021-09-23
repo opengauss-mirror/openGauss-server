@@ -22,14 +22,14 @@
 #include "gtm/utils/stringinfo.h"
 
 /*
- * This structure represents the data that is saved each time a Postgres-XC node
+ * This structure represents the data that is saved each time a openGauss node
  * registered on GTM.
  * It contains:
  *	-	Type of the Node: Proxy, Coordinator, Datanode
  *	-	Node number
  *	-	Proxy number: This ID number is set at 0 if node does not go through a Proxy
  *		or if Node Type is Proxy
- *	-	PostgreSQL port the node uses to communicate
+ *	-	openGauss port the node uses to communicate
  *	-	IP visible to GTM
  *	-	Data folder of the node
  */

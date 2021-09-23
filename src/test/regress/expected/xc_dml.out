@@ -169,13 +169,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D
 (8 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Delete on public.delete_xc_c
-   ->  Seq Scan on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
          Output: ctid
-         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
               QUERY PLAN              
@@ -231,13 +232,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D
 (8 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Delete on public.delete_xc_c
-   ->  Seq Scan on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
          Output: ctid
-         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
               QUERY PLAN              
@@ -293,13 +295,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D
 (8 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Delete on public.delete_xc_c
-   ->  Seq Scan on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
          Output: ctid
-         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
               QUERY PLAN              
@@ -532,12 +535,12 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D
 (8 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Delete on public.delete_xc_c
-   ->  Seq Scan on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
          Output: ctid
-         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
 (4 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
@@ -845,12 +848,12 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C2 IN (SELECT D
 (8 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Delete on public.delete_xc_c
-   ->  Seq Scan on public.delete_xc_c
+   ->  Index Scan using con_delete on public.delete_xc_c
          Output: ctid
-         Filter: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
+         Index Cond: ((delete_xc_c.c3 = 1) AND (delete_xc_c.c1 = 5))
 (4 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE)DELETE FROM DELETE_XC_C WHERE C3 = 0;
@@ -914,13 +917,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
               QUERY PLAN              
@@ -962,13 +966,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
               QUERY PLAN              
@@ -1010,13 +1015,14 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ [Bypass]
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
-(4 rows)
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+(5 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
               QUERY PLAN              
@@ -1291,12 +1297,12 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
 (4 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
@@ -1349,12 +1355,12 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
 (4 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;
@@ -1630,12 +1636,12 @@ EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET (C2) = (SELECT D3 FRO
 (7 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 0 WHERE C3 = 1 AND C1 = 5;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Update on public.update_xc_c
-   ->  Seq Scan on public.update_xc_c
+   ->  Index Scan using con_update on public.update_xc_c
          Output: c1, 0, c3, ctid
-         Filter: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
+         Index Cond: ((update_xc_c.c3 = 1) AND (update_xc_c.c1 = 5))
 (4 rows)
 
 EXPLAIN (VERBOSE TRUE, COSTS FALSE) UPDATE UPDATE_XC_C SET C2 = 1 WHERE C3 = 0;

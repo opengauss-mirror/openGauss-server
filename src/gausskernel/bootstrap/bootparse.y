@@ -46,11 +46,11 @@
 #include "nodes/primnodes.h"
 #include "rewrite/prs2lock.h"
 #include "storage/buf/block.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/item/itemptr.h"
 #include "storage/off.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/dest.h"
 #include "utils/rel.h"
 #include "utils/catcache.h"
@@ -111,11 +111,11 @@ do_end(void)
 %type <list>  boot_index_params
 %type <ielem> boot_index_param
 %type <str>   boot_const boot_ident
-%type <ival>  optbootstrap optsharedrelation optwithoutoids
+%type <ival>  optbootstrap optorder optsharedrelation optwithoutoids
 %type <oidval> oidspec optoideq optrowtypeoid
 
 %token <str> CONST_P ID
-%token OPEN XCLOSE XCREATE INSERT_TUPLE
+%token ASC DESC OPEN XCLOSE XCREATE INSERT_TUPLE
 %token XDECLARE INDEX ON USING XBUILD INDICES UNIQUE XTOAST
 %token COMMA EQUALS LPAREN RPAREN
 %token OBJ_ID XBOOTSTRAP XSHARED_RELATION XWITHOUT_OIDS XROWTYPE_OID NULLVAL
@@ -235,7 +235,8 @@ Boot_CreateStmt:
 												   REL_CMPRS_NOT_SUPPORT,
 												   BOOTSTRAP_SUPERUSERID,
 												   false,
-												   TAM_HEAP);
+												   TAM_HEAP,
+												   HEAP_DISK);
 						ereport(DEBUG4, (errmsg("bootstrap relation created")));
 						
 						/*
@@ -410,7 +411,7 @@ boot_index_params:
 		;
 
 boot_index_param:
-		boot_ident boot_ident
+		boot_ident boot_ident optorder
 				{
 					IndexElem *n = makeNode(IndexElem);
 					n->name = $1;
@@ -418,10 +419,16 @@ boot_index_param:
 					n->indexcolname = NULL;
 					n->collation = NIL;
 					n->opclass = list_make1(makeString($2));
-					n->ordering = SORTBY_DEFAULT;
+					n->ordering = (SortByDir)$3;
 					n->nulls_ordering = SORTBY_NULLS_DEFAULT;
 					$$ = n;
 				}
+		;
+
+optorder:
+			ASC		{ $$ = (int)SORTBY_ASC;     }
+		|	DESC		{ $$ = (int)SORTBY_DESC;    }
+		|			{ $$ = (int)SORTBY_DEFAULT; }
 		;
 
 optbootstrap:

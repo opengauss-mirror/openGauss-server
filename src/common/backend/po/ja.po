@@ -12101,8 +12101,8 @@ msgstr "pg_hba.conf の読み込みができませんでした"
 
 #: postmaster/postmaster.c:1151
 #, c-format
-msgid "%s: could not locate matching postgres executable"
-msgstr "%s: 一致するpostgres実行ファイルがありませんでした"
+msgid "%s: could not locate matching openGauss executable"
+msgstr "%s: 一致するopenGauss実行ファイルがありませんでした"
 
 #: postmaster/postmaster.c:1174 utils/misc/tzparser.c:325
 #, c-format
@@ -12192,7 +12192,7 @@ msgstr "開始パケットの構成が無効です。最終バイトに想定外
 
 #: postmaster/postmaster.c:1702
 #, c-format
-msgid "no PostgreSQL user name specified in startup packet"
+msgid "no openGauss user name specified in startup packet"
 msgstr "開始パケット中に指定されたPostgreSQLユーザ名は存在しません"
 
 #: postmaster/postmaster.c:1759

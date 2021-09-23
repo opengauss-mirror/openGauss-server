@@ -56,7 +56,7 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -176,9 +176,9 @@ int gs_send_ctrl_msg(struct node_sock* ns, FCMSG_T* msg, int role)
 // send control message to remoter
 // by sokcet
 //
-int gs_send_ctrl_msg_by_socket(int ctrl_sock, FCMSG_T* msg, int node_idx)
+int gs_send_ctrl_msg_by_socket(LibCommConn *conn, FCMSG_T* msg, int node_idx)
 {
-    int rc = mc_tcp_write_block(ctrl_sock, (void*)msg, sizeof(FCMSG_T));  // do send message
+    int rc = LibCommClientWriteBlock(conn, (void*)msg, sizeof(FCMSG_T));  // do send message
 
     // if tcp send failed, close tcp connction
     if (rc <= 0) {
@@ -187,7 +187,7 @@ int gs_send_ctrl_msg_by_socket(int ctrl_sock, FCMSG_T* msg, int node_idx)
             ctrl_msg_string(msg->type),
             msg->node_idx,
             msg->nodename,
-            ctrl_sock,
+            conn->socket,
             mc_strerror(errno));
     }
 
@@ -225,6 +225,51 @@ static int getRecvError(const sock_id fdId, int nodeIdx, struct mc_lqueue_item* 
     return error;
 }
 
+void WakeupSession(SessionInfo *session_info, bool err_occurs, const char* caller_name)
+{
+    CommEpollFd *comm_epfd = NULL;
+
+    if (session_info == NULL) {
+        LIBCOMM_ELOG(LOG, "Trace: CommEpollFd NotifyListener(%s), no register", caller_name);
+        return;
+    }
+
+    if (gs_compare_and_swap_32(&session_info->is_idle, (int)true, (int)false) == false) {
+        LIBCOMM_ELOG(LOG, "Trace: CommEpollFd NotifyListener(%s), no event "
+            "detail: idx[%d], streamid[%d], is_idle[false]",
+            caller_name,
+            session_info->commfd.logic_fd.idx,
+            session_info->commfd.logic_fd.sid);
+        return;
+    }
+
+    comm_epfd = session_info->comm_epfd_ptr;
+    comm_epfd->PushReadyEvent(session_info, err_occurs);
+    LIBCOMM_ELOG(LOG, "Trace: CommEpollFd DoWakeup(%s), normal event detail:epfd[%d], idx[%d], streamid[%d]",
+        caller_name,
+        comm_epfd->m_epfd,
+        session_info->commfd.logic_fd.idx,
+        session_info->commfd.logic_fd.sid);
+    comm_epfd->DoWakeup();
+}
+
+void NotifyListener(struct c_mailbox* cmailbox, bool err_occurs, const char* caller_name)
+{
+    Assert(cmailbox);
+    SessionInfo *session_info = NULL;
+
+    if (cmailbox->session_info_ptr) {
+        session_info = cmailbox->session_info_ptr;
+    } else {
+        LogicFd logic_fd = {cmailbox->idx, cmailbox->streamid};
+        session_info = g_instance.comm_logic_cxt.comm_fd_collection->GetSessionInfo(&logic_fd);
+        cmailbox->session_info_ptr = session_info;
+    }
+
+    WakeupSession(session_info, err_occurs, caller_name);
+}
+
+
 // the broker: receive message from give socket and put it into
 //      the corressponding mailbox in g_c_mailbox, then wake up Consumer of executor to fetch the data
 // sock        : the data socket which has epoll events
@@ -247,10 +292,10 @@ int gs_internal_recv(const sock_id fd_id, int node_idx, int flags)
     COMM_TIMER_INIT();
 
     for (;;) {
-        LibcommRecvInfo recv_info;
+        LibcommRecvInfo recv_info = {0};
         COMM_TIMER_LOG("(r|inner recv)\tInternal receive start.");
 
-        int64 curr_rcv_time;
+        int64 curr_rcv_time = 0;
         int64 last_rcv_time = 0;
         if (idx >= 0) {
             last_rcv_time = g_instance.comm_cxt.g_receivers->receiver_conn[idx].last_rcv_time;
@@ -302,7 +347,20 @@ int gs_internal_recv(const sock_id fd_id, int node_idx, int flags)
             /* send ack message. */
             curr_rcv_time = g_instance.comm_cxt.g_receivers->receiver_conn[idx].last_rcv_time;
             if (last_rcv_time > 0 && curr_rcv_time - last_rcv_time > g_ackchk_time) {
-                send(recvsk, "ACK", sizeof("ACK"), 0);
+#ifdef USE_SSL
+                if (g_instance.attr.attr_network.comm_enable_SSL) {
+                    SSL* ssl = LibCommClientGetSSLForSocket(recvsk);
+                    if (ssl != NULL) {
+                        LIBCOMM_ELOG(LOG, "gs_internal_recv start\n");
+                        LibCommClientSSLWrite(ssl, "ACK", strlen("ACK"));
+                    } else {
+                        return RECV_NEED_RETRY;
+                    }
+                } else
+#endif
+                {
+                    send(recvsk, "ACK", strlen("ACK"), 0);
+                }
             }
         }
 
@@ -321,6 +379,9 @@ int gs_internal_recv(const sock_id fd_id, int node_idx, int flags)
                 libcomm_free_iov_item(&iov_item, IOV_DATA_SIZE);
             }
 
+            if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+                NotifyListener(cmailbox, false, __FUNCTION__);
+            }
             COMM_TIMER_LOG("(r|inner recv)\tInternal receive finish for [%d,%d].", idx, streamid);
             return RECV_NEED_RETRY;
         } else {
@@ -794,7 +855,7 @@ retry:
         /* data channel need to check socket even if the connection state in htap is succeed */
         if (type == DATA_CHANNEL) {
             LIBCOMM_PTHREAD_RWLOCK_WRLOCK(&g_instance.comm_cxt.g_senders->sender_conn[node_idx].rwlock);
-            if (g_libcomm_adapt.check_socket(g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket) != 0) {
+            if (LibCommClientCheckSocket(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]) != 0) {
                 fd_id.fd = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket;
                 fd_id.id = g_instance.comm_cxt.g_senders->sender_conn[node_idx].socket_id;
                 LIBCOMM_ELOG(WARNING,
@@ -907,7 +968,15 @@ int gs_connect(libcommaddrinfo** libcomm_addrinfo, int addr_num, int timeout)
         LIBCOMM_INTERFACE_END(false, TempImmediateInterruptOK);
         return -1;
     }
-
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        ret = LibCommClientSecureInit();
+        if (ret != 0) {
+            LIBCOMM_ELOG(ERROR, "(s|connect|SSL)\tSet libcomm ssl context initialize failed!\n");
+            return -1;
+        }
+    }
+#endif
     // producer build connections with address list,
     // and send MAIL_READY message to consumers.
     for (i = 0; i < addr_num; i++) {

@@ -1,0 +1,643 @@
+-- GPC test cases are kept but not really useful since centralized fastcheck disables gpc.
+-- setups
+create schema schema_hint_iud;
+set current_schema = schema_hint_iud;
+set rewrite_rule = 'magicset, partialpush, uniquecheck, disablerep, intargetlist, predpushforce';
+create table t1 (c1 int primary key, c2 int);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+create index t1_c2_idx on t1 using btree(c2);
+create table t2 (c1 int, c2 int);
+create index t2_c2_idx on t2 using btree(c2);
+-- insert some data to suppress no statistics warning
+insert into t1 values(1,1);
+insert into t2 values(1,1);
+analyze t1;
+analyze t2;
+\set EXP 'EXPLAIN  (verbose off, costs off)'
+-- INSERT
+--- No hint
+:EXP insert into t1 select c1, c2 from t2 where c2 = 1;
+        QUERY PLAN        
+--------------------------
+ Insert on t1
+   ->  Seq Scan on t2
+         Filter: (c2 = 1)
+(3 rows)
+
+--- Scan
+:EXP insert /*+ indexscan(t2) */ into t1 select c1, c2 from t2 where c2 = 1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   ->  Index Scan using t2_c2_idx on t2
+         Index Cond: (c2 = 1)
+(3 rows)
+
+--- No hint
+:EXP insert into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt1
+         ->  Seq Scan on t2 tt2
+(5 rows)
+
+--- Join
+:EXP insert /*+ hashjoin(tt1 tt2) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1;
+              QUERY PLAN              
+--------------------------------------
+ Insert on t1
+   ->  Hash Join
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt1
+         ->  Hash
+               ->  Seq Scan on t2 tt2
+(6 rows)
+
+--- Leading
+:EXP insert /*+ leading((tt2 tt1)) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt2
+         ->  Seq Scan on t2 tt1
+(5 rows)
+
+--- Set
+:EXP insert /*+ set(query_dop 1008) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Insert on t1
+   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+         ->  Nested Loop
+               Join Filter: (tt1.c1 = tt2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                     ->  Seq Scan on t2 tt1
+               ->  Materialize
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                           ->  Seq Scan on t2 tt2
+(9 rows)
+
+--- Plancache
+prepare insert_g as insert /*+ use_gplan */ into t1 select c1, c2 from t2 where c2 = $1;
+set plan_cache_mode = force_custom_plan;
+:EXP execute insert_g(2);
+        QUERY PLAN         
+---------------------------
+ Insert on t1
+   ->  Seq Scan on t2
+         Filter: (c2 = $1)
+(3 rows)
+
+prepare insert_c as insert /*+ use_cplan */ into t1 select c1, c2 from t2 where c2 = $1;
+set plan_cache_mode = force_generic_plan;
+:EXP execute insert_c(1);
+        QUERY PLAN        
+--------------------------
+ Insert on t1
+   ->  Seq Scan on t2
+         Filter: (c2 = 1)
+(3 rows)
+
+--- No gpc
+select * from dbe_perf.global_plancache_clean;
+ plancache_clean 
+-----------------
+ t
+(1 row)
+
+truncate t1;
+prepare insert_nogpc as insert /*+ no_gpc */ into t1 select c1, c2 from t2 where c1 = $1;
+execute insert_nogpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+truncate t1;
+prepare insert_gpc as insert into t1 select c1, c2 from t2 where c1 = $1;
+execute insert_gpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+reset plan_cache_mode;
+deallocate all;
+-- UPSERT
+--- No hint
+:EXP insert into t1 select c1, c2 from t2 where c2 = 1 on duplicate key update c2 = c2 + 1;
+             QUERY PLAN              
+-------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Seq Scan on t2
+         Filter: (c2 = 1)
+(5 rows)
+
+--- Scan
+:EXP insert /*+ indexscan(t2) */ into t1 select c1, c2 from t2 where c2 = 1 on duplicate key update c2 = c2 + 1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Index Scan using t2_c2_idx on t2
+         Index Cond: (c2 = 1)
+(5 rows)
+
+--- No hint
+:EXP insert into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1 on duplicate key update c2 = c2 + 1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt1
+         ->  Seq Scan on t2 tt2
+(7 rows)
+
+--- Join
+:EXP insert /*+ hashjoin(tt1 tt2) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1 on duplicate key update c2 = c2 + 1;
+              QUERY PLAN              
+--------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Hash Join
+         Hash Cond: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt1
+         ->  Hash
+               ->  Seq Scan on t2 tt2
+(8 rows)
+
+--- Leading
+:EXP insert /*+ leading((tt2 tt1)) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1 on duplicate key update c2 = c2 + 1;
+               QUERY PLAN               
+----------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Nested Loop
+         Join Filter: (tt1.c1 = tt2.c1)
+         ->  Seq Scan on t2 tt2
+         ->  Seq Scan on t2 tt1
+(7 rows)
+
+--- Set
+:EXP insert /*+ set(query_dop 1008) */ into t1 select tt1.c1, tt2.c2 from t2 tt1, t2 tt2 where tt1.c1 = tt2.c1 on duplicate key update c2 = c2 + 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Streaming(type: LOCAL GATHER dop: 1/8)
+         ->  Nested Loop
+               Join Filter: (tt1.c1 = tt2.c1)
+               ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                     ->  Seq Scan on t2 tt1
+               ->  Materialize
+                     ->  Streaming(type: LOCAL REDISTRIBUTE dop: 8/8)
+                           ->  Seq Scan on t2 tt2
+(11 rows)
+
+--- Plancache
+prepare upsert_g as insert /*+ use_gplan */ into t1 select c1, c2 from t2 where c2 = $1 on duplicate key update c2 = c2 + 1;
+set plan_cache_mode = force_custom_plan;
+:EXP execute upsert_g(2);
+             QUERY PLAN              
+-------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Seq Scan on t2
+         Filter: (c2 = $1)
+(5 rows)
+
+prepare upsert_c as insert /*+ use_cplan */ into t1 select c1, c2 from t2 where c2 = $1 on duplicate key update c2 = c2 + 1;
+set plan_cache_mode = force_generic_plan;
+:EXP execute upsert_c(1);
+             QUERY PLAN              
+-------------------------------------
+ Insert on t1
+   Conflict Resolution: UPDATE
+   Conflict Arbiter Indexes: t1_pkey
+   ->  Seq Scan on t2
+         Filter: (c2 = 1)
+(5 rows)
+
+--- No gpc
+select * from dbe_perf.global_plancache_clean;
+ plancache_clean 
+-----------------
+ t
+(1 row)
+
+truncate t1;
+prepare upsert_nogpc as insert /*+ no_gpc */ into t1 select c1, c2 from t2 where c1 = $1 on duplicate key update c2 = c2 + 1;
+execute upsert_nogpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+truncate t1;
+prepare upsert_gpc as insert into t1 select c1, c2 from t2 where c1 = $1 on duplicate key update c2 = c2 + 1;
+execute upsert_gpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+reset plan_cache_mode;
+deallocate all;
+-- UPDATE
+--- No hint
+:EXP update t1 set c2 = 2 where c2 = 1;
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Update on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(4 rows)
+
+--- Scan
+:EXP update /*+ indexscan(t1) */ t1 set c2 = 2 where c2 = 1;
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Update on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(4 rows)
+
+--- No hint
+:EXP update t1 set c2 = 2 where c2 in (select c2 from t2);
+                  QUERY PLAN                  
+----------------------------------------------
+ Update on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(7 rows)
+
+--- Join
+:EXP update /*+ hashjoin(t1 t2) */ t1 set c2 = 2 where c2 in (select c2 from t2);
+             QUERY PLAN             
+------------------------------------
+ Update on t1
+   ->  Hash Semi Join
+         Hash Cond: (t1.c2 = t2.c2)
+         ->  Seq Scan on t1
+         ->  Hash
+               ->  Seq Scan on t2
+(6 rows)
+
+--- Leading
+:EXP update /*+ leading((t2 t1))*/ t1 set c2 = 2 where c2 in (select c2 from t2);
+                  QUERY PLAN                  
+----------------------------------------------
+ Update on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(7 rows)
+
+--- Set
+:EXP update /*+ set(query_dop 1008) */ t1 set c2 = 2 where c2 in (select c2 from t2);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Update on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Streaming(type: LOCAL GATHER dop: 1/8)
+                     ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(8 rows)
+
+--- No expand
+:EXP update t1 set c2 = 2 where c2 in (select /*+ no_expand */ c2 from t2);
+             QUERY PLAN             
+------------------------------------
+ Update on t1
+   ->  Seq Scan on t1
+         Filter: (hashed SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on t2
+(5 rows)
+
+--- Plancache
+prepare update_g as update /*+ use_gplan */ t1 set c2 = 2 where c2 = $1;
+set plan_cache_mode = force_custom_plan;
+:EXP execute update_g(2);
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Update on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = $1)
+(4 rows)
+
+prepare update_c as update /*+ use_cplan */ t1 set c2 = 2 where c2 = $1;
+set plan_cache_mode = force_generic_plan;
+:EXP execute update_c(1);
+               QUERY PLAN               
+----------------------------------------
+ Update on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(3 rows)
+
+--- No gpc
+select * from dbe_perf.global_plancache_clean;
+ plancache_clean 
+-----------------
+ t
+(1 row)
+
+truncate t1;
+prepare update_nogpc as update /*+ no_gpc */ t1 set c2 = 2 where c2 = $1;
+execute update_nogpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+truncate t1;
+prepare update_gpc as update t1 set c2 = 2 where c2 = $1;
+execute update_gpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+reset plan_cache_mode;
+deallocate all;
+-- DELETE
+--- No hint
+:EXP delete t1 where c2 = 1;
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Delete on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(4 rows)
+
+--- Scan
+:EXP delete /*+ indexscan(t1) */ t1 where c2 = 1;
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Delete on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(4 rows)
+
+--- No hint
+:EXP delete t1 where c2 in (select c2 from t2);
+                  QUERY PLAN                  
+----------------------------------------------
+ Delete on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(7 rows)
+
+--- Join
+:EXP delete /*+ hashjoin(t1 t2) */ t1 where c2 in (select c2 from t2);
+             QUERY PLAN             
+------------------------------------
+ Delete on t1
+   ->  Hash Semi Join
+         Hash Cond: (t1.c2 = t2.c2)
+         ->  Seq Scan on t1
+         ->  Hash
+               ->  Seq Scan on t2
+(6 rows)
+
+--- Leading
+:EXP delete /*+ leading((t2 t1)) */ t1 where c2 in (select c2 from t2);
+                  QUERY PLAN                  
+----------------------------------------------
+ Delete on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(7 rows)
+
+--- Set
+:EXP delete /*+ set(query_dop 1008) */ t1 where c2 in (select c2 from t2);
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Delete on t1
+   ->  Nested Loop
+         ->  HashAggregate
+               Group By Key: t2.c2
+               ->  Streaming(type: LOCAL GATHER dop: 1/8)
+                     ->  Seq Scan on t2
+         ->  Index Scan using t1_c2_idx on t1
+               Index Cond: (c2 = t2.c2)
+(8 rows)
+
+--- No expand
+:EXP delete t1 where c2 in (select /*+ no_expand */ c2 from t2);
+             QUERY PLAN             
+------------------------------------
+ Delete on t1
+   ->  Seq Scan on t1
+         Filter: (hashed SubPlan 1)
+         SubPlan 1
+           ->  Seq Scan on t2
+(5 rows)
+
+--- Plancache
+prepare delete_g as delete /*+ use_gplan */ t1 where c2 = $1;
+set plan_cache_mode = force_custom_plan;
+:EXP execute delete_g(2);
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Delete on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = $1)
+(4 rows)
+
+prepare delete_c as delete /*+ use_cplan */ t1 where c2 = 1;
+set plan_cache_mode = force_generic_plan;
+:EXP execute delete_c(1);
+               QUERY PLAN               
+----------------------------------------
+ [Bypass]
+ Delete on t1
+   ->  Index Scan using t1_c2_idx on t1
+         Index Cond: (c2 = 1)
+(4 rows)
+
+--- No gpc
+select * from dbe_perf.global_plancache_clean;
+ plancache_clean 
+-----------------
+ t
+(1 row)
+
+truncate t1;
+insert into t1 values(1,1);
+prepare delete_nogpc as delete /*+ no_gpc */ t1 where c1 = $1;
+execute delete_nogpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+truncate t1;
+insert into t1 values(1,1);
+prepare delete_gpc as delete t1 where c1 = $1;
+execute delete_gpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+reset plan_cache_mode;
+deallocate all;
+-- MERGE INTO
+--- No hint
+:EXP merge into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+                 QUERY PLAN                 
+--------------------------------------------
+ Merge on t1
+   ->  Nested Loop Left Join
+         ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = t2.c1)
+(5 rows)
+
+--- Scan
+:EXP merge /*+ indexscan(t1) */ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+                 QUERY PLAN                 
+--------------------------------------------
+ Merge on t1
+   ->  Nested Loop Left Join
+         ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = t2.c1)
+(5 rows)
+
+--- Join
+:EXP merge /*+ mergejoin(t1 t2) */ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+                 QUERY PLAN                 
+--------------------------------------------
+ Merge on t1
+   ->  Merge Right Join
+         Merge Cond: (t1.c1 = t2.c1)
+         ->  Index Scan using t1_pkey on t1
+         ->  Sort
+               Sort Key: t2.c1
+               ->  Seq Scan on t2
+(7 rows)
+
+--- Leading
+:EXP merge /*+ leading((t1 t2))*/ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+             QUERY PLAN             
+------------------------------------
+ Merge on t1
+   ->  Hash Right Join
+         Hash Cond: (t1.c1 = t2.c1)
+         ->  Seq Scan on t1
+         ->  Hash
+               ->  Seq Scan on t2
+(6 rows)
+
+--- Set
+:EXP merge /*+ set(query_dop 1008) */ into t1 using t2 on t1.c1 = t2.c1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+                     QUERY PLAN                     
+----------------------------------------------------
+ Merge on t1
+   ->  Nested Loop Left Join
+         ->  Streaming(type: LOCAL GATHER dop: 1/8)
+               ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = t2.c1)
+(6 rows)
+
+--- Plancache
+prepare merge_g as merge /*+ use_gplan */ into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+set plan_cache_mode = force_custom_plan;
+:EXP execute merge_g(2);
+                 QUERY PLAN                 
+--------------------------------------------
+ Merge on t1
+   ->  Nested Loop Left Join
+         Join Filter: (t1.c1 = t2.c1)
+         ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = $1)
+(6 rows)
+
+prepare merge_c as merge /*+ use_cplan */ into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+set plan_cache_mode = force_generic_plan;
+:EXP execute merge_c(1);
+                 QUERY PLAN                 
+--------------------------------------------
+ Merge on t1
+   ->  Nested Loop Left Join
+         Join Filter: (t1.c1 = t2.c1)
+         ->  Seq Scan on t2
+         ->  Index Scan using t1_pkey on t1
+               Index Cond: (c1 = 1)
+(6 rows)
+
+--- No gpc / PGXC
+select * from dbe_perf.global_plancache_clean;
+ plancache_clean 
+-----------------
+ t
+(1 row)
+
+truncate t1;
+insert into t1 values(1,1);
+prepare merge_nogpc as merge /*+ no_gpc*/ into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+execute merge_nogpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+truncate t1;
+insert into t1 values(1,1);
+prepare merge_gpc as merge into t1 using t2 on t1.c1 = t2.c1 and t1.c1 = $1 when matched then update set t1.c2 = t2.c2 when not matched then insert values (t2.c1, t2.c2);
+execute merge_gpc(1);
+select * from dbe_perf.global_plancache_status where schema_name = 'schema_hint_iud' order by 1,2;
+ nodename | query | refcount | valid | databaseid | schema_name | params_num | func_id 
+----------+-------+----------+-------+------------+-------------+------------+---------
+(0 rows)
+
+deallocate all;
+-- cleanup
+drop schema schema_hint_iud cascade;
+NOTICE:  drop cascades to 2 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t2

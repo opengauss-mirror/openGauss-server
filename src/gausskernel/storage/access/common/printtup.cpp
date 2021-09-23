@@ -32,7 +32,7 @@
 #include "utils/builtins.h"
 #endif
 #include "distributelayer/streamProducer.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "access/heapam.h"
 
 static void printtup_startup(DestReceiver *self, int operation, TupleDesc typeinfo);
@@ -543,7 +543,9 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
     for (i = 0; i < natts; ++i) {
         Oid atttypid = attrs[i]->atttypid;
         int32 atttypmod = attrs[i]->atttypmod;
-
+        if (IsClientLogicType(atttypid) && atttypmod == -1) {
+            elog(DEBUG1, "client logic without original type is sent to client");
+        }
         pq_writestring(buf, NameStr(attrs[i]->attname));
 
 #ifdef PGXC
@@ -584,7 +586,7 @@ static void SendRowDescriptionCols_3(StringInfo buf, TupleDesc typeinfo, List *t
         pq_writeint32(buf, atttypmod);
 
         /*
-         * Send the type name from a Postgres-XC backend node.
+         * Send the type name from a openGauss backend node.
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */
@@ -635,7 +637,7 @@ static void SendRowDescriptionCols_2(StringInfo buf, TupleDesc typeinfo, List *t
         pq_sendint32(buf, atttypmod);
 
         /*
-         * Send the type name from a Postgres-XC backend node.
+         * Send the type name from a openGauss backend node.
          * This preserves from OID inconsistencies as architecture is shared nothing.
          */
         /* Description: unified cn/dn cn/client  tupledesc data format under normal type. */

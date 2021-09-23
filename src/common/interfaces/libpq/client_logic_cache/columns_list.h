@@ -37,6 +37,7 @@ public:
     void clear();
     bool add(CachedColumn *cached_column);
     const CachedColumn *get_by_oid(Oid table_oid, unsigned int column_position) const;
+    const CachedColumn* get_by_oid(Oid oid) const;
     const CachedColumn *get_by_details(const char *database_name, const char *schema_name, const char *table_name,
         const char *column_name) const;
     const CachedColumn **get_by_details(const char *database_name, const char *schema_name, const char *table_name,

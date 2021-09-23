@@ -17,6 +17,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_bitmapscan                 | on
  enable_bloom_filter               | on
  enable_broadcast                  | on
+ enable_candidate_buf_usage_count  | off
  enable_change_hjcost              | off
  enable_codegen                    | on
  enable_codegen_print              | off
@@ -24,6 +25,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_copy_server_files          | off
  enable_data_replicate             | off
  enable_debug_vacuum               | off
+ enable_default_ustore_table       | off
  enable_delta_store                | off
  enable_double_write               | on
  enable_early_free                 | on
@@ -37,6 +39,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_hashjoin                   | on
  enable_incremental_catchup        | on
  enable_incremental_checkpoint     | on
+ enable_indexkey_update            | on
  enable_index_nestloop             | on
  enable_indexonlyscan              | on
  enable_indexscan                  | on
@@ -63,6 +66,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_partitionwise              | off
  enable_pbe_optimization           | on
  enable_prevent_job_task_startup   | off
+ enable_recyclebin                 | off
  enable_resource_record            | off
  enable_resource_track             | on
  enable_save_datachanged_timestamp | on
@@ -80,11 +84,12 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_upgrade_merge_lock_mode    | off
  enable_upsert_to_merge            | on
  enable_user_metric_persistent     | on
+ enable_ustore_partial_seqscan     | off
  enable_valuepartition_pruning     | on
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(80 rows)
+(84 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);
@@ -654,7 +659,6 @@ DROP FUNCTION foo(int);
 -- some tests on SQL functions with RETURNING
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 create table tt(f1 int, data text);
 create function insert_tt(text) returns int as
 $$ insert into tt(data) values($1) returning f1 $$

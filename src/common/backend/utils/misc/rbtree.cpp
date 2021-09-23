@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * rbtree.c
- *	  implementation for PostgreSQL generic Red-Black binary tree package
+ *	  implementation for openGauss generic Red-Black binary tree package
  *	  Adopted from http://algolist.manual.ru/ds/rbtree.php
  *
  * This code comes from Thomas Niemann's "Sorting and Searching Algorithms:
@@ -47,28 +47,6 @@
 #define RBRED 1
 
 /*
- * RBTree control structure
- */
-struct RBTree {
-    RBNode* root; /* root node, or RBNIL if tree is empty */
-
-    /* Iteration state */
-    RBNode* cur; /* current iteration node */
-    RBNode* (*iterate)(RBTree* rb);
-
-    /* Remaining fields are constant after rb_create */
-
-    Size node_size; /* actual size of tree nodes */
-    /* The caller-supplied manipulation functions */
-    rb_comparator comparator;
-    rb_combiner combiner;
-    rb_allocfunc allocfunc;
-    rb_freefunc freefunc;
-    /* Passthrough arg passed to all manipulation functions */
-    void* arg;
-};
-
-/*
  * all leafs are sentinels, use customized NIL name to prevent
  * collision with system-wide constant NIL which is actually NULL
  */
@@ -86,6 +64,7 @@ static RBNode sentinel = {InitialState, RBBLACK, RBNIL, RBNIL, NULL};
  *	combiner: merge an existing tree entry with a new one
  *	allocfunc: allocate a new RBNode
  *	freefunc: free an old RBNode
+ *	copyfunc: copy an old RBNode to another one
  *	arg: passthrough pointer that will be passed to the manipulation functions
  *
  * Note that the combiner's righthand argument will be a "proposed" tree node,
@@ -99,6 +78,8 @@ static RBNode sentinel = {InitialState, RBBLACK, RBNIL, RBNIL, NULL};
  * to free any subsidiary data, because the node passed to it may not contain
  * valid data!	freefunc can be NULL if caller doesn't require retail
  * space reclamation.
+ * 
+ * The copyfunc will repace default shallow copy of rb_copy_data() if not NULL.
  *
  * The RBTree node is palloc'd in the caller's memory context.	Note that
  * all contents of the tree are actually allocated by the caller, not here.
@@ -109,7 +90,7 @@ static RBNode sentinel = {InitialState, RBBLACK, RBNIL, RBNIL, NULL};
  * the RBTree node if you feel the urge.
  */
 RBTree* rb_create(Size node_size, rb_comparator comparator, rb_combiner combiner, rb_allocfunc allocfunc,
-    rb_freefunc freefunc, void* arg)
+    rb_freefunc freefunc, void* arg, rb_copyfunc copyfunc)
 {
     RBTree* tree = (RBTree*)palloc(sizeof(RBTree));
 
@@ -123,6 +104,7 @@ RBTree* rb_create(Size node_size, rb_comparator comparator, rb_combiner combiner
     tree->combiner = combiner;
     tree->allocfunc = allocfunc;
     tree->freefunc = freefunc;
+    tree->copyfunc = copyfunc;
 
     tree->arg = arg;
 
@@ -132,10 +114,13 @@ RBTree* rb_create(Size node_size, rb_comparator comparator, rb_combiner combiner
 /* Copy the additional data fields from one RBNode to another */
 static inline void rb_copy_data(RBTree* rb, RBNode* dest, const RBNode* src)
 {
-    errno_t rc = EOK;
-
-    rc = memcpy_s(dest + 1, rb->node_size - sizeof(RBNode), src + 1, rb->node_size - sizeof(RBNode));
-    securec_check(rc, "\0", "\0");
+    if (rb->copyfunc != NULL) {
+        rb->copyfunc(rb, dest, src);
+    } else {
+        errno_t rc = EOK;
+        rc = memcpy_s(dest + 1, rb->node_size - sizeof(RBNode), src + 1, rb->node_size - sizeof(RBNode));
+        securec_check(rc, "\0", "\0");
+    }
 }
 
 /**********************************************************************

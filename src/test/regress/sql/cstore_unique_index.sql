@@ -40,7 +40,7 @@ insert into t1 values (1, 3, 4, 5);
 drop table t1;
 
 -- Fail. Primary key must contain partition key.
-CREATE TABLE part_t1(a int, b int, c int, d int, primary key (b, c)) with (orientatiON = column)
+CREATE TABLE part_t1(a int, b int, c int, d int, primary key (b, c)) with (orientation = column)
 PARTITION BY RANGE (a)
 (
     PARTITION P1 VALUES LESS THAN(200),
@@ -49,7 +49,7 @@ PARTITION BY RANGE (a)
     PARTITION P4 VALUES LESS THAN(800)
 );
 
-CREATE TABLE part_t1(a int, b int, c int, d int, primary key (a, b)) with (orientatiON = column)
+CREATE TABLE part_t1(a int, b int, c int, d int, primary key (a, b)) with (orientation = column)
 PARTITION BY RANGE (a)
 (
     PARTITION P1 VALUES LESS THAN(200),
@@ -65,7 +65,7 @@ create unique index on part_t1 using cbtree (a, c) local;
 \d part_t1
 drop table part_t1;
 
-CREATE TABLE part_t1(a int, b int, c int, d int) with (orientatiON = column)
+CREATE TABLE part_t1(a int, b int, c int, d int) with (orientation = column)
 PARTITION BY RANGE (a)
 (
     PARTITION P1 VALUES LESS THAN(200),
@@ -101,3 +101,44 @@ insert into part_t1 select * from t0 where a > 400 and a < 500;
 drop table part_t1;
 
 drop table t0;
+
+-- CStore does not supoort DEFERABLE/INITIALLY DEFERRED on primary/unique constraint
+-- Fail on column-level and table-level constraint
+create table col_t1_defer (a int primary key DEFERRABLE INITIALLY DEFERRED, b int) with (orientation = column);
+create table col_t1_defer (a int, b int, primary key (a) DEFERRABLE INITIALLY DEFERRED) with (orientation = column);
+
+drop table if exists col_t1_defer;
+
+-- CStore supports NOT DEFERABLE/INITIALLY IMMEDIATE on primary/unique constraint
+-- Scuccess on column-level and table-level constraint
+create table col_t1_not_defer (a int primary key NOT DEFERRABLE INITIALLY IMMEDIATE, b int) with (orientation = column);
+create table col_t2_not_defer (a int, b int, primary key (a) NOT DEFERRABLE INITIALLY IMMEDIATE) with (orientation = column);
+
+drop table col_t1_not_defer;
+drop table col_t2_not_defer;
+
+-- CStore supports add primary key/unique column
+create table col_t1 (a int, b int) with (orientation = column);
+alter table col_t1 add column c int unique;
+\d col_t1
+-- Duplicate key violation
+insert into col_t1 values (1, 1, 1), (2, 2, 1);
+
+drop table col_t1;
+
+-- Test adding and merging cstore partition
+create table col_part_t1 (a int primary key, b int) with (orientation = column)
+partition by range (a)
+(
+partition p1 values less than (100),
+partition p2 values less than (200),
+partition p3 values less than (300)
+);
+alter table col_part_t1 add partition p4 values less than(400);
+insert into col_part_t1 values (105, 105), (205, 205), (305, 305);
+alter table col_part_t1 merge partitions p2, p3, p4 into partition p234;
+insert into col_part_t1 values (106, 106), (206, 206), (306, 306);
+-- Duplicate key violation
+insert into col_part_t1 values (105, 105), (205, 205), (305, 305);
+
+drop table col_part_t1;

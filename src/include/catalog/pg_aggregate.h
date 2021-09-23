@@ -474,6 +474,13 @@ DATA(insert (4461 ordered_set_transition - mode_final 0 2281 _null_ _null_ o 0))
 DATA(insert (5555 median_transfn      -    median_float8_finalfn            0   2281    _null_   _null_ 	 n 0));
 DATA(insert (5556 median_transfn      -    median_interval_finalfn          0   2281    _null_   _null_ 	 n 0));
 
+/* percentile */
+DATA(insert ( 9990	tdigest_merge		tdigest_merge_to_one		calculate_quantile_of				0	4406	_null_ _null_ 	n	0));
+#define ADDTDIGESTMERGEOID 9990
+
+DATA(insert ( 9986	tdigest_mergep		tdigest_merge_to_one		calculate_value_at				0	4406	_null_ _null_ 	n	0));
+#define ADDTDIGESTMERGEPOID 9986
+
 /*
  * prototypes for functions in pg_aggregate.c
  */

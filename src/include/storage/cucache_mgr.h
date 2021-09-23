@@ -28,7 +28,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "vecexecutor/vectorbatch.h"
 #include "utils/hsearch.h"
 #include "storage/lock/lwlock.h"

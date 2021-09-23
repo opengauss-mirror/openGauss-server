@@ -296,7 +296,7 @@ function install_gaussdb()
     export PATH=${BUILD_DIR}:$PATH
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:$LD_LIBRARY_PATH
 
-    commitid=$(LD_PRELOAD='' ${BUILD_DIR}/bin/gaussdb -V | awk '{print $5}' | cut -d ")" -f 1)
+    commitid=$(LD_PRELOAD='' ${BUILD_DIR}/bin/gaussdb -V | awk '{print $6}' | cut -d ")" -f 1)
     if [ -z "$commitid" ]
     then
         commitid=$(date "+%Y%m%d%H%M%S")
@@ -313,7 +313,7 @@ function copy_files_list()
 {
     for file in $(echo $1)
     do
-        tar -cpf - $file  | ( cd $2; tar -xpf -  )
+        test -e $file && tar -cpf - $file | ( cd $2; tar -xpf -  )
     done
 }
 
@@ -355,7 +355,6 @@ function target_file_copy()
     copy_files_list "$1" $2
 
     cp ${SCRIPT_DIR}/version.cfg ${BUILD_DIR}/temp
-    cp -rf ${SCRIPT_DIR}/../../simpleInstall ${BUILD_DIR}/temp
     if [ $? -ne 0 ]; then
         die "copy ${SCRIPT_DIR}/version.cfg to ${BUILD_DIR}/temp failed"
     fi

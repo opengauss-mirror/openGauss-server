@@ -30,6 +30,13 @@
 #include "utils/array.h"
 
 /*
+ *  * This Row Level Security policy can apply to all commands.
+ *   * Include SELECT, INSERT, UPDATE, DELETE, currently only support
+ *    * SELECT, UPDATE, DELETE.
+ *     */
+#define RLS_CMD_ALL_CHR '*'
+
+/*
  * The struct that can describe Row Level Security Policy.
  * Aleady know the relation information, no need to store relation info.
  */

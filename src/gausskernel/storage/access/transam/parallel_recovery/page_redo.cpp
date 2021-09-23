@@ -73,9 +73,9 @@ static const int REDO_SLEEP_100US = 100;
 
 static void AddSafeRecoveryRestartPoint(XLogRecPtr restartPoint);
 static void ApplyAndFreeRedoItem(RedoItem *);
-static void ApplyMultiPageRecord(RedoItem *);
+static void ApplyMultiPageRecord(RedoItem *, bool replayUndo = false);
 static int ApplyRedoLoop();
-static void ApplySinglePageRecord(RedoItem *);
+static void ApplySinglePageRecord(RedoItem *, bool replayUndo = false);
 static PageRedoWorker *CreateWorker(uint32);
 static void DeleteExpiredRecoveryRestartPoint();
 static void InitGlobals();
@@ -86,6 +86,17 @@ static ThreadId StartWorkerThread(PageRedoWorker *);
 static void ApplyMultiPageShareWithTrxnRecord(RedoItem *item);
 static void ApplyMultiPageSyncWithTrxnRecord(RedoItem *item);
 static void ApplyMultiPageAllWorkerRecord(RedoItem *item);
+static void ApplyRecordWithoutSyncUndoLog(RedoItem *item);
+
+bool DoPageRedoWorkerReplayUndo()
+{
+    return g_redoWorker->replay_undo;
+}
+
+RedoWorkerRole GetRedoWorkerRole()
+{
+    return g_redoWorker->role;
+}
 
 void UpdateRecordGlobals(RedoItem *item, HotStandbyState standbyState)
 {
@@ -136,7 +147,19 @@ static PageRedoWorker *CreateWorker(uint32 id)
 {
     PageRedoWorker *tmp = (PageRedoWorker *)palloc0(sizeof(PageRedoWorker) + REDO_WORKER_ALIGN_LEN);
     PageRedoWorker *worker;
+    uint32             parallelism = get_real_recovery_parallelism();
+    uint32             undoZidWorkersNum = get_recovery_undozidworkers_num();
+
     worker = (PageRedoWorker *)TYPEALIGN(REDO_WORKER_ALIGN_LEN, tmp);
+
+    /* Use the second half as undo log workers */
+    if (SUPPORT_USTORE_UNDO_WORKER &&
+        id >= (parallelism - undoZidWorkersNum)) {
+        worker->role = UndoLogZidWorker;
+    } else {
+        worker->role = DataPageWorker;
+    }
+
     worker->selfOrinAddr = tmp;
     worker->id = id;
     worker->originId = id;
@@ -335,6 +358,9 @@ static void SigHupHandler(SIGNAL_ARGS)
 /* Run from the worker thread. */
 static void InitGlobals()
 {
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ParallelRedoThread",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
     t_thrd.xlog_cxt.server_mode = g_redoWorker->initialServerMode;
     t_thrd.xlog_cxt.ThisTimeLineID = g_redoWorker->initialTimeLineID;
     /* apply recoveryinfo will change standbystate see UpdateRecordGlobals */
@@ -414,7 +440,11 @@ static void ApplyAndFreeRedoItem(RedoItem *item)
     XLogRecPtr endLSN = item->record.EndRecPtr;
     XLogRecPtr readLSN = item->record.ReadRecPtr;
 
-    if (IsLSNMarker(item)) {
+    if (item->replay_undo) {
+        g_redoWorker->replay_undo = (g_redoWorker->role == UndoLogZidWorker);
+        ApplyRecordWithoutSyncUndoLog(item);
+        pg_atomic_write_u64(&g_redoWorker->lastReplayedEndRecPtr, endLSN);
+    } else if (IsLSNMarker(item)) {
         FreeRedoItem(item);
         SetCompletedReadEndPtr(g_redoWorker, readLSN, endLSN);
     } else if (item->sharewithtrxn)
@@ -442,8 +472,52 @@ void OnlyFreeRedoItem(RedoItem *item)
     }
 }
 
+/* Run from the worker thread */
+static void ApplyRecordWithoutSyncUndoLog(RedoItem *item)
+{
+    bool bOld = item->oldVersion;
+
+    /* No need to sync with undo log */
+    if (g_redoWorker->replay_undo) {
+        Assert(g_redoWorker->role == UndoLogZidWorker);
+        MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+        ApplyRedoRecord(&item->record, bOld);
+        (void)MemoryContextSwitchTo(oldCtx);
+        uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
+        uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
+        uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
+
+        /* The last one to replay the item */
+        if (trueRefCount == (shrCount + undoZidWorkersNum))
+            FreeRedoItem(item);
+
+    } else {
+
+        /* When the worker role is DataPageWorker */
+        Assert(g_redoWorker->role == DataPageWorker);
+
+        if (g_instance.attr.attr_storage.EnableHotStandby) {
+            XLogReaderState *record = &item->record;
+            XLogRecPtr lrRead;
+            XLogRecPtr lrEnd;
+
+            GetReplayedRecPtrFromUndoWorkers(&lrRead, &lrEnd);
+        
+            while (XLByteLT(lrEnd, record->EndRecPtr)) {
+                GetReplayedRecPtrFromUndoWorkers(&lrRead, &lrEnd);
+                RedoInterruptCallBack();
+            }
+        }
+    
+        if (item->shareCount == 1)
+            ApplySinglePageRecord(item, true);
+        else
+            ApplyMultiPageRecord(item, true);
+    }
+}
+
 /* Run from the worker thread. */
-static void ApplySinglePageRecord(RedoItem *item)
+static void ApplySinglePageRecord(RedoItem *item, bool replayUndo)
 {
     XLogReaderState *record = &item->record;
     bool bOld = item->oldVersion;
@@ -452,7 +526,15 @@ static void ApplySinglePageRecord(RedoItem *item)
     ApplyRedoRecord(record, bOld);
     (void)MemoryContextSwitchTo(oldCtx);
 
-    FreeRedoItem(item);
+    if (replayUndo) {
+        uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
+        uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
+        uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
+        if (trueRefCount == (shrCount + undoZidWorkersNum))
+            FreeRedoItem(item);
+    } else {
+        FreeRedoItem(item);
+    }
 }
 
 static void AddSafeRecoveryRestartPoint(XLogRecPtr restartPoint)
@@ -487,7 +569,58 @@ static void DeleteExpiredRecoveryRestartPoint()
     }
 }
 
-static void ApplyMultiPageRecord(RedoItem *item)
+static void WaitAndApplyMultiPageRecord(RedoItem *item)
+{
+    uint64 blockcnt = 0;
+
+    /* Wait until every worker has reached this record. */
+    pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
+    while (pg_atomic_read_u32(&item->refCount) != item->shareCount) {
+        blockcnt++;
+        if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
+            XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, "
+                                     "Workerid:%u, shareCount:%u, refcount:%u, LatestReplayedRecPtr:%lu",
+                                     item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->shareCount,
+                                     item->refCount, LatestReplayedRecPtr)));
+        }
+        RedoInterruptCallBack();
+    };
+    pgstat_report_waitevent(WAIT_EVENT_END);
+
+    MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
+    /* Apply the record and wake up other workers. */
+    ApplyRedoRecord(&item->record, item->oldVersion);
+    (void)MemoryContextSwitchTo(oldCtx);
+
+    pg_memory_barrier();
+
+    pg_atomic_write_u32(&item->replayed, 1);
+}
+
+static void WaitForApplyMultiPageRecord(RedoItem *item)
+{
+    uint64 blockcnt = 0;
+
+    /* Wait until the record has been applied. */
+    pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
+    while (pg_atomic_read_u32(&item->replayed) == 0) {
+        blockcnt++;
+        if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
+            XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                              errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, Workerid:%u,"
+                                     " replayed:%u, LatestReplayedRecPtr:%lu",
+                                     item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->replayed,
+                                     LatestReplayedRecPtr)));
+        }
+        RedoInterruptCallBack();
+    };
+    pgstat_report_waitevent(WAIT_EVENT_END);
+}
+
+static void ApplyMultiPageRecord(RedoItem *item, bool replayUndo)
 {
     g_redoWorker->statMulpageCnt++;
     uint32 refCount = pg_atomic_add_fetch_u32(&item->refCount, 1);
@@ -499,57 +632,40 @@ static void ApplyMultiPageRecord(RedoItem *item)
      */
     uint32 designatedWorker = item->designatedWorker;
     bool isLast = (refCount == item->shareCount);
-    bool doApply = (designatedWorker == GetMyPageRedoWorkerId() || (designatedWorker == ANY_WORKER && isLast));
-    uint64 blockcnt = 0;
+    bool doApply = false;
+
+    /* 
+     * UStore parallel replay want to make sure the redo worker dispatcher by data page rnode 
+     * to replay the record. Update could has two block, for this fix will use the first block
+     */
+    if (item->designatedWorker == USTORE_WORKER) {
+        XLogReaderState *record = &(item->record);
+        DecodedBkpBlock *block = &record->blocks[0];
+
+        /* Currently, concurrent reply can be performed only by filenode. */
+        uint32 desire_page_worker_id = GetWorkerId(block->rnode, 0, 0);
+        doApply = (desire_page_worker_id == GetMyPageRedoWorkerId());
+    } else {
+        doApply = (designatedWorker == GetMyPageRedoWorkerId() || (designatedWorker == ANY_WORKER && isLast));
+    }
 
     if (doApply) {
-        pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
-        /* Wait until every worker has reached this record. */
-        while (pg_atomic_read_u32(&item->refCount) != item->shareCount) {
-            blockcnt++;
-            if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-                XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
-                ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                                  errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, "
-                                         "Workerid:%u, shareCount:%u, refcount:%u, LatestReplayedRecPtr:%lu",
-                                         item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->shareCount,
-                                         item->refCount, LatestReplayedRecPtr)));
-            }
-            RedoInterruptCallBack();
-        };
-        pgstat_report_waitevent(WAIT_EVENT_END);
-
-        MemoryContext oldCtx = MemoryContextSwitchTo(g_redoWorker->oldCtx);
-        /* Apply the record and wake up other workers. */
-        ApplyRedoRecord(&item->record, item->oldVersion);
-        (void)MemoryContextSwitchTo(oldCtx);
-
-        pg_memory_barrier();
-
-        pg_atomic_write_u32(&item->replayed, 1);
+        WaitAndApplyMultiPageRecord(item);
     } else {
-        pgstat_report_waitevent(WAIT_EVENT_PREDO_APPLY);
-        /* Wait until the record has been applied. */
-        while (pg_atomic_read_u32(&item->replayed) == 0) {
-            blockcnt++;
-            if ((blockcnt & OUTPUT_WAIT_COUNT) == OUTPUT_WAIT_COUNT) {
-                XLogRecPtr LatestReplayedRecPtr = GetXLogReplayRecPtr(NULL);
-                ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
-                                  errmsg("[REDO_LOG_TRACE]MultiPageRecord:recordEndLsn:%lu, blockcnt:%lu, Workerid:%u,"
-                                         " replayed:%u, LatestReplayedRecPtr:%lu",
-                                         item->record.EndRecPtr, blockcnt, g_redoWorker->id, item->replayed,
-                                         LatestReplayedRecPtr)));
-            }
-            RedoInterruptCallBack();
-        };
-        pgstat_report_waitevent(WAIT_EVENT_END);
+        WaitForApplyMultiPageRecord(item);
     }
 
     /*
      * If we are the last worker leaving this record, we should destroy
      * the copied record.
      */
-    if (pg_atomic_sub_fetch_u32(&item->refCount, 1) == 0) {
+    if (replayUndo) {
+        uint32 shrCount = pg_atomic_read_u32(&item->shareCount);
+        uint32 trueRefCount = pg_atomic_add_fetch_u32(&item->trueRefCount, 1);
+        uint32 undoZidWorkersNum = get_recovery_undozidworkers_num();
+        if (trueRefCount == (shrCount + undoZidWorkersNum))
+            FreeRedoItem(item);
+    } else if (pg_atomic_sub_fetch_u32(&item->refCount, 1) == 0) {
         FreeRedoItem(item);
     }
 }
@@ -586,6 +702,17 @@ static void ApplyMultiPageAllWorkerRecord(RedoItem *item)
         /* process invalid db and close files */
         XLogDropDatabase(xlrec->db_id);
         (void)MemoryContextSwitchTo(oldCtx);
+    } else if (IsSegPageShrink(record)) {
+        XLogDataSpaceShrink *xlog_data = (XLogDataSpaceShrink *)XLogRecGetData(record);
+        /* forget metadata buffer that uses physical block number */
+        XLogTruncateRelation(xlog_data->rnode, xlog_data->forknum, xlog_data->target_size);
+        /* forget data buffer that uses logical block number */
+        XLogTruncateSegmentSpace(xlog_data->rnode, xlog_data->forknum, xlog_data->target_size);
+    } else if (IsSegPageDropSpace(record)) {
+        char *data = (char *)XLogRecGetData(record);
+        Oid spcNode = *(Oid *)data;
+        Oid dbNode = *(Oid *)(data + sizeof(Oid));
+        XLogDropSegmentSpace(spcNode, dbNode);
     } else {
         ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                         errmsg("[REDO_LOG_TRACE]ApplyMultiPageAllWorkerRecord encounter fatal error:"
@@ -909,6 +1036,18 @@ void redo_dump_worker_queue_info()
                         redoWorker->id, redoWorker->originId, redoWorker->tid.thid,
                         SPSCGetQueueCount(redoWorker->queue), pg_atomic_read_u32(&(redoWorker->queue->maxUsage)),
                         pg_atomic_read_u64(&(redoWorker->queue->totalCnt)))));
+    }
+}
+
+/* Pending items should be pushed to all workers' queues before invoking this function */
+void WaitAllPageWorkersQueueEmpty()
+{
+    if ((get_real_recovery_parallelism() > 1) && (GetPageWorkerCount() > 0)) {
+        for (uint32 i = 0; i < g_dispatcher->pageWorkerCount; i++) {
+            while (!SPSCBlockingQueueIsEmpty(g_dispatcher->pageWorkers[i]->queue)) {
+                HandlePageRedoInterrupts();
+            }
+        }
     }
 }
 

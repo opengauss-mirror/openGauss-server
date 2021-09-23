@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * lmgr.h
- *	  POSTGRES lock manager definitions.
+ *	  openGauss lock manager definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -66,8 +66,14 @@ extern void XactLockTableDelete(TransactionId xid);
 extern void XactLockTableWait(TransactionId xid, bool allow_con_update = false);
 extern bool ConditionalXactLockTableWait(TransactionId xid, bool waitparent = true, bool bCareNextxid = false);
 
+/* Lock a SubXID */
+extern void SubXactLockTableInsert(SubTransactionId subxid);
+extern void SubXactLockTableWait(TransactionId xid, SubTransactionId subxid);
+extern bool ConditionalSubXactLockTableWait(TransactionId xid, SubTransactionId subxid);
+
 /* Lock a general object (other than a relation) of the current database */
 extern void LockDatabaseObject(Oid classid, Oid objid, uint16 objsubid, LOCKMODE lockmode);
+extern bool ConditionalLockDatabaseObject(Oid classid, Oid objid, uint16 objsubid, LOCKMODE lockmode);
 extern void UnlockDatabaseObject(Oid classid, Oid objid, uint16 objsubid, LOCKMODE lockmode);
 
 /* Lock a shared-across-databases object (other than a relation) */

@@ -375,12 +375,16 @@ explain (costs off, verbose on) execute p6;
 
 prepare p7 as  select a from prepare_table_01 where current_date<'2013-07-20' ;
 explain (costs off, verbose on) execute p7;
-        QUERY PLAN        
---------------------------
- Result
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Row Adapter
    Output: a
-   One-Time Filter: false
-(3 rows)
+   ->  Vector Result
+         Output: a
+         One-Time Filter: false
+         ->  CStore Scan on vector_distribute_prepare.prepare_table_01
+               Output: a
+(7 rows)
 
 drop table test_prepare_1;
 drop table test_prepare_2;

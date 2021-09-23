@@ -10,6 +10,9 @@ GENERATE
 \! gs_ktool -g
 GENERATE
 3
+\! gs_ktool -g
+GENERATE
+4
 select  count(*), 'count' from gs_client_global_keys;
  count | ?column? 
 -------+----------
@@ -67,10 +70,10 @@ CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK1, A
 ERROR(CLIENT): failed to get client master key imgcmk1 from cache
 -- fail  didn't support AES_128_CBC algorithm
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK, ALGORITHM  = AES_128_CBC);
-ERROR(CLIENT): invalid algorithm.
+ERROR(CLIENT): invalid column encryption key algorithm.
 -- fail   syntax error parsing cek creation query
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (CLIENT_MASTER_KEY = ImgCMK);
-ERROR(CLIENT): invalid algorithm.
+ERROR(CLIENT): invalid column encryption key algorithm.
 -- fail   syntax error parsing cek creation query
 CREATE COLUMN ENCRYPTION KEY ImgCEK2 WITH VALUES (ALGORITHM = AEAD_AES_128_CBC_HMAC_SHA256);
 ERROR(CLIENT): failed to get client master key from cache
@@ -94,6 +97,32 @@ DROP CLIENT MASTER KEY ImgCMK CASCADE;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to column encryption key: imgcek
 drop cascades to column encryption key: imgcek1
+--failed
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM3);
+ERROR(CLIENT): unsupported client master key algorithm
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM2);
+ERROR(CLIENT): unsupported client master key algorithm
+--success
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM4);
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = sm4_sm34);
+ERROR(CLIENT): invalid column encryption key algorithm.
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+ERROR(CLIENT): National secret algorithm must be used together.
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = sm4_sm3);
+select  count(*), 'count' from gs_client_global_keys;
+ count | ?column? 
+-------+----------
+     1 | count
+(1 row)
+
+select  count(*), 'count' from gs_column_keys;
+ count | ?column? 
+-------+----------
+     1 | count
+(1 row)
+
+DROP CLIENT MASTER KEY test_sm2_cmk CASCADE;
+NOTICE:  drop cascades to column encryption key: sm4_cek
 \! gs_ktool -d all
 DELETE ALL
- 1 2 3
+ 1 2 3 4

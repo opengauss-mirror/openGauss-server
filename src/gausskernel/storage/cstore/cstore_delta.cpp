@@ -34,11 +34,6 @@
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
 
-extern List* ChooseIndexColumnNames(const List* indexElems);
-extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
-    int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
-    bool amcanorder, bool isconstraint);
-
 static Oid GetCUIdxFromDeltaIdx(Relation deltaIdx, bool isPartition);
 
 /*
@@ -148,11 +143,6 @@ void DefineDeltaUniqueIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId
     List* indexColNames =  NIL;
     char deltaIndexRelName[NAMEDATALEN] = {'\0'};
     error_t ret = 0;
-    Oid* typeObjectId = NULL;
-    Oid* collationObjectId = NULL;
-    Oid* classObjectId = NULL;
-    int16* coloptions = NULL;
-    Oid indexOid = InvalidOid;
 
     if (parentRel) {
         /* For partiontioned table. relationId is a partition id. */
@@ -202,9 +192,6 @@ void DefineDeltaUniqueIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId
     }
     securec_check_ss_c(ret, "\0", "\0");
 
-    /* Unique index can only be btree. */
-    Oid accessMethodId = BTREE_AM_OID;
-
     IndexInfo* indexInfo = NULL;
     indexInfo = makeNode(IndexInfo);
     indexInfo->ii_NumIndexAttrs = numberOfKeyAttributes;
@@ -222,49 +209,9 @@ void DefineDeltaUniqueIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
 
-    typeObjectId = (Oid*)palloc(numberOfKeyAttributes * sizeof(Oid));
-    collationObjectId = (Oid*)palloc(numberOfKeyAttributes * sizeof(Oid));
-    classObjectId = (Oid*)palloc(numberOfKeyAttributes * sizeof(Oid));
-    coloptions = (int16*)palloc(numberOfKeyAttributes * sizeof(int16));
-    ComputeIndexAttrs(indexInfo,
-        typeObjectId,
-        collationObjectId,
-        classObjectId,
-        coloptions,
-        stmt->indexParams,
-        stmt->excludeOpNames,
-        parentRel != NULL ? RelationGetRelid(parentRel) : relationId,
-        "btree",
-        accessMethodId,
-        true,
-        stmt->isconstraint);
+    (void)CreateDeltaUniqueIndex(deltaRelation, deltaIndexRelName, indexInfo, stmt->indexParams,
+        indexColNames, stmt->primary);
 
-    IndexCreateExtraArgs extra;
-    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
-
-    indexOid = index_create(
-        deltaRelation,
-        deltaIndexRelName,
-        InvalidOid,
-        InvalidOid,
-        indexInfo,
-        indexColNames,
-        BTREE_AM_OID,
-        rel->rd_rel->reltablespace,
-        collationObjectId,
-        classObjectId,
-        coloptions,
-        (Datum)0,
-        true,
-        false,
-        false,
-        false,
-        true,
-        false,
-        false,
-        &extra
-    );
-    Assert(OidIsValid(indexOid));
     heap_close(deltaRelation, NoLock);
 
     if (parentRel) {
@@ -272,11 +219,45 @@ void DefineDeltaUniqueIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId
     } else {
         relation_close(rel, NoLock);
     }
+}
+
+/*
+ * @Description: Create unique index on delta table.
+ * @IN deltaRel: the delta table.
+ * @IN deltaIndexName: the name of index on delta table
+ * @IN indexInfo: indexInfo of CU index
+ * @IN indexElemList: the list contains each index column attribute
+ * @IN indexColNames: the list contains name of each index column
+ * @IN isPrimary: is primary index?
+ */
+Oid CreateDeltaUniqueIndex(Relation deltaRel, const char* deltaIndexName, IndexInfo* indexInfo,
+    List* indexElemList, List* indexColNames, bool isPrimary)
+{
+    int numIndexCols = indexInfo->ii_NumIndexAttrs;
+    Oid* typeObjectId = (Oid*)palloc(numIndexCols * sizeof(Oid));
+    Oid* collationObjectId = (Oid*)palloc(numIndexCols * sizeof(Oid));
+    Oid* classObjectId = (Oid*)palloc(numIndexCols * sizeof(Oid));
+    int16* coloptions = (int16*)palloc(numIndexCols * sizeof(int16));
+
+    ComputeIndexAttrs(indexInfo, typeObjectId, collationObjectId, classObjectId, coloptions,
+        indexElemList, NULL, RelationGetRelid(deltaRel), "btree", BTREE_AM_OID, true, false);
+
+    IndexCreateExtraArgs extra;
+    SetIndexCreateExtraArgs(&extra, InvalidOid, false, false);
+
+    Oid deltaIndexOid = index_create(deltaRel,
+        deltaIndexName, InvalidOid, InvalidOid, indexInfo,
+        indexColNames, BTREE_AM_OID, deltaRel->rd_rel->reltablespace,
+        collationObjectId, classObjectId, coloptions, (Datum)0,
+        isPrimary, false, false, false, true, false,
+        false, &extra);
 
     pfree(typeObjectId);
     pfree(collationObjectId);
     pfree(classObjectId);
     pfree(coloptions);
+
+    return deltaIndexOid;
 }
 
 /*
@@ -349,7 +330,7 @@ void BuildIndexOnNewDeltaTable(Oid oldRelOid, Oid newRelOid, Oid parentOid)
             cxt.relation = makeRangeVar(
                 get_namespace_name(RelationGetNamespace(oldRel)), RelationGetRelationName(oldRel), -1);
             IndexStmt* indexStmt = NULL;
-            indexStmt = generateClonedIndexStmt(&cxt, idxRel, attmap, attmapLength, NULL);
+            indexStmt = generateClonedIndexStmt(&cxt, idxRel, attmap, attmapLength, NULL, TRANSFORM_INVALID);
 
             /*
              * Must delete the index on old delta table, or conflicts will happen between
@@ -437,7 +418,6 @@ void ReindexPartDeltaIndex(Oid indexOid, Oid partOid)
     partScan = systable_beginscan(pg_partition, PartitionIndexTableIdIndexId, true, SnapshotNow, 1, &scanKey);
     while ((partTuple = systable_getnext(partScan)) != NULL) {
         partForm = (Form_pg_partition)GETSTRUCT(partTuple);
-
         if (partForm->parentid == indexOid) {
             indexPartOid = HeapTupleGetOid(partTuple);
             break;

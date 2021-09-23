@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * off.h
- *	  POSTGRES disk "offset" definitions.
+ *	  openGauss disk "offset" definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

@@ -84,6 +84,7 @@ public:
      *  @brief copy all params from statment data to params structre and allocating memory for adjusted
      */
     void copy_params();
+    ICachedColumnManager* GetCacheManager() const;
     ~StatementData();
 
 private:

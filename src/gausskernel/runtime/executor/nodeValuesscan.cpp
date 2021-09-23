@@ -25,7 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeValuesscan.h"
+#include "executor/node/nodeValuesscan.h"
 #include "parser/parsetree.h"
 
 static TupleTableSlot* ValuesNext(ValuesScanState* node);

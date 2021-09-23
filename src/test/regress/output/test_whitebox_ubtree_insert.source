@@ -1,0 +1,42 @@
+\! rm -f @abs_srcdir@/ubtree_insert_1
+\! echo "ubtinsert,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-begin,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-found,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeDoInsert-end,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeCheckUnique,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeInsertOnPage,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-begin,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-bulk-extend,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "UBTreeGetNewPage-extend,PRINT," >> @abs_srcdir@/ubtree_insert_1
+\! echo "GetAvailablePageOnPage-got,PRINT," >> @abs_srcdir@/ubtree_insert_1
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/ubtree_insert_1';
+-- case 1: print insert path
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int primary key, c2 int) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (3,2);
+NOTICE:  Hitting breakpoint ubtinsert
+NOTICE:  Hitting breakpoint UBTreeDoInsert-begin
+NOTICE:  Hitting breakpoint UBTreeGetNewPage-begin
+NOTICE:  Hitting breakpoint UBTreeGetNewPage-extend
+NOTICE:  Hitting breakpoint UBTreeDoInsert-found
+NOTICE:  Hitting breakpoint UBTreeCheckUnique
+NOTICE:  Hitting breakpoint UBTreeInsertOnPage
+NOTICE:  Hitting breakpoint UBTreeDoInsert-end
+insert into t1 values (5,6);
+NOTICE:  Hitting breakpoint ubtinsert
+NOTICE:  Hitting breakpoint UBTreeDoInsert-begin
+NOTICE:  Hitting breakpoint UBTreeDoInsert-found
+NOTICE:  Hitting breakpoint UBTreeCheckUnique
+NOTICE:  Hitting breakpoint UBTreeInsertOnPage
+NOTICE:  Hitting breakpoint UBTreeDoInsert-end
+select * from t1;
+ c1 | c2 
+----+----
+  3 |  2
+  5 |  6
+(2 rows)
+
+drop table t1;
+\! rm -f @abs_srcdir@/ubtree_insert_1

@@ -15,7 +15,8 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-
+#include "catalog/indexing.h"
+#include "utils/fmgroids.h"
 #include "access/heapam.h"
 #include "catalog/dependency.h"
 #include "catalog/namespace.h"
@@ -24,10 +25,13 @@
 #include "catalog/pg_proc.h"
 #include "commands/defrem.h"
 #include "commands/trigger.h"
+#include "gs_policy/gs_policy_masking.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "parser/parse_type.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
+#include "utils/snapmgr.h"
 #include "utils/inval.h"
 #include "utils/builtins.h"
 #include "utils/syscache.h"
@@ -100,9 +104,9 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
 {
     ObjectAddresses* objects = NULL;
     ListCell* cell1 = NULL;
-    ListCell* cell2 = NULL;
     bool skip_check = false;
-
+    ListCell* cell2 = NULL;
+    Oid pkgOid = InvalidOid;
     objects = new_object_addresses();
 
     foreach (cell1, stmt->objects) {
@@ -130,16 +134,38 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             DropExtensionIsSupported(objname);
         }
 
+        TrForbidAccessRbObject(address.classId, address.objectId);
+
         /*
          * Although COMMENT ON FUNCTION, SECURITY LABEL ON FUNCTION, etc. are
          * happy to operate on an aggregate as on any other function, we have
          * historically not allowed this for DROP FUNCTION.
          */
+
         if (stmt->removeType == OBJECT_FUNCTION) {
             Oid funcOid = address.objectId;
-            HeapTuple tup;
+            if (IsMaskingFunctionOid(funcOid) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+                ereport(ERROR,
+                    (errmodule(MOD_FUNCTION),
+                        errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+                            errmsg("function \"%s\" is a masking function, it can not be droped", 
+                                NameListToString(objname)),
+                                errdetail("cannot drop masking function")));
+            }
 
+            HeapTuple tup;
+            bool isnull = false;
             tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
+            Datum packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
+            if (!isnull) {
+                Oid pkgFuncOid = DatumGetObjectId(packageOidDatum);
+                if (OidIsValid(pkgFuncOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("\"%s\" is a function in package", NameListToString(objname)),
+                            errhint("Use DROP PACKAGE.")));
+                }
+            }
             if (!HeapTupleIsValid(tup)) /* should not happen */
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcOid)));
@@ -156,6 +182,49 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             ReleaseSysCache(tup);
         }
 
+        /* For DROP PACKAGE */
+        if (stmt->removeType == OBJECT_PACKAGE) {
+            pkgOid = address.objectId;
+
+            HeapTuple oldtup;
+            ScanKeyData entry;
+            ScanKeyInit(&entry, Anum_pg_proc_packageid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(pkgOid));
+            Relation pg_proc_rel = heap_open(ProcedureRelationId, RowExclusiveLock);
+            SysScanDesc scan = systable_beginscan(pg_proc_rel, InvalidOid, false, NULL, 1, &entry);
+            /*
+             * do we need job status not run, we can change the owner, 
+             * now only check if have the permission to change the owner, if after change, the running job may 
+             * failed in check permission
+             */
+            while ((oldtup = systable_getnext(scan)) != NULL) {
+                HeapTuple proctup = heap_copytuple(oldtup);
+                Oid funcOid = InvalidOid;
+                if (HeapTupleIsValid(proctup)) {
+                    funcOid = HeapTupleGetOid(proctup);
+                    if (!OidIsValid(funcOid)) {
+                        ereport(ERROR,
+                            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                                errmodule(MOD_PLSQL),
+                                errmsg("cache lookup failed for relid %u", funcOid)));
+                    }
+                } else {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                            errmodule(MOD_PLSQL),
+                            errmsg("cache lookup failed for relid %u", funcOid)));
+                }
+                CacheInvalidateFunction(funcOid);
+                heap_freetuple(proctup);
+            }
+            systable_endscan(scan);
+            heap_close(pg_proc_rel, RowExclusiveLock);
+
+            HeapTuple tup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgOid));
+            if (!HeapTupleIsValid(tup)) /* should not happen */
+                ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+            ReleaseSysCache(tup);
+        }
         // @Temp Table. myTempNamespace and myTempToastNamespace's owner is
         // bootstrap user, so can not be deleted by ordinary user. to ensuer this two
         // schema be deleted on session quiting, we should bypass acl check when
@@ -238,6 +307,12 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
             break;
         case OBJECT_FUNCTION:
             msg = gettext_noop("function %s(%s) does not exist");
+            name = NameListToString(objname);
+            args = TypeNameListToString(objargs);
+            break;
+        case OBJECT_PACKAGE:
+        case OBJECT_PACKAGE_BODY:
+            msg = gettext_noop("package %s(%s) does not exist");
             name = NameListToString(objname);
             args = TypeNameListToString(objargs);
             break;

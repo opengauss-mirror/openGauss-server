@@ -24,6 +24,7 @@
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
+#include "commands/tablecmds.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
@@ -39,6 +40,7 @@
 #include "parser/parse_target.h"
 #include "pgxc/pgxc.h"
 #include "rewrite/rewriteManip.h"
+#include "storage/tcap.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
@@ -62,6 +64,7 @@ static RangeTblEntry* transformCTEReference(ParseState* pstate, RangeVar* r, Com
 static RangeTblEntry* transformRangeSubselect(ParseState* pstate, RangeSubselect* r);
 static RangeTblEntry* transformRangeFunction(ParseState* pstate, RangeFunction* r);
 static TableSampleClause* transformRangeTableSample(ParseState* pstate, RangeTableSample* rts);
+static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTimeCapsule* rtc);
 
 static void setNamespaceLateralState(List *l_namespace, bool lateral_only, bool lateral_ok);
 static Node* buildMergedJoinVar(ParseState* pstate, JoinType jointype, Var* l_colvar, Var* r_colvar);
@@ -121,7 +124,7 @@ static RangeTblRef* transformItem(ParseState* pstate, RangeTblEntry* rte, RangeT
  * The range table may grow still further when we transform the expressions
  * in the query's quals and target list. (This is possible because in
  * POSTQUEL, we allowed references to relations not specified in the
- * from-clause.  PostgreSQL keeps this extension to standard SQL.)
+ * from-clause.  openGauss keeps this extension to standard SQL.)
  */
 void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bool isCreateView)
 {
@@ -223,6 +226,15 @@ int setTargetTable(ParseState* pstate, RangeVar* relation, bool inh, bool alsoSo
         !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(pstate->p_target_relation) &&
         (strcmp(RelationGetRelationName(pstate->p_target_relation), "pg_authid") == 0 ||
         strcmp(RelationGetRelationName(pstate->p_target_relation), "gs_global_config") == 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied: \"%s\" is a system catalog",
+                    RelationGetRelationName(pstate->p_target_relation))));
+    }
+
+    /* Restrict DML privileges to gs_global_chain which stored history and consistent message like hash. */
+    if (IsUnderPostmaster && !u_sess->attr.attr_common.IsInplaceUpgrade && IsSystemRelation(pstate->p_target_relation)
+        && strcmp(RelationGetRelationName(pstate->p_target_relation), "gs_global_chain") == 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("permission denied: \"%s\" is a system catalog",
@@ -681,6 +693,37 @@ static TableSampleClause* transformRangeTableSample(ParseState* pstate, RangeTab
     return tablesample;
 }
 
+
+/*
+ * Description: Transform a TABLECAPSULE clause
+ * 			Caller has already transformed rtc->relation, we just have to validate
+ * 			the remaining fields and create a TimeCapsuleClause node.
+ *
+ * Parameters:
+ *	@in pstate: state information used during parse analysis.
+ * 	@in rts: TABLECAPSULE appearing in a raw FROM clause.
+ *
+ * Return: TABLECAPSULE appearing in a transformed FROM clause.
+ */
+static TimeCapsuleClause* transformRangeTimeCapsule(ParseState* pstate, RangeTimeCapsule* rtc)
+{
+    TimeCapsuleClause* timeCapsule;
+
+    if (rtc->tvver == NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("timecapsule value must be specified"),
+                parser_errposition(pstate, rtc->location)));
+    }
+
+    timeCapsule = makeNode(TimeCapsuleClause);
+
+    timeCapsule->tvver = TvTransformVersionExpr(pstate, rtc->tvtype, rtc->tvver);
+    timeCapsule->tvtype = rtc->tvtype;
+
+    return timeCapsule;
+}
+
 /*
  * transformFromClauseItem -
  *	  Transform a FROM-clause item, adding any required entries to the
@@ -788,11 +831,36 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
         if (REL_COL_ORIENTED != rte->orientation && REL_ROW_ORIENTED != rte->orientation) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    (errmsg("TABLESAMPLE clause only support relation of oriented-row and oriented-column."))));
+                    (errmsg("TABLESAMPLE clause only support relation of oriented-row, oriented-column and oriented-inplace."))));
         }
 
         /* Transform TABLESAMPLE details and attach to the RTE */
         rte->tablesample = transformRangeTableSample(pstate, rts);
+        return (Node*)rtr;
+    } else if (IsA(n, RangeTimeCapsule)) {
+        /* TABLECAPSULE clause (wrapping some other valid FROM NODE) */
+        RangeTimeCapsule* rtc = (RangeTimeCapsule *)n;
+        Node* rel = NULL;
+        RangeTblRef* rtr = NULL;
+        RangeTblEntry* rte = NULL;
+
+        /* Recursively transform the contained relation. */
+        rel = transformFromClauseItem(pstate, rtc->relation, top_rte, top_rti, NULL, NULL, relnamespace);
+        if (unlikely(rel == NULL)) {
+            ereport(
+                ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Range table with timecapsule clause should not be null")));
+        }
+
+        /* Currently, grammar could only return a RangeVar as contained rel */
+        Assert(IsA(rel, RangeTblRef));
+        rtr = (RangeTblRef*)rel;
+        rte = rt_fetch(rtr->rtindex, pstate->p_rtable);
+
+        TvCheckVersionScan(rte);
+
+        /* Transform TABLECAPSULE details and attach to the RTE */
+        rte->timecapsule = transformRangeTimeCapsule(pstate, rtc);
         return (Node*)rtr;
     } else if (IsA(n, JoinExpr)) {
         /* A newfangled join expression */
@@ -1340,7 +1408,7 @@ static void checkExprIsVarFree(ParseState* pstate, Node* n, const char* construc
  * This function supports the old SQL92 ORDER BY interpretation, where the
  * expression is an output column name or number.  If we fail to find a
  * match of that sort, we fall through to the SQL99 rules.	For historical
- * reasons, Postgres also allows this interpretation for GROUP BY, though
+ * reasons, openGauss also allows this interpretation for GROUP BY, though
  * the standard never did.	However, for GROUP BY we prefer a SQL99 match.
  * This function is *not* used for WINDOW definitions.
  *
@@ -1367,7 +1435,7 @@ static TargetEntry* findTargetlistEntrySQL92(ParseState* pstate, Node* node, Lis
      *	  targetlist entries: according to SQL92, an identifier in GROUP BY
      *	  is a reference to a column name exposed by FROM, not to a target
      *	  list column.	However, many implementations (including pre-7.0
-     *	  PostgreSQL) accept this anyway.  So for GROUP BY, we look first
+     *	  openGauss) accept this anyway.  So for GROUP BY, we look first
      *	  to see if the identifier matches any FROM column name, and only
      *	  try for a targetlist name if it doesn't.  This ensures that we
      *	  adhere to the spec in the case where the name could be both.

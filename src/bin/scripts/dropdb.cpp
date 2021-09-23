@@ -134,7 +134,7 @@ int main(int argc, char* argv[])
 
 static void help(const char* progname)
 {
-    printf(_("%s removes a PostgreSQL database.\n\n"), progname);
+    printf(_("%s removes a openGauss database.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... DBNAME\n"), progname);
     printf(_("\nOptions:\n"));

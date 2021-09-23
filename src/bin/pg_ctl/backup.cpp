@@ -44,6 +44,8 @@
 #include "bin/elog.h"
 #include "file_ops.h"
 #include "catalog/catalog.h"
+#include "port/pg_crc32c.h"
+#include "replication/dcf_data.h"
 
 #ifdef ENABLE_MOT
 #include "fetchmot.h"
@@ -59,6 +61,7 @@
 
 /* Global options */
 char* basedir = NULL;
+bool isBuildFromStandby = false;
 char format = 'p'; /* p(lain)/t(ar) */
 char* label = "gs_ctl full build";
 bool showprogress = true;
@@ -91,6 +94,7 @@ static char conf_file[MAXPGPATH] = {0};
 static char buildstart_file[MAXPGPATH] = {0};
 static char builddone_file[MAXPGPATH] = {0};
 static char build_label_file[MAXPGPATH] = {0};
+static char paxos_index_file[MAXPGPATH] = {0};
 
 /* Progress counters */
 static uint64 totalsize = 0;
@@ -132,6 +136,7 @@ static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sRep
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
 void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
+static bool UpdatePaxosIndexFile(unsigned long long paxosIndex);
 static void DeleteAlreadyDropedFile(const char* path, bool is_table_space);
 static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int fileNode);
 
@@ -308,6 +313,10 @@ static int tblspaceIndex = 0;
         securec_check_ss_c(rcm, "", "");                                                                        \
         rcm = snprintf_s(build_label_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dirname, FULL_BACKUP_LABEL_FILE); \
         securec_check_ss_c(rcm, "", "");                                                                        \
+        if (GetPaxosValue(conf_file)) {                                                                       \
+            rcm = snprintf_s(paxos_index_file, MAXPGPATH, MAXPGPATH - 1, "%s/paxosindex", dirname);       \
+            securec_check_ss_c(rcm, "", "");                                                                    \
+        }                                                                                                       \
     } while (0)
 
 /* crete build start tag file */
@@ -346,6 +355,10 @@ static void disconnect_and_exit(int code)
 #endif
 
     removeCreatedTblspace();
+    if (g_is_obsmode) {
+        update_obs_build_status("build failed");
+        PQfinish(dbConn);
+    }
 
     exit(code);
 }
@@ -452,6 +465,7 @@ typedef struct {
     char* sysidentifier;
     int timeline;
     uint32 term;
+    bool isBuildFromStandby;
 } logstreamer_param;
 
 static int LogStreamerMain(logstreamer_param* param)
@@ -459,7 +473,14 @@ static int LogStreamerMain(logstreamer_param* param)
     int ret = 0;
 
     /* get second connection info in child process for the sake of memmory leak */
-    param->bgconn = check_and_conn(standby_connect_timeout, standby_recv_timeout, param->term);
+    
+    if (g_is_obsmode) {
+        param->bgconn = GetConnection();
+    } else if (param->isBuildFromStandby) {
+        param->bgconn = check_and_conn_for_standby(standby_connect_timeout, standby_recv_timeout, param->term);
+    } else {
+        param->bgconn = check_and_conn(standby_connect_timeout, standby_recv_timeout, param->term);
+    }
     if (param->bgconn == NULL) {
         return 1;
     }
@@ -503,6 +524,7 @@ void StartLogStreamer(
     param->timeline = timeline;
     param->sysidentifier = sysidentifier;
     param->term = primaryTerm;
+    param->isBuildFromStandby = isBuildFromStandby;
 
     /* Convert the starting position */
     if (sscanf_s(startpos, "%X/%X", &hi, &lo) != 2) {
@@ -784,7 +806,7 @@ static void ReceiveAndUnpackTarFile(PGconn* conn, PGresult* res, int rownum)
             }
             break;
         } else if (r == -2) {
-            pg_log(PG_WARNING, _("could not read COPY data: %s"), PQerrorMessage(conn));
+            pg_log(PG_WARNING, _("could not read COPY data: %s\n"), PQerrorMessage(conn));
 
             disconnect_and_exit(1);
         }
@@ -1037,6 +1059,7 @@ static void BaseBackup(const char* dirname, uint32 term)
     bool ret = FALSE;
     char* get_value = NULL;
     char xlog_location[MAXPGPATH] = {0};
+    char backup_location[MAXPGPATH] = {0};
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
@@ -1056,41 +1079,54 @@ static void BaseBackup(const char* dirname, uint32 term)
 
     chmod(dirname, (mode_t)S_IRWXU);
 #endif
-    /* save connection info from command line or postgresql file */
-    get_conninfo(conf_file);
 
-    /* find a available conn */
-    streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
-    if (streamConn == NULL) {
-        show_full_build_process("could not connect to server.");
-        disconnect_and_exit(1);
+    if (g_is_obsmode) {
+        streamConn = GetConnection();
+        nRet = snprintf_s(backup_location, MAXPGPATH, MAXPGPATH - 1, "%s/obs_backup", dirname);
+        securec_check_ss_c(nRet, "\0", "\0");
+        pg_free(basedir);
+        basedir = xstrdup(backup_location);
+    } else {
+        /* save connection info from command line or postgresql file */
+        get_conninfo(conf_file);
+
+        /* find a available conn */
+        if (isBuildFromStandby) {
+            streamConn = check_and_conn_for_standby(standby_connect_timeout, standby_recv_timeout, term);
+        } else {
+            streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
+        }
+        if (streamConn == NULL) {
+            show_full_build_process("could not connect to server.");
+            disconnect_and_exit(1);
+        }
+
+        show_full_build_process("connect to server success, build started.");
+        /* create  build tag file */
+        ret = CreateBuildtagFile(buildstart_file);
+        if (ret == FALSE) {
+            pg_log(PG_WARNING, _("could not create file %s.\n"), buildstart_file);
+
+            disconnect_and_exit(1);
+        }
+
+        show_full_build_process("create build tag file success");
+
+        /* delete data/ and  pg_tblspc/, but keep .config */
+        delete_datadir(dirname);
+
+        show_full_build_process("clear old target dir success");
+
+        /* create  build tag file again*/
+        ret = CreateBuildtagFile(buildstart_file);
+        if (ret == FALSE) {
+            pg_log(PG_WARNING, _("could not create file again %s.\n"), buildstart_file);
+
+            disconnect_and_exit(1);
+        }
+
+        show_full_build_process("create build tag file again success");
     }
-
-    show_full_build_process("connect to server success, build started.");
-    /* create  build tag file */
-    ret = CreateBuildtagFile(buildstart_file);
-    if (ret == FALSE) {
-        pg_log(PG_WARNING, _("could not create file %s.\n"), buildstart_file);
-
-        disconnect_and_exit(1);
-    }
-
-    show_full_build_process("create build tag file success");
-
-    /* delete data/ and  pg_tblspc/, but keep .config */
-    delete_datadir(dirname);
-
-    show_full_build_process("clear old target dir success");
-
-    /* create  build tag file again*/
-    ret = CreateBuildtagFile(buildstart_file);
-    if (ret == FALSE) {
-        pg_log(PG_WARNING, _("could not create file again %s.\n"), buildstart_file);
-
-        disconnect_and_exit(1);
-    }
-
-    show_full_build_process("create build tag file again success");
 
     /*
      * Run IDENTIFY_SYSTEM so we can get the timeline
@@ -1111,31 +1147,39 @@ static void BaseBackup(const char* dirname, uint32 term)
 
     show_full_build_process("get system identifier success");
 
-    create_backup_label(dirname, sysidentifier, timeline);
+    if (!g_is_obsmode) {
+        create_backup_label(dirname, sysidentifier, timeline);
 
-    show_full_build_process("create backup label success");
+        show_full_build_process("create backup label success");
 
-    /*
-     * Run IDENTIFY_MAXLSN then get the remote node name
-     * The name use for rename tablespace name
-     */
-    GET_FLUSHED_LSN();
-    GET_REMOTE_NODENAME();
+        /*
+         * Run IDENTIFY_MAXLSN then get the remote node name
+         * The name use for rename tablespace name
+         */
+        GET_FLUSHED_LSN();
+        GET_REMOTE_NODENAME();
+
+        (void)PQsetRwTimeout(streamConn, Max(BUILD_RW_TIMEOUT, standby_recv_timeout));
+    }
 
     /*
      * Start the actual backup
      */
-    (void)PQsetRwTimeout(streamConn, Max(BUILD_RW_TIMEOUT, standby_recv_timeout));
     (void)PQescapeStringConn(streamConn, escaped_label, label, sizeof(escaped_label), &i);
+    if (isBuildFromStandby) {
+        fastcheckpoint = false;
+    }
     nRet = snprintf_s(current_path,
         MAXPGPATH,
         sizeof(current_path) - 1,
-        "BASE_BACKUP LABEL '%s' %s %s %s %s",
+        "BASE_BACKUP LABEL '%s' %s %s %s %s %s %s",
         escaped_label,
         showprogress ? "PROGRESS" : "",
         includewal && !streamwal ? "WAL" : "",
         fastcheckpoint ? "FAST" : "",
-        includewal ? "NOWAIT" : "");
+        includewal ? "NOWAIT" : "",
+        isBuildFromStandby ? "BUILDSTANDBY" : "",
+        g_is_obsmode ? "OBSMODE" : "");
     securec_check_ss_c(nRet, "", "");
 
     if (PQsendQuery(streamConn, current_path) == 0) {
@@ -1206,7 +1250,8 @@ static void BaseBackup(const char* dirname, uint32 term)
      */
     res = PQgetResult(streamConn);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        pg_log(PG_WARNING, _("could not get backup header: %s"), PQerrorMessage(streamConn));
+        pg_log(PG_WARNING, _("could not get backup header. Please check server's information. Error message: %s"),
+            PQerrorMessage(streamConn));
         disconnect_and_exit(1);
     }
     if (PQntuples(res) < 1) {
@@ -1330,6 +1375,31 @@ static void BaseBackup(const char* dirname, uint32 term)
     if (verbose && includewal) {
         pg_log(PG_WARNING, "xlog end point: %s\n", xlogend);
     }
+
+    /* If the res has two fields, it shows that paxos index sent, then write paxos index in a file. */
+    bool dcfEnabled = GetPaxosValue(conf_file);
+    int nfields = PQnfields(res);
+    if (dcfEnabled) {
+        if (nfields <= 1) {
+            pg_log(PG_WARNING, _("Received nfields from PQ is less than 2\n"));
+            disconnect_and_exit(1);
+        }
+        get_value = PQgetvalue(res, 0, 1);
+        char* tmp = NULL;
+        unsigned long long paxosIndex = strtoul(PQgetvalue(res, 0, 1), &tmp, 10);
+        if (*tmp != '\0') {
+            pg_log(PG_WARNING, _("Unexpected paxos index specified!\n"));
+            disconnect_and_exit(1);
+        }
+        /* Keep the paxos index info in a file, then Gaussdb server can read it after start. */
+        if (UpdatePaxosIndexFile(paxosIndex) == false) {
+            pg_log(PG_WARNING, _("Failed to write paxos index to a file!\n"));
+            disconnect_and_exit(1);
+        }
+        pg_log(PG_PROGRESS,
+            _("Enable DCF and paxos index written in paxosindex file is %llu\n"),
+            paxosIndex);
+    }
     PQclear(res);
 
     res = PQgetResult(streamConn);
@@ -1446,16 +1516,21 @@ static void BaseBackup(const char* dirname, uint32 term)
         (void) fsync_pgdata(basedir);
         show_full_build_process("finish fsync all files.");
     }
-
     /* delete dw file if exists, recreate it and write a page of zero */
-    backup_dw_file(dirname);
+    if (g_is_obsmode) {
+        backup_dw_file(basedir);
+    } else {
+        backup_dw_file(dirname);
+    }
     show_full_build_process("build dummy dw file success");
 
-    /* rename tag file to done */
-    RENAME_BUILD_FILE(buildstart_file, builddone_file);
-
-    show_full_build_process("rename build status file success");
-
+    if (!g_is_obsmode) {
+        /* rename tag file to done */
+        RENAME_BUILD_FILE(buildstart_file, builddone_file);
+        show_full_build_process("rename build status file success");
+    } else {
+        show_full_build_process("full backup to local success");
+    }
     nRet = snprintf_s(basePath, MAXPGPATH, MAXPGPATH, "%s/base", dirname);
     securec_check_ss_c(nRet, "\0", "\0");
     DeleteAlreadyDropedFile(basePath, false);
@@ -1471,13 +1546,14 @@ static void BaseBackup(const char* dirname, uint32 term)
  * Description        :
  * Notes            :
  */
-void backup_main(char* dir, uint32 term)
+void backup_main(const char* dir, uint32 term, bool isFromStandby)
 {
     if (dir == NULL) {
         pg_log(PG_PRINT, "%s: parameters dir is NULL.\n", progname);
         exit(1);
     } else {
-        basedir = dir;
+        basedir = g_is_obsmode ? xstrdup(dir) : (char*)dir;
+        isBuildFromStandby = isFromStandby;
     }
     /* program name */
     progname = "gs_ctl";
@@ -1969,6 +2045,58 @@ void get_xlog_location(char (&xlog_location)[MAXPGPATH])
     xlog_location[MAXPGPATH - 1] = '\0';
 }
 
+static bool UpdatePaxosIndexFile(unsigned long long paxosIndex)
+{
+    int paxos_index_fd = -1;
+    int ret;
+    DCFData dcfData;
+    int len = sizeof(DCFData);
+    const int PAXOS_INDEX_FILE_NUM = 2;
+    char paxos_index_files[PAXOS_INDEX_FILE_NUM][MAXPGPATH] = {0};
+    ret = snprintf_s(paxos_index_files[0], MAXPGPATH, MAXPGPATH - 1, "%s.backup", paxos_index_file);
+    securec_check_ss_c(ret, "\0", "\0");
+    ret = strcpy_s(paxos_index_files[1], MAXPGPATH, paxos_index_file);
+    securec_check_ss_c(ret, "\0", "\0");
+
+    /* Init dcfData */
+    dcfData.dcfDataVersion = DCF_DATA_VERSION;
+    dcfData.appliedIndex = (paxosIndex > 0) ? (paxosIndex - 1) : 0;
+    dcfData.realMinAppliedIdx = paxosIndex;
+    INIT_CRC32C(dcfData.crc);
+    COMP_CRC32C(dcfData.crc, (char *)&dcfData, offsetof(DCFData, crc));
+    FIN_CRC32C(dcfData.crc);
+
+    for (int i = 0; i < PAXOS_INDEX_FILE_NUM; i++) {
+        char tmp_paxos_index_file[PATH_MAX + 1] = {0};
+        if ((strlen(paxos_index_files[i]) > PATH_MAX) ||
+            (realpath(paxos_index_files[i], tmp_paxos_index_file) == NULL)) {
+            pg_log(PG_ERROR, _("Canonicalize paxos index file %s failed!"), paxos_index_files[i]);
+            return false;
+        }
+        paxos_index_fd = open(tmp_paxos_index_file, O_CREAT | O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
+        if (paxos_index_fd < 0) {
+            pg_log(PG_ERROR, _("Open paxos index file %s failed: %m\n"), tmp_paxos_index_file);
+            return false;
+        }
+        if ((write(paxos_index_fd, &dcfData, len)) != len) {
+            close(paxos_index_fd);
+            pg_log(PG_ERROR, _("Write paxos index file %s failed: %m\n"), tmp_paxos_index_file);
+            return false;
+        }
+        if (fsync(paxos_index_fd)) {
+            close(paxos_index_fd);
+            pg_log(PG_ERROR, _("could not fsync dcf paxos index file: %m\n"));
+            return false;
+        }
+
+        if (close(paxos_index_fd)) {
+            pg_log(PG_ERROR, _("could not close dcf paxos index file: %m\n"));
+            return false;
+        }
+    }
+    return true;
+}
+
 static void DeleteAlreadyDropedFile(const char* path, bool is_table_space)
 {
     char* fileName = NULL;
@@ -1977,13 +2105,18 @@ static void DeleteAlreadyDropedFile(const char* path, bool is_table_space)
     unsigned int spaceNode = 0;
     unsigned int SegNo = 0;
     unsigned int dbNode = 0;
+    DIR *dir = NULL;
     struct stat statbuf;
     struct dirent *de = NULL;
     int nmatch = 0;
     int res = -1;
     int rc = 0;
 
-    DIR *dir = opendir(path);
+    dir = opendir(path);
+    if (dir == NULL) {
+        pg_log(PG_ERROR, _("could not open directory : %s!\n"), path);
+        disconnect_and_exit(1);
+    }
 
     while ((de = readdir(dir)) != NULL) {
         /* skip entries point current dir or parent dir */
@@ -1994,8 +2127,10 @@ static void DeleteAlreadyDropedFile(const char* path, bool is_table_space)
         if (lstat(pathbuf, &statbuf) != 0) {
             if (errno != ENOENT) {
                 pg_log(PG_WARNING, _("could not lstat file or directory : %s!\n"), de->d_name);
-                continue;
+                (void)closedir(dir);
+                disconnect_and_exit(1);
             }
+            continue;
         }
         if (S_ISDIR(statbuf.st_mode)) {
             DeleteAlreadyDropedFile(pathbuf, is_table_space);
@@ -2059,17 +2194,15 @@ static int DeleteUnusedFile(const char* path, unsigned int SegNo, unsigned int f
             return 0;
         }
     }
-    if (statbuf.st_size == 0) {
-        while (SegNo > 1) {
-            SegNo -= 1;
-            rc = snprintf_s(beforeFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u.%u", path, fileNode, SegNo);
-            securec_check_ss_c(rc, "\0", "\0");
-            if (lstat(beforeFileName, &tmpStatBuf) != 0) {
-                if (errno == ENOENT) {
-                    pg_log(PG_DEBUG, _("the file %s before file does not exist\n"), currentFileName);
-                    unlink(currentFileName);
-                    break;
-                }
+    while (SegNo > 1) {
+        SegNo -= 1;
+        rc = snprintf_s(beforeFileName, MAXPGPATH, MAXPGPATH - 1, "%s/%u.%u", path, fileNode, SegNo);
+        securec_check_ss_c(rc, "\0", "\0");
+        if (lstat(beforeFileName, &tmpStatBuf) != 0) {
+            if (errno == ENOENT) {
+                pg_log(PG_DEBUG, _("the file %s before file does not exist\n"), currentFileName);
+                unlink(currentFileName);
+                break;
             }
         }
     }

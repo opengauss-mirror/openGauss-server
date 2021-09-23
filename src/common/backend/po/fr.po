@@ -13754,8 +13754,8 @@ msgstr "n'a pas pu charger pg_hba.conf"
 
 #: postmaster/postmaster.c:1156
 #, c-format
-msgid "%s: could not locate matching postgres executable"
-msgstr "%s : n'a pas pu localiser l'exécutable postgres correspondant"
+msgid "%s: could not locate matching openGauss executable"
+msgstr "%s : n'a pas pu localiser l'exécutable openGauss correspondant"
 
 #: postmaster/postmaster.c:1179
 #: utils/misc/tzparser.c:325
@@ -13855,7 +13855,7 @@ msgstr ""
 
 #: postmaster/postmaster.c:1707
 #, c-format
-msgid "no PostgreSQL user name specified in startup packet"
+msgid "no openGauss user name specified in startup packet"
 msgstr "aucun nom d'utilisateur PostgreSQL n'a été spécifié dans le paquet de démarrage"
 
 #: postmaster/postmaster.c:1764

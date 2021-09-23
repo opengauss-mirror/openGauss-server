@@ -223,6 +223,7 @@ typedef struct {
 #ifndef HAVE_DATABASE_TYPE
 #define HAVE_DATABASE_TYPE
 /*Type of database; increase for sql compatibility*/
+
 typedef enum { 
     A_FORMAT = 0x0001,
     B_FORMAT = 0x0002,
@@ -232,6 +233,7 @@ typedef enum {
 
 #define IS_CMPT(cmpt, flag) (((uint32)cmpt & (uint32)(flag)) != 0)
 #define DB_IS_CMPT(flag) IS_CMPT(u_sess->attr.attr_sql.sql_compatibility, (flag))
+
 #endif /* HAVE_DATABASE_TYPE */
 
 typedef enum { EXPLAIN_NORMAL, EXPLAIN_PRETTY, EXPLAIN_SUMMARY, EXPLAIN_RUN } ExplainStyle;
@@ -400,7 +402,7 @@ typedef enum {
 
 /*
  * Port Notes:
- *	Postgres makes the following assumptions about datatype sizes:
+ *	openGauss makes the following assumptions about datatype sizes:
  *
  *	sizeof(Datum) == sizeof(void *) == 4 or 8
  *	sizeof(char) == 1
@@ -609,7 +611,7 @@ typedef Datum* DatumPtr;
  * DatumGetCString
  *		Returns C string (null-terminated string) value of a datum.
  *
- * Note: C string is not a full-fledged Postgres type at present,
+ * Note: C string is not a full-fledged openGauss type at present,
  * but type input functions use this conversion for their inputs.
  */
 
@@ -619,7 +621,7 @@ typedef Datum* DatumPtr;
  * CStringGetDatum
  *		Returns datum representation for a C string (null-terminated string).
  *
- * Note: C string is not a full-fledged Postgres type at present,
+ * Note: C string is not a full-fledged openGauss type at present,
  * but type output functions use this conversion for their outputs.
  * Note: CString is pass-by-reference; caller must ensure the pointed-to
  * value has adequate lifetime.
@@ -871,8 +873,15 @@ extern THR_LOCAL PGDLLIMPORT bool assert_enabled;
 #endif /* USE_ASSERT_CHECKING */
 #endif /* PC_LINT */
 
-extern void ExceptionalCondition(const char* conditionName, const char* errorType, const char* fileName, int lineNumber)
-    __attribute__((noreturn));
+typedef enum {
+    ENV_OK,
+    ENV_ERR_LENGTH,
+    ENV_ERR_NULL,
+    ENV_ERR_DANGER_CHARACTER
+} EnvCheckResult;
+
+extern void ExceptionalCondition(const char *conditionName, const char *errorType, const char *fileName,
+    int lineNumber);
 
 extern void ConnFree(void* conn);
 
@@ -901,6 +910,7 @@ extern void execute_simple_query(const char* query_string);
 
 /* check the value from environment variablethe to prevent command injection. */
 extern void check_backend_env(const char* input_env_value);
+extern EnvCheckResult check_backend_env_sigsafe(const char* input_env_value);
 extern bool backend_env_valid(const char* input_env_value, const char* stamp);
 
 extern void CleanSystemCaches(bool is_in_read_command);
@@ -924,6 +934,13 @@ extern int errdetail_abort(void);
 
 void log_disconnections(int code, Datum arg);
 
+void ResetInterruptCxt();
+
 #define MSG_A_REPEAT_NUM_MAX 1024
 #define OVERRIDE_STACK_LENGTH_MAX 1024
+#ifdef ENABLE_UT
+#include "lib/stringinfo.h"
+extern void exec_describe_statement_message(const char* stmt_name);
+extern void exec_get_ddl_params(StringInfo input_message);
+#endif
 #endif /* POSTGRES_H */

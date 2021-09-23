@@ -28,11 +28,11 @@
 
 #include "access/relscan.h"
 #include "access/tableam.h"
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecnoderowtovector.h"
-#include "executor/nodeModifyTable.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeModifyTable.h"
+#include "executor/node/nodeSeqscan.h"
 #include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
 #include "optimizer/clauses.h"
@@ -42,8 +42,8 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
-#include "executor/nodeSamplescan.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeSamplescan.h"
+#include "executor/node/nodeSeqscan.h"
 #include "access/cstoreskey.h"
 #include "catalog/pg_cast.h"
 #include "catalog/pg_operator.h"
@@ -468,18 +468,16 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
         if (plan->itrs > 0) {
             Partition part = NULL;
             Partition curr_part = NULL;
-            
-            PruningResult* resultPlan = NULL;
-            if (plan->pruningInfo->expr != NULL) {
-                resultPlan = GetPartitionInfo(plan->pruningInfo, estate, curr_rel);
-            } else {
-                resultPlan = plan->pruningInfo;
-            }
-
             ListCell* cell = NULL;
-            List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
+            PruningResult* resultPlan = NULL;
 
             if (!idx_flag) {
+                if (plan->pruningInfo->expr != NULL) {
+                    resultPlan = GetPartitionInfo(plan->pruningInfo, estate, curr_rel);
+                } else {
+                    resultPlan = plan->pruningInfo;
+                }
+                List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
                 foreach (cell, part_seqs) {
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
@@ -525,6 +523,12 @@ void InitCStoreRelation(CStoreScanState* node, EState* estate, bool idx_flag, Re
                 // Now curr_rel is the index relation of logical table (parent relation)
                 // parent_rel is the logical heap relation
                 //
+                if (plan->pruningInfo->expr != NULL) {
+                    resultPlan = GetPartitionInfo(plan->pruningInfo, estate, parent_rel);
+                } else {
+                    resultPlan = plan->pruningInfo;
+                }
+                List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
                 foreach (cell, part_seqs) {
                     Oid tbl_part_id = InvalidOid;
                     int part_seq = lfirst_int(cell);
@@ -677,7 +681,6 @@ CStoreScanState* ExecInitCStoreScan(
     InitCStoreRelation(scan_stat, estate, idx_flag, parent_heap_rel);
     scan_stat->ps.ps_TupFromTlist = false;
 
-#ifdef ENABLE_LLVM_COMPILE
     /*
      * First, not only consider the LLVM native object, but also consider the cost of
      * the LLVM compilation time. We will not use LLVM optimization if there is
@@ -703,7 +706,6 @@ CStoreScanState* ExecInitCStoreScan(
                 llvm_code_gen->addFunctionToMCJit(jitted_vecqual, reinterpret_cast<void**>(&(scan_stat->jitted_vecqual)));
         }
     }
-#endif
 
     /*
      * Initialize result tuple type and projection info.
@@ -760,7 +762,6 @@ CStoreScanState* ExecInitCStoreScan(
         scan_stat->m_pScanBatch->CreateSysColContainer(CurrentMemoryContext, plan_stat->ps_ProjInfo->pi_sysAttrList);
     }
 
-#ifdef ENABLE_LLVM_COMPILE
     /**
      * Since we separate the target list elements into simple var references and
      * generic expression, we only need to deal the generic expression with LLVM
@@ -779,7 +780,6 @@ CStoreScanState* ExecInitCStoreScan(
             llvm_code_gen->addFunctionToMCJit(
                 jitted_vectarget, reinterpret_cast<void**>(&(plan_stat->ps_ProjInfo->jitted_vectarget)));
     }
-#endif
 
     scan_stat->m_pScanRunTimeKeys = NULL;
     scan_stat->m_ScanRunTimeKeysNum = 0;

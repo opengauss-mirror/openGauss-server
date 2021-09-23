@@ -17,7 +17,7 @@
 
 #include <dirent.h>
 #include "utils/resowner.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 typedef struct vfd {
     int fd;                 /* current FD, or VFD_CLOSED if none */

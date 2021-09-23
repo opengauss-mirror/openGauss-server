@@ -21,7 +21,7 @@
  */
 #include "catalog/catversion.h" /* pgrminclude ignore */
 #include "catalog/pg_class.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 
 #define FORKNAMECHARS	4		/* max chars for a fork name */
@@ -41,8 +41,6 @@ extern int	forkname_chars(const char *str, ForkNumber *);
 
 extern char *relpathbackend(RelFileNode rnode, BackendId backend, ForkNumber forknum);
 extern char *GetDatabasePath(Oid dbNode, Oid spcNode);
-extern char* GetBucketDirPath(const RelFileNodeBackend& rel_file_node_backend);
-
 
 /* First argument is a RelFileNodeBackend */
 #define relpath(rnode, forknum) \

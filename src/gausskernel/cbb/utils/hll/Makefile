@@ -32,6 +32,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = hll_mpp.o
+OBJS = hll.o hll_function.o hll_mpp.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

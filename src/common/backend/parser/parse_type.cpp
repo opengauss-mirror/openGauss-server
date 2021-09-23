@@ -156,7 +156,7 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
         char* field = NULL;
         Oid relid;
         AttrNumber attnum;
-
+        Oid pkgNamespaceOid = InvalidOid;
         /* deconstruct the name list */
         switch (list_length(typname->names)) {
             case 1:
@@ -167,6 +167,12 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                         parser_errposition(pstate, typname->location)));
                 break;
             case 2:
+                if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+                    pkgNamespaceOid = u_sess->plsql_cxt.plpgsql_curr_compile_package->namespaceOid;
+                }
+                if (OidIsValid(pkgNamespaceOid)) {
+                    rel->schemaname = get_namespace_name(pkgNamespaceOid);
+                }
                 rel->relname = strVal(linitial(typname->names));
                 field = strVal(lsecond(typname->names));
                 break;
@@ -206,6 +212,9 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
                     parser_errposition(pstate, typname->location)));
         }
         typoid = get_atttype(relid, attnum);
+        if (IsClientLogicType(typoid)) {
+            typoid = get_atttypmod(relid, attnum);
+        }
 
         /* this construct should never have an array indicator */
         Assert(typname->arrayBounds == NIL);
@@ -248,7 +257,8 @@ Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* 
     }
 
     /* Don't support the type in blacklist. */
-    if (!u_sess->attr.attr_common.IsInplaceUpgrade && IsTypeInBlacklist(typoid)) {
+    bool is_unsupported_type = !u_sess->attr.attr_common.IsInplaceUpgrade && IsTypeInBlacklist(typoid);
+    if (is_unsupported_type) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type %s is not yet supported.", format_type_be(typoid))));
     }
@@ -950,6 +960,76 @@ bool IsTypeSupportedByTsStore(_in_ int kvtype, _in_ Oid typeOid)
     } else {
         return is_support_old_ts_style(kvtype, typeOid);
     }
+}
+
+/*
+ * IsTypeSupportedByUStore
+ *    Return true if the type is supported by UStore
+ *
+ * The performance of this function relies on compiler to flat the branches. But
+ * it is ok if compiler failed to do its job as it is not in critical code path.
+ */
+bool
+IsTypeSupportedByUStore(_in_ const Oid typeOid, _in_ const int32 typeMod)
+{
+    /* we don't support user defined type. */
+    if (typeOid >= FirstNormalObjectId)
+        return false;
+
+    static Oid supportType[] = {
+        BOOLOID,
+        BYTEAOID,
+        CHAROID,
+        INT8OID,
+        INT2OID,
+        INT4OID,
+        INT1OID,
+        NUMERICOID,
+        BPCHAROID,
+        VARCHAROID,
+        NVARCHAR2OID,
+        SMALLDATETIMEOID,
+        TEXTOID,
+        OIDOID,
+        FLOAT4OID,
+        FLOAT8OID,
+        ABSTIMEOID,
+        RELTIMEOID,
+        TINTERVALOID,
+        INETOID,
+        DATEOID,
+        TIMEOID,
+        TIMESTAMPOID,
+        TIMESTAMPTZOID,
+        INTERVALOID,
+        TIMETZOID,
+        CASHOID,
+        CIDROID,
+        BITOID,
+        VARBITOID,
+	NAMEOID,
+        RAWOID,
+        BLOBOID,
+        CIRCLEOID,
+        MACADDROID,
+        UUIDOID,
+        TSVECTOROID,
+        TSQUERYOID,
+        POINTOID,
+        LSEGOID,
+        BOXOID,
+        PATHOID,
+        POLYGONOID,
+        INT4ARRAYOID
+    };
+
+    for(uint32 i = 0; i < sizeof(supportType)/sizeof(Oid); ++i) {
+        if(supportType[i] == typeOid) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /* Check whether the type is in blacklist. */

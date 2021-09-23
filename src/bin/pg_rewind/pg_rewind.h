@@ -18,7 +18,7 @@
 #include "access/xlogdefs.h"
 #include "access/xlog_internal.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "bin/elog.h"
 
 #define TAG_START "build_completed.start"

@@ -1,0 +1,31 @@
+create table t1(a int primary key, b int)with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+create table t2(a int references t1, b int)with(storage_type=ustore);
+insert into t2 values(1,1);
+ERROR:  insert or update on table "t2" violates foreign key constraint "t2_a_fkey"
+DETAIL:  Key (a)=(1) is not present in table "t1".
+insert into t1 values(1,1);
+insert into t2 values(1,1);
+insert into t2 values(2,2);
+ERROR:  insert or update on table "t2" violates foreign key constraint "t2_a_fkey"
+DETAIL:  Key (a)=(2) is not present in table "t1".
+update t2 set a=2,b=2;
+ERROR:  insert or update on table "t2" violates foreign key constraint "t2_a_fkey"
+DETAIL:  Key (a)=(2) is not present in table "t1".
+insert into t1 values(2,2);
+update t2 set a=2,b=2;
+insert into t2 values(3,3);
+ERROR:  insert or update on table "t2" violates foreign key constraint "t2_a_fkey"
+DETAIL:  Key (a)=(3) is not present in table "t1".
+update t1 set a=3,b=3 where a=1;
+insert into t2 values(3,3);
+delete from t1;
+ERROR:  update or delete on table "t1" violates foreign key constraint "t2_a_fkey" on table "t2"
+DETAIL:  Key (a)=(2) is still referenced from table "t2".
+insert into t1 values(4,4);
+delete from t1 where a=4;
+delete from t2;
+delete from t1;
+drop table t1 cascade;
+NOTICE:  drop cascades to constraint t2_a_fkey on table t2
+drop table t2 cascade;

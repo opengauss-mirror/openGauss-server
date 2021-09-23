@@ -34,6 +34,7 @@ typedef struct nodeinfo {
 #define BUCKETMAPLEN_CONFIG_NAME "buckets_len"
 #define MIN_BUCKETMAPLEN 32
 #define MAX_BUCKETMAPLEN 16384
+#define MIN_BUCKETCOUNT  32
 #define CHAR_BUF_SIZE 512
 
 extern void PgxcGroupCreate(CreateGroupStmt* stmt);
@@ -50,7 +51,7 @@ extern bool GetExecnodeIsInstallationGroup(Oid groupoid);
 extern void InitNodeGroupStatus(void);
 extern void CleanNodeGroupStatus(void);
 extern List* GetNodeGroupOidCompute(Oid role_id);
-extern uint2* GetBucketMapByGroupName(const char* groupname);
+extern uint2* GetBucketMapByGroupName(const char* groupname, int *bucketlen);
 extern char* DeduceGroupByNodeList(Oid* nodeoids, int numnodes);
 extern void PgxcGroupAddNode(Oid group_oid, Oid nodeid);
 extern void PgxcGroupRemoveNode(Oid group_oid, Oid nodeid);
@@ -62,8 +63,8 @@ extern oidvector* GetGroupMemberRef(HeapTuple tup, bool* need_free);
 extern char GetGroupKind(HeapTuple tup);
 
 /* Routines for bucketmap cache */
-extern uint2* BucketMapCacheGetBucketmap(Oid groupoid);
-extern uint2* BucketMapCacheGetBucketmap(const char* groupname);
+extern uint2* BucketMapCacheGetBucketmap(Oid groupoid, int *bucketlen);
+extern uint2* BucketMapCacheGetBucketmap(const char* groupname, int *bucketlen);
 extern void BucketMapCacheDestroy(void);
 
 extern int GsGlobalConfigGetBucketMapLen(void);

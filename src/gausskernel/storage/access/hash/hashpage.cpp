@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hashpage.cpp
- *	  Hash table page management code for the Postgres hash access method
+ *	  Hash table page management code for the openGauss hash access method
  *
  * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
@@ -12,7 +12,7 @@
  *	  src/gausskernel/storage/access/hash/hashpage.cpp
  *
  * NOTES
- *	  Postgres hash pages look like ordinary relation pages.  The opaque
+ *	  openGauss hash pages look like ordinary relation pages.  The opaque
  *	  data at high addresses includes information about the page including
  *	  whether a page is an overflow page or a true bucket, the bucket
  *	  number, and the block numbers of the preceding and following pages
@@ -31,11 +31,12 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
+#include "storage/buf/buf_internals.h"
 #include "access/hash_xlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/aiomem.h"
 
 static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nblocks);
@@ -968,33 +969,42 @@ static bool _hash_alloc_buckets(Relation rel, BlockNumber firstblock, uint32 nbl
     if (lastblock < firstblock || lastblock == InvalidBlockNumber)
         return false;
 
-    page = (Page)zerobuf;
+    if (IsSegmentFileNode(rel->rd_node)) {
+        Buffer buf = ReadBuffer(rel, P_NEW);
+#ifdef USE_ASSERT_CHECKING
+        BufferDesc *buf_desc = GetBufferDescriptor(buf - 1);
+        Assert(buf_desc->tag.blockNum == lastblock);
+#endif
+        ReleaseBuffer(buf);
+    } else {
+        page = (Page)zerobuf;
 
-    /*
-     * Initialize the page.  Just zeroing the page won't work; see
-     * _hash_freeovflpage for similar usage.  We take care to make the special
-     * space valid for the benefit of tools such as pageinspect.
-     */
-    _hash_pageinit(page, BLCKSZ);
+        /*
+         * Initialize the page.  Just zeroing the page won't work; see
+         * _hash_freeovflpage for similar usage.  We take care to make the special
+         * space valid for the benefit of tools such as pageinspect.
+         */
+        _hash_pageinit(page, BLCKSZ);
 
-    ovflopaque = (HashPageOpaque) PageGetSpecialPointer(page);
+        ovflopaque = (HashPageOpaque) PageGetSpecialPointer(page);
 
-    ovflopaque->hasho_prevblkno = InvalidBlockNumber;
-    ovflopaque->hasho_nextblkno = InvalidBlockNumber;
-    ovflopaque->hasho_bucket = -1;
-    ovflopaque->hasho_flag = LH_UNUSED_PAGE;
-    ovflopaque->hasho_page_id = HASHO_PAGE_ID;
+        ovflopaque->hasho_prevblkno = InvalidBlockNumber;
+        ovflopaque->hasho_nextblkno = InvalidBlockNumber;
+        ovflopaque->hasho_bucket = -1;
+        ovflopaque->hasho_flag = LH_UNUSED_PAGE;
+        ovflopaque->hasho_page_id = HASHO_PAGE_ID;
 
-    if (RelationNeedsWAL(rel))
-        log_newpage(&rel->rd_node,
-                    MAIN_FORKNUM,
-                    lastblock,
-                    zerobuf,
-                    true);
+        if (RelationNeedsWAL(rel))
+            log_newpage(&rel->rd_node,
+                        MAIN_FORKNUM,
+                        lastblock,
+                        zerobuf,
+                        true);
 
-    RelationOpenSmgr(rel);
-    PageSetChecksumInplace(zerobuf, lastblock);
-    smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, zerobuf, false);
+        RelationOpenSmgr(rel);
+        PageSetChecksumInplace(zerobuf, lastblock);
+        smgrextend(rel->rd_smgr, MAIN_FORKNUM, lastblock, zerobuf, false);
+    }
 
     return true;
 }

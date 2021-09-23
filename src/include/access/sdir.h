@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * sdir.h
- *	  POSTGRES scan direction definitions.
+ *	  openGauss scan direction definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

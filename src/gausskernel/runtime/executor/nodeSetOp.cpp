@@ -46,8 +46,8 @@
 
 #include "access/tableam.h"
 #include "executor/executor.h"
-#include "executor/nodeSetOp.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeSetOp.h"
+#include "executor/node/nodeAgg.h"
 #include "optimizer/pgxcplan.h"
 #include "pgxc/pgxc.h"
 #include "utils/memutils.h"

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * fmgr.c
- *	  The Postgres function manager.
+ *	  The openGauss function manager.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -17,7 +17,9 @@
 #include "knl/knl_variable.h"
 
 #include "access/tuptoaster.h"
+#include "access/ustore/knl_utuptoaster.h"
 #include "bulkload/dist_fdw.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "executor/executor.h"
@@ -159,6 +161,7 @@ static Datum fmgr_oldstyle(PG_FUNCTION_ARGS);
 static Datum fmgr_security_definer(PG_FUNCTION_ARGS);
 
 extern bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedureTuple);
+extern char* get_language_name(Oid languageOid);
 
 /*
  * Lookup routines for builtin-function table.	We can search by either Oid
@@ -167,28 +170,11 @@ extern bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple pr
 
 const FmgrBuiltin* fmgr_isbuiltin(Oid id)
 {
-    int low = 0;
-    int high = nBuiltinFuncs - 1;
-
-    /*
-     * Loop invariant: low is the first index that could contain target entry,
-     * and high is the last index that could contain it.
-     */
-    while (low <= high) {
-        int i = (high + low) / 2;
-
-        const Builtin_func* ptr = g_sorted_funcs[i];
-
-        if (id == ptr->foid) {
-            return (ptr->prolang != INTERNALlanguageId) ? NULL : (const FmgrBuiltin*)ptr;
-        } else if (id > ptr->foid) {
-            low = i + 1;
-        } else {
-            high = i - 1;
-        }
-    }
-
-    return NULL;
+    const Builtin_func*  func = SearchBuiltinFuncByOid(id);
+    if (func == NULL)
+        return NULL;
+    else
+        return (func->prolang != INTERNALlanguageId) ? NULL : (const FmgrBuiltin*)func;
 }
 
 /*
@@ -295,6 +281,15 @@ static void fmgr_info_cxt_security(Oid functionId, FmgrInfo* finfo, MemoryContex
     finfo->fn_strict = procedureStruct->proisstrict;
     finfo->fn_retset = procedureStruct->proretset;
     finfo->fn_rettype = procedureStruct->prorettype;
+    if (IsClientLogicType(finfo->fn_rettype)) {
+        HeapTuple gstup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(functionId));
+        if (!HeapTupleIsValid(gstup)) /* should not happen */
+            ereport(ERROR,
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", functionId)));
+        Form_gs_encrypted_proc gsform = (Form_gs_encrypted_proc)GETSTRUCT(gstup);
+        finfo->fn_rettypemod = gsform->prorettype_orig;
+        ReleaseSysCache(gstup);
+    }
     finfo->fn_languageId = procedureStruct->prolang;
     finfo->fn_volatile = procedureStruct->provolatile;
     /*
@@ -561,7 +556,9 @@ static void fmgr_info_other_lang(Oid functionId, FmgrInfo* finfo, HeapTuple proc
      * We only support fenced java-udf now. For java-udf, finfo->fn_addr will be replaced by
      * RPCFencedUDF in RPCInitFencedUDFIfNeed, and return.
      */
-    if (language == JavalanguageId && RPCInitFencedUDFIfNeed(functionId, finfo, procedureTuple)) {
+    char* lname = get_language_name(language);
+    if ((language == JavalanguageId || strncmp(lname, "plpython", strlen("plpython")) == 0) 
+                    && RPCInitFencedUDFIfNeed(functionId, finfo, procedureTuple)) {
         return;
     }
 
@@ -2327,7 +2324,7 @@ bytea* OidSendFunctionCall(Oid functionId, Datum val)
  * !!! OLD INTERFACE !!!
  *
  * fmgr() is the only remaining vestige of the old-style caller support
- * functions.  It's no longer used anywhere in the Postgres distribution,
+ * functions.  It's no longer used anywhere in the openGauss distribution,
  * but we should leave it around for a release or two to ease the transition
  * for user-supplied C functions.  OidFunctionCallN() replaces it for new
  * code.

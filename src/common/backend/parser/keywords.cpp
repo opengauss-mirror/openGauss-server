@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * keywords.cpp
- *	  lexical token lookup for key words in PostgreSQL
+ *	  lexical token lookup for key words in openGauss
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

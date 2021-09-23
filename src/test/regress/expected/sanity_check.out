@@ -152,6 +152,7 @@ SELECT relname, relhasindex
  pg_pltemplate                | t
  pg_proc                      | t
  pg_range                     | t
+ pg_recyclebin                | t
  pg_resource_pool             | t
  pg_rewrite                   | t
  pg_rlspolicy                 | t
@@ -159,6 +160,7 @@ SELECT relname, relhasindex
  pg_shdepend                  | t
  pg_shdescription             | t
  pg_shseclabel                | t
+ pg_snapshot                  | t
  pg_statistic                 | t
  pg_statistic_ext             | t
  pg_synonym                   | t

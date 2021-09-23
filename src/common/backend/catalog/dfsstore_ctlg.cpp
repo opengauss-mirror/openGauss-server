@@ -161,7 +161,6 @@ void createDfsDescTable(Relation rel, Datum relOptions)
         true,
         NULL,
         REL_CMPRS_NOT_SUPPORT,
-        NULL,
         NULL);
 
     Assert(duDescRelId != InvalidOid);
@@ -194,6 +193,7 @@ void createDfsDescTable(Relation rel, Datum relOptions)
     indexInfo->ii_ReadyForInserts = true;
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
+    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = Anum_pg_class_relcudescidx;
 
     collationObjectId[0] = InvalidOid;
@@ -227,7 +227,8 @@ void createDfsDescTable(Relation rel, Datum relOptions)
         true,
         false,
         false,
-        &extra);
+        &extra,
+        false);
     Assert(OidIsValid(indexOid));
 
     heap_close(duDescRel, NoLock);

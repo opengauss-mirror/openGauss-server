@@ -63,6 +63,8 @@
 #include "utils/syscache.h"
 #include "utils/builtins.h"
 #include "utils/fmgrtab.h"
+#include "utils/postinit.h"
+#include "utils/relmapper.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "dynloader.h"
@@ -72,12 +74,13 @@
 #include <execinfo.h>
 #include "pgxc/pgxc.h"
 #include "port.h"
+#include "fencedudf.h"
 
 typedef enum { UDF_INFO = 5, UDF_ARGS, UDF_RESULT, UDF_ERROR } UDFMsgType;
 
 typedef enum { UDF_SEND_ARGS = 0, UDF_RECV_ARGS = 1, UDF_SEND_RESULT = 2, UDF_RECV_RESULT = 3 } UDFArgHandlerType;
 
-typedef enum { C_UDF, JAVA_UDF } UDF_LANG;
+typedef enum { C_UDF, JAVA_UDF, PYTHON_UDF} UDF_LANG;
 
 typedef enum { MASTER_PROCESS = 1, WORK_PROCESS, KILL_WORK } UDF_Process;
 
@@ -124,80 +127,6 @@ typedef struct LibraryInfo {
 
 #define FENCED_UDF_UNIXSOCKET ".gaussUDF.socket"
 
-/*
- * Hashtable for fast lookup of external C functions
- */
-typedef struct {
-    /* fn_oid is the hash key and so must be first! */
-    Oid fn_oid;         /* OID of an external function */
-    Oid fn_languageId;  /* language OID */
-    int argNum;         /* The number of argument value */
-    PGFunction user_fn; /* the function's address */
-    UDFInfoType udfInfo;
-} UDFFuncHashTabEntry;
-
-#define AppendBufFixedMsgVal(bufPtr, addr, size)    \
-    do {                                            \
-        appendBinaryStringInfo(bufPtr, addr, size); \
-    } while (0)
-
-#define AppendBufVarMsgVal(bufPtr, addr, size)             \
-    do {                                                   \
-        appendBinaryStringInfo(bufPtr, (char*)&(size), 4); \
-        appendBinaryStringInfo(bufPtr, addr, size);        \
-    } while (0)
-
-#define GetFixedMsgVal(bufPtr, addr, size, addr_size)         \
-    do {                                                      \
-        errno_t rc;                                           \
-        rc = memcpy_s((addr), (addr_size), (bufPtr), (size)); \
-        securec_check_c(rc, "\0", "\0");                      \
-        (bufPtr) += (size);                                   \
-    } while (0)
-
-#define GetFixedMsgValSafe(bufPtr, addr, size, addr_size, srcRemainLen)           \
-    do {                                                                        \
-        if (unlikely(srcRemainLen < size)) {                                     \
-            ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
-                errmsg("No data left in msg, left len:%u, desire len:%lu", srcRemainLen, (long unsigned int)size))); \
-        }                                                                          \
-        errno_t rc = memcpy_s((addr), (addr_size), (bufPtr), (size)); \
-        securec_check_c(rc, "\0", "\0");                      \
-        (bufPtr) += (size);                                   \
-        (srcRemainLen) -= (size);                             \
-    } while (0)                                               \
-
-#define GetVarMsgValSafe(bufPtr, addr, size, addr_size, srcRemainLen)           \
-        do {                                                      \
-            if (unlikely(srcRemainLen < 4)) {                                     \
-                ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
-                    errmsg("No data left in msg, left len:%u", srcRemainLen))); \
-            }                                                                           \
-            (size) = *(int*)(bufPtr);                             \
-            (bufPtr) += 4;                                        \
-            (srcRemainLen) -= 4;                                  \
-            if (unlikely(srcRemainLen < size)) {                                     \
-                ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_PROTOCOL_VIOLATION), \
-                    errmsg("No data left in msg, left len:%u, desire len:%u", srcRemainLen, size))); \
-            }                                                                          \
-            errno_t rc = memcpy_s((addr), (addr_size), (bufPtr), (size)); \
-            securec_check_c(rc, "\0", "\0");                      \
-            (bufPtr) += (size);                                   \
-            (srcRemainLen) -= (size);                             \
-        } while (0)                                               \
-
-#define Reserve4BytesMsgHeader(bufPtr)                             \
-    do {                                                           \
-        int _reserveSize = 0;                                      \
-        appendBinaryStringInfo((bufPtr), (char*)&_reserveSize, 4); \
-    } while (0)
-
-#define Fill4BytesMsgHeader(bufPtr)                \
-    do {                                           \
-        Assert((bufPtr)->len >= 4);                \
-        *(int*)(bufPtr)->data = (bufPtr)->len - 4; \
-    } while (0)
-
 THR_LOCAL int UDFRPCSocket = -1;
 THR_LOCAL Oid lastUDFOid = InvalidOid;
 
@@ -226,10 +155,37 @@ extern Datum RPCFencedUDF(FunctionCallInfo fcinfo);
 bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedureTuple);
 void InitFuncCallUDFInfo(FunctionCallInfoData* fcinfo, int argN, bool setFuncPtr);
 void InitUDFInfo(UDFInfoType* udfInfo, int argN, int batchRows);
+void FencedUDFMasterMain(int argc, char* argv[]);
 
 /* Extern Enterface Declaration */
 extern void* internal_load_library(const char* libname);
 
+
+void StartUDFMaster()
+{
+    pid_t fencedWorkPid = 0;
+    switch ((fencedWorkPid = fork_process())) {
+        case -1: {
+            int errsv = errno;
+            ereport(WARNING,
+                (errmodule(MOD_UDF),
+                    errcode(ERRCODE_INVALID_STATUS),
+                    errmsg("could not fork gaussDB process, errno:%d, error reason:%s",
+                        errsv,
+                        strerror(errsv))));
+            break;
+        }
+        case 0: {
+
+            FencedUDFMasterMain(0, NULL);
+            exit(0);
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+}
 /*
  * @Description: The main function of UDF RPC server.
  * It will initialize envrionment, create listen socket and startup
@@ -239,6 +195,8 @@ extern void* internal_load_library(const char* libname);
  */
 void FencedUDFMasterMain(int argc, char* argv[])
 {
+    SetProcessingMode(FencedProcessing);
+
     /* Just make set_ps_dispaly ok */
     IsUnderPostmaster = true;
     set_ps_display("gaussdb fenced UDF master process", true);
@@ -266,6 +224,13 @@ void FencedUDFMasterMain(int argc, char* argv[])
     /* ignore SIGXFSZ, so that ulimit violations work like disk full */
 #ifdef SIGXFSZ
     (void)gspqsignal(SIGXFSZ, SIG_IGN); /* ignored */
+#endif
+
+#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
+    BaseInit();
+    InitProcess();
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "fencedMaster",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_AI));
 #endif
 
     /*
@@ -436,7 +401,7 @@ pid_t StartUDFWorker(int socket)
             break;
         }
         case 0: {
-            /* Child process */
+            /* Child process */			
             /* Just make set_ps_dispaly ok */
             IsUnderPostmaster = true;
 
@@ -722,6 +687,14 @@ void SetUDFMemoryLimit()
     }
 }
 
+void changeDatabase(unsigned int currentDatabaseId)
+{
+    if (currentDatabaseId!= 0 && currentDatabaseId != u_sess->proc_cxt.MyDatabaseId){
+        u_sess->proc_cxt.MyDatabaseId = currentDatabaseId;
+        t_thrd.proc_cxt.PostInit->InitFencedSysCache();
+    }
+}
+
 /*
  * @Description: The main function which run UDF
  * @IN socket: argument values is socket communication with RPC client
@@ -742,10 +715,9 @@ static void UDFWorkerMain(int socket)
     UDFCreateHashTab();
 
     MemoryContextSwitchTo(UDFWorkMemContext);
-
+    FunctionCallInfoData fcinfo;
     while (1) {
         /* Step 2: Receive UDF information */
-        FunctionCallInfoData fcinfo;
         RecvUDFInformation(socket, &fcinfo);
 
         /* Step 3: Set memory limit */
@@ -769,10 +741,20 @@ static void UDFWorkerMain(int socket)
                     fcinfo.argnull[idx] = fcinfo.udfInfo.null[row][idx];
                 }
                 Datum result = 0;
-                if (fcinfo.flinfo->fn_languageId == ClanguageId)
-                    result = RunUDF<C_UDF>(&fcinfo);
-                else
-                    result = RunUDF<JAVA_UDF>(&fcinfo);
+                switch (fcinfo.flinfo->fn_languageId) {
+                    case ClanguageId:
+                        result = RunUDF<C_UDF>(&fcinfo);
+                        break;
+                    case JavalanguageId:
+                        result = RunUDF<JAVA_UDF>(&fcinfo);
+                        break;
+                    default:
+                        if(fcinfo.flinfo->fnLibPath != NULL) {
+                            changeDatabase(atoi(fcinfo.flinfo->fnLibPath));
+                        }
+                        result = RunUDF<PYTHON_UDF>(&fcinfo);
+                        break;
+                }
                 (fcinfo.udfInfo.UDFResultHandlerPtr)(&fcinfo, 0, result);
             }
 
@@ -1569,7 +1551,7 @@ bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedure
 
             udfLibPath = TextDatumGetCString(probinattr);
             char* udfLibFullPath = expand_dynamic_library_name(udfLibPath);
-            errno_t errorno = memcpy_s(finfo->fnName, sizeof(finfo->fnName), udfName, strlen(udfName));
+            errno_t errorno = memcpy_s(finfo->fnName, sizeof(finfo->fnName), udfName, strlen(udfName) + 1);
             securec_check_c(errorno, "\0", "\0");
 
             finfo->fnLibPath = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibFullPath) + 1);
@@ -1588,7 +1570,13 @@ bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedure
                     (errmodule(MOD_UDF),
                         errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                         errmsg("null prosrc for Java function %u", functionId)));
-            udfLibPath = TextDatumGetCString(prosrcattr);
+            if (languageId == JavalanguageId) {
+                udfLibPath = TextDatumGetCString(prosrcattr);
+            } else {
+                const int dbinLen = 10;
+                udfLibPath = (char *)palloc0(dbinLen * sizeof(char));
+                pg_itoa(u_sess->proc_cxt.MyDatabaseId, udfLibPath);
+            }
             finfo->fnLibPath = (char*)MemoryContextAllocZero(finfo->fn_mcxt, strlen(udfLibPath) + 1);
             errno_t errorno = memcpy_s(finfo->fnLibPath, strlen(udfLibPath) + 1, udfLibPath, strlen(udfLibPath));
             securec_check_c(errorno, "\0", "\0");
@@ -1732,7 +1720,7 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
 
                 /* Look up the function within the library */
                 flinfo->fn_addr = (PGFunction)pg_dlsym(libHandle, flinfo->fnName);
-            } else {
+            } else if (flinfo->fn_languageId == JavalanguageId){
                 /* Load libpljava.so to support Java UDF */
                 char pathbuf[MAXPGPATH];
                 get_lib_path(my_exec_path, pathbuf);
@@ -1745,7 +1733,6 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                             errmsg("internal_load_library %s failed: %m", libpljava_location)));
                 free(libpljava_location);
-
                 /* Look up the java_call_handler function within libpljava.so */
                 Datum (*pljava_call_handler)(FunctionCallInfoData*);
                 pljava_call_handler = (Datum(*)(FunctionCallInfoData*))pg_dlsym(libpljava_handler, "java_call_handler");
@@ -1755,6 +1742,32 @@ static void FindOrInsertUDFHashTab(FunctionCallInfoData* fcinfo)
                             errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
                             errmsg("load java_call_handler failed.")));
                 flinfo->fn_addr = pljava_call_handler;
+            } else {
+                char pathbuf[MAXPGPATH];
+                get_lib_path(my_exec_path, pathbuf);
+#ifdef ENABLE_PYTHON2
+                join_path_components(pathbuf, pathbuf, "postgresql/plpython2.so");
+#else
+                join_path_components(pathbuf, pathbuf, "postgresql/plpython3.so");
+#endif
+                char *libpl_location = strdup(pathbuf);
+                void *libpl_handler = internal_load_library(libpl_location);
+                if (NULL == libpl_handler)
+                    ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                                    errmsg("internal_load_library %s failed: %m", libpl_location)));
+                free(libpl_location);
+                Datum (*plpython_call_handler)(FunctionCallInfoData *);
+#ifdef ENABLE_PYTHON2
+                plpython_call_handler = (Datum(*)(FunctionCallInfoData *))pg_dlsym(libpl_handler, "plpython_call_handler");
+#else
+                plpython_call_handler = 
+                            (Datum(*)(FunctionCallInfoData *))pg_dlsym(libpl_handler, "plpython3_call_handler");
+#endif
+                if (NULL == plpython_call_handler) {
+                    ereport(ERROR, (errmodule(MOD_UDF), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                                    errmsg("load plpython_call_handler failed.")));
+                }
+                flinfo->fn_addr = plpython_call_handler;
             }
             entry->user_fn = fcinfo->flinfo->fn_addr;
 

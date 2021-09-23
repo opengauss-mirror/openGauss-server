@@ -1,0 +1,16 @@
+<refentry id="SQL-SAVEPOINT">
+<refmeta>
+<refentrytitle>SAVEPOINT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SAVEPOINT</refname>
+<refpurpose>create a new savepoint in the current transaction</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SAVEPOINT savepoint_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

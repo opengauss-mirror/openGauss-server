@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Support for the various \d ("describe") commands.  Note that the current
  * expectation is that all functions in this file will succeed when working
@@ -16,6 +16,7 @@
 #include <ctype.h>
 
 #include "catalog/pg_class.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_default_acl.h"
 #include "catalog/pg_attrdef.h"
 #include "common.h"
@@ -41,6 +42,10 @@
 #ifdef HAVE_CE
 #define DECRYPT_PADDING_SIZE 48
 #endif /* HAVE_CE */
+
+#ifdef ENABLE_UT
+#define static
+#endif
 
 #define MOT_FDW "mot_fdw"
 #define MOT_FDW_SERVER "mot_server"
@@ -99,14 +104,22 @@ bool describeAggregates(const char* pattern, bool verbose, bool showSystem)
         appendPQExpBuffer(&buf,
             "  CASE WHEN p.pronargs = 0\n"
             "    THEN CAST('*' AS pg_catalog.text)\n"
-            "    ELSE\n"
+            "    WHEN p.pronargs <= %d THEN\n"
             "    pg_catalog.array_to_string(ARRAY(\n"
             "      SELECT\n"
             "        pg_catalog.format_type(p.proargtypes[s.i], NULL)\n"
             "      FROM\n"
             "        pg_catalog.generate_series(0, pg_catalog.array_upper(p.proargtypes, 1)) AS s(i)\n"
             "    ), ', ')\n"
+            "    ELSE\n"
+            "    pg_catalog.array_to_string(ARRAY(\n"
+            "      SELECT\n"
+            "        pg_catalog.format_type(p.proargtypesext[s.i], NULL)\n"
+            "      FROM\n"
+            "        pg_catalog.generate_series(0, pg_catalog.array_upper(p.proargtypesext, 1)) AS s(i)\n"
+            "    ), ', ')\n"
             "  END AS \"%s\",\n",
+            FUNC_MAX_ARGS_INROW,
             gettext_noop("Argument data types"));
     else
         appendPQExpBuffer(
@@ -457,6 +470,7 @@ bool describeFunctions(const char* functypes, const char* pattern, bool verbose,
     if (!showSystem && (pattern == NULL)) {
         appendPQExpBuffer(&buf,
             "      AND n.nspname <> 'pg_catalog'\n"
+            "      AND n.nspname <> 'db4ai'\n"
             "      AND n.nspname <> 'information_schema'\n");
     }
 
@@ -562,6 +576,7 @@ bool describeTypes(const char* pattern, bool verbose, bool showSystem)
     if (!showSystem && (pattern == NULL))
         appendPQExpBuffer(&buf,
             "      AND n.nspname <> 'pg_catalog'\n"
+            "      AND n.nspname <> 'db4ai'\n"
             "      AND n.nspname <> 'information_schema'\n");
 
     /* Match name pattern against either internal or external name */
@@ -1114,6 +1129,7 @@ bool describeTableDetails(const char* pattern, bool verbose, bool showSystem)
     if (!showSystem && pattern == NULL)
         appendPQExpBuffer(&buf,
             "WHERE n.nspname <> 'pg_catalog'\n"
+            "      AND n.nspname <> 'db4ai'\n"
             "      AND n.nspname <> 'information_schema'\n");
 
     (void)processSQLNamePattern(pset.db,
@@ -1523,7 +1539,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
     }
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_attribute a");
     appendPQExpBuffer(&buf, "\nWHERE a.attrelid = '%s' AND a.attnum > 0 AND NOT a.attisdropped AND "
-                            "a.attkvtype != 4 AND a.attname <> 'tableoid'", oid);
+                            "a.attkvtype != 4 AND a.attname <> 'tableoid' AND a.attname <> 'tablebucketid'", oid);
     appendPQExpBuffer(&buf, "\nORDER BY a.attnum;");
 
     res = PSQLexec(buf.data, false);
@@ -1645,10 +1661,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
 
         /* Type */
 #ifdef HAVE_CE
-        if (hasFullEncryptFeature &&
-            strncmp(PQgetvalue(res, i, 1),
-                    "byteawithoutorderwithequalcol",
-                    sizeof("byteawithoutorderwithequalcol") - 1) == 0) {
+        if (hasFullEncryptFeature && (strncmp(
+            PQgetvalue(res, i, 1), "byteawithoutorderwithequalcol", sizeof("byteawithoutorderwithequalcol") - 1) == 0 ||
+            strncmp(PQgetvalue(res, i, 1), "byteawithoutordercol", sizeof("byteawithoutordercol") - 1) == 0)) {
             printTableAddCell(&cont, PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type")), false, false);
         } else {
             printTableAddCell(&cont, PQgetvalue(res, i, 1), false, false);
@@ -1928,100 +1943,103 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         PGresult* result = NULL;
         int tuples = 0;
 
-        /* print indexes */
-        if (tableinfo.hasindex) {
-            printfPQExpBuffer(&buf, "SELECT c2.relname, i.indisprimary, i.indisunique, i.indisclustered, ");
-            if (pset.sversion >= 80200)
-                appendPQExpBuffer(&buf, "i.indisvalid, ");
-            else
-                appendPQExpBuffer(&buf, "true as indisvalid, ");
-            appendPQExpBuffer(&buf, "pg_catalog.pg_get_indexdef(i.indexrelid, 0, true),\n  ");
-            if (pset.sversion >= 90000)
-                appendPQExpBuffer(&buf,
-                    "pg_catalog.pg_get_constraintdef(con.oid, true), "
-                    "contype, condeferrable, condeferred");
-            else
-                appendPQExpBuffer(&buf,
-                    "null AS constraintdef, null AS contype, "
-                    "false AS condeferrable, false AS condeferred");
-            if (hasreplident)
-                appendPQExpBuffer(&buf, ", i.indisreplident");
-            else
-                appendPQExpBuffer(&buf, ", false AS indisreplident");
-            if (pset.sversion >= 80000)
-                appendPQExpBuffer(&buf, ", c2.reltablespace");
-            appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i\n");
-            if (pset.sversion >= 90000)
-                appendPQExpBuffer(&buf,
-                    "  LEFT JOIN pg_catalog.pg_constraint con ON (conrelid = i.indrelid AND conindid = i.indexrelid "
-                    "AND contype IN ('p','u','x'))\n");
+        /* list indexes by table oid */
+        printfPQExpBuffer(&buf, "SELECT c2.relname, i.indisprimary, i.indisunique, i.indisclustered, ");
+        if (pset.sversion >= 80200)
+            appendPQExpBuffer(&buf, "i.indisvalid, ");
+        else
+            appendPQExpBuffer(&buf, "true as indisvalid, ");
+        appendPQExpBuffer(&buf, "pg_catalog.pg_get_indexdef(i.indexrelid, 0, true),\n  ");
+        if (pset.sversion >= 90000)
             appendPQExpBuffer(&buf,
-                "WHERE c.oid = '%s' AND c.oid = i.indrelid AND i.indexrelid = c2.oid\n"
-                "ORDER BY i.indisprimary DESC, i.indisunique DESC, c2.relname;",
-                oid);
-            result = PSQLexec(buf.data, false);
-            if (result == NULL)
-                goto error_return;
-            else
-                tuples = PQntuples(result);
+                "pg_catalog.pg_get_constraintdef(con.oid, true), "
+                "contype, condeferrable, condeferred");
+        else
+            appendPQExpBuffer(&buf,
+                "null AS constraintdef, null AS contype, "
+                "false AS condeferrable, false AS condeferred");
+        if (hasreplident)
+            appendPQExpBuffer(&buf, ", i.indisreplident");
+        else
+            appendPQExpBuffer(&buf, ", false AS indisreplident");
+        if (pset.sversion >= 80000)
+            appendPQExpBuffer(&buf, ", c2.reltablespace");
+        appendPQExpBuffer(&buf, ", i.indisusable");
+        appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_class c, pg_catalog.pg_class c2, pg_catalog.pg_index i\n");
+        if (pset.sversion >= 90000)
+            appendPQExpBuffer(&buf,
+                "  LEFT JOIN pg_catalog.pg_constraint con ON (conrelid = i.indrelid AND conindid = i.indexrelid "
+                "AND contype IN ('p','u','x'))\n");
+        appendPQExpBuffer(&buf,
+            "WHERE c.oid = '%s' AND c.oid = i.indrelid AND i.indexrelid = c2.oid\n"
+            "ORDER BY i.indisprimary DESC, i.indisunique DESC, c2.relname;",
+            oid);
+        result = PSQLexec(buf.data, false);
+        if (result == NULL)
+            goto error_return;
+        else
+            tuples = PQntuples(result);
 
-            if (tuples > 0) {
-                printTableAddFooter(&cont, _("Indexes:"));
-                for (i = 0; i < tuples; i++) {
-                    /* untranslated index name */
-                    printfPQExpBuffer(&buf, "    \"%s\"", PQgetvalue(result, i, 0));
+        /* print indexes */
+        if (tuples > 0) {
+            printTableAddFooter(&cont, _("Indexes:"));
+            for (i = 0; i < tuples; i++) {
+                /* untranslated index name */
+                printfPQExpBuffer(&buf, "    \"%s\"", PQgetvalue(result, i, 0));
 
-                    /* If exclusion constraint, print the constraintdef */
-                    if (strcmp(PQgetvalue(result, i, 7), "x") == 0) {
-                        appendPQExpBuffer(&buf, " %s", PQgetvalue(result, i, 6));
-                    } else {
-                        const char* indexdef = NULL;
-                        const char* usingpos = NULL;
+                /* If exclusion constraint, print the constraintdef */
+                if (strcmp(PQgetvalue(result, i, 7), "x") == 0) {
+                    appendPQExpBuffer(&buf, " %s", PQgetvalue(result, i, 6));
+                } else {
+                    const char* indexdef = NULL;
+                    const char* usingpos = NULL;
 
-                        /* Label as primary key or unique (but not both) */
-                        if (strcmp(PQgetvalue(result, i, 1), "t") == 0)
-                            appendPQExpBuffer(&buf, " PRIMARY KEY,");
-                        else if (strcmp(PQgetvalue(result, i, 2), "t") == 0) {
-                            if (strcmp(PQgetvalue(result, i, 7), "u") == 0)
-                                appendPQExpBuffer(&buf, " UNIQUE CONSTRAINT,");
-                            else
-                                appendPQExpBuffer(&buf, " UNIQUE,");
-                        }
-
-                        /* Everything after "USING" is echoed verbatim */
-                        indexdef = PQgetvalue(result, i, 5);
-                        usingpos = strstr(indexdef, " USING ");
-                        if (NULL != usingpos)
-                            indexdef = usingpos + 7;
-                        appendPQExpBuffer(&buf, " %s", indexdef);
-
-                        /* Need these for deferrable PK/UNIQUE indexes */
-                        if (strcmp(PQgetvalue(result, i, 8), "t") == 0)
-                            appendPQExpBuffer(&buf, " DEFERRABLE");
-
-                        if (strcmp(PQgetvalue(result, i, 9), "t") == 0)
-                            appendPQExpBuffer(&buf, " INITIALLY DEFERRED");
+                    /* Label as primary key or unique (but not both) */
+                    if (strcmp(PQgetvalue(result, i, 1), "t") == 0)
+                        appendPQExpBuffer(&buf, " PRIMARY KEY,");
+                    else if (strcmp(PQgetvalue(result, i, 2), "t") == 0) {
+                        if (strcmp(PQgetvalue(result, i, 7), "u") == 0)
+                            appendPQExpBuffer(&buf, " UNIQUE CONSTRAINT,");
+                        else
+                            appendPQExpBuffer(&buf, " UNIQUE,");
                     }
 
-                    /* Add these for all cases */
-                    if (strcmp(PQgetvalue(result, i, 3), "t") == 0)
-                        appendPQExpBuffer(&buf, " CLUSTER");
+                    /* Everything after "USING" is echoed verbatim */
+                    indexdef = PQgetvalue(result, i, 5);
+                    usingpos = strstr(indexdef, " USING ");
+                    if (NULL != usingpos)
+                        indexdef = usingpos + 7;
+                    appendPQExpBuffer(&buf, " %s", indexdef);
 
-                    if (strcmp(PQgetvalue(result, i, 4), "t") != 0)
-                        appendPQExpBuffer(&buf, " INVALID");
+                    /* Need these for deferrable PK/UNIQUE indexes */
+                    if (strcmp(PQgetvalue(result, i, 8), "t") == 0)
+                        appendPQExpBuffer(&buf, " DEFERRABLE");
 
-                    if (strcmp(PQgetvalue(result, i, 10), "t") == 0)
-                        appendPQExpBuffer(&buf, " REPLICA IDENTITY");
-
-                    printTableAddFooter(&cont, buf.data);
-
-                    /* Print tablespace of the index on the same line */
-                    if (pset.sversion >= 80000)
-                        add_tablespace_footer(&cont, 'i', atooid(PQgetvalue(result, i, 11)), false);
+                    if (strcmp(PQgetvalue(result, i, 9), "t") == 0)
+                        appendPQExpBuffer(&buf, " INITIALLY DEFERRED");
                 }
+
+                /* Add these for all cases */
+                if (strcmp(PQgetvalue(result, i, 3), "t") == 0)
+                    appendPQExpBuffer(&buf, " CLUSTER");
+
+                if (strcmp(PQgetvalue(result, i, 4), "t") != 0)
+                    appendPQExpBuffer(&buf, " INVALID");
+
+                if (strcmp(PQgetvalue(result, i, 10), "t") == 0)
+                    appendPQExpBuffer(&buf, " REPLICA IDENTITY");
+
+                if (strcmp(PQgetvalue(result, i, 12), "t") != 0)
+                    appendPQExpBuffer(&buf, " UNUSABLE");
+
+                printTableAddFooter(&cont, buf.data);
+
+                /* Print tablespace of the index on the same line */
+                if (pset.sversion >= 80000)
+                    add_tablespace_footer(&cont, 'i', atooid(PQgetvalue(result, i, 11)), false);
             }
-            PQclear(result);
         }
+        PQclear(result);
 
         if (tableinfo.relkind == RELKIND_FOREIGN_TABLE || tableinfo.relkind == RELKIND_STREAM) {
             /* Print foreign table Information Constraint.*/
@@ -2780,6 +2798,40 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         printTableAddFooter(&cont, buf.data);
     }
 
+    /* if rel in blockchain schema */
+    if (verbose) {
+        bool has_blockchain_attr = is_column_exists(pset.db, NamespaceRelationId, "nspblockchain");
+        if (has_blockchain_attr) {
+            PGresult* result = NULL;
+            printfPQExpBuffer(&buf,
+                "SELECT nspblockchain from pg_namespace n where \n"
+                "n.oid = (SELECT relnamespace FROM pg_class WHERE oid = '%s')",
+                oid);
+            result = PSQLexec(buf.data, false);
+            if (result == NULL) {
+                goto error_return;
+            }
+            char* has_blockchain = PQgetvalue(result, 0, 0);
+            if (has_blockchain != NULL && *has_blockchain == 't') {
+                printfPQExpBuffer(&buf,
+                    "select c.relname from pg_class c, pg_depend d where c.oid = d.objid \n"
+                    "and c.relnamespace = (select oid from pg_namespace where nspname = 'blockchain') \n"
+                    "and d.classid=(select oid from pg_class where relname = 'pg_class') \n"
+                    "and d.refobjid = '%s' ",
+                    oid);
+                PQclear(result);
+                result = PSQLexec(buf.data, false);
+                if (result == NULL) {
+                    goto error_return;
+                }
+                char *hist_table_name = PQgetvalue(result, 0, 0);
+                printfPQExpBuffer(&buf, _("History table name: %s"), hist_table_name);
+                printTableAddFooter(&cont, buf.data);
+            }
+            PQclear(result);
+        }
+    }
+
     printTable(&cont, pset.queryFout, pset.logfile);
     printTableCleanup(&cont);
 
@@ -2945,6 +2997,10 @@ bool describeRoles(const char* pattern, bool verbose)
             appendPQExpBufferStr(&buf, "\n, r.rolkind");
         }
         appendPQExpBufferStr(&buf, "\nFROM pg_catalog.pg_roles r\n");
+        if (!pattern) {
+            appendPQExpBufferStr(&buf, "WHERE r.rolname not in ('gs_role_copy_files', 'gs_role_signal_backend', "
+                "'gs_role_tablespace', 'gs_role_replication', 'gs_role_account_lock', 'gs_role_pldebugger')\n");
+        }
 
         (void)processSQLNamePattern(pset.db, &buf, pattern, false, false, NULL, "r.rolname", NULL, NULL);
     } else {
@@ -3280,6 +3336,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     if (!showSystem && (pattern == NULL))
         appendPQExpBuffer(&buf,
             "      AND n.nspname <> 'pg_catalog'\n"
+            "      AND n.nspname <> 'db4ai'\n"
             "      AND n.nspname <> 'information_schema'\n");
 
     /*
@@ -3774,10 +3831,14 @@ bool listSchemas(const char* pattern, bool verbose, bool showSystem)
         gettext_noop("Owner"));
 
     if (verbose) {
+        bool hasblockchain = is_column_exists(pset.db, NamespaceRelationId, "nspblockchain");
         appendPQExpBuffer(&buf, ",\n  ");
         printACLColumn(&buf, "n.nspacl");
         appendPQExpBuffer(
             &buf, ",\n  pg_catalog.obj_description(n.oid, 'pg_namespace') AS \"%s\"", gettext_noop("Description"));
+        if (hasblockchain) {
+            appendPQExpBuffer(&buf, ",\n n.nspblockchain AS \"%s\"", gettext_noop("WithBlockChain"));
+        }
     }
 
     appendPQExpBuffer(&buf, "\nFROM pg_catalog.pg_namespace n\n");

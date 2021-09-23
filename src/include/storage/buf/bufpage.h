@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * bufpage.h
- *	  Standard POSTGRES buffer page definitions.
+ *	  Standard openGauss buffer page definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -19,12 +19,13 @@
 #include "storage/item/item.h"
 #include "storage/off.h"
 #include "storage/buf/buf.h"
+#include "tde_key_management/data_common.h"
 
 /*
- * A postgres disk page is an abstraction layered on top of a postgres
+ * A openGauss disk page is an abstraction layered on top of a openGauss
  * disk block (which is simply a unit of i/o, see block.h).
  *
- * specifically, while a disk block can be unformatted, a postgres
+ * specifically, while a disk block can be unformatted, a openGauss
  * disk page is always a slotted page of the form:
  *
  * +----------------+---------------------------------+
@@ -205,8 +206,9 @@ typedef HeapPageHeaderData* HeapPageHeader;
 #define PD_ENCRYPT_PAGE 0x0020    /* is a encryt cluster */
 #define PD_CHECKSUM_FNV1A 0x0040  /* page checksum using FNV-1a hash */
 #define PD_JUST_AFTER_FPW 0x0080  /* page just after redo full page write */
+#define PD_TDE_PAGE 0x0100        /* there is TdePageInfo at the end of a page */
 
-#define PD_VALID_FLAG_BITS 0x00FF /* OR of all valid pd_flags bits */
+#define PD_VALID_FLAG_BITS 0x01FF /* OR of all valid pd_flags bits */
 
 /*
  * Page layout version number 0 is for pre-7.3 Postgres releases.
@@ -220,6 +222,8 @@ typedef HeapPageHeaderData* HeapPageHeader;
  * As of Release 9.3, the checksum version must also be considered when
  * handling pages.
  */
+#define PG_SEGMENT_PAGE_LAYOUT_VERSION 8
+#define PG_UHEAP_PAGE_LAYOUT_VERSION 7
 #define PG_HEAP_PAGE_LAYOUT_VERSION 6
 #define PG_COMM_PAGE_LAYOUT_VERSION 5
 #define PG_PAGE_4B_LAYOUT_VERSION 4
@@ -306,6 +310,8 @@ typedef HeapPageHeaderData* HeapPageHeader;
 
 #define PageIs8BXidHeapVersion(page) (PageGetPageLayoutVersion(page) == PG_HEAP_PAGE_LAYOUT_VERSION)
 
+#define PageIsSegmentVersion(page) (PageGetPageLayoutVersion(page) == PG_SEGMENT_PAGE_LAYOUT_VERSION)
+
 /*
  * PageSetPageSizeAndVersion
  *		Sets the page size and page layout version number of a page.
@@ -345,9 +351,17 @@ typedef HeapPageHeaderData* HeapPageHeader;
     (((PageHeader)(page))->pd_prune_xid = NormalTransactionIdToShort( \
          PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_xid_base : 0, (xid)))
 
+#define PageSetPruneXid(page, xid)                                \
+    (((PageHeader)(page))->pd_prune_xid = NormalTransactionIdToShort( \
+         ((UBTPageOpaqueInternal)PageGetSpecialPointer(page))->xid_base, (xid)))
+
 #define HeapPageGetPruneXid(page) \
     (ShortTransactionIdToNormal(  \
         PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_xid_base : 0, ((PageHeader)(page))->pd_prune_xid))
+
+#define PageGetPruneXid(page) \
+    (ShortTransactionIdToNormal(  \
+       ((UBTPageOpaqueInternal)PageGetSpecialPointer(page))->xid_base, ((PageHeader)(page))->pd_prune_xid))
 
 /*
  * PageGetItem
@@ -424,7 +438,10 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
 #define PageSetEncrypt(page) (((PageHeader)(page))->pd_flags |= PD_ENCRYPT_PAGE)
 #define PageClearEncrypt(page) (((PageHeader)(page))->pd_flags &= ~PD_ENCRYPT_PAGE)
 
-#define PageIsChecksumByFNV1A(page) (((PageHeader)(page))->pd_flags & PD_CHECKSUM_FNV1A)
+#define PageIsTDE(page) (((PageHeader)(page))->pd_flags & PD_TDE_PAGE)
+#define PageSetTDE(page) (((PageHeader)(page))->pd_flags |= PD_TDE_PAGE)
+#define PageClearTDE(page) (((PageHeader)(page))->pd_flags &= ~PD_TDE_PAGE)
+
 #define PageSetChecksumByFNV1A(page) (((PageHeader)(page))->pd_flags |= PD_CHECKSUM_FNV1A)
 #define PageClearChecksumByFNV1A(page) (((PageHeader)(page))->pd_flags &= ~PD_CHECKSUM_FNV1A)
 
@@ -436,6 +453,12 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     (AssertMacro(TransactionIdIsNormal(oldestxmin)),       \
         TransactionIdIsValid(HeapPageGetPruneXid(page)) && \
             TransactionIdPrecedes(HeapPageGetPruneXid(page), oldestxmin))
+
+#define IndexPageIsPrunable(page, oldestxmin)                   \
+    (AssertMacro(TransactionIdIsNormal(oldestxmin)),       \
+        TransactionIdIsValid(PageGetPruneXid(page)) && \
+            TransactionIdPrecedes(PageGetPruneXid(page), oldestxmin))
+
 #define PageSetPrunable(page, xid)                                                                                     \
     do {                                                                                                               \
         Assert(TransactionIdIsNormal(xid));                                                                            \
@@ -448,6 +471,11 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
     ((rel)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP && PageIsNew(page))
 
 const int PAGE_INDEX_CAN_TUPLE_DELETE = 2;
+inline bool CheckPageZeroCases(const PageHeader page)
+{
+    return page->pd_lsn.xlogid != 0 || page->pd_lsn.xrecoff != 0 || (page->pd_flags & ~PD_LOGICAL_PAGE) != 0 ||
+        page->pd_lower != 0 || page->pd_upper != 0 || page->pd_special != 0 || page->pd_pagesize_version != 0;
+}
 
 /* ----------------------------------------------------------------
  *		extern declarations
@@ -464,6 +492,8 @@ typedef itemIdSortData* itemIdSort;
 extern void PageInit(Page page, Size pageSize, Size specialSize, bool isheap = false);
 extern bool PageIsVerified(Page page, BlockNumber blkno);
 extern bool PageHeaderIsValid(PageHeader page);
+struct UHeapPageHeaderData;
+extern bool UPageHeaderIsValid(const UHeapPageHeaderData* page);
 extern OffsetNumber PageAddItem(
     Page page, Item item, Size size, OffsetNumber offsetNumber, bool overwrite, bool is_heap);
 extern Page PageGetTempPage(Page page);
@@ -480,11 +510,12 @@ extern void PageIndexMultiDelete(Page page, OffsetNumber* itemnos, int nitems);
 
 extern void PageReinitWithDict(Page page, Size dictSize);
 extern bool PageFreeDict(Page page);
-extern char* PageDataEncryptIfNeed(Page page);
+extern char* PageDataEncryptIfNeed(Page page, TdeInfo* tdeinfo = NULL, bool need_copy = true, bool is_segbuf = false);
 extern void PageDataDecryptIfNeed(Page page);
-extern char* PageSetChecksumCopy(Page page, BlockNumber blkno);
+extern char* PageSetChecksumCopy(Page page, BlockNumber blkno, bool is_segbuf = false);
 extern void PageSetChecksumInplace(Page page, BlockNumber blkno);
 
 extern void PageLocalUpgrade(Page page);
 extern void DumpPageInfo(Page page, XLogRecPtr newLsn);
+extern void SegPageInit(Page page, Size pageSize);
 #endif /* BUFPAGE_H */

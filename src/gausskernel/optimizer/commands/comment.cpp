@@ -2,7 +2,7 @@
  *
  * comment.cpp
  *
- * PostgreSQL object comments utility code.
+ * openGauss object comments utility code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -29,6 +29,7 @@
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "miscadmin.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -136,6 +137,8 @@ void CommentObject(CommentStmt* stmt)
      */
     address =
         get_object_address(stmt->objtype, stmt->objname, stmt->objargs, &relation, ShareUpdateExclusiveLock, false);
+
+    TrForbidAccessRbObject(address.classId, address.objectId);
 
     /* Require ownership or comment privilege of the target object. */
     AclResult aclresult = CheckObjectCommentPrivilege(stmt, address.objectId, relation);

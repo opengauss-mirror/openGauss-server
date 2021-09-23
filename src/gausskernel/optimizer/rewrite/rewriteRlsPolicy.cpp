@@ -43,13 +43,6 @@
 #include "utils/sec_rls_utils.h"
 #include "utils/syscache.h"
 
-/*
- * This Row Level Security policy can apply to all commands.
- * Include SELECT, INSERT, UPDATE, DELETE, currently only support
- * SELECT, UPDATE, DELETE.
- */
-#define RLS_CMD_ALL_CHR '*'
-
 static bool CheckRoleForRlsPolicy(const RlsPolicy* policy, Oid roleid);
 static void PullRlsPoliciesForRel(CmdType cmd, Oid roleid, const List* relRlsPolicies, List** permissivePolicies,
     List** restrictivePolicies, bool& hasSubLink);
@@ -193,7 +186,7 @@ static void AddRlsUsingQuals(
      * Add a single security qual combining together the USING clauses from all
      * the permissive policies using OR. If there were no permissive policies
      * exist, we did not construct one-time False filter, this is different with
-     * Postgres (PG will generate one-time False filter when no permissive
+     * openGauss (PG will generate one-time False filter when no permissive
      * policies exist).
      */
     rlsExpr = NULL;

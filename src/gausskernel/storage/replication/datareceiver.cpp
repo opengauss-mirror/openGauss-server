@@ -62,7 +62,7 @@
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
 #include "storage/procarray.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/guc.h"
 #include "utils/builtins.h"
 #include "utils/ps_status.h"
@@ -277,7 +277,8 @@ void DataReceiverMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Data Receiver", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Data Receiver",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -1260,27 +1261,41 @@ static void DataRcvReceive(char *buf, Size nbytes)
         securec_check(rc, "", "");
         buf += headerlen;
         if (u_sess->attr.attr_storage.HaModuleDebug) {
-            ereport(LOG, (errmsg("DataRcvReceive element info: %u, %u, %u, %u  ", dataelemheader.rnode.dbNode,
-                                 dataelemheader.rnode.spcNode, dataelemheader.rnode.relNode,
-                                 GETATTID((uint)dataelemheader.attid))));
+            ereport(LOG,
+                (errmsg("DataRcvReceive element info: %u, %u, %u, %d, %u  ",
+                    dataelemheader.rnode.dbNode,
+                    dataelemheader.rnode.spcNode,
+                    dataelemheader.rnode.relNode,
+                    GETBUCKETID(dataelemheader.attid),
+                    GETATTID((uint)dataelemheader.attid))));
         }
 
         cursegno = dataelemheader.blocknum / ((BlockNumber)RELSEG_SIZE);
 
         if (currentlen != (sizeof(uint32) + (uint32)headerlen + (uint32)dataelemheader.data_size)) {
-            ereport(ERROR, (errmsg("Current length is illegal, the dataRcvReceiveelement info is : %u, %u, %u, %u  ",
-                                   dataelemheader.rnode.dbNode, dataelemheader.rnode.spcNode,
-                                   dataelemheader.rnode.relNode, GETATTID((uint)dataelemheader.attid))));
+            ereport(ERROR,
+                (errmsg("Current length is illegal, the dataRcvReceiveelement info is : %u, %u, %u, %d, %u  ",
+                    dataelemheader.rnode.dbNode,
+                    dataelemheader.rnode.spcNode,
+                    dataelemheader.rnode.relNode,
+                    GETBUCKETID(dataelemheader.attid),
+                    GETATTID((uint)dataelemheader.attid))));
         }
 
         if (u_sess->attr.attr_storage.HaModuleDebug) {
             /* now BLCKSZ is equal to ALIGNOF_CUSIZE, so either one is used */
             ereport(LOG,
-                    (errmsg("HA-DataRcvReceive: rnode %u/%u/%u, blockno %u, segno %u, "
-                            "pageoffset2blockno %lu, size %u, queueoffset %u/%u",
-                            dataelemheader.rnode.spcNode, dataelemheader.rnode.dbNode, dataelemheader.rnode.relNode,
-                            dataelemheader.blocknum, cursegno, dataelemheader.offset / BLCKSZ, dataelemheader.data_size,
-                            dataelemheader.queue_offset.queueid, dataelemheader.queue_offset.queueoff)));
+                (errmsg("HA-DataRcvReceive: rnode %u/%u/%u, blockno %u, segno %u, "
+                        "pageoffset2blockno %lu, size %u, queueoffset %u/%u",
+                    dataelemheader.rnode.spcNode,
+                    dataelemheader.rnode.dbNode,
+                    dataelemheader.rnode.relNode,
+                    dataelemheader.blocknum,
+                    cursegno,
+                    dataelemheader.offset / BLCKSZ,
+                    dataelemheader.data_size,
+                    dataelemheader.queue_offset.queueid,
+                    dataelemheader.queue_offset.queueoff)));
         }
 
         /* Add hearbeat */
@@ -1293,12 +1308,18 @@ static void DataRcvReceive(char *buf, Size nbytes)
 
         if (!EQ_CRC32(dataelemheader.data_crc, crc)) {
             ereport(PANIC,
-                    (errmsg("received incorrect data page checksum at: "
-                            "rnode[%u,%u,%u], blockno[%u], segno[%u], "
-                            "pageoffset[%u], size[%u], queueoffset[%u/%u]",
-                            dataelemheader.rnode.spcNode, dataelemheader.rnode.dbNode, dataelemheader.rnode.relNode,
-                            dataelemheader.blocknum, cursegno, dataelemheader.offset, dataelemheader.data_size,
-                            dataelemheader.queue_offset.queueid, dataelemheader.queue_offset.queueoff)));
+                (errmsg("received incorrect data page checksum at: "
+                        "rnode[%u,%u,%u], blockno[%u], segno[%u], "
+                        "pageoffset[%u], size[%u], queueoffset[%u/%u]",
+                    dataelemheader.rnode.spcNode,
+                    dataelemheader.rnode.dbNode,
+                    dataelemheader.rnode.relNode,
+                    dataelemheader.blocknum,
+                    cursegno,
+                    dataelemheader.offset,
+                    dataelemheader.data_size,
+                    dataelemheader.queue_offset.queueid,
+                    dataelemheader.queue_offset.queueoff)));
         }
 #endif
 

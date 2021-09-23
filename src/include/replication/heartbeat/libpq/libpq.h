@@ -14,7 +14,7 @@
  * ---------------------------------------------------------------------------------------
  * 
  * libpq.h
- *	  POSTGRES LIBPQ buffer structure definitions.
+ *	  openGauss LIBPQ buffer structure definitions.
  *
  *
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group

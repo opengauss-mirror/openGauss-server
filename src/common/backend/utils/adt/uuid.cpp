@@ -206,3 +206,125 @@ Datum uuid_hash(PG_FUNCTION_ARGS)
 
     return hash_any(key->data, UUID_LEN);
 }
+
+static int hash_ctoa(char ch)
+{
+    int res = 0;
+    if (ch >= 'a' && ch <= 'f') {
+        res = 10 + (ch - 'a');
+    } else {
+        res = ch - '0';
+    }
+    return res;
+}
+
+Datum hash16in(PG_FUNCTION_ARGS)
+{
+    char* str = PG_GETARG_CSTRING(0);
+    int len = strlen(str);
+    uint64 res = 0;
+    if (len > 16) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("invalid input syntax for hash16: \"%s\"", str)));
+    }
+
+    for (int i = 0; i < len; ++i) {
+        if (str[0] == '-') {
+            res = 0;
+            break;
+        }
+        if (!((str[i] >= 'a' && str[i] <= 'f') || (str[i] >= '0' && str[i] <= '9'))) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                    errmsg("invalid input syntax for hash16: \"%s\"", str)));
+        }
+        res = res * 16 + hash_ctoa(str[i]);
+    }
+
+    PG_RETURN_TRANSACTIONID(res);
+}
+
+Datum hash16out(PG_FUNCTION_ARGS)
+{
+    uint64 hash16 = PG_GETARG_TRANSACTIONID(0);
+    static const char hex_chars[] = "0123456789abcdef";
+    StringInfoData buf;
+    StringInfoData res;
+
+    initStringInfo(&buf);
+    initStringInfo(&res);
+
+    if (hash16 >= 0) {
+        for (int i = 0; i < 16; ++i) {
+            int ho = hash16 & 0x0F;
+            hash16 = hash16 >> 4;
+            appendStringInfoChar(&buf, hex_chars[ho]);
+        }
+        for (int j = strlen(buf.data) - 1; j >= 0; --j) {
+            appendStringInfoChar(&res, buf.data[j]);
+        }
+    }
+    PG_RETURN_CSTRING(res.data);
+}
+
+static void string_to_hash32(const char* source, hash32_t* hash32)
+{
+    const char* src = source;
+    int len = strlen(src);
+    if (len != HASH32_LEN * 2) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                        errmsg("invalid input syntax for hash32: \"%s\"", source)));
+    }
+
+    for (int i = 0; i < HASH32_LEN; ++i) {
+        hash32->data[i] = hash_ctoa(src[i * 2]) * 16 + hash_ctoa(src[i * 2 + 1]);
+    }
+}
+
+Datum hash32in(PG_FUNCTION_ARGS)
+{
+    char *hash32_str = PG_GETARG_CSTRING(0);
+    hash32_t *hash32 = NULL;
+
+    hash32 = (hash32_t*)palloc(sizeof(hash32_t));
+    string_to_hash32(hash32_str, hash32);
+    PG_RETURN_HASH32_P(hash32);
+}
+
+Datum hash32out(PG_FUNCTION_ARGS)
+{
+    hash32_t* hash32 = PG_GETARG_HASH32_P(0);
+    static const char hex_chars[] = "0123456789abcdef";
+    StringInfoData buf;
+    int i;
+
+    initStringInfo(&buf);
+    for (i = 0; i < HASH32_LEN; i++) {
+        int h_low;
+        int h_high;
+
+        h_low = hash32->data[i] & 0x0F;
+        h_high = (hash32->data[i] >> 4) & 0x0F;
+
+        appendStringInfoChar(&buf, hex_chars[h_high]);
+        appendStringInfoChar(&buf, hex_chars[h_low]);
+    }
+
+    PG_RETURN_CSTRING(buf.data);
+}
+
+Datum hash16_add(PG_FUNCTION_ARGS)
+{
+    uint64 arg1 = DatumGetUInt64(PG_GETARG_DATUM(0));
+    uint64 arg2 = DatumGetUInt64(PG_GETARG_DATUM(1));
+
+    PG_RETURN_DATUM(UInt64GetDatum(arg1 + arg2));
+}
+
+Datum hash16_eq(PG_FUNCTION_ARGS)
+{
+    uint64 arg1 = DatumGetUInt64(PG_GETARG_DATUM(0));
+    uint64 arg2 = DatumGetUInt64(PG_GETARG_DATUM(1));
+
+    PG_RETURN_BOOL(arg1 == arg2);
+}

@@ -1,0 +1,26 @@
+{
+    "enable_libnet":false,
+    "enable_dfx":false,
+    "numa_num":4,
+    "numa_bind":[
+        [
+            30,
+            31
+        ],
+        [
+            62,
+            63
+        ],
+        [
+            94,
+            95
+        ],
+        [
+            126,
+            127
+        ]
+    ],
+    "listen":[
+        "localhost:29011"
+    ]
+}

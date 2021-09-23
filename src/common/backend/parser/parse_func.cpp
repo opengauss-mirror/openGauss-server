@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_proc.h"
@@ -32,10 +33,12 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+#include "catalog/gs_encrypted_columns.h"
 
 static Oid FuncNameAsType(List* funcname);
 static Node* ParseComplexProjection(ParseState* pstate, char* funcname, Node* first_arg, int location);
 static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs);
+static Oid cl_get_input_param_original_type(Oid func_oid, int argno);
 
 /*
  *	Parse a function call
@@ -69,6 +72,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
     bool func_variadic = (fn ? fn->func_variadic : false);
     WindowDef* over = (fn ? fn->over : NULL);
     Oid rettype;
+    int rettype_orig = -1;
     Oid funcid;
     ListCell* l = NULL;
     ListCell* nextl = NULL;
@@ -217,7 +221,8 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
         &declared_arg_types,
         &argdefaults,
         call_func,
-        &refSynOid);
+        &refSynOid,
+        &rettype_orig);
     name_string = NameListToString(funcname);
     if (fdresult == FUNCDETAIL_COERCION) {
         /*
@@ -228,7 +233,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
             (Node*)linitial(fargs),
             actual_arg_types[0],
             rettype,
-            -1,
+            rettype_orig,
             COERCION_EXPLICIT,
             COERCE_EXPLICIT_CALL,
             location);
@@ -399,7 +404,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                             "Perhaps you misplaced ORDER BY; ORDER BY must appear "
                             "after all regular arguments of the aggregate."),
                     parser_errposition(pstate, location)));
-        } else
+        } else {
             ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("function %s does not exist",
@@ -407,6 +412,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
                     errhint("No function matches the given name and argument types. "
                             "You might need to add explicit type casts."),
                     parser_errposition(pstate, location)));
+        }
     }
 
     /*
@@ -478,6 +484,7 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
 
         funcexpr->funcid = funcid;
         funcexpr->funcresulttype = rettype;
+        funcexpr->funcresulttype_orig = rettype_orig;
         funcexpr->funcretset = retset;
         funcexpr->funcvariadic = func_variadic;
         funcexpr->funcformat = COERCE_EXPLICIT_CALL;
@@ -1434,7 +1441,7 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
     Oid* vatype,                                             /* return value */
     Oid** true_typeids,                                      /* return value */
     List** argdefaults, bool call_func,                      /* optional return value */
-    Oid* refSynOid)
+    Oid* refSynOid, int* rettype_orig)
 {
     FuncCandidateList raw_candidates = NULL;
     FuncCandidateList all_candidates = NULL;
@@ -1652,6 +1659,15 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
                     errmsg("cache lookup failed for function %u", best_candidate->oid)));
         pform = (Form_pg_proc)GETSTRUCT(ftup);
         *rettype = pform->prorettype;
+        if (IsClientLogicType(*rettype) && rettype_orig) {
+            HeapTuple gstup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(best_candidate->oid));
+            if (!HeapTupleIsValid(gstup)) /* should not happen */
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("cache lookup failed for function %u", best_candidate->oid)));
+            Form_gs_encrypted_proc gsform = (Form_gs_encrypted_proc)GETSTRUCT(gstup);
+            *rettype_orig = gsform->prorettype_orig;
+            ReleaseSysCache(gstup);
+        }
         *retset = pform->proretset;
         *vatype = pform->provariadic;
         /* fetch default args if caller wants 'em */
@@ -1894,6 +1910,12 @@ Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError)
     clist = FuncnameGetCandidates(funcname, nargs, NIL, false, false, false);
 
     while (clist) {
+        /* if argtype is CL type replace it with original type */
+        for (int i = 0; i < nargs; i++) {
+            if (IsClientLogicType(clist->args[i])) {
+                clist->args[i] = cl_get_input_param_original_type(clist->oid, i);
+            }
+        }
         if (memcmp(argtypes, clist->args, nargs * sizeof(Oid)) == 0)
             return clist->oid;
         clist = clist->next;
@@ -2126,9 +2148,15 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
     AssertEreport(IsA(defaults, List), MOD_OPT, "");
     pfree_ext(defaultsstr);
 
-    defargposdatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prodefaultargpos, &isnull);
-    AssertEreport(!isnull, MOD_OPT, "");
-    defaultargpos = (int2vector*)DatumGetPointer(defargposdatum);
+    if (pronargs <= FUNC_MAX_ARGS_INROW) {
+        defargposdatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prodefaultargpos, &isnull);
+        AssertEreport(!isnull, MOD_OPT, "");
+        defaultargpos = (int2vector*)DatumGetPointer(defargposdatum);
+    } else {
+        defargposdatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prodefaultargposext, &isnull);
+        AssertEreport(!isnull, MOD_OPT, "");
+        defaultargpos = (int2vector*)PG_DETOAST_DATUM(defargposdatum);
+    }
 
     AssertEreport(pronargs >= ndargs, MOD_OPT, "");
     AssertEreport(pronargdefaults >= ndargs, MOD_OPT, "");
@@ -2191,4 +2219,30 @@ static List* GetDefaultVale(Oid funcoid, const int* argnumbers, int ndargs)
 
     ReleaseSysCache(tuple);
     return defaults;
+}
+
+/*
+ * Replace column managed type with original type
+ * to identify overloaded functions
+ */
+static Oid cl_get_input_param_original_type(Oid func_id, int argno)
+{
+    HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(func_id));
+    Oid ret = InvalidOid;
+    if (HeapTupleIsValid(gs_oldtup)) {
+        bool isnull = false;
+        oidvector* proargcachedcol = (oidvector*)DatumGetPointer(
+            SysCacheGetAttr(GSCLPROCID, gs_oldtup, Anum_gs_encrypted_proc_proargcachedcol, &isnull));
+        if (!isnull && proargcachedcol->dim1 > argno) {
+            Oid cachedColId = proargcachedcol->values[argno];
+            HeapTuple tup = SearchSysCache1(CEOID, ObjectIdGetDatum(cachedColId));
+            if (HeapTupleIsValid(tup)) {
+                Form_gs_encrypted_columns ec_form = (Form_gs_encrypted_columns)GETSTRUCT(tup);
+                ret = ec_form->data_type_original_oid;
+                ReleaseSysCache(tup);
+            }
+        }
+        ReleaseSysCache(gs_oldtup);
+    }
+    return ret;
 }

@@ -29,7 +29,7 @@
 #include "securec.h"
 #include "securec_check.h"
 #include "aead_aes_hamc_enc_key.h"
-#include "cipher.h"
+#include "encrypt_decrypt.h"
 
 const unsigned char *AeadAesHamcEncKey::g_encryption_key_salt_format =
     (unsigned char *)"mppdb cell encryption key with encryption algorithm AEAD_AES_256_CBC_HMAC_SHA256 and key length "
@@ -44,6 +44,7 @@ const unsigned char *AeadAesHamcEncKey::g_mac_key_salt_format =
 const unsigned char *AeadAesHamcEncKey::g_iv_key_salt_format =
     (unsigned char *)"mppdb cell IV key with encryption algorithm AEAD_AES_256_CBC_HMAC_SHA256 and key length : 32";
 
+const int RAND_COUNT = 100;
 /* Derives all the required keys from the given root key */
 AeadAesHamcEncKey::AeadAesHamcEncKey(unsigned char *root_key, size_t root_key_size)
 {
@@ -67,8 +68,28 @@ AeadAesHamcEncKey::~AeadAesHamcEncKey()
 
 bool AeadAesHamcEncKey::generate_root_key(unsigned char *key, size_t &keySize)
 {
-    if (RAND_priv_bytes(key, MAX_SIZE) != 1) {
-        keySize = 0;
+    bool is_ok = true;
+    int r_count = 0;
+
+    while (r_count++ < RAND_COUNT) {
+        is_ok = true;
+        if (RAND_priv_bytes(key, MAX_SIZE) != 1) {
+            keySize = 0;
+            printf("ERROR(CLIENT):Generate random key failed.\n");
+            return false;
+        }
+        for (int i = 0; i < MAX_SIZE; i++) {
+            if (key[i] == '\0') {
+                is_ok = false;
+                break;
+            }
+        }
+        if (is_ok) {
+            break;
+        }
+    }
+    if (!is_ok) {
+        printf("ERROR(CLIENT):Generate random key failed.\n");
         return false;
     }
     keySize = MAX_SIZE;
@@ -79,6 +100,9 @@ bool AeadAesHamcEncKey::generate_keys(unsigned char *root_key, size_t root_key_l
 {
     errno_t rc = EOK;
     /* Derive keys from the root key. Derive encryption key */
+    hmac_ctx_group_iv.free_hmac_ctx_all();
+    hmac_ctx_group_mac.free_hmac_ctx_all();
+    hmac_ctx_group_root.free_hmac_ctx_all();
     if (!HKDF(root_key, root_key_len, g_encryption_key_salt_format, strlen((char *)g_encryption_key_salt_format),
         _encryption_key)) {
         rc = memset_s(root_key, root_key_len, 0, root_key_len);
@@ -119,11 +143,10 @@ const unsigned char *AeadAesHamcEncKey::get_iv_key() const
  * Computes a keyed hash of a given text
  */
 bool AeadAesHamcEncKey::HKDF(const unsigned char *key, int key_len, const unsigned char *data, int data_len, 
-    unsigned char *result) const
+    unsigned char *result)
 {
     unsigned int result_len = MAX_SIZE;
-    int ret = CRYPT_hmac(NID_hmacWithSHA256, key, key_len, data, data_len, result, &result_len);
-    if (ret) {
+    if (!cached_hmac(NID_hmacWithSHA256, key, key_len, data, data_len, result, &result_len, &hmac_ctx_group_root)) {
         return false;
     }
     return true;

@@ -254,7 +254,7 @@ static int resolve_symlinks(char* path)
     int len = 0;
     int rc = 0;
 
-    /* PostgreSQL is process based, and our MPPDB is thread based.
+    /* openGauss is process based, and our MPPDB is thread based.
      * And chdir() will affect all the threads within the process.
      * So we have to avoid calling chdir() after main thread is working
      * well in normal state.

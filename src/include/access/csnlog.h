@@ -24,14 +24,12 @@
 extern void CSNLogSetCommitSeqNo(TransactionId xid, int nsubxids, TransactionId* subxids, CommitSeqNo csn);
 extern CommitSeqNo CSNLogGetCommitSeqNo(TransactionId xid);
 extern CommitSeqNo CSNLogGetNestCommitSeqNo(TransactionId xid);
-extern TransactionId CSNLogGetNextInProgressXid(TransactionId start, TransactionId end);
 
 extern Size CSNLOGShmemBuffers(void);
 extern Size CSNLOGShmemSize(void);
 extern void CSNLOGShmemInit(void);
 extern void BootStrapCSNLOG(void);
 extern void StartupCSNLOG(bool isUpgrade);
-extern void TrimCSNLOG(void);
 extern void ShutdownCSNLOG(void);
 extern void CheckPointCSNLOG(void);
 extern void ExtendCSNLOG(TransactionId newestXact);

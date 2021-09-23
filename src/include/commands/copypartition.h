@@ -67,7 +67,9 @@ typedef struct CopyFromBulkData {
     /* the other entry info in hash table */
     int numTuples;
     int maxTuples;
-    HeapTuple* tuples;
+    // XXXTAM: replace below with generic Tuple
+    Tuple* tuples;
+    Tuple* utuples;
     Size sizeTuples;
     /* bulk-insert  Memory Context */
     CopyFromMemCxt memCxt;
@@ -88,6 +90,7 @@ typedef struct CopyFromManagerData {
     /* members without PARTITION */
     bool isPartRel;
     bool LastFlush;
+    bool isUHeapRel;
     CopyFromBulk bulk;
     CopyFromBulkKey	switchKey;	
 } CopyFromManagerData;
@@ -97,56 +100,10 @@ extern void CopyFromBulkInsert(EState* estate, CopyFromBulk bulk, PageCompress* 
 
 extern CopyFromBulk findBulk(CopyFromManager mgr, Oid partOid, int2 bucketId, bool *toFlush);
 extern bool isBulkFull(CopyFromBulk bulk);
-template <bool isInsertSelect>
-void addToBulk(CopyFromBulk bulk, HeapTuple tup, bool needCopy)
-{
-    MemoryContext oldCxt = NULL;
-    CopyFromMemCxt copyFromMemCxt = NULL;
-    HeapTuple newTuple = NULL;
+template<bool isInsertSelect> void AddToBulk(CopyFromBulk bulk, HeapTuple tup, bool needCopy);
+template<bool isInsertSelect> void AddToUHeapBulk(CopyFromBulk bulk, UHeapTuple tup, bool needCopy);
 
-    Assert(bulk != NULL && tup != NULL);
-    if (needCopy) {
-#ifdef USE_ASSERT_CHECKING
-        int idx;
-        bool found = false;
-#endif
-        copyFromMemCxt = bulk->memCxt;
-        Assert(copyFromMemCxt != NULL);
-
-#ifdef USE_ASSERT_CHECKING
-        if (!isInsertSelect) {
-            for (idx = 0; idx < copyFromMemCxt->nextBulk; idx++) {
-                found = found || (copyFromMemCxt->chunk[idx] == bulk);
-            }
-            Assert(true == found);
-        }
-#endif
-
-        oldCxt = MemoryContextSwitchTo(copyFromMemCxt->memCxtCandidate);
-
-        newTuple = heap_copytuple(tup);
-        copyFromMemCxt->memCxtSize += newTuple->t_len;
-        if (bulk->numTuples == bulk->maxTuples) {
-            bulk->maxTuples *= 2;
-            bulk->tuples = (HeapTuple*)repalloc(bulk->tuples, sizeof(HeapTuple) * bulk->maxTuples);
-        }
-
-        (void)MemoryContextSwitchTo(oldCxt);
-    } else {
-        Assert(InvalidOid == bulk->partOid);
-        Assert(NULL == bulk->memCxt);
-        Assert(bulk->numTuples < MAX_BUFFERED_TUPLES);
-        Assert(bulk->sizeTuples < MAX_TUPLES_SIZE);
-        newTuple = tup;
-    }
-
-    Assert(bulk->numTuples < bulk->maxTuples);
-    bulk->tuples[bulk->numTuples] = newTuple;
-    bulk->sizeTuples += newTuple->t_len;
-    bulk->numTuples++;
-}
-
-template <bool isInsertSelect>
+template<bool isInsertSelect>
 bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, CopyFromManager mgr,
     PageCompress* pCState, CommandId mycid, int hiOptions, ResultRelInfo* resultRelInfo, TupleTableSlot* myslot,
     BulkInsertState bistate)
@@ -197,7 +154,9 @@ bool CopyFromChunkInsert(CopyState cstate, EState* estate, CopyFromBulk bulk, Co
 		mgr->switchKey.bucketId = InvalidBktId;
         bulk->maxTuples = DEF_BUFFERED_TUPLES;
         oldCxt = MemoryContextSwitchTo(copyFromMemCxt->memCxtCandidate);
-        bulk->tuples = (HeapTuple*)palloc(sizeof(HeapTuple) * bulk->maxTuples);
+
+        bulk->tuples = (Tuple *)palloc(sizeof(Tuple) * bulk->maxTuples);
+
         (void)MemoryContextSwitchTo(oldCxt);
     }
 

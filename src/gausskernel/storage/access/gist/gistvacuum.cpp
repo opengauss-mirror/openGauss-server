@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * gistvacuum.cpp
- *	  vacuuming routines for the postgres GiST index access method.
+ *	  vacuuming routines for the openGauss GiST index access method.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -181,7 +181,7 @@ Datum gistbulkdelete(PG_FUNCTION_ARGS)
             for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i)) {
                 iid = PageGetItemId(page, i);
                 idxtuple = (IndexTuple)PageGetItem(page, iid);
-                if (callback(&(idxtuple->t_tid), callback_state, InvalidOid)) {
+                if (callback(&(idxtuple->t_tid), callback_state, InvalidOid, InvalidBktId)) {
                     todelete[ntodelete] = i - ntodelete;
                     ntodelete++;
                     stats->tuples_removed += 1;
@@ -229,7 +229,7 @@ Datum gistbulkdelete(PG_FUNCTION_ARGS)
                             (errmsg("index \"%s\" contains an inner tuple marked as invalid",
                                     RelationGetRelationName(rel)),
                              errdetail("This is caused by an incomplete page split at crash recovery before upgrading "
-                                       "to PostgreSQL 9.1."),
+                                       "to openGauss 1.0.0"),
                              errhint("Please REINDEX it.")));
             }
         }

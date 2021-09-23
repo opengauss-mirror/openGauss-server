@@ -135,7 +135,7 @@ static bool collectMatchBitmap(GinBtreeData *btree, GinBtreeStack *stack, GinSca
 
     /* Initialize empty bitmap result */
     if (!isColStore) {
-        scanEntry->matchBitmap = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
+        scanEntry->matchBitmap = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L);
     }
 
     /* Null query cannot partial-match anything */

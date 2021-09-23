@@ -834,11 +834,14 @@ Retry:
             InvalidSnapshot,
             InvalidSnapshot,
             true,
+            NULL,
             &tmfd,
             NULL,   // we don't need update_indexes
+            NULL,   // we don't meed modifiedIdxAttrs
             false);
 
         switch (result) {
+            case TM_SelfUpdated:
             case TM_SelfModified: {
                 // Now It is TM_SelfModified
                 ereport(ERROR,

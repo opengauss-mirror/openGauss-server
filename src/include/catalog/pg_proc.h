@@ -79,6 +79,11 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     bool        proshippable;    /* if provolatile is not 'i', proshippable will determine if the func can be shipped */
     bool        propackage;
     char        prokind;         /* see PROKIND_ categories below */
+    text        proargsrc;    /* procedure header source text before keyword AS/IS */
+    Oid         propackageid;    /* OID of package containing this proc */
+    bool        proisprivate;
+    oidvector_extend proargtypesext;
+    int2vector_extend prodefaultargposext;
 #endif
 } FormData_pg_proc;
 
@@ -93,7 +98,7 @@ typedef FormData_pg_proc *Form_pg_proc;
  *        compiler constants for pg_proc
  * ----------------
  */
-#define Natts_pg_proc 32
+#define Natts_pg_proc 37
 #define Anum_pg_proc_proname 1
 #define Anum_pg_proc_pronamespace 2
 #define Anum_pg_proc_proowner 3
@@ -126,11 +131,16 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define Anum_pg_proc_shippable 30
 #define Anum_pg_proc_package 31
 #define Anum_pg_proc_prokind 32
+#define Anum_pg_proc_proargsrc 33
+#define Anum_pg_proc_packageid 34
+#define Anum_pg_proc_proisprivate 35
+#define Anum_pg_proc_proargtypesext 36
+#define Anum_pg_proc_prodefaultargposext 37
 
 /* proc_oid is only for builitin
  * func view shouldn't be included in Natts_pg_proc
  */
-#define Anum_pg_proc_oid 33
+#define Anum_pg_proc_oid 38
 
 /* ----------------
  *        initial contents of pg_proc
@@ -168,7 +178,6 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define TINTERVALINFUNCOID 246
 #define TINTERVALOUTFUNCOID 247
 #define TIMENOWFUNCOID 250
-#define INT4TOFLOAT8FUNCOID 316
 #define BTINT4CMP_OID 351
 #define RTRIM1FUNCOID 401
 #define NAME2TEXTFUNCOID 406
@@ -396,8 +405,6 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PERCENTILECONTAGGFUNCOID 4452
 #define MODEAGGFUNCOID 4461
 #define PGCHECKAUTHIDFUNCOID 3228
-#define JSONAGGFUNCOID 5206
-#define JSONOBJECTAGGFUNCOID 5209
 #define DB4AI_PREDICT_BY_BOOL_OID    7101
 #define DB4AI_PREDICT_BY_INT32_OID   7102
 #define DB4AI_PREDICT_BY_INT64_OID   7103
@@ -405,6 +412,8 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define DB4AI_PREDICT_BY_FLOAT8_OID  7106
 #define DB4AI_PREDICT_BY_NUMERIC_OID 7107
 #define DB4AI_PREDICT_BY_TEXT_OID    7108
+#define JSONAGGFUNCOID 5206
+#define JSONOBJECTAGGFUNCOID 5209
 
 /*
  * Symbolic values for prokind column
@@ -448,6 +457,100 @@ typedef FormData_pg_proc *Form_pg_proc;
 
 #define OID_REGEXP_SPLIT_TO_TABLE 2765
 #define OID_REGEXP_SPLIT_TO_TABLE_NO_FLAG 2766
+
+/* cast functions oid */
+#define INT4TOCHARFUNCOID 78
+#define INT2TOFLOAT8FUNCOID 235
+#define INT2TOFLOAT4FUNCOID 236
+#define FLOAT4TOFLOAT8FUNCOID 311
+#define INT2TOINT4FUNCOID 313
+#define INT4TOINT2FUNCOID 314
+#define INT4TOFLOAT8FUNCOID 316
+#define BPCHARTEXTFUNCOID 405
+#define BOOLTOTEXTFUNCOID 2971
+#define BOOLTOINT8FUNCOID 3178
+#define BOOLTOINT2FUNCOID 3181
+#define INT8TOINT4FUNCOID 480
+#define INT4TOINT8FUNCOID 481
+#define INT8TOINT2FUNCOID 714
+#define INT2TOINT8FUNCOID 754
+#define CHARTOBPCHARFUNCOID 860
+#define CHARTOTEXTFUNCOID 946
+#define FLOAT8TOTIMESTAMPFUNCOID 1158
+#define TIMESTAMPTZTONEWTIMEZONEFUNCOID 1159
+#define RELTIMETOINTERVALFUNCOID 1177
+#define TIMETOINTERVALFUNCOID 1370
+#define INT4TOCHRFUNCOID 1621
+#define INT4TOHEXFUNCOID 2089
+#define INT8TOHEXFUNCOID 2090
+#define INT4TONUMERICFUNCOID 1740
+#define FLOAT4TONUMERICFUNCOID 1742
+#define FLOAT8TONUMERICFUNCOID 1743
+#define INT8TONUMERICFUNCOID 1781
+#define INT2TONUMERICFUNCOID 1782
+#define TEXTTOREGCLASSFUNCOID 1079
+#define DATEANDTIMETOTIMESTAMPFUNCOID 2025
+#define TIMESTAMPTONEWTIMEZONEFUNCOID 2069
+#define TEXTTOTIMESTAMP 4073
+#define HEXTORAWFUNCOID 4038
+#define DATETOTEXTFUNCOID 4159
+#define DATETOBPCHARFUNCOID 4160
+#define DATETOVARCHARFUNCOID 4161
+#define TIMESTAMPZONETOTEXTFUNCOID 4177
+#define TIMESATMPTOTEXTFUNCOID 4178
+#define TIMESTAMPTOVARCHARFUNCOID 4179
+#define FLOAT8TOINTERVALFUNCOID 4229
+#define INT1TONUMERICFUNCOID 5521
+#define I1TOI2FUNCOID 5523
+#define I2TOI1FUNCOID 5524
+#define I1TOI4FUNCOID 5525
+#define I4TOI1FUNCOID 5526
+#define I1TOI8FUNCOID 5527
+#define I8TOI1FUNCOID 5528
+#define I1TOF4FUNCOID 5529
+#define I1TOF8FUNCOID 5531
+#define BOOLTOINT1FUNCOID 5534
+#define INT4TOBPCHARFUNCOID 3192
+#define DATETOTIMESTAMPFUNCOID 2024
+#define BOOLTOINT4FUNCOID 2558
+#define INT1TOINTERVALFUNCOID 3189
+#define INT2TOINTERVALFUNCOID 3190
+#define INT4TOINTERVALFUNCOID 3191
+#define INT1TOTEXTFUNCOID 4165
+#define INT2TOTEXTFUNCOID 4166
+#define INT4TOTEXTFUNCOID 4167
+#define INT8TOTEXTFUNCOID 4168
+#define FLOAT4TOTEXTFUNCOID 4169
+#define FLOAT8TOTEXTFUNCOID 4170
+#define NUMERICTOTEXTFUNCOID 4171
+#define BPCHARTONUMERICFUNCOID 4172
+#define VARCHARTONUMERICFUNCOID 4173
+#define VARCHARTOINT4FUNCOID 4174
+#define BPCHARTOINT4FUNCOID 4175
+#define VARCHARTOINT8FUNCOID 4176
+#define INT2TOVARCHARFUNCOID 4180
+#define INT4TOVARCHARFUNCOID 4181
+#define INT8TOVARCHARFUNCOID 4182
+#define NUMERICTOVARCHARFUNCOID 4183
+#define FLOAT4TOVARCHARFUNCOID 4184
+#define FLOAT8TOVARCHARFUNCOID 4185
+#define VARCHARTOTIMESTAMPFUNCOID 4186
+#define BPCHARTOTIMESTAMPFUNCOID 4187
+#define TEXTTOINT1FUNCOID 4188
+#define TEXTTOINT2FUNCOID 4189
+#define TEXTTOINT4FUNCOID 4190
+#define TEXTTOINT8FUNCOID 4191
+#define TEXTTONUMERICFUNCOID 4194
+#define BPCHARTOINT8FUNCOID 4195
+#define INT1TOVARCHARFUNCOID 4065
+#define INT1TONVARCHAR2FUNCOID 4066
+#define INT1TOBPCHARFUNCOID 4067
+#define INT2TOBPCHAR 4068
+#define INT8TOBPCHARFUNCOID 4069
+#define FLOAT4TOBPCHARFUNCOID 4070
+#define FLOAT8TOBPCHARFUNCOID 4071
+#define NUMERICTOBPCHARFUNCOID 4072
+
 
 #endif   /* PG_PROC_H */
 

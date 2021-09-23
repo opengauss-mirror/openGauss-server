@@ -27,6 +27,22 @@
 #define INSEL_SHIPPABLE_DCOL 1
 #define INSEL_UNSHIPPABLE_COL 2
 
+/* Type casts that doesn't effect the hash value */
+#define FLOAT4TOFLOAT8OID 311
+#define FLOAT8TOFLOAT4OID 312
+#define INT2TOINT4OID 313
+#define INT4TOINT2OID 314
+#define INT8TOINT4OID 480
+#define INT4TOINT8OID 481
+#define INT8TOINT2OID 714
+#define INT2TOINT8OID 754
+#define INT1TOINT2OID 5523
+#define INT2TOINT1OID 5524
+#define INT1TOINT4OID 5525
+#define INT4TOINT1OID 5526
+#define INT1TOINT8OID 5527
+#define INT8TOINT1OID 5528
+
 typedef struct {
     bool is_randomfunc_shippable;
     bool is_nextval_shippable;
@@ -97,5 +113,9 @@ extern List* contains_subquery(Node* node, contain_subquery_context* context);
 extern contain_subquery_context init_contain_subquery_context();
 
 /* Get var from nodes */
-extern Var* get_var_from_node(Node* node);
+extern Var* get_var_from_node(Node* node, bool (*func)(Oid));
+extern bool func_oid_check_reject(Oid oid);
+extern bool func_oid_check_restricted(Oid oid);
+extern bool func_oid_check_pass(Oid oid);
+
 #endif

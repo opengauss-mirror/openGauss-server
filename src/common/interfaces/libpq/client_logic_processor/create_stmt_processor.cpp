@@ -16,7 +16,7 @@
  * create_stmt_processor.cpp
  *
  * IDENTIFICATION
- *	  src\common\interfaces\libpq\client_logic_processor\create_stmt_processor.cpp
+ *      src\common\interfaces\libpq\client_logic_processor\create_stmt_processor.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -139,11 +139,12 @@ RawValue *createStmtProcessor::trans_column_definition(const ColumnDef * const c
             if_allowd = true;
     }
     if (!if_allowd) {
-        fprintf(stderr, "ERROR(CLIENT): encrypted %s column is not implemented\n", column_name);
+        printfPQExpBuffer(&statement_data->conn->errorMessage,
+            libpq_gettext("ERROR(CLIENT): encrypted %s column is not implemented\n"), column_name);
         error = true;
         return NULL;
     }
-    ICachedColumn *cached_column = ICachedColumnManager::get_instance().create_cached_column(column_key_name);
+    ICachedColumn *cached_column = statement_data->GetCacheManager()->create_cached_column(column_key_name);
     if (!cached_column) {
         return NULL;
     }
@@ -182,7 +183,7 @@ RawValue *createStmtProcessor::trans_column_definition(const ColumnDef * const c
                 }
                 default: {
                     if (!check_constraint(constraint, cached_column->get_data_type(), column_def->colname,
-                        cached_columns)) {
+                        cached_columns, statement_data)) {
                         error = true;
                         if (cached_column) {
                             delete cached_column;
@@ -203,7 +204,8 @@ RawValue *createStmtProcessor::trans_column_definition(const ColumnDef * const c
     return raw_value;
 }
 
-bool createStmtProcessor::check_distributeby(const DistributeBy *distributeby, const char *colname)
+bool createStmtProcessor::check_distributeby(const DistributeBy *distributeby, const char *colname,
+    StatementData *statement_data)
 {
     if (distributeby == NULL || distributeby->disttype == DistributionType::DISTTYPE_HASH) {
         return true;
@@ -212,8 +214,8 @@ bool createStmtProcessor::check_distributeby(const DistributeBy *distributeby, c
         foreach (cell, distributeby->colname) {
             char *distribute_colname = strVal(lfirst(cell));
             if (strcmp(distribute_colname, colname) == 0) {
-                fprintf(stderr,
-                    "ERROR(CLIENT): encrypted column only support distribute by hash clause\n");
+                printfPQExpBuffer(&statement_data->conn->errorMessage,libpq_gettext(
+                    "ERROR(CLIENT): encrypted column only support distribute by hash clause\n"));
                 return false;
             }
         }
@@ -227,7 +229,7 @@ bool createStmtProcessor::check_distributeby(const DistributeBy *distributeby, c
  */
 bool createStmtProcessor::run_pre_create_statement(const CreateStmt * const stmt, StatementData *statement_data)
 {
-    if (!ICachedColumnManager::get_instance().has_global_setting()) {
+    if (!statement_data->GetCacheManager()->has_global_setting()) {
         return true;
     }
 
@@ -246,7 +248,7 @@ bool createStmtProcessor::run_pre_create_statement(const CreateStmt * const stmt
                     continue;
                 }
                 if (column->colname != NULL &&
-                    !check_distributeby(stmt->distributeby, column->colname)) {
+                    !check_distributeby(stmt->distributeby, column->colname, statement_data)) {
                     return false;
                 }
                 if (!process_column_defintion(column, element, &expr_vec, &cached_columns, 
@@ -264,13 +266,14 @@ bool createStmtProcessor::run_pre_create_statement(const CreateStmt * const stmt
                         char *ikname = strVal(lfirst(ixcell));
                         for (size_t i = 0; i < cached_columns.size(); i++) {
                             if (strcmp((cached_columns.at(i))->get_col_name(), ikname) == 0 && !check_constraint(
-                                constraint, cached_columns.at(i)->get_data_type(), ikname, &cached_columns)) {
+                                constraint, cached_columns.at(i)->get_data_type(), 
+                                ikname, &cached_columns, statement_data)) {
                                 return false;
                             }
                         }
                     }
                 } else if (constraint->raw_expr != NULL) {
-                    if (!transform_expr(constraint->raw_expr, "", &cached_columns)) {
+                    if (!transform_expr(constraint->raw_expr, "", &cached_columns, statement_data)) {
                         return false;
                     }
                 }
@@ -329,13 +332,14 @@ bool createStmtProcessor::process_column_defintion(ColumnDef *column, Node *elem
 
     /* 4 is database + schema + object + extra padding */
     char object_fqdn[NAMEDATALEN * 4] = {0};
-    size_t object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
+    size_t object_fqdn_size = statement_data->GetCacheManager()->get_object_fqdn(column_key_name, false, object_fqdn);
     if (object_fqdn_size == 0) {
-        statement_data->conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
-        ICachedColumnManager::get_instance().load_cache(statement_data->conn);
-        object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
+        statement_data->conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
+        statement_data->GetCacheManager()->load_cache(statement_data->conn);
+        object_fqdn_size = statement_data->GetCacheManager()->get_object_fqdn(column_key_name, false, object_fqdn);
         if (object_fqdn_size == 0) {
-            fprintf(stderr, "ERROR(CLIENT):error while trying to retrieve column encryption key from cache\n");
+            printfPQExpBuffer(&(statement_data->conn->errorMessage), 
+                libpq_gettext("ERROR(CLIENT):error while trying to retrieve column encryption key from cache\n"));
             return false;
         }
     }
@@ -358,26 +362,26 @@ bool createStmtProcessor::process_column_defintion(ColumnDef *column, Node *elem
 
 /* for unique and check primary definiton in column */
 bool createStmtProcessor::check_constraint(Constraint *constraint, const Oid type_id, char *name,
-    ICachedColumns *cached_columns)
+    ICachedColumns *cached_columns, StatementData* statement_data)
 {
     if (constraint != NULL) {
         switch (constraint->contype) {
             case CONSTR_UNIQUE:
                 if (type_id == BYTEAWITHOUTORDERCOLOID) {
-                    fprintf(stderr,
-                        "ERROR(CLIENT): could not support random encrypted columns as unique constraints\n");
+                    printfPQExpBuffer(&statement_data->conn->errorMessage, libpq_gettext(
+                        "ERROR(CLIENT): could not support random encrypted columns as unique constraints\n"));
                     return false;
                 }
                 break;
             case CONSTR_PRIMARY:
                 if (type_id == BYTEAWITHOUTORDERCOLOID) {
-                    fprintf(stderr,
-                        "ERROR(CLIENT): could not support random encrypted columns as primary key constraints\n");
+                    printfPQExpBuffer(&statement_data->conn->errorMessage, libpq_gettext(
+                        "ERROR(CLIENT): could not support random encrypted columns as primary key constraints\n"));
                     return false;
                 }
                 break;
             case CONSTR_CHECK:
-                if (!transform_expr(constraint->raw_expr, name, cached_columns)) {
+                if (!transform_expr(constraint->raw_expr, name, cached_columns, statement_data)) {
                     return false;
                 }
                 break;
@@ -389,7 +393,8 @@ bool createStmtProcessor::check_constraint(Constraint *constraint, const Oid typ
 }
 
 /* check (id>0) encryption column doesn't support check */
-bool createStmtProcessor::transform_expr(Node *expr, char *name, ICachedColumns *cached_columns)
+bool createStmtProcessor::transform_expr(Node *expr, char *name, ICachedColumns *cached_columns,
+    StatementData* statement_data)
 {
     if (expr == NULL) {
         return false;
@@ -402,14 +407,16 @@ bool createStmtProcessor::transform_expr(Node *expr, char *name, ICachedColumns 
                 return false;
             }
             if (name != NULL && strcmp(col_name, name) == 0) {
-                fprintf(stderr, "ERROR(CLIENT): could not support encrypted columns as check constraints\n");
+                printfPQExpBuffer(&statement_data->conn->errorMessage, libpq_gettext(
+                    "ERROR(CLIENT): could not support encrypted columns as check constraints\n"));
                 return false;
             }
             if (cached_columns != NULL) {
                 for (size_t i = 0; i < cached_columns->size(); i++) {
                     if (cached_columns->at(i)->get_col_name() != NULL &&
                         strcmp(cached_columns->at(i)->get_col_name(), col_name) == 0) {
-                        fprintf(stderr, "ERROR(CLIENT): could not support encrypted columns as check constraints\n");
+                        printfPQExpBuffer(&statement_data->conn->errorMessage, libpq_gettext(
+                            "ERROR(CLIENT): could not support encrypted columns as check constraints\n"));
                         return false;
                     }
                 }
@@ -420,8 +427,8 @@ bool createStmtProcessor::transform_expr(Node *expr, char *name, ICachedColumns 
             A_Expr *a = (A_Expr *)expr;
             Node *lexpr = a->lexpr;
             Node *rexpr = a->rexpr;
-            bool lresult = transform_expr(lexpr, name, cached_columns);
-            bool rresult = transform_expr(rexpr, name, cached_columns);
+            bool lresult = transform_expr(lexpr, name, cached_columns, statement_data);
+            bool rresult = transform_expr(rexpr, name, cached_columns, statement_data);
             if (lresult && rresult) {
                 return true;
             } else {

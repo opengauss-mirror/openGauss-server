@@ -591,7 +591,7 @@ void batchsort_rescan(Batchsortstate* state)
             state->m_markposEof = false;
             break;
         case BS_SORTEDONTAPE:
-            LogicalTapeRewind(state->m_tapeset, state->m_resultTape, false);
+            LogicalTapeRewindForRead(state->m_tapeset, state->m_resultTape, BLCKSZ);
             state->m_eofReached = false;
             state->m_markposBlock = 0L;
             state->m_markposOffset = 0;
@@ -661,11 +661,7 @@ void batchsort_restorepos(Batchsortstate* state)
             } else
                 state->m_eofReached = false;
 
-            if (!LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset))
-                ereport(ERROR,
-                    (errmodule(MOD_EXECUTOR),
-                        errcode(ERRCODE_INVALID_OPERATION),
-                        errmsg("batchsort_restorepos failed")));
+            LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset);
             break;
         default:
             ereport(ERROR,
@@ -1296,7 +1292,7 @@ void Batchsortstate::MergeRuns()
 
     /* End of step D2: rewind all output tapes to prepare for merging */
     for (tapenum = 0; tapenum < m_tapeRange; ++tapenum)
-        LogicalTapeRewind(m_tapeset, tapenum, false);
+        LogicalTapeRewindForRead(m_tapeset, tapenum, BLCKSZ);
 
     for (;;) {
         CHECK_FOR_INTERRUPTS();
@@ -1349,9 +1345,9 @@ void Batchsortstate::MergeRuns()
         if (--m_level == 0)
             break;
         /* rewind output tape T to use as new input */
-        LogicalTapeRewind(m_tapeset, m_tpNum[m_tapeRange], false);
+        LogicalTapeRewindForRead(m_tapeset, m_tpNum[m_tapeRange], BLCKSZ);
         /* rewind used-up input tape P, and prepare it for write pass */
-        LogicalTapeRewind(m_tapeset, m_tpNum[m_tapeRange - 1], true);
+        LogicalTapeRewindForWrite(m_tapeset, m_tpNum[m_tapeRange - 1]);
         m_tpRuns[m_tapeRange - 1] = 0;
 
         /*
@@ -1433,7 +1429,7 @@ void Batchsortstate::InitTapes()
     /*
      * Create the tape set and allocate the per-tape data arrays.
      */
-    m_tapeset = LogicalTapeSetCreate(maxTapes);
+    m_tapeset = LogicalTapeSetCreate(maxTapes, NULL, NULL, 0);
     m_lastFileBlocks = 0L;
 
     m_mergeActive = (bool*)palloc0(maxTapes * sizeof(bool));
@@ -1976,7 +1972,13 @@ void ReadFromDataNode(Batchsortstate* state, MultiColumns& multiColumn, int tape
                 Form_pg_attribute attr = state->tupDesc->attrs[i];
                 ScalarValue val = vecBatch->m_arr[i].m_vals[cursor];
                 Datum v = ScalarVector::Decode(val);
-                multiColumn.m_values[i] = datumCopy(v, attr->attbyval, VARSIZE_ANY(v));
+                int typlen = 0;
+                if (vecBatch->m_arr[i].m_desc.typeId == NAMEOID) {
+                    typlen = datumGetSize(v, false, -2);
+                } else {
+                    typlen = VARSIZE_ANY(v);
+                }
+                multiColumn.m_values[i] = datumCopy(v, attr->attbyval, typlen);
                 char* p = DatumGetPointer(multiColumn.m_values[i]);
                 state->UseMem(GetMemoryChunkSpace(p));
             } else {

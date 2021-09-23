@@ -1,19 +1,12 @@
-/*
- * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
- *
- * openGauss is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *
- *          http://license.coscl.org.cn/MulanPSL2
- *
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details.
- * ---------------------------------------------------------------------------------------
+
+/* ---------------------------------------------------------------------------------------
  *
  * walwriterauxiliary.cpp
+ *
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1994, Regents of the University of California
+ *
  *
  * IDENTIFICATION
  *        src/backend/postmaster/walwriterauxiliary.cpp
@@ -41,7 +34,7 @@
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -99,7 +92,8 @@ void WalWriterAuxiliaryMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Writer Auxiliary", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Writer Auxiliary",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -206,7 +200,7 @@ void WalWriterAuxiliaryMain(void)
      * Loop forever
      */
     for (;;) {
-        long cur_timeout = u_sess->attr.attr_storage.WalWriterDelay;
+        long curTimeout = u_sess->attr.attr_storage.WalWriterDelay;
         int rc = 0;
 
         /* Clear any already-pending wakeups */
@@ -238,8 +232,7 @@ void WalWriterAuxiliaryMain(void)
             }
         }
 
-        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
-
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, curTimeout);
         if (rc & WL_POSTMASTER_DEATH) {
             gs_thread_exit(1);
         }

@@ -22,6 +22,7 @@
 #include "executor/instrument.h"
 #include "storage/buf/buf_internals.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/smgr/segment.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/resowner.h"
@@ -74,14 +75,17 @@ void LocalBufferWrite(BufferDesc *bufHdr)
 {
     SMgrRelation oreln;
     Page localpage = (char *)LocalBufHdrGetBlock(bufHdr);
+    char *bufToWrite = NULL;
 
     /* Find smgr relation for buffer */
     oreln = smgropen(bufHdr->tag.rnode, BackendIdForTempRelations);
+    /* data encrypt */
+    bufToWrite = PageDataEncryptForBuffer(localpage, bufHdr);
 
-    PageSetChecksumInplace(localpage, bufHdr->tag.blockNum);
+    PageSetChecksumInplace((Page)bufToWrite, bufHdr->tag.blockNum);
 
     /* And write... */
-    smgrwrite(oreln, bufHdr->tag.forkNum, bufHdr->tag.blockNum, localpage, false);
+    smgrwrite(oreln, bufHdr->tag.forkNum, bufHdr->tag.blockNum, bufToWrite, false);
 }
 
 void LocalBufferFlushForExtremRTO(BufferDesc *bufHdr)
@@ -269,6 +273,8 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
     buf_state += BUF_USAGECOUNT_ONE;
     pg_atomic_write_u32(&buf_desc->state, buf_state);
 
+    buf_desc->seg_fileno = EXTENT_INVALID;
+
     *foundPtr = FALSE;
     return buf_desc;
 }
@@ -324,7 +330,7 @@ void DropRelFileNodeLocalBuffers(const RelFileNode &rnode, ForkNumber forkNum, B
 
         buf_state = pg_atomic_read_u32(&buf_desc->state);
 
-        if ((buf_state & BM_TAG_VALID) && BucketRelFileNodeEquals(rnode, buf_desc->tag.rnode) &&
+        if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(rnode, buf_desc->tag.rnode) &&
             buf_desc->tag.forkNum == forkNum && buf_desc->tag.blockNum >= firstDelBlock) {
             if (u_sess->storage_cxt.LocalRefCount[i] != 0) {
                 ereport(ERROR,
@@ -366,7 +372,7 @@ void DropRelFileNodeAllLocalBuffers(const RelFileNode &rnode)
 
         buf_state = pg_atomic_read_u32(&buf_desc->state);
 
-        if ((buf_state & BM_TAG_VALID) && BucketRelFileNodeEquals(rnode, buf_desc->tag.rnode)) {
+        if ((buf_state & BM_TAG_VALID) && RelFileNodeEquals(rnode, buf_desc->tag.rnode)) {
             if (u_sess->storage_cxt.LocalRefCount[i] != 0) {
                 if (buf_desc->tag.forkNum < 0) {
                     ereport(ERROR, (errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR),
@@ -540,4 +546,47 @@ void AtProcExit_LocalBuffers(void)
         }
     }
 #endif
+}
+
+/*
+ * ForgetLocalBuffer - drop a buffer from local buffers
+ *
+ * This is similar to bufmgr.c's ForgetBuffer, except that we do not need
+ * to do any locking since this is all local.  As with that function, this
+ * must be used very carefully, since we'll cheerfully throw away dirty
+ * buffers without any attempt to write them.
+ */
+void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
+{
+    SMgrRelation smgr = smgropen(rnode, t_thrd.proc_cxt.MyBackendId);
+    BufferTag   tag;            /* identity of target block */
+    LocalBufferLookupEnt *hresult;
+    BufferDesc *bufHdr;
+    uint32      bufState;
+
+    /*
+     * If somehow this is the first request in the session, there's nothing to
+     * do.  (This probably shouldn't happen, though.)
+     */
+    if (t_thrd.storage_cxt.LocalBufHash == NULL) {
+        return;
+    }
+
+    /* create a tag so we can lookup the buffer */
+    INIT_BUFFERTAG(tag, smgr->smgr_rnode.node, forkNum, blockNum);
+
+    /* see if the block is in the local buffer pool */
+    hresult = (LocalBufferLookupEnt *)
+        hash_search(t_thrd.storage_cxt.LocalBufHash, (void *) &tag, HASH_REMOVE, NULL);
+
+    /* didn't find it, so nothing to do */
+    if (!hresult) {
+        return;
+    }
+
+    /* mark buffer invalid */
+    bufHdr = GetLocalBufferDescriptor(hresult->id);
+    CLEAR_BUFFERTAG(bufHdr->tag);
+    bufState = pg_atomic_read_u32(&bufHdr->state);
+    bufState &= ~(BM_VALID | BM_TAG_VALID | BM_DIRTY);
 }

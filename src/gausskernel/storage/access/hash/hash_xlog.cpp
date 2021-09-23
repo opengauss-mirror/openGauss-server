@@ -660,7 +660,7 @@ static TransactionId hash_xlog_vacuum_get_latestRemovedXid(XLogReaderState *reco
      * overkill, but it's safe, and certainly better than panicking here.
      */
     XLogRecGetBlockTag(record, 0, &rnode, NULL, &blkno);
-    ibuffer = XLogReadBufferExtended(rnode, MAIN_FORKNUM, blkno, RBM_NORMAL);
+    ibuffer = XLogReadBufferExtended(rnode, MAIN_FORKNUM, blkno, RBM_NORMAL, NULL);
 
     if (!BufferIsValid(ibuffer))
         return InvalidTransactionId;
@@ -684,7 +684,7 @@ static TransactionId hash_xlog_vacuum_get_latestRemovedXid(XLogReaderState *reco
          * Locate the heap page that the index tuple points at
          */
         hblkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-        hbuffer = XLogReadBufferExtended(xlrec->hnode, MAIN_FORKNUM, hblkno, RBM_NORMAL);
+        hbuffer = XLogReadBufferExtended(xlrec->hnode, MAIN_FORKNUM, hblkno, RBM_NORMAL, NULL);
 
         if (!BufferIsValid(hbuffer)) {
             UnlockReleaseBuffer(ibuffer);

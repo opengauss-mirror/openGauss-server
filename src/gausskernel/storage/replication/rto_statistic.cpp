@@ -74,6 +74,53 @@ Datum rto_get_standby_info()
     return value;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+RTOStandbyData *GetDCFRTOStat(uint32 *num)
+{
+    RTOStandbyData *result =
+        (RTOStandbyData *)palloc((int64)(DCF_MAX_NODE_NUM) * sizeof(RTOStandbyData));
+    int i;
+    int rc;
+    int readDCFNode = 0;
+
+    for (i = 0; i < DCF_MAX_NODE_NUM; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile DCFStandbyInfo *nodeinfo = &t_thrd.dcf_cxt.dcfCtxInfo->nodes_info[i];
+        if (nodeinfo->isMember) {
+            char *standby_names = (char *)(result[readDCFNode].id);
+            rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.dcf_rto_standby_data[i].id,
+                           strlen(g_instance.rto_cxt.dcf_rto_standby_data[i].id));
+            securec_check(rc, "\0", "\0");
+            ereport(LOG, (errmsg("Step into GetDCFRTOStat and id is %s.",
+                g_instance.rto_cxt.dcf_rto_standby_data[i].id)));
+            char *local_ip = (char *)(result[readDCFNode].source_ip);
+            rc = strncpy_s(local_ip, IP_LEN, (char *)g_instance.rto_cxt.dcf_rto_standby_data[i].source_ip,
+                           strlen((char *)g_instance.rto_cxt.dcf_rto_standby_data[i].source_ip));
+            securec_check(rc, "\0", "\0");
+
+            char *remote_ip = (char *)(result[readDCFNode].dest_ip);
+            rc = strncpy_s(remote_ip, IP_LEN, (char *)g_instance.rto_cxt.dcf_rto_standby_data[i].dest_ip,
+                           strlen((char *)g_instance.rto_cxt.dcf_rto_standby_data[i].dest_ip));
+            securec_check(rc, "\0", "\0");
+
+            result[readDCFNode].source_port = g_instance.rto_cxt.dcf_rto_standby_data[i].source_port;
+            result[readDCFNode].dest_port = g_instance.rto_cxt.dcf_rto_standby_data[i].dest_port;
+            result[readDCFNode].current_rto = g_instance.rto_cxt.dcf_rto_standby_data[i].current_rto;
+
+            if (u_sess->attr.attr_storage.target_rto == 0) {
+                result[readDCFNode].current_sleep_time = 0;
+            } else {
+                result[readDCFNode].current_sleep_time = g_instance.rto_cxt.dcf_rto_standby_data[i].current_sleep_time;
+            }
+            result[readDCFNode].target_rto = u_sess->attr.attr_storage.target_rto;
+            readDCFNode++;
+        }
+    }
+
+    *num = readDCFNode;
+    return result;
+}
+#endif
 RTOStandbyData *GetRTOStat(uint32 *num)
 {
     RTOStandbyData *result =

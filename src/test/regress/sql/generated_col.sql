@@ -266,7 +266,7 @@ INSERT INTO gtest23q VALUES (2, 5);  -- error
 
 DROP TABLE gtest23q;
 
--- domains
+-- domains (domain is not yet supported.)
 CREATE DOMAIN gtestdomain1 AS int CHECK (VALUE < 10);
 CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED);
 INSERT INTO gtest24 (a) VALUES (4);  -- ok
@@ -571,6 +571,14 @@ DROP TABLE t1;
 
 --cstore not support
 CREATE TABLE t2(height_cm int,height_in int GENERATED ALWAYS AS (height_cm * 2) STORED) WITH (ORIENTATION = COLUMN);
+
+--ustore engine test
+CREATE TABLE ustoretest (a int PRIMARY KEY, b int, c int GENERATED ALWAYS AS (a * 2) STORED) WITH (STORAGE_TYPE = USTORE, init_td=32);
+INSERT INTO ustoretest(a,b) values(2,3),(4,5);
+SELECT * FROM ustoretest;
+UPDATE ustoretest SET a=7 WHERE a=2;
+SELECT * FROM ustoretest;
+DROP TABLE ustoretest;
 
 DROP TABLE gtest0;
 DROP TABLE gtest1;

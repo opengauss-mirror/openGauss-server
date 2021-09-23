@@ -454,6 +454,8 @@ RangeVar* makeRangeVar(char* schemaname, char* relname, int location)
     r->isbucket = false;
     r->buckets = NIL;
     r->length = 0;
+    r->withVerExpr = false;
+
     return r;
 }
 
@@ -512,6 +514,7 @@ FuncExpr* makeFuncExpr(Oid funcid, Oid rettype, List* args, Oid funccollid, Oid 
     funcexpr = makeNode(FuncExpr);
     funcexpr->funcid = funcid;
     funcexpr->funcresulttype = rettype;
+    funcexpr->funcresulttype_orig = -1;
     funcexpr->funcretset = false; /* only allowed case here */
     funcexpr->funcformat = fformat;
     funcexpr->funccollid = funccollid;
@@ -537,9 +540,28 @@ DefElem* makeDefElem(char* name, Node* arg)
     res->defname = name;
     res->arg = arg;
     res->defaction = DEFELEM_UNSPEC;
+    res->begin_location = -1;
+    res->end_location = -1;
 
     return res;
 }
+
+/*
+ * makeDefElem -
+ *	build a DefElem node
+ *
+ * similar to makeDefElem, add begin_location and end_location params
+ */
+DefElem* MakeDefElemWithLoc(char* name, Node* arg, int begin_loc, int end_loc)
+{
+    DefElem* res = makeDefElem(name, arg);
+
+    res->begin_location = begin_loc;
+    res->end_location = end_loc;
+    
+    return res;    
+}
+
 
 /*
  * makeDefElemExtended -
@@ -553,6 +575,8 @@ DefElem* makeDefElemExtended(char* nameSpace, char* name, Node* arg, DefElemActi
     res->defname = name;
     res->arg = arg;
     res->defaction = defaction;
+    res->begin_location = -1;
+    res->end_location = -1;
 
     return res;
 }
@@ -664,6 +688,7 @@ IndexInfo* makeIndexInfo(int numattrs, List* expressions, List* predicates, bool
     /* initialize index-build state to default */
     n->ii_BrokenHotChain = false;
     n->ii_PgClassAttrId = 0;
+    n->ii_ParallelWorkers = 0;
 
     return n;
 }

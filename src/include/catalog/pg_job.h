@@ -150,8 +150,10 @@ extern void update_run_job_to_fail();
 extern void remove_job_by_oid(const char *objname, Delete_Pgjob_Oid oidFlag, bool local, Oid job_id = InvalidOid);
 extern void execute_job(int4 job_id);
 extern void	get_job_values(int4 job_id, HeapTuple tup, Relation relation, Datum *values, bool *visnull);
+extern void RemoveJobById(Oid objectId);
 extern void check_job_permission(HeapTuple tuple, bool check_running = true);
 extern int jobid_alloc(uint16* pusJobId);
+extern void update_pg_job_dbname(Oid jobid, const char* dbname);
 #define JOBID_MAX_NUMBER  ((uint16)(32767))
 
 #define JOBID_ALLOC_OK         0                /* alloc jobid ok */

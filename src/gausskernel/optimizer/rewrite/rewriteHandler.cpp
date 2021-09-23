@@ -381,7 +381,8 @@ static Query* rewriteRuleAction(
 
             switch (rte->rtekind) {
                 case RTE_RELATION:
-                    sub_action->hasSubLinks = checkExprHasSubLink((Node*)rte->tablesample);
+                    sub_action->hasSubLinks = checkExprHasSubLink((Node*)rte->tablesample)
+                        || checkExprHasSubLink((Node*)rte->timecapsule);
                     break;
                 case RTE_FUNCTION:
                     sub_action->hasSubLinks = checkExprHasSubLink(rte->funcexpr);
@@ -740,9 +741,12 @@ static List* rewriteTargetListIU(List* targetList, CmdType commandType, Relation
              * we've got to explicitly set the column to NULL.
              */
             if (new_expr == NULL) {
-                if (commandType == CMD_INSERT)
+                if (commandType == CMD_INSERT) {
                     new_tle = NULL;
-                else {
+                    ereport(DEBUG2, (errmodule(MOD_PARSER), errcode(ERRCODE_LOG),
+                        errmsg("default column \"%s\" is effectively NULL, and hence omitted.",
+                            NameStr(att_tup->attname))));
+                } else {
                     new_expr = (Node*)makeConst(att_tup->atttypid,
                         -1,
                         att_tup->attcollation,
@@ -1198,7 +1202,7 @@ static void rewriteTargetListUD(Query* parsetree, RangeTblEntry* target_rte, Rel
     ListCell* elt = NULL;
 
     /*
-     * In Postgres-XC, we need to evaluate quals of the parse tree and determine
+     * In openGauss, we need to evaluate quals of the parse tree and determine
      * if they are Coordinator quals. If they are, their attribute need to be
      * added to target list for evaluation. In case some are found, add them as
      * junks in the target list. The junk status will be used by remote UPDATE
@@ -2089,6 +2093,8 @@ static List* rewriteTargetListMergeInto(
                          (new_tle && new_tle->expr && IsA(new_tle->expr, SetToDefault)));
         
         bool isGeneratedCol = ISGENERATEDCOL(target_relation->rd_att, attrno - 1);
+
+
         if (isGeneratedCol) {
             if (!apply_default) {
                 CheckGeneratedColConstraint(commandType, att_tup, new_tle);
@@ -2988,9 +2994,7 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     appendStringInfo(cquery, "INSERT ");
 
     HintState *hintState = ((Query*)stmt->query)->hintState;
-    if (hintState != NULL && hintState->multi_node_hint) {
-        appendStringInfo(cquery, " /*+ multinode */ ");
-    }
+    get_hint_string(hintState, cquery);
 
     if (relation->schemaname)
         appendStringInfo(

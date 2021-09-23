@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * palloc.h
- *	  POSTGRES memory allocator definitions.
+ *	  openGauss memory allocator definitions.
  *
  * This file contains the basic memory allocation interface that is
  * needed by almost every backend module.  It is included directly by
@@ -28,6 +28,8 @@
 #ifndef PALLOC_H
 #define PALLOC_H
 #ifndef FRONTEND_PARSER
+#include "postgres.h"
+#include "c.h"
 
 /*
  * Type MemoryContextData is declared in nodes/memnodes.h.	Most users

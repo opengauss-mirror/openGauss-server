@@ -23,6 +23,7 @@
 #include "access/xlogproc.h"
 
 #include "storage/procarray.h"
+#include "storage/smgr/relfilenode.h"
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
 #include "access/multi_redo_api.h"
@@ -52,12 +53,16 @@ typedef struct bt_incomplete_action {
     bool is_root;         /* we split the root */
     BlockNumber leftblk;  /* left half of split */
     BlockNumber rightblk; /* right half of split */
+    XLogPhyBlock leftpblk; /* left physical block */
+    XLogPhyBlock rightpblk; /* right physical block */
     uint32 level;
     /* these fields are for a delete: */
     BlockNumber delblk; /* parent block to be deleted */
+    XLogPhyBlock delpblk; /* parent physical block */
 } bt_incomplete_action;
 
-static void log_incomplete_split(const RelFileNode *node, BlockNumber leftblk, BlockNumber rightblk, bool is_root)
+static void log_incomplete_split(const RelFileNode *node, BlockNumber leftblk, BlockNumber rightblk,
+    const XLogPhyBlock &leftpblk, const XLogPhyBlock &rightpblk, bool is_root)
 {
     MemoryContext oldCtx = NULL;
     if (get_real_recovery_parallelism() > 1 && (!parallel_recovery::DispatchPtrIsNull())) {
@@ -75,6 +80,8 @@ static void log_incomplete_split(const RelFileNode *node, BlockNumber leftblk, B
     action->is_root = is_root;
     action->leftblk = leftblk;
     action->rightblk = rightblk;
+    action->leftpblk = leftpblk;
+    action->rightpblk = rightpblk;
     t_thrd.xlog_cxt.incomplete_actions = lappend(t_thrd.xlog_cxt.incomplete_actions, action);
 
     if (get_real_recovery_parallelism() > 1 && (!parallel_recovery::DispatchPtrIsNull())) {
@@ -97,7 +104,7 @@ static void forget_matching_split(const RelFileNode *node, BlockNumber downlink,
     foreach (l, t_thrd.xlog_cxt.incomplete_actions) {
         bt_incomplete_action *action = (bt_incomplete_action *)lfirst(l);
 
-        if (BucketRelFileNodeEquals(*node, action->node) && action->is_split && downlink == action->rightblk) {
+        if (RelFileNodeEquals(*node, action->node) && action->is_split && downlink == action->rightblk) {
             if (log_min_messages <= DEBUG4) {
                 ereport(LOG,
                         (errmsg("[BTREE_ACTION_TRACE]forget_matching_split successfully: input spc:%u,db:%u,rel:%u,"
@@ -120,7 +127,7 @@ static void forget_matching_split(const RelFileNode *node, BlockNumber downlink,
     }
 }
 
-static void log_incomplete_deletion(const RelFileNode *node, BlockNumber delblk)
+static void log_incomplete_deletion(const RelFileNode *node, BlockNumber delblk, const XLogPhyBlock &delpblk)
 {
     MemoryContext oldCtx = NULL;
     if (get_real_recovery_parallelism() > 1 && (!parallel_recovery::DispatchPtrIsNull())) {
@@ -135,6 +142,7 @@ static void log_incomplete_deletion(const RelFileNode *node, BlockNumber delblk)
     action->node = *node;
     action->is_split = false;
     action->delblk = delblk;
+    action->delpblk = delpblk;
     t_thrd.xlog_cxt.incomplete_actions = lappend(t_thrd.xlog_cxt.incomplete_actions, action);
     if (get_real_recovery_parallelism() > 1 && (!parallel_recovery::DispatchPtrIsNull())) {
         (void)MemoryContextSwitchTo(oldCtx);
@@ -163,7 +171,7 @@ static void forget_matching_deletion(const RelFileNode *node, BlockNumber delblk
     foreach (l, t_thrd.xlog_cxt.incomplete_actions) {
         bt_incomplete_action *action = (bt_incomplete_action *)lfirst(l);
 
-        if (BucketRelFileNodeEquals(*node, action->node) && !action->is_split && delblk == action->delblk) {
+        if (RelFileNodeEquals(*node, action->node) && !action->is_split && delblk == action->delblk) {
             if (SHOW_DEBUG_MESSAGE()) {
                 ereport(LOG,
                         (errmsg("[BTREE_ACTION_TRACE]forget_matching_deletion successfully: input spc:%u,db:%u,rel:%u,"
@@ -355,12 +363,14 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
     Item left_hikey = NULL;
     Size left_hikeysz = 0;
     RelFileNode rnode;
+    XLogPhyBlock leftpblk;
+    XLogPhyBlock rightpblk;
     BlockNumber leftsib;
     BlockNumber rightsib;
     BlockNumber rnext;
 
-    XLogRecGetBlockTag(record, 0, &rnode, NULL, &leftsib);
-    XLogRecGetBlockTag(record, 1, NULL, NULL, &rightsib);
+    XLogRecGetBlockTag(record, 0, &rnode, NULL, &leftsib, &leftpblk);
+    XLogRecGetBlockTag(record, 1, NULL, NULL, &rightsib, &rightpblk);
     if (!XLogRecGetBlockTag(record, 2, NULL, NULL, &rnext)) {
         rnext = P_NONE;
     }
@@ -528,7 +538,7 @@ static void btree_xlog_split(bool onleft, bool isroot, XLogReaderState *record, 
         }
     }
 
-    log_incomplete_split(&rnode, leftsib, rightsib, isroot);
+    log_incomplete_split(&rnode, leftsib, rightsib, leftpblk, rightpblk, isroot);
 }
 
 static void btree_xlog_vacuum(XLogReaderState *record)
@@ -564,7 +574,7 @@ static void btree_xlog_vacuum(XLogReaderState *record)
 
         XLogRecGetBlockTag(record, BTREE_VACUUM_ORIG_BLOCK_NUM, &thisrnode, NULL, &thisblkno);
 
-        for (blkno = xlrec->lastBlockVacuumed + 1; blkno < thisblkno; blkno++) {
+        for (blkno = xlrec->lastBlockVacuumed + 1; blkno < thisblkno && !IsSegmentFileNode(thisrnode); blkno++) {
             /*
              * We use RBM_NORMAL_NO_LOG mode because it's not an error
              * condition to see all-zero pages.  The original btvacuumpage
@@ -578,7 +588,7 @@ static void btree_xlog_vacuum(XLogReaderState *record)
              * buffer manager we could optimise this so that if the block is
              * not in shared_buffers we confirm it as unpinned.
              */
-            Buffer buffer = XLogReadBufferExtended(thisrnode, MAIN_FORKNUM, blkno, RBM_NORMAL_NO_LOG);
+            Buffer buffer = XLogReadBufferExtended(thisrnode, MAIN_FORKNUM, blkno, RBM_NORMAL_NO_LOG, NULL);
             if (BufferIsValid(buffer)) {
                 LockBufferForCleanup(buffer);
                 UnlockReleaseBuffer(buffer);
@@ -639,6 +649,7 @@ static void btree_xlog_delete_page(uint8 info, XLogReaderState *record)
     BlockNumber target;
     BlockNumber leftsib;
     BlockNumber rightsib;
+    XLogPhyBlock pblk;
     RedoBufferInfo buffer;
     Page page;
     BTPageOpaqueInternal pageop;
@@ -647,7 +658,7 @@ static void btree_xlog_delete_page(uint8 info, XLogReaderState *record)
     rightsib = xlrec->rightblk;
 
     XLogRecGetBlockTag(record, 0, &rnode, NULL, &target);
-    XLogRecGetBlockTag(record, 3, NULL, NULL, &parent);
+    XLogRecGetBlockTag(record, 3, NULL, NULL, &parent, &pblk);
 
     /*
      * In normal operation, we would lock all the pages this WAL record
@@ -744,7 +755,7 @@ static void btree_xlog_delete_page(uint8 info, XLogReaderState *record)
 
     /* If parent became half-dead, remember it for deletion */
     if (info == XLOG_BTREE_MARK_PAGE_HALFDEAD) {
-        log_incomplete_deletion(&rnode, parent);
+        log_incomplete_deletion(&rnode, parent, pblk);
     }
 }
 
@@ -965,7 +976,8 @@ static void btree_xlog_reuse_page(XLogReaderState *record)
     RelFileNodeCopy(tmp_node, xlrec->node, XLogRecGetBucketId(record));
 
     if (InHotStandby && g_supportHotStandby) {
-        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node);
+        XLogRecPtr lsn = record->EndRecPtr;
+        ResolveRecoveryConflictWithSnapshot(xlrec->latestRemovedXid, tmp_node, lsn);
     }
 }
 
@@ -1042,7 +1054,7 @@ void btree_xlog_finish_incomplete_split(bt_incomplete_action *action)
     bool is_only = false;
     Relation reln;
 
-    lbuf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->leftblk, RBM_NORMAL);
+    lbuf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->leftblk, RBM_NORMAL, &action->leftpblk);
     /* failure is impossible because we wrote this page earlier */
     if (BufferIsValid(lbuf))
         LockBuffer(lbuf, BUFFER_LOCK_EXCLUSIVE);
@@ -1050,7 +1062,7 @@ void btree_xlog_finish_incomplete_split(bt_incomplete_action *action)
         ereport(PANIC, (errmsg("btree_xlog_cleanup: left block unfound")));
     lpage = (Page)BufferGetPage(lbuf);
     lpageop = (BTPageOpaqueInternal)PageGetSpecialPointer(lpage);
-    rbuf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->rightblk, RBM_NORMAL);
+    rbuf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->rightblk, RBM_NORMAL, &action->rightpblk);
     /* failure is impossible because we wrote this page earlier */
     if (BufferIsValid(rbuf))
         LockBuffer(rbuf, BUFFER_LOCK_EXCLUSIVE);
@@ -1071,7 +1083,7 @@ void btree_xlog_finish_incomplete_split(bt_incomplete_action *action)
 void btree_xlog_finish_incomplete_deletion(const bt_incomplete_action *action)
 {
     Buffer buf;
-    buf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->delblk, RBM_NORMAL);
+    buf = XLogReadBufferExtended(action->node, MAIN_FORKNUM, action->delblk, RBM_NORMAL, &action->delpblk);
     if (BufferIsValid(buf)) {
         Relation reln;
 
@@ -1115,7 +1127,7 @@ void btree_xlog_cleanup(void)
                                  action->is_root, action->leftblk, action->rightblk, action->level, action->delblk,
                                  t_thrd.xlog_cxt.forceFinishHappened,
                                  g_instance.attr.attr_storage.enable_update_max_page_flush_lsn)));
-        if (force_finish_enabled()) {
+        if (FORCE_FINISH_ENABLED) {
             continue;
         }
         if (action->is_split && action->is_root) {
@@ -1137,7 +1149,7 @@ void btree_xlog_cleanup(void)
                                  action->is_root, action->leftblk, action->rightblk, action->level, action->delblk,
                                  t_thrd.xlog_cxt.forceFinishHappened,
                                  g_instance.attr.attr_storage.enable_update_max_page_flush_lsn)));
-        if (force_finish_enabled()) {
+        if (FORCE_FINISH_ENABLED) {
             continue;
         }
 

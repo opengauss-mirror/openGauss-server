@@ -94,6 +94,49 @@ int comp_location(const void* a, const void* b);
 void generate_jstate(pgssJumbleState* jstate, Query* query);
 }  // namespace UniqueSql
 
+typedef struct BuiltinUniqueSQL {
+    NodeTag     type;
+    const char  *unique_sql;
+    uint32      unique_sql_id;
+    uint32      unique_sql_len;
+} BuiltinUniqueSQL;
+
+/* For sqls in BuiltinUniqueSQLArray, use pre-defined unique sql id/string */
+static BuiltinUniqueSQL BuiltinUniqueSQLArray[] = {
+    {T_BarrierStmt, "CREATE BARRIER", 0, 0},
+    {T_DeallocateStmt, "DEALLOCATE", 0, 0}
+};
+
+void init_builtin_unique_sql()
+{
+    for (uint32 i = 0; i < (sizeof(BuiltinUniqueSQLArray) / sizeof(BuiltinUniqueSQLArray[0])); i++) {
+        if (BuiltinUniqueSQLArray[i].unique_sql != NULL) {
+            BuiltinUniqueSQLArray[i].unique_sql_len = strlen(BuiltinUniqueSQLArray[i].unique_sql);
+            BuiltinUniqueSQLArray[i].unique_sql_id = UniqueSql::pgss_hash_string(BuiltinUniqueSQLArray[i].unique_sql); 
+            if (BuiltinUniqueSQLArray[i].unique_sql_id == 0) {
+                BuiltinUniqueSQLArray[i].unique_sql_id = 1;
+            }
+        }
+    }
+}
+
+static const BuiltinUniqueSQL *find_builtin_unqiue_sql(const Query *query)
+{
+    if (query == NULL || query->utilityStmt == NULL) {
+        return NULL;
+    }
+    for (uint32 i = 0; i < (sizeof(BuiltinUniqueSQLArray) / sizeof(BuiltinUniqueSQLArray[0])); i++) {
+        if (BuiltinUniqueSQLArray[i].type == nodeTag(query->utilityStmt)) {
+            if (BuiltinUniqueSQLArray[i].unique_sql != NULL) {
+                return (BuiltinUniqueSQLArray + i);
+            } else {
+                return NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
 /*
  * create unique queryid
  * query         query tree
@@ -104,6 +147,13 @@ uint32 generate_unique_queryid(Query* query, const char* query_string)
 {
     pgssJumbleState jstate;
     uint32 queryid = 0;
+
+    const BuiltinUniqueSQL *builtin_unique_sql = find_builtin_unqiue_sql(query);
+    if (builtin_unique_sql != NULL) {
+        queryid = builtin_unique_sql->unique_sql_id;
+        return queryid;
+    }
+
     errno_t rc;
     rc = memset_s(&jstate, sizeof(jstate), 0, sizeof(jstate));
     securec_check(rc, "\0", "\0");
@@ -180,10 +230,13 @@ bool normalized_unique_querystring(Query* query, const char* query_string, char*
 
             pfree(norm_query);
         } else {
+            const BuiltinUniqueSQL *builtin_unique_sql = find_builtin_unqiue_sql(query);
+            if (builtin_unique_sql != NULL) {
+                query_string = builtin_unique_sql->unique_sql;
+                query_len = builtin_unique_sql->unique_sql_len;
+            }
             if (query_len > buf_len) {
-                query_len = pg_encoding_mbcliplen(encoding,
-                    query_string,
-                    query_len,
+                query_len = pg_encoding_mbcliplen(encoding, query_string, query_len,
                     g_instance.attr.attr_common.pgstat_track_activity_query_size - 1);
             }
 
@@ -333,6 +386,8 @@ void UniqueSql::JumbleRangeTable(pgssJumbleState* jstate, List* rtable)
                  */
                 APP_JUMB_STRING(rte->ctename);
                 APP_JUMB(rte->ctelevelsup);
+                break;
+            case RTE_RESULT:
                 break;
             default:
                 elog(ERROR, "unrecognized RTE kind: %d", (int)rte->rtekind);

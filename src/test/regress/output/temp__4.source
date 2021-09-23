@@ -48,6 +48,7 @@ CREATE FUNCTION oldstyle_length(int4, text)
    RETURNS int4
    AS '@libdir@/regress@DLSUFFIX@'
    LANGUAGE C not fenced;
+ERROR:  function "oldstyle_length" already exists with same argument types
 CREATE FUNCTION equipment_named(hobby hobbies_r)
    RETURNS setof equipment_r
    AS 'select * from equipment_r where equipment_r.hobby = equipment_named.hobby.name'

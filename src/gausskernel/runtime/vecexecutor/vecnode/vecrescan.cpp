@@ -26,13 +26,12 @@
 #include "knl/knl_variable.h"
 #include "vecexecutor/vecexecutor.h"
 #include "executor/executor.h"
-#include "executor/nodeSubplan.h"
+#include "executor/node/nodeSubplan.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecpartiterator.h"
 #include "storage/cstore/cstore_compress.h"
 #include "access/cstore_am.h"
-#include "executor/nodeModifyTable.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeModifyTable.h"
 #include "vecexecutor/vecnoderowtovector.h"
 #include "vecexecutor/vecnestloop.h"
 #include "vecexecutor/vecmaterial.h"
@@ -220,9 +219,6 @@ void VecExecReScan(PlanState* node)
             break;
         case T_VecWindowAggState:
             ExecReScanVecWindowAgg((VecWindowAggState*)node);
-            break;
-        case T_SeqScanState:
-            ExecReScanBatchSeqScan((SeqScanState*)node);
             break;
         default:
             ereport(ERROR,

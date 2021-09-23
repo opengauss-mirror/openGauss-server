@@ -1,0 +1,14 @@
+dcf_heartbeat_interval datanode
+dcf_audit_backup_file_count datanode
+dcf_max_audit_file_size datanode
+enforce_two_phase_commit datanode
+expected_computing_nodegroup datanode
+default_storage_nodegroup datanode
+comm_control_port datanode
+comm_max_receiver datanode
+comm_quota_size datanode
+comm_sctp_port datanode
+comm_tcp_mode datanode
+comm_usable_memory datanode
+minimum_pool_size datanode
+pooler_maximum_idle_time datanode

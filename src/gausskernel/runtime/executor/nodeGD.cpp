@@ -24,7 +24,7 @@
 #include "postgres.h"
 
 #include "executor/executor.h"
-#include "executor/nodeGD.h"
+#include "executor/node/nodeGD.h"
 #include "db4ai/gd.h"
 
 //////////////////////////////////////////////////////////////////////////

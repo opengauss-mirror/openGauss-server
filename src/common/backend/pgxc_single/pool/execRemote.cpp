@@ -97,6 +97,7 @@
 #include "instruments/instr_unique_sql.h"
 #include "utils/elog.h"
 #include "utils/globalplancore.h"
+#include "executor/node/nodeModifyTable.h"
 
 #ifndef MIN
 #define MIN(A, B) (((B) < (A)) ? (B) : (A))
@@ -2240,6 +2241,7 @@ int pgxc_node_begin(int conn_count, PGXCNodeHandle** connections, GlobalTransact
                     generate_begin_command(),
                     false,
                     false,
+                    false,
                     g_instance.attr.attr_storage.enable_gtm_free)) {
                 pgstat_report_waitstatus_phase(oldPhase);
                 return EOF;
@@ -2813,15 +2815,6 @@ void pgxc_node_remote_commit(bool barrierLockHeld)
                 ereport(ERROR,
                     (errcode(ERRCODE_CONNECTION_EXCEPTION),
                         errmsg("failed to send %s command to node %u", command, connections[i]->nodeoid)));
-
-                const int dest_max = 256;
-                rc = sprintf_s(errMsg,
-                    dest_max,
-                    "failed to send COMMIT "
-                    "command to node %s",
-                    connections[i]->remoteNodeName);
-                securec_check_ss(rc, "\0", "\0");
-                add_error_message(connections[i], "%s", errMsg);
             }
         } else {
             u_sess->pgxc_cxt.remoteXactState->remoteNodeStatus[i] = RXACT_NODE_COMMIT_SENT;
@@ -4312,7 +4305,7 @@ bool pgxc_start_command_on_connection(
                 return false;
         }
     } else {
-        if (pgxc_node_send_query(connection, step->sql_statement, false, trigger_ship) != 0)
+        if (pgxc_node_send_query(connection, step->sql_statement, false, false, trigger_ship) != 0)
             return false;
     }
     return true;
@@ -4860,7 +4853,7 @@ static bool internal_do_query_for_planrouter(RemoteQueryState* node, bool vector
     int regular_conn_count = 0;
 
     /*
-     * A Postgres-XC node cannot run transactions while in recovery as
+     * A openGauss node cannot run transactions while in recovery as
      * this operation needs transaction IDs. This is more a safety guard than anything else.
      */
     if (RecoveryInProgress())
@@ -5028,7 +5021,7 @@ void do_query(RemoteQueryState* node, bool vectorized)
     PGXCNodeAllHandles* pgxc_connections = NULL;
 
     /*
-     * A Postgres-XC node cannot run transactions while in recovery as
+     * A openGauss node cannot run transactions while in recovery as
      * this operation needs transaction IDs. This is more a safety guard than anything else.
      */
     if (RecoveryInProgress())
@@ -6164,7 +6157,8 @@ static void ExecRemoteFunctionInParallel(
 
     if (exec_on_datanode(exec_remote_type)) {
         /* send execute info to datanodes */
-        if (pgxc_node_begin(dn_conn_count, dn_connections, gxid, false, state->read_only, PGXC_NODE_DATANODE)) {
+        /* The query_id parameter is added to facilitate DFX fault locating. */
+        if (pgxc_node_begin(dn_conn_count, dn_connections, gxid, false, state->read_only, PGXC_NODE_DATANODE, true)) {
             ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("Could not begin transaction on Datanodes")));
         }
 
@@ -7212,7 +7206,7 @@ void AtEOXact_Remote(void)
      * create t1;  |   WARNING: Clean connections not completed
      * analyze;    |
      *
-     * analyze create a postgres on cn2, the postgres do NOT give conn back
+     * analyze create a openGauss on cn2, the openGauss do NOT give conn back
      * to pooler, so code here do this.
      */
     if (IS_PGXC_COORDINATOR && IsConnFromCoord())
@@ -7390,9 +7384,17 @@ bool PreAbort_Remote(bool PerfectRollback)
     return has_error;
 }
 
+/* Indicates the version containing the backend_version parameter,
+ * This parameter is used to determine whether the handle is used to update catalog.
+ * For a version that does not contain the backend_version parameter,
+ * check whether the version is a handle in the upgrade process.. */
 bool isInLargeUpgrade()
 {
-    return (t_thrd.proc->workingVersionNum != GRAND_VERSION_NUM || u_sess->attr.attr_common.IsInplaceUpgrade);
+    if (contain_backend_version(t_thrd.proc->workingVersionNum)) {
+        return u_sess->attr.attr_common.IsInplaceUpgrade;
+    } else {
+        return (t_thrd.proc->workingVersionNum != GRAND_VERSION_NUM || u_sess->attr.attr_common.IsInplaceUpgrade);
+    }
 }
 
 char* PrePrepare_Remote(const char* prepareGID, bool implicit, bool WriteCnLocalNode)
@@ -7816,15 +7818,20 @@ void pgxc_all_success_nodes(ExecNodes** d_nodes, ExecNodes** c_nodes, char** fai
  */
 void set_dbcleanup_callback(xact_callback function, const void* paraminfo, int paraminfo_size)
 {
+    AutoContextSwitch dbcleanupCxt(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+    
     void* fparams = NULL;
     errno_t rc = EOK;
 
-    fparams = MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), paraminfo_size);
+    abort_callback_type* dbcleanupInfo = (abort_callback_type*)palloc(sizeof(abort_callback_type));
+    fparams = palloc(paraminfo_size);
     rc = memcpy_s(fparams, paraminfo_size, paraminfo, paraminfo_size);
     securec_check(rc, "", "");
 
-    u_sess->xact_cxt.dbcleanup_info->function = function;
-    u_sess->xact_cxt.dbcleanup_info->fparams = fparams;
+    dbcleanupInfo->fparams = fparams;
+    dbcleanupInfo->function = function;
+
+    u_sess->xact_cxt.dbcleanupInfoList = lappend(u_sess->xact_cxt.dbcleanupInfoList, dbcleanupInfo);
 }
 
 /*
@@ -7833,18 +7840,28 @@ void set_dbcleanup_callback(xact_callback function, const void* paraminfo, int p
  */
 void AtEOXact_DBCleanup(bool isCommit)
 {
-    if (u_sess->xact_cxt.dbcleanup_info->function)
-        (*u_sess->xact_cxt.dbcleanup_info->function)(isCommit, u_sess->xact_cxt.dbcleanup_info->fparams);
+    bool doFunc = isCommit || t_thrd.xact_cxt.XactLocalNodeCanAbort;
+    ListCell *lc = NULL;
+    if (u_sess->xact_cxt.dbcleanupInfoList && doFunc) {
+        foreach (lc, u_sess->xact_cxt.dbcleanupInfoList) {
+            abort_callback_type *dbcleanupInfo = (abort_callback_type*)lfirst(lc);
+            if (dbcleanupInfo->function) {
+                (*dbcleanupInfo->function)(isCommit, dbcleanupInfo->fparams);
+            }
+        }
+    }
 
     /*
      * Just reset the callbackinfo. We anyway don't want this to be called again,
      * until explicitly set.
      */
-    u_sess->xact_cxt.dbcleanup_info->function = NULL;
-    if (u_sess->xact_cxt.dbcleanup_info->fparams != NULL) {
-        pfree_ext(u_sess->xact_cxt.dbcleanup_info->fparams);
-        u_sess->xact_cxt.dbcleanup_info->fparams = NULL;
+    foreach (lc, u_sess->xact_cxt.dbcleanupInfoList) {
+        abort_callback_type *dbcleanupInfo = (abort_callback_type*)lfirst(lc);
+        pfree_ext(dbcleanupInfo->fparams);
+        dbcleanupInfo->function = NULL;
     }
+    list_free_deep(u_sess->xact_cxt.dbcleanupInfoList);
+    u_sess->xact_cxt.dbcleanupInfoList = NIL;
 }
 
 /*
@@ -9587,7 +9604,8 @@ static void ReceiveHistogram(Oid relid, TupleTableSlot* slot, bool isReplication
      * Create a resource owner to keep track of resources
      * in order to release resources when catch the exception.
      */
-    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats", MEMORY_CONTEXT_OPTIMIZER);
+    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     oldOwner1 = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = asOwner;
 
@@ -9764,7 +9782,8 @@ static void ReceiveHistogramMultiColStats(Oid relid, TupleTableSlot* slot, bool 
      * Create a resource owner to keep track of resources
      * in order to release resources when catch the exception.
      */
-    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats", MEMORY_CONTEXT_OPTIMIZER);
+    asOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "update_stats",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     oldOwner1 = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = asOwner;
 
@@ -10396,7 +10415,8 @@ static void send_remote_node_query(int conn_num, PGXCNodeHandle** connections, c
         initStringInfo(&send_fail_node);
         /* Clean the previous errors, if any */
         connections[i]->error = NULL;
-        if (pgxc_node_send_query(connections[i], sql, false, false, g_instance.attr.attr_storage.enable_gtm_free)) {
+        if (pgxc_node_send_query(connections[i], sql, false, false, false,
+            g_instance.attr.attr_storage.enable_gtm_free)) {
             /* do something record send failed node_name */
             clean_success = false;
             appendStringInfo(&send_fail_node, "%s ", connections[i]->remoteNodeName);

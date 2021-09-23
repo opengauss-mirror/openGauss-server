@@ -1,5 +1,5 @@
 /*
- *	PostgreSQL type definitions for MAC addresses.
+ *	openGauss type definitions for MAC addresses.
  *
  *	src/backend/utils/adt/mac.c
  */

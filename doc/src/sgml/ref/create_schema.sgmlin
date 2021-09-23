@@ -11,8 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 CREATE SCHEMA schema_name
-    [ AUTHORIZATION user_name ] [ schema_element [ ... ] ];
-CREATE SCHEMA AUTHORIZATION user_name [ schema_element [ ... ] ];
+    [ AUTHORIZATION user_name ] [WITH BLOCKCHAIN] [ schema_element [ ... ] ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

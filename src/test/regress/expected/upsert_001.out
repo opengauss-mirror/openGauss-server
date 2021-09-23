@@ -8,7 +8,7 @@ Command:     INSERT
 Description: create new rows in a table
 Syntax:
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-INSERT INTO table_name [ ( column_name [, ...] ) ]
+INSERT [/*+ plan_hint */] INTO table_name [ ( column_name [, ...] ) ]
     { DEFAULT VALUES | VALUES {( { expression | DEFAULT } [, ...] ) }[, ...] | query }
     [ ON DUPLICATE KEY UPDATE { NOTHING | { column_name = { expression | DEFAULT } } [, ...] } ]
     [ RETURNING {* | {output_expression [ [ AS ] output_name ] }[, ...]} ];
@@ -22,12 +22,14 @@ GRANT ALL PRIVILEGES ON SCHEMA test_upsert_001 TO upsert_tester;
 SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
 INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
 ERROR:  permission denied for relation t00
+DETAIL:  N/A
 RESET SESSION AUTHORIZATION;
 ---- error: only have INSERT permission
 GRANT INSERT ON test_upsert_001.t00 TO upsert_tester;
 SET SESSION SESSION AUTHORIZATION upsert_tester PASSWORD '123456@cc';
 INSERT INTO test_upsert_001.t00 VALUES(1) ON DUPLICATE KEY UPDATE col2 = 5;
 ERROR:  permission denied for relation t00
+DETAIL:  N/A
 RESET SESSION AUTHORIZATION;
 ---- success: have INSERT UPDATE permission
 GRANT INSERT, UPDATE ON test_upsert_001.t00 TO upsert_tester;

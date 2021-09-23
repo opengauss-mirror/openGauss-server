@@ -1989,7 +1989,7 @@ GRANT SELECT ON TABLE pg_catalog.gs_column_keys_args TO PUBLIC;
 
 --define new catalog type and function
 DROP TYPE IF EXISTS pg_catalog.byteawithoutorderwithequalcol;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 4402, 0, b;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 4402, 4404, b;
 CREATE TYPE pg_catalog.byteawithoutorderwithequalcol;
 
 DROP FUNCTION IF EXISTS pg_catalog.byteawithoutorderwithequalcolin(cstring) cascade;
@@ -2022,7 +2022,7 @@ COMMENT ON TYPE pg_catalog.byteawithoutorderwithequalcol IS 'encrypted data vari
 COMMENT ON TYPE pg_catalog._byteawithoutorderwithequalcol IS 'encrypted data variable-length string, binary values escaped';
 
 DROP TYPE IF EXISTS pg_catalog.byteawithoutordercol;
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 4403, 0, b;
+SET LOCAL inplace_upgrade_next_system_object_oids = IUO_TYPE, 4403, 4405, b;
 CREATE TYPE pg_catalog.byteawithoutordercol;
 
 DROP FUNCTION IF EXISTS pg_catalog.byteawithoutordercolin(cstring) cascade;
@@ -2393,21 +2393,3 @@ out catalog_version_no pg_catalog.int4,
 out system_identifier pg_catalog.int8,
 out pg_control_last_modified pg_catalog.timestamptz)
 RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_control_system';
-
-DROP FUNCTION IF EXISTS pg_catalog.pg_start_backup(IN backupid TEXT, IN fast BOOL, IN exclusive BOOL) CASCADE;
-DROP FUNCTION IF EXISTS pg_catalog.pg_stop_backup(IN exclusive BOOL) CASCADE;
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6203;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_start_backup
-(IN backupid pg_catalog.text,
-IN fast pg_catalog.bool,
-IN exclusive pg_catalog.bool)
-RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_start_backup_v2';
-
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_PROC, 6204;
-CREATE OR REPLACE FUNCTION pg_catalog.pg_stop_backup
-(IN exclusive pg_catalog.bool,
-out lsn pg_catalog.text,
-out labelfile pg_catalog.text,
-out spcmapfile pg_catalog.text)
-RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_stop_backup_v2';

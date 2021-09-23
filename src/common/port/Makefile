@@ -126,7 +126,7 @@ libport_srv.so: $(OBJS_SRV)
 	$(CC) -fPIC -shared $(CFLAGS) $(LDFLAGS) $(LDFLAGS_EX) -o $@ $^
 
 port: libport.so libport_srv.so
-	mv *.so $(top_builddir)/src/distribute/test/ut/lib
+	mv *.so $(top_builddir)/../distribute/test/ut/lib
 	
 # Because this uses its own compilation rule, it doesn't use the
 # dependency tracking logic from Makefile.global.  To make sure that

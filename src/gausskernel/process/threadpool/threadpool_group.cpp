@@ -72,6 +72,7 @@ ThreadPoolGroup::ThreadPoolGroup(int maxWorkerNum, int expectWorkerNum, int maxS
       m_sessionCount(0),
       m_waitServeSessionCount(0),
       m_processTaskCount(0),
+      m_hasHanged(0),
       m_groupId(groupId),
       m_numaId(numaId),
       m_groupCpuNum(cpuNum),
@@ -354,6 +355,17 @@ bool ThreadPoolGroup::IsGroupHang()
 
     bool ishang = m_listener->GetSessIshang(&m_current_time, &m_sessionId);
     return ishang;
+}
+
+void ThreadPoolGroup::SetGroupHanged(bool isHang)
+{
+    pg_atomic_exchange_u32((volatile uint32*)&m_hasHanged, (uint32)isHang);
+}
+
+bool ThreadPoolGroup::IsGroupHanged()
+{
+    pg_memory_barrier();
+    return m_hasHanged != 0;
 }
 
 void ThreadPoolGroup::AttachThreadToCPU(ThreadId thread, int cpu)

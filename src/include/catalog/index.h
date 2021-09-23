@@ -25,6 +25,7 @@
 #define CSTORE_BTREE_INDEX_TYPE "cbtree"
 #define DEFAULT_GIN_INDEX_TYPE "gin"
 #define CSTORE_GINBTREE_INDEX_TYPE "cgin"
+#define DEFAULT_USTORE_INDEX_TYPE "ubtree"
 
 /* Typedef for callback function for IndexBuildHeapScan */
 typedef void (*IndexBuildCallback)(Relation index, HeapTuple htup, Datum *values, const bool *isnull,
@@ -41,6 +42,18 @@ typedef enum
     INDEX_DROP_CLEAR_VALID,
     INDEX_DROP_SET_DEAD
 } IndexStateFlagsAction;
+
+typedef struct IndexBucketShared {
+    Oid heaprelid;
+    Oid indexrelid;
+    Oid heappartid;
+    Oid indexpartid;
+    slock_t mutex;
+    IndexInfo  indexInfo;
+    pg_atomic_uint32 curiter;
+    int nparticipants;
+    IndexBuildResult indresult;
+} IndexBucketShared;
 
 /* */
 #define	REINDEX_BTREE_INDEX (1<<1)
@@ -87,6 +100,7 @@ typedef struct
     Oid  existingPSortOid;
     bool isPartitionedIndex;
     bool isGlobalPartitionedIndex;
+    bool crossBucket;
 } IndexCreateExtraArgs;
 
 typedef enum {
@@ -108,7 +122,8 @@ extern Oid index_create(Relation heapRelation, const char *indexRelationName, Oi
                         Oid tableSpaceId, Oid *collationObjectId, Oid *classObjectId, int16 *coloptions,
                         Datum reloptions, bool isprimary, bool isconstraint, bool deferrable,
                         bool initdeferred, bool allow_system_table_mods, bool skip_build, bool concurrent,
-                        IndexCreateExtraArgs *extra);
+                        IndexCreateExtraArgs *extra, bool useLowLockLevel = false,
+                        int8 relindexsplit = 0);
 
 extern void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexInfo *indexInfo,
                                     const char *constraintName, char constraintType, bool deferrable,
@@ -136,12 +151,22 @@ extern void index_build(Relation heapRelation,
 			IndexInfo *indexInfo,
 			bool isprimary,
 			bool isreindex,
-			IndexCreatePartitionType partitionType);
+			IndexCreatePartitionType partitionType,
+			bool parallel = true);
 
 extern double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-                                 bool allow_sync, IndexBuildCallback callback, void *callback_state);
+    bool allow_sync, IndexBuildCallback callback, void *callback_state, TableScanDesc scan = NULL);
+extern double IndexBuildUHeapScan(Relation heapRelation,
+                         Relation indexRelation,
+                         IndexInfo *indexInfo,
+                         bool allowSync,
+                         IndexBuildCallback callback,
+                         void *callbackState,
+                         TableScanDesc scan /* set as NULL */);
 extern double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
                                  IndexBuildCallback callback, void* callbackState);
+extern double IndexBuildHeapScanCrossBucket(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
+                                            IndexBuildCallback callback, void *callbackState);
 extern double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
                                         VectorBatch *vecScanBatch, Snapshot snapshot,
                                         IndexBuildVecBatchScanCallback callback, void *callback_state, 
@@ -159,15 +184,18 @@ extern void reindex_indexpart_internal(Relation heapRelation,
                                        Oid indexPartId);
 extern void reindex_index(Oid indexId, Oid indexPartId,
                           bool skip_constraint_checks, AdaptMem *memInfo,
-                          bool dbWide);
+                          bool dbWide,
+                          void *baseDesc = NULL);
 extern void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo* indexInfo);
 
-/* Flag bits for reindex_relation(): */
+/* Flag bits for ReindexRelation(): */
 #define REINDEX_REL_PROCESS_TOAST		0x01
 #define REINDEX_REL_SUPPRESS_INDEX_USE	0x02
 #define REINDEX_REL_CHECK_CONSTRAINTS	0x04
 
-extern bool reindex_relation(Oid relid, int flags, int reindexType, AdaptMem* memInfo = NULL, bool dbWide = false,
+extern bool ReindexRelation(Oid relid, int flags, int reindexType,
+    void *baseDesc = NULL,
+    AdaptMem* memInfo = NULL, bool dbWide = false,
     IndexKind indexKind = ALL_KIND);
 extern bool ReindexIsProcessingHeap(Oid heapOid);
 extern bool ReindexIsProcessingIndex(Oid indexOid);
@@ -176,6 +204,7 @@ extern Oid IndexGetRelation(Oid indexId, bool missing_ok);
 typedef struct
 {
     Oid  existingPSortOid;
+    bool crossbucket;
 } PartIndexCreateExtraArgs;
 
 extern Oid partition_index_create(const char* partIndexName,
@@ -204,6 +233,16 @@ extern void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid,
 extern void reindex_partIndex(Relation heapRel,  Partition heapPart, Relation indexRel , Partition indexPart);
 extern bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType);
 extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
-extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset);
-extern void SetIndexCreateExtraArgs(IndexCreateExtraArgs* extra, Oid psortOid, bool isPartition, bool isGlobal);
+void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 
+    const List* indexDestOidList);
+extern void DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid);
+extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2 bktId);
+extern bool RecheckIndexTuple(IndexScanDesc scan, TupleTableSlot *slot);
+extern void SetIndexCreateExtraArgs(IndexCreateExtraArgs* extra, Oid psortOid, bool isPartition, bool isGlobal,
+    bool crossBucket = false);
+extern void cbi_set_enable_clean(Relation rel);
+void ScanBucketsInsertIndex(Relation rel, const List* idxRelList, const List* idxInfoList);
+extern void ScanPartitionInsertIndex(Relation partTableRel, Relation partRel, const List* indexRelList,
+                              const List* indexInfoList);
+void ScanHeapInsertCBI(Relation parentRel, Relation heapRel, Relation idxRel, Oid tmpPartOid);
 #endif   /* INDEX_H */

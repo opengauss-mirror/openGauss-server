@@ -41,7 +41,7 @@
  * Unlike plain atoi(), this will throw ereport() upon bad input format or
  * overflow.
  */
-bool fe_pg_atoi8(const char *s, int8 *res, char *err_msg)
+bool fe_pg_atoi8(const PGconn* conn, const char *s, int8 *res, char *err_msg)
 {
     long l;
     char *badp = NULL;
@@ -56,7 +56,7 @@ bool fe_pg_atoi8(const char *s, int8 *res, char *err_msg)
         return false;
     }
 
-    if ((*s == 0) && ICachedColumnManager::get_instance().get_sql_compatibility() == ORA_FORMAT) {
+    if ((*s == 0) && conn->client_logic->m_cached_column_manager->get_sql_compatibility() == ORA_FORMAT) {
         check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, " invalid input syntax for integer: %s\n", s));
         return false;
     }
@@ -66,7 +66,7 @@ bool fe_pg_atoi8(const char *s, int8 *res, char *err_msg)
 
     /* We made no progress parsing the string, so bail out */
     if (s == badp) {
-        if (ICachedColumnManager::get_instance().get_sql_compatibility() == ORA_FORMAT) {
+        if (conn->client_logic->m_cached_column_manager->get_sql_compatibility() == ORA_FORMAT) {
             check_sprintf_s(sprintf_s(err_msg, MAX_ERRMSG_LENGTH, " invalid input syntax for integer: %s\n", s));
             return false;
         }
@@ -105,7 +105,7 @@ bool fe_pg_atoi8(const char *s, int8 *res, char *err_msg)
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-bool fe_pg_strtoint16(const char *s, int16 *res, char *err_msg)
+bool fe_pg_strtoint16(const PGconn* conn, const char *s, int16 *res, char *err_msg)
 {
     const char *ptr = s;
     int16 tmp = 0;
@@ -124,10 +124,14 @@ bool fe_pg_strtoint16(const char *s, int16 *res, char *err_msg)
     } else if (*ptr == '+') {
         ptr++;
     }
+    /* skip  spaces after sign */
+    while (likely(*ptr) && isspace((unsigned char)*ptr)) {
+        ptr++;
+    }
 
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (ICachedColumnManager::get_instance().get_sql_compatibility() == ORA_FORMAT) {
+        if (conn->client_logic->m_cached_column_manager->get_sql_compatibility() == ORA_FORMAT) {
             goto invalid_syntax;
         }
     }
@@ -181,7 +185,7 @@ invalid_syntax : {
  * representation of the most negative number, which can't be represented as a
  * positive number.
  */
-bool fe_pg_strtoint32(const char *s, int32 *res, char *err_msg)
+bool fe_pg_strtoint32(const PGconn* conn, const char *s, int32 *res, char *err_msg)
 {
     const char *ptr = s;
     int32 tmp = 0;
@@ -200,10 +204,10 @@ bool fe_pg_strtoint32(const char *s, int32 *res, char *err_msg)
     } else if (*ptr == '+') {
         ptr++;
     }
-
+    
     /* require at least one digit */
     if (unlikely(!isdigit((unsigned char)*ptr))) {
-        if (ICachedColumnManager::get_instance().get_sql_compatibility() == ORA_FORMAT) {
+        if (conn->client_logic->m_cached_column_manager->get_sql_compatibility() == ORA_FORMAT) {
             goto invalid_syntax;
         }
     }

@@ -43,7 +43,8 @@ void CachedColumn::init(const ICachedColumn *source)
         printf("Invalid cached column source.\n");
         exit(EXIT_FAILURE);
     }
-    m_in_columns_list = true;
+    m_own_oid = 0;
+    m_in_columns_list = false;
     m_table_oid = source->get_table_oid();
     m_column_index = source->get_col_idx();
     m_data_type = source->get_data_type();
@@ -73,16 +74,17 @@ void CachedColumn::init(const ICachedColumn *source)
  * according to the atrributes building a CacheColumn
  * it's useful to get CacheColumn in CacheLoader
  */
-CachedColumn::CachedColumn(Oid table_oid, const char *database_name, const char *schema_name, const char *table_name,
-    const char *column_name, int column_position, Oid data_type_oid, int data_type_mod)
-    : m_column_hook_executors_list(new(std::nothrow) ColumnHookExecutorsList),
+CachedColumn::CachedColumn(Oid oid, Oid table_oid, const char* database_name, const char* schema_name,
+    const char* table_name, const char* column_name, int column_position, Oid data_type_oid, int data_type_mod)
+    : m_column_hook_executors_list(new (std::nothrow) ColumnHookExecutorsList),
+      m_own_oid(oid),
       m_table_oid(table_oid),
       m_column_index(column_position),
       m_data_type(0),
       m_data_type_original_oid(data_type_oid),
       m_data_type_original_mod(data_type_mod),
       m_col_full_name(new(std::nothrow) colFullName),
-      m_in_columns_list(true)
+      m_in_columns_list(false)
 {
     init();
     if (m_col_full_name != NULL) {
@@ -99,6 +101,7 @@ CachedColumn::CachedColumn(Oid table_oid, const char *database_name, const char 
  */
 CachedColumn::CachedColumn()
     : m_column_hook_executors_list(NULL),
+      m_own_oid(0),
       m_table_oid(0),
       m_column_index(0),
       m_data_type(0),
@@ -250,4 +253,16 @@ const bool CachedColumn::is_in_columns_list() const
 void CachedColumn::remove_from_columnslist()
 {
     m_in_columns_list = false;
+}
+void CachedColumn::set_flag_columnslist()
+{
+    m_in_columns_list = true;
+}
+Oid CachedColumn::get_oid() const
+{
+    return m_own_oid;
+}
+void CachedColumn::set_oid(Oid oid)
+{
+    m_own_oid = oid;
 }

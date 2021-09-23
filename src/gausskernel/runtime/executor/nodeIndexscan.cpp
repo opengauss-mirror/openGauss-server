@@ -29,9 +29,11 @@
 #include "access/relscan.h"
 #include "access/tableam.h"
 #include "catalog/pg_partition_fn.h"
-#include "executor/execdebug.h"
-#include "executor/nodeIndexscan.h"
+#include "commands/cluster.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeIndexscan.h"
 #include "optimizer/clauses.h"
+#include "storage/tcap.h"
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -61,6 +63,7 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     IndexScanDesc scandesc;
     HeapTuple tuple;
     TupleTableSlot* slot = NULL;
+    bool isUstore = false;
 
     /*
      * extract necessary information from index scan node
@@ -78,26 +81,42 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
 
+    isUstore = RelationIsUstoreFormat(node->ss.ss_currentRelation);
+
     /*
      * ok, now that we have what we need, fetch the next tuple.
      */
-    while ((tuple = scan_handler_idx_getnext(scandesc, direction)) != NULL) {
-        IndexScanDesc index_scan = GetIndexScanDesc(scandesc);
-        /*
-         * Store the scanned tuple in the scan tuple slot of the scan state.
-         * Note: we pass 'false' because tuples returned by amgetnext are
-         * pointers onto disk pages and must not be pfree_ext()'d.
-         */
-        (void)ExecStoreTuple(tuple,  /* tuple to store */
-            slot,              /* slot to store in */
-            index_scan->xs_cbuf, /* buffer containing tuple */
-            false);            /* don't pfree */
+    // while ((tuple = scan_handler_idx_getnext(scandesc, direction)) != NULL) {
+    // we should change abs_idx_getnext to call IdxScanAm(scan)->idx_getnext and channge .idx_getnext in g_HeapIdxAm to
+    // IndexGetnextSlot
+    while (true) {
+        IndexScanDesc indexScan = GetIndexScanDesc(scandesc);
+        if (isUstore) {
+            if (!IndexGetnextSlot(scandesc, direction, slot)) {
+                break;
+            }
+        } else {
+            if ((tuple = scan_handler_idx_getnext(scandesc, direction)) == NULL) {
+                break;
+            }
+            /* Update indexScan, because hashbucket may switch current index in scan_handler_idx_getnext */
+            indexScan = GetIndexScanDesc(scandesc);
+            /*
+             * Store the scanned tuple in the scan tuple slot of the scan state.
+             * Note: we pass 'false' because tuples returned by amgetnext are
+             * pointers onto disk pages and must not be pfree_ext()'d.
+             */
+            (void)ExecStoreTuple(tuple, /* tuple to store */
+                slot,                   /* slot to store in */
+                indexScan->xs_cbuf,     /* buffer containing tuple */
+                false);                 /* don't pfree */
+        }
 
         /*
          * If the index was lossy, we have to recheck the index quals using
          * the fetched tuple.
          */
-        if (index_scan->xs_recheck) {
+        if (indexScan->xs_recheck) {
             econtext->ecxt_scantuple = slot;
             ResetExprContext(econtext);
             if (!ExecQual(node->indexqualorig, econtext, false)) {
@@ -203,7 +222,9 @@ void ExecReScanIndexScan(IndexScanState* node)
     /*
      * deal with partitioned table
      */
-    if (node->ss.isPartTbl) {
+    bool partpruning = ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION) && list_length(node->ss.partitions) == 1;
+    /* if only one partition is scaned in indexscan, we don't need do rescan for partition */
+    if (node->ss.isPartTbl && !partpruning) {
         /*
          * if node->ss.ss_ReScan = true, just do rescaning as non-partitioned
          * table; else switch to next partition for scaning.
@@ -509,6 +530,7 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
     IndexScanState* index_state = NULL;
     Relation current_relation;
     bool relis_target = false;
+    Snapshot scanSnap;
 
     gstrace_entry(GS_TRC_ID_ExecInitIndexScan);
     /*
@@ -563,7 +585,7 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
      * get the scan type from the relation descriptor.
      */
     ExecAssignScanType(&index_state->ss, CreateTupleDescCopy(RelationGetDescr(current_relation)));
-    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = TAM_HEAP;
+    index_state->ss.ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = current_relation->rd_tam_type;
 
     /*
      * Initialize result tuple type and projection info.
@@ -653,6 +675,12 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
         index_state->iss_RuntimeContext = NULL;
     }
 
+    /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(index_state->iss_RelationDesc, &node->scan, &index_state->ss);
+
     /* deal with partition info */
     if (node->scan.isPartTbl) {
         index_state->iss_ScanDesc = NULL;
@@ -675,23 +703,52 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
                 index_state->iss_CurrentIndexPartition =
                     partitionGetRelation(index_state->iss_RelationDesc, currentindex);
 
+                /*
+                 * Verify if a DDL operation that froze all tuples in the relation
+                 * occured after taking the snapshot.
+                 */
+                if (RelationIsUstoreFormat(index_state->ss.ss_currentPartition)) {
+                    TransactionId relfrozenxid64 = getPartitionRelfrozenxid(index_state->ss.ss_currentPartition);
+                    if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                        !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                        TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_SNAPSHOT_INVALID),
+                                 (errmsg("Snapshot too old."))));
+                    }
+                }
+
                 /* Initialize scan descriptor for partitioned table */
                 index_state->iss_ScanDesc = scan_handler_idx_beginscan(index_state->ss.ss_currentPartition,
                     index_state->iss_CurrentIndexPartition,
-                    estate->es_snapshot,
+                    scanSnap,
                     index_state->iss_NumScanKeys,
                     index_state->iss_NumOrderByKeys,
                     (ScanState*)index_state);
-                Assert(PointerIsValid(index_state->iss_ScanDesc));
             }
         }
     } else {
+        /*
+         * Verify if a DDL operation that froze all tuples in the relation
+         * occured after taking the snapshot.
+         */
+        if (RelationIsUstoreFormat(current_relation)) {
+            TransactionId relfrozenxid64 = getRelationRelfrozenxid(current_relation);
+            if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_SNAPSHOT_INVALID),
+                         (errmsg("Snapshot too old."))));
+            }
+        }
+
         /*
          * Initialize scan descriptor.
          */
         index_state->iss_ScanDesc = scan_handler_idx_beginscan(current_relation,
             index_state->iss_RelationDesc,
-            estate->es_snapshot,
+            scanSnap,
             index_state->iss_NumScanKeys,
             index_state->iss_NumOrderByKeys,
             (ScanState*)index_state);
@@ -954,7 +1011,7 @@ void ExecIndexBuildScanKeys(PlanState* plan_state, Relation index, List* quals, 
                 opno = lfirst_oid(opnos_cell);
                 opnos_cell = lnext(opnos_cell);
 
-                if (index->rd_rel->relam != BTREE_AM_OID || varattno < 1 || varattno > index->rd_index->indnatts)
+                if (!OID_IS_BTREE(index->rd_rel->relam) || varattno < 1 || varattno > index->rd_index->indnatts)
                     ereport(ERROR,
                         (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("bogus RowCompare index qualification, attribute number is %d", varattno)));
@@ -1326,9 +1383,9 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
         }
         
         if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-            index_state->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            index_state->ss.part_id = resultPlan->ls_rangeSelectedPartitions->length;
         } else {
-            index_state->part_id = 0;
+            index_state->ss.part_id = 0;
         }
 
         ListCell* cell = NULL;

@@ -2005,7 +2005,6 @@ CONTEXT:  SQL statement "select        unique1 from tenk1 where unique2 =
 PL/pgSQL function trap_matching_test(integer) line 9 at SQL statement
 referenced column: trap_matching_test
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 --create temp table foo (f1 int);
 create table foo (f1 int);
 create function blockme() returns int as $$

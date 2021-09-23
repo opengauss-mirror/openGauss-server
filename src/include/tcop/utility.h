@@ -37,7 +37,8 @@ typedef void (*ProcessUtility_hook_type)(Node* parsetree, const char* queryStrin
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag);
+    char* completionTag,
+    bool isCTAS);
 extern THR_LOCAL PGDLLIMPORT ProcessUtility_hook_type ProcessUtility_hook;
 
 extern void ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
@@ -45,22 +46,25 @@ extern void ProcessUtility(Node* parsetree, const char* queryString, ParamListIn
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag);
+    char* completionTag,
+    bool isCTAS = false);
 extern void standard_ProcessUtility(Node* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel,
     DestReceiver* dest,
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag);
+    char* completionTag,
+    bool isCTAS = false);
 
 extern char* find_first_exec_cn();
 extern bool find_hashbucket_options(List* stmts);
 
 #ifdef PGXC
-extern void CreateCommand(
-    CreateStmt* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel, bool sentToRemote);
+extern void CreateCommand(CreateStmt *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
+    bool sentToRemote, bool isCTAS = false);
 #else
-extern void CreateCommand(CreateStmt* parsetree, const char* queryString, ParamListInfo params, bool isTopLevel);
+extern void CreateCommand(CreateStmt *parsetree, const char *queryString, ParamListInfo params, bool isTopLevel,
+    bool isCTAS = false);
 #endif
 
 extern void ReindexCommand(ReindexStmt* stmt, bool isTopLevel);

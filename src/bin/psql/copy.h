@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -10,6 +10,14 @@
 
 #include "libpq/libpq-fe.h"
 
+typedef struct CopyInArgs {
+    const char* query;
+    PGconn* conn;         /* connection to backend */
+    pthread_t	thread;
+    pthread_mutex_t *stream_mutex;
+    bool	result;
+} CopyInArgs;
+
 /* handler for \copy */
 bool do_copy(const char* args);
 
@@ -17,6 +25,7 @@ bool do_copy(const char* args);
 
 bool handleCopyOut(PGconn* conn, FILE* copystream);
 bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary);
+bool ParallelCopyIn(const CopyInArgs* copyarg, const char** errMsg);
 
 #endif
 

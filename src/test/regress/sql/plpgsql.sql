@@ -1755,7 +1755,6 @@ select trap_matching_test(100000);
 select trap_matching_test(1);
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 
 --create temp table foo (f1 int);

@@ -1037,7 +1037,7 @@ opt_externaldir_map(ConfigOption *opt, const char *arg)
  * Enforce permissions from backup_content.control. The only
  * problem now is with PGDATA itself.
  * TODO: we must preserve PGDATA permissions somewhere. Is it actually a problem?
- * Shouldn`t starting postgres force correct permissions on PGDATA?
+ * Shouldn`t starting openGauss force correct permissions on PGDATA?
  *
  * TODO: symlink handling. If user located symlink in PG_TBLSPC_DIR, it will
  * be restored as directory.

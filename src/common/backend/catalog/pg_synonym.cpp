@@ -77,6 +77,14 @@ void CreateSynonym(CreateSynonymStmt* stmt)
         aclcheck_error(aclResult, ACL_KIND_NAMESPACE, get_namespace_name(synNamespace));
     }
 
+    if (synNamespace == PG_PUBLIC_NAMESPACE && !isRelSuperuser()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create synonym \"%s\"", synName),
+                errhint("must be %s to create a synonym in public schema.",
+                    g_instance.attr.attr_security.enablePrivilegesSeparate  ? "initial user" : "sysadmin")));
+    }
+
     /* Deconstruct the referenced qualified-name. */
     DeconstructQualifiedName(stmt->objName, &objSchema, &objName);
 

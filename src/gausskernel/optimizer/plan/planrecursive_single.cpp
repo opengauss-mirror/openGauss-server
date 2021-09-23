@@ -34,7 +34,7 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/pgxc_node.h"
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "miscadmin.h"
 #include "lib/bipartite_match.h"
 #include "nodes/makefuncs.h"
@@ -73,7 +73,7 @@
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
 #include "vecexecutor/vecfunc.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "optimizer/randomplan.h"
 #include "optimizer/optimizerdebug.h"
 

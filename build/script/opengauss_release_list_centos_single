@@ -1,7 +1,6 @@
 [server]
 ./bin/gsql
 ./bin/gaussdb
-./bin/gaussmaster
 ./bin/gstrace
 ./bin/gs_basebackup
 ./bin/gs_probackup
@@ -13,7 +12,6 @@
 ./bin/gs_initdb
 ./bin/gs_guc
 ./bin/encrypt
-./bin/gs_clean
 ./bin/openssl
 ./bin/gs_restore
 ./bin/gs_cgroup
@@ -26,10 +24,8 @@
 ./bin/alarmItem.conf
 ./bin/retry_errcodes.conf
 ./bin/cluster_guc.conf
-./bin/transfer.py
 ./bin/bind_net_irq.sh
 ./bin/setArmOptimization.sh
-./bin/gs_plan_simulator.sh
 ./bin/krb5kdc
 ./bin/klist
 ./bin/kinit
@@ -46,8 +42,10 @@
 ./etc/kerberos/krb5.conf  
 ./etc/kerberos/mppdb-site.xml
 ./share/postgresql/tmp/udstools.py
+./share/postgresql/db4ai
 ./share/postgresql/snowball_create.sql
 ./share/postgresql/pg_hba.conf.sample
+./share/postgresql/gs_gazelle.conf.sample
 ./share/postgresql/pg_service.conf.sample
 ./share/postgresql/psqlrc.sample
 ./share/postgresql/conversion_create.sql
@@ -75,9 +73,6 @@
 ./share/postgresql/extension/log_fdw.control
 ./share/postgresql/extension/mot_fdw--1.0.sql
 ./share/postgresql/extension/mot_fdw.control
-./share/postgresql/extension/gsredistribute.control
-./share/postgresql/extension/gsredistribute--1.0.sql
-./share/postgresql/extension/gsredistribute--unpackaged--1.0.sql
 ./share/postgresql/extension/postgres_fdw--1.0.sql
 ./share/postgresql/extension/postgres_fdw.control
 ./share/postgresql/timezone/GB-Eire
@@ -668,6 +663,7 @@
 ./share/postgresql/timezone/Navajo
 ./share/postgresql/timezone/GMT
 ./share/postgresql/system_views.sql
+./share/postgresql/private_system_views.sql
 ./share/postgresql/performance_views.sql
 ./share/postgresql/sql_features.txt
 ./share/postgresql/pg_cast_oid.txt
@@ -761,6 +757,7 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
+./lib/libgauss_cl_jni.so
 ./lib/libcgroup.so
 ./lib/libcgroup.so.1
 ./lib/libcom_err_gauss.so
@@ -770,15 +767,6 @@
 ./lib/libatomic.so.1
 ./lib/libatomic.so.1.2.0
 ./lib/libmasstree.so
-./lib/libgpr.so
-./lib/libgpr.so.9
-./lib/libgpr.so.9.0.0
-./lib/libgrpc.so
-./lib/libgrpc++.so
-./lib/libgrpc++.so.1
-./lib/libgrpc++.so.1.28.1
-./lib/libgrpc.so.9
-./lib/libgrpc.so.9.0.0
 ./lib/libupb.so
 ./lib/libupb.so.9
 ./lib/libupb.so.9.0.0
@@ -808,13 +796,19 @@
 ./lib/libkadm5clnt_mit.so
 ./lib/libkadm5clnt_mit.so.11
 ./lib/libkadm5clnt_mit.so.11.0
+./lib/libkadm5clnt_mit.so.12
+./lib/libkadm5clnt_mit.so.12.0
 ./lib/libkadm5srv.so
 ./lib/libkadm5srv_mit.so
 ./lib/libkadm5srv_mit.so.11
 ./lib/libkadm5srv_mit.so.11.0
+./lib/libkadm5srv_mit.so.12
+./lib/libkadm5srv_mit.so.12.0
 ./lib/libkdb5.so
 ./lib/libkdb5.so.9
 ./lib/libkdb5.so.9.0
+./lib/libkdb5.so.10
+./lib/libkdb5.so.10.0
 ./lib/libkrad.so
 ./lib/libkrad.so.0
 ./lib/libkrad.so.0.0
@@ -873,12 +867,19 @@
 ./lib/libxml2.so.2
 ./lib/libxml2.so.2.9.9
 ./lib/libparquet.so
-./lib/libparquet.so.11
-./lib/libparquet.so.11.1.0
+./lib/libparquet.so.14
+./lib/libparquet.so.14.1.0
+./lib/libarrow.so
+./lib/libarrow.so.14
+./lib/libarrow.so.14.1.0
 ./lib/OBS.ini
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
-./lib/libhll.so
+./lib/libdcf.so
+./lib/libzstd.so
+./lib/libzstd.so.1
+./lib/libzstd.so.1.4.4
+
 
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
@@ -996,7 +997,7 @@
 ./include/postgresql/server/storage/off.h
 ./include/postgresql/server/storage/buf/block.h
 ./include/postgresql/server/storage/item/item.h
-./include/postgresql/server/storage/relfilenode.h
+./include/postgresql/server/storage/smgr/relfilenode.h
 ./include/postgresql/server/storage/buf/bufpage.h
 ./include/postgresql/server/storage/spin.h
 ./include/postgresql/server/storage/buf/buf.h
@@ -1352,6 +1353,7 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
+./lib/libgauss_cl_jni.so
 ./lib/libconfig.so
 ./lib/libconfig.so.4
 ./lib/libcrypto.so
@@ -1387,6 +1389,7 @@
 ./lib/libpq_ce.so
 ./lib/libpq_ce.so.5
 ./lib/libpq_ce.so.5.5
+./lib/libgauss_cl_jni.so
 ./lib/libconfig.so
 ./lib/libconfig.so.4
 ./lib/libcrypto.so
@@ -1421,7 +1424,7 @@
 ./include/libpq-events.h
 ./include/libpq/libpq-fs.h
 [version]
-V500R001C20
+V500R002C00
 [header]
 ./include/libpq-fe.h
 ./include/postgres_ext.h

@@ -1,8 +1,8 @@
 #
 # NOTE:
-#   This file is NOT loaded by the PostgreSQL database.  It just serves as
+#   This file is NOT loaded by the openGauss database.  It just serves as
 #   a template for timezones you could need.  See the `Date/Time Support'
-#   appendix in the PostgreSQL documentation for more information.
+#   appendix in the openGauss documentation for more information.
 #
 # src/timezone/tznames/Etc.txt
 #

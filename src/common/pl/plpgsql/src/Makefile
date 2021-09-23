@@ -24,7 +24,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = pl_gram.o pl_handler.o pl_comp.o pl_exec.o pl_funcs.o pl_scanner.o plsql_packages.o
+OBJS = pl_gram.o pl_handler.o pl_comp.o pl_package.o pl_exec.o pl_funcs.o pl_scanner.o plsql_packages.o pl_debugger.o pl_debugger_api.o pl_sql_validator.o 
 
 DATA = plpgsql.control plpgsql--1.0.sql plpgsql--unpackaged--1.0.sql
 
@@ -54,7 +54,7 @@ uninstall-data:
 .PHONY: install-data uninstall-data
 
 # Force these dependencies to be known even without dependency info built:
-pl_gram.o pl_handler.o pl_comp.o pl_exec.o pl_funcs.o pl_scanner.o: plpgsql.h pl_gram.hpp plerrcodes.h
+pl_gram.o pl_handler.o pl_comp.o pl_package.o pl_exec.o pl_funcs.o pl_scanner.o: pl_gram.hpp plerrcodes.h
 
 # See notes in src/backend/parser/Makefile about the following two rules
 

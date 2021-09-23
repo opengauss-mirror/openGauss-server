@@ -29,8 +29,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeBitmapAnd.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeBitmapAnd.h"
 
 /* ----------------------------------------------------------------
  *		ExecInitBitmapAnd

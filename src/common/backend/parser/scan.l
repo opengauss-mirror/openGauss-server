@@ -67,6 +67,8 @@ long getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_y
  */
 #define SET_YYLLOC()  (*(yylloc) = yytext - yyextra->scanbuf)
 
+#define COMMENT_NOT_IGNORED()  (yyextra->is_hint_str || yyextra->include_ora_comment)
+
 /*
  * Advance yylloc by the given number of bytes.
  */
@@ -177,6 +179,7 @@ non_newline		[^\n\r]
 comment			("--"{non_newline}*)
 
 whitespace		({space}+|{comment})
+whitespace_only	({space}+)
 
 /*
  * SQL requires at least one newline in the whitespace separating
@@ -325,8 +328,8 @@ para_equals	"=>"
  * If you change either set, adjust the character lists appearing in the
  * rule for "operator"!
  */
-self			[,()\[\].;\:\+\-\*\/\%\^\<\>\=]
-op_chars		[\~\!\@\#\^\&\|\`\?\+\-\*\/\%\<\>\=]
+self			[,()\[\].;\:\+\-\*\/\%\^\<\>\=\@]
+op_chars		[\~\!\#\^\&\|\`\?\+\-\*\/\%\<\>\=\@]
 operator		{op_chars}+
 
 /* we no longer allow unary minus in numbers.
@@ -345,6 +348,7 @@ decimalfail		{digit}+\.\.
 real			({integer}|{decimal})[Ee][-+]?{digit}+
 realfail1		({integer}|{decimal})[Ee]
 realfail2		({integer}|{decimal})[Ee][-+]
+snapvers		({digit}+(\.{digit}+)*)
 
 param			\${integer}
 
@@ -369,7 +373,18 @@ other			.
 
 %%
 
-{whitespace}	{
+{whitespace_only}	{
+					/* ignore */
+				}
+
+{comment}		{
+					if (yyextra->include_ora_comment)
+					{
+						SET_YYLLOC();
+						addlit(yytext, yyleng, yyscanner);
+						yylval->str = litbufdup(yyscanner);
+						return COMMENTSTRING;
+					}
 					/* ignore */
 				}
 
@@ -380,7 +395,7 @@ other			.
 					BEGIN(xc);
 					/* Put back any characters past slash-star; see above */
 					yyless(2);
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{
 						startlit();
 						addlit(yytext, yyleng, yyscanner);
@@ -391,7 +406,7 @@ other			.
 					(yyextra->xcdepth)++;
 					/* Put back any characters past slash-star; see above */
 					yyless(2);
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{
 						addlit(yytext, yyleng, yyscanner);
 					}
@@ -403,7 +418,7 @@ other			.
 					else
 						(yyextra->xcdepth)--;
 
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{	
 						addlit(yytext, yyleng, yyscanner);
 						yylval->str = litbufdup(yyscanner);
@@ -413,21 +428,21 @@ other			.
 		}
 
 <xc>{xcinside}	{
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{
 						addlit(yytext, yyleng, yyscanner);
 					}
 		}
 
 <xc>{op_chars}	{
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{
 						addlit(yytext, yyleng, yyscanner);
 					}
 		}
 
 <xc>\*+		{
-					if (yyextra->is_hint_str)
+					if (COMMENT_NOT_IGNORED())
 					{
 						addlit(yytext, yyleng, yyscanner);
 					}
@@ -875,7 +890,7 @@ other			.
 
 						for (ic = nchars-2; ic >= 0; ic--)
 						{
-							if (strchr("~!@#^&|`?%", yytext[ic]))
+							if (strchr("~!#^&|`?%", yytext[ic]))
 								break;
 						}
 						if (ic >= 0)
@@ -896,7 +911,7 @@ other			.
 						 * that the "self" rule would have.
 						 */
 						if (nchars == 1 &&
-							strchr(",()[].;:+-*/%^<>=", yytext[0]))
+							strchr(",()[].;:+-*/%^<>=@", yytext[0]))
 						{
 							yyextra->is_hint_str = false;
 							return yytext[0];
@@ -991,6 +1006,19 @@ other			.
 					yylval->str = pstrdup(yytext);
 					yyextra->is_hint_str = false;
 					return FCONST;
+				}
+{snapvers}		{
+					SET_YYLLOC();
+					yylval->str = pstrdup(yytext);
+					for (int i = strlen(yylval->str) - 1; i > 0; i--)
+					{
+						if (yylval->str[i] == '.')
+						{
+							yylval->str[i] = DB4AI_SNAPSHOT_VERSION_SEPARATOR;
+						}
+					}
+					yyextra->is_hint_str = false;
+					return VCONST;
 				}
 
 
@@ -1130,21 +1158,44 @@ scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 {
 	const char *loc = yyextra->scanbuf + *yylloc;
 
-	if (*loc == YY_END_OF_BUFFER_CHAR)
-	{
-		ereport(ERROR,
+    if (u_sess->plsql_cxt.plpgsql_curr_compile != NULL &&
+               u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+		PLpgSQL_function* func = u_sess->plsql_cxt.plpgsql_curr_compile;
+		if (*loc == YY_END_OF_BUFFER_CHAR)
+		{
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("%s at end of input when compile function %s", _(message), func->fn_signature),
+                    errdetail("syntax error"),
+                    errcause("The package declaration contains a character string error."),
+                    erraction("Check character string")));
+		}
+		else
+		{
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("%s at or near \"%s\" when compile function %s", _(message), loc, func->fn_signature),
+                    errdetail("syntax error"),
+                    errcause("The package declaration contains a character string error."),
+                    erraction("Check character string")));
+		}
+	} else {
+		if (*loc == YY_END_OF_BUFFER_CHAR)
+		{
+			ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 /* translator: %s is typically the translation of "syntax error" */
 				 errmsg("%s at end of input", _(message)),
 				 lexer_errposition()));
-	}
-	else
-	{
-		ereport(ERROR,
+		}
+		else
+		{
+			ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 /* translator: first %s is typically the translation of "syntax error" */
 				 errmsg("%s at or near \"%s\"", _(message), loc),
 				 lexer_errposition()));
+		}
 	}
 }
 
@@ -1177,6 +1228,9 @@ scanner_init(const char *str,
 	yyext->dolqstart = NULL;
 	yyext->is_hint_str = false;
 	yyext->parameter_list = NIL;
+	yyext->include_ora_comment = false;
+	yyext->func_param_begin = 0;
+	yyext->func_param_end = 0;
 
 	/*
 	 * Make a scan buffer with special termination needed by flex.

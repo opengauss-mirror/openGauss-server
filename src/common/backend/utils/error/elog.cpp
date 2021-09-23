@@ -86,7 +86,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/execRemote.h"
 #endif
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "executor/executor.h"
 #include "workload/workload.h"
 #include "../bin/gsqlerr/errmsg.h"
@@ -246,8 +246,12 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          * infinite recursion!)
          */
         if (elevel == ERROR) {
-            if (t_thrd.log_cxt.PG_exception_stack == NULL || t_thrd.proc_cxt.proc_exit_inprogress)
+            if (t_thrd.log_cxt.PG_exception_stack == NULL ||
+                t_thrd.proc_cxt.proc_exit_inprogress ||
+                t_thrd.xact_cxt.applying_subxact_undo)
+            {
                 elevel = FATAL;
+            }
 
             if (u_sess->attr.attr_common.ExitOnAnyError && !AmPostmasterProcess()) {
                 /*
@@ -532,6 +536,17 @@ void errfinish(int dummy, ...)
     }
 #endif
 
+    /* 
+     * Make sure reset create schema flag if error happen,
+     * even in pg_try_catch case and procedure exception case.
+     * Top transaction memcxt will release the memory, just set NULL.
+     */
+    if (elevel >= ERROR) {
+        u_sess->catalog_cxt.setCurCreateSchema = false;
+        u_sess->catalog_cxt.curCreateSchema = NULL;
+        u_sess->exec_cxt.isLockRows = false;
+    }
+
     /*
      * If ERROR (not more nor less) we pass it off to the current handler.
      * Printing it and popping the stack is the responsibility of the handler.
@@ -553,6 +568,7 @@ void errfinish(int dummy, ...)
          * should make life easier for most.)
          */
         t_thrd.int_cxt.InterruptHoldoffCount = 0;
+        t_thrd.int_cxt.QueryCancelHoldoffCount = 0;
 
         t_thrd.int_cxt.InterruptCountResetFlag = true;
 
@@ -630,7 +646,10 @@ void errfinish(int dummy, ...)
         pfree(edata->internalquery);
     if (edata->backtrace_log)
         pfree(edata->backtrace_log);
-
+    if (edata->cause)
+        pfree(edata->cause);
+    if (edata->action)
+        pfree(edata->action);
     t_thrd.log_cxt.errordata_stack_depth--;
 
     /* Exit error-handling context */
@@ -1116,6 +1135,37 @@ int errdetail_plural(const char* fmt_singular, const char* fmt_plural, unsigned 
     return 0; /* return value does not matter */
 }
 
+int errcause(const char* fmt, ...)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+    MemoryContext oldcontext;
+
+    t_thrd.log_cxt.recursion_depth++;
+    CHECK_STACK_DEPTH();
+    oldcontext = MemoryContextSwitchTo(ErrorContext);
+
+    EVALUATE_MESSAGE(cause, false, true);
+
+    MemoryContextSwitchTo(oldcontext);
+    t_thrd.log_cxt.recursion_depth--;
+    return 0; /* return value does not matter */
+}
+
+int erraction(const char* fmt, ...)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+    MemoryContext oldcontext;
+
+    t_thrd.log_cxt.recursion_depth++;
+    CHECK_STACK_DEPTH();
+    oldcontext = MemoryContextSwitchTo(ErrorContext);
+
+    EVALUATE_MESSAGE(action, false, true);
+
+    MemoryContextSwitchTo(oldcontext);
+    t_thrd.log_cxt.recursion_depth--;
+    return 0; /* return value does not matter */
+}
 /*
  * errhint --- add a hint error message text to the current error
  */
@@ -1266,6 +1316,23 @@ int internalerrquery(const char* query)
     return 0; /* return value does not matter */
 }
 
+
+/*
+ * ErrOutToClient --- sets whether to send error output to client or not.
+ */
+int
+ErrOutToClient(bool outToClient)
+{
+    ErrorData  *edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    edata->output_to_client = outToClient;
+
+    return 0;                   /* return value does not matter */
+}
+
 /*
  * geterrcode --- return the currently set SQLSTATE error code
  *
@@ -1280,6 +1347,22 @@ int geterrcode(void)
     CHECK_STACK_DEPTH();
 
     return edata->sqlerrcode;
+}
+
+/*
+ * Geterrmsg --- return the currently set error message
+ *
+ * This is only intended for use in error callback subroutines, since there
+ * is no other place outside elog.c where the concept is meaningful.
+ */
+char *Geterrmsg(void)
+{
+    ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    /* we don't bother incrementing t_thrd.log_cxt.recursion_depth */
+    CHECK_STACK_DEPTH();
+
+    return edata->message;
 }
 
 /*
@@ -1571,7 +1654,10 @@ ErrorData* CopyErrorData(void)
         newedata->funcname = pstrdup(newedata->funcname);
     if (newedata->backtrace_log)
         newedata->backtrace_log = pstrdup(newedata->backtrace_log);
-
+    if (newedata->cause)
+        newedata->cause = pstrdup(newedata->cause);
+    if (newedata->action)
+        newedata->action = pstrdup(newedata->action);
     return newedata;
 }
 
@@ -1587,7 +1673,8 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     FREE_POINTER(edata->context);
     FREE_POINTER(edata->internalquery);
     FREE_POINTER(edata->backtrace_log);
-
+    FREE_POINTER(edata->cause);
+    FREE_POINTER(edata->action);
     MemoryContext oldcontext = MemoryContextSwitchTo(ErrorContext);
 
     edata->elevel = newData->elevel;
@@ -1606,7 +1693,8 @@ void UpdateErrorData(ErrorData* edata, ErrorData* newData)
     edata->saved_errno = newData->saved_errno;
     edata->backtrace_log = pstrdup(newData->backtrace_log);
     edata->internalerrcode = newData->internalerrcode;
-
+    edata->cause = newData->cause;
+    edata->action = newData->action;
     MemoryContextSwitchTo(oldcontext);
 }
 
@@ -1638,7 +1726,14 @@ void FreeErrorData(ErrorData* edata)
         pfree(edata->backtrace_log);
         edata->backtrace_log = NULL;
     }
-
+    if (edata->cause) {
+        pfree(edata->cause);
+        edata->cause = NULL;
+    }
+    if (edata->action) {
+        pfree(edata->action);
+        edata->action = NULL;
+    }
     pfree(edata);
 }
 
@@ -1720,7 +1815,10 @@ void ReThrowError(ErrorData* edata)
         newedata->funcname = pstrdup(newedata->funcname);
     if (newedata->backtrace_log)
         newedata->backtrace_log = pstrdup(newedata->backtrace_log);
-
+    if (newedata->cause)
+        newedata->cause = pstrdup(newedata->cause);
+    if (newedata->action)
+        newedata->action = pstrdup(newedata->action);
     t_thrd.log_cxt.recursion_depth--;
     PG_RE_THROW();
 }
@@ -1773,7 +1871,23 @@ void pg_re_throw(void)
 
     /* Doesn't return ... */
     ExceptionalCondition("pg_re_throw tried to return", "FailedAssertion", __FILE__, __LINE__);
+    abort(); // keep compiler quiet
 }
+
+
+/*
+ * PgRethrowAsFatal - Promote the error level to fatal.
+ */
+void
+PgRethrowAsFatal(void)
+{
+    ErrorData  *edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+
+    Assert(t_thrd.log_cxt.errordata_stack_depth >= 0);
+    edata->elevel = FATAL;
+    PG_RE_THROW();
+}
+
 
 /*
  * Initialization of error output file
@@ -2289,7 +2403,9 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
                 t_thrd.log_cxt.error_with_nodename = true;
                 break;
             case 'S':
-                appendStringInfo(buf, "%lu", u_sess->session_id);
+                appendStringInfo(buf, "%lu[%d:%lu#%lu]", u_sess->session_id,
+                    (int)u_sess->globalSessionId.nodeId,
+                    u_sess->globalSessionId.sessionId, u_sess->globalSessionId.seq);
                 break;
             case '%':
                 appendStringInfoChar(buf, '%');
@@ -2310,7 +2426,7 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
 
 /*
  * append a CSV'd version of a string to a StringInfo
- * We use the PostgreSQL defaults for CSV, i.e. quote = escape = '"'
+ * We use the openGauss defaults for CSV, i.e. quote = escape = '"'
  * If it's NULL, append nothing.
  */
 static inline void appendCSVLiteral(StringInfo buf, const char* data)
@@ -2679,7 +2795,7 @@ const char* mask_encrypted_key(const char *query_string, int str_len)
     return mask_string;
 }
 
-static int output_backtrace_to_log(StringInfoData* pOutBuf)
+int output_backtrace_to_log(StringInfoData* pOutBuf)
 {
     const int max_buffer_size = 128;
     void* buffer[max_buffer_size];
@@ -2775,6 +2891,18 @@ static void send_message_to_server_log(ErrorData* edata)
             log_line_prefix(&buf, edata);
             appendStringInfoString(&buf, _("HINT:  "));
             append_with_tabs(&buf, edata->hint);
+            appendStringInfoChar(&buf, '\n');
+        }
+        if (edata->cause) {
+            log_line_prefix(&buf, edata);
+            appendStringInfoString(&buf, _("CAUSE:  "));
+            append_with_tabs(&buf, edata->cause);
+            appendStringInfoChar(&buf, '\n');
+        }
+        if (edata->action) {
+            log_line_prefix(&buf, edata);
+            appendStringInfoString(&buf, _("ACTION:  "));
+            append_with_tabs(&buf, edata->action);
             appendStringInfoChar(&buf, '\n');
         }
         if (edata->internalquery) {
@@ -3281,7 +3409,7 @@ static void send_message_to_frontend(ErrorData* edata)
 
     /*
      * Since cancel is always driven by Coordinator, internal-cancel message
-     * of datanode postgres thread can be ignored to avoid libcomm waitting quota in here.
+     * of datanode openGauss thread can be ignored to avoid libcomm waitting quota in here.
      * If a single node, always send message to front.
      */
 
@@ -3292,7 +3420,9 @@ static void send_message_to_frontend(ErrorData* edata)
      * If u_sess->utils_cxt.qunit_case_number != 0, it(CN/DN) serves as a QUNIT backend thread, and it(CN/DN)
      * needs to send all ERROR messages to the client(gsql).
      */
-    if ((IsConnFromCoord() || StreamThreadAmI()) && edata->elevel < ERROR && !edata->handle_in_client
+    if ((IsConnFromCoord() || StreamThreadAmI() || 
+        (t_thrd.proc_cxt.MyProgName != NULL && strcmp(t_thrd.proc_cxt.MyProgName, "BackgroundWorker") == 0)) && 
+        edata->elevel < ERROR && !edata->handle_in_client
 
 #ifdef ENABLE_QUNIT
         && u_sess->utils_cxt.qunit_case_number == 0
@@ -4046,6 +4176,7 @@ static char* mask_Password_internal(const char* query_string)
     const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128","gs_encrypt", "gs_decrypt"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
+
     int length_crypt = 0;
     int count_crypt = 0;
     int position_crypt = 0;
@@ -4384,6 +4515,7 @@ static char* mask_Password_internal(const char* query_string)
                                 break;
                             }
                         }
+
                     }
                     break;
                 case 41: /* character ')' */

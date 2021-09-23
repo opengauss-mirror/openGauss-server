@@ -22,7 +22,7 @@ SHOW track_sql_count;
  off
 (1 row)
 
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 -----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
 (0 rows)
@@ -30,7 +30,7 @@ SELECT * FROM gs_sql_count;
 /* test 2 : track_activities is off but track_sql_count is on */
 SET track_activities=off;
 SET track_sql_count=on;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 -----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
 (0 rows)
@@ -38,7 +38,7 @@ SELECT * FROM gs_sql_count;
 /* test 3 : track_activities is off but track_sql_count is off */
 SET track_activities=off;
 SET track_sql_count=off;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --? node_name | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 -----------+-----------+--------------+--------------+--------------+--------------+-----------------+-----------+-----------+-----------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------+---------------------+-------------------+-------------------+-------------------
 (0 rows)
@@ -46,13 +46,13 @@ SELECT * FROM gs_sql_count;
 /* test 4 : track_activities is on but track_sql_count is on */
 SET track_activities=on;
 SET track_sql_count=on;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*  |            0 |            0 |            0 |            0 |               0 |         0 |         0 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
 (1 row)
 
-SELECT * FROM pgxc_sql_count order by node_name;
+SELECT * FROM pgxc_sql_count WHERE user_name !~ '^gs_' order by node_name;
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*  |            1 |            0 |            0 |            0 |               0 |         0 |         1 |         0 |                .* |              .* |              .* |              .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
@@ -85,7 +85,7 @@ GRANT INSERT on TABLE t to qps;
 GRANT SELECT on TABLE t to qps;
 GRANT UPDATE on TABLE t to qps;
 GRANT DELETE on TABLE t to qps;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*  |            2 |            0 |            0 |            0 |               0 |         4 |         2 |         4 |              .* |             .* |            .* |              .* |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0
@@ -98,7 +98,7 @@ SELECT * FROM gs_sql_count;
 SET track_sql_count=on;
 SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
 INSERT INTO t values(generate_series(1, 10), generate_series(1,10));
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            0 |            0 |            1 |            0 |               0 |         0 |         1 |         0 |                   0 |                 0 |                 0 |                 0 |                   0 |                 0 |                 0 |                 0 |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
@@ -120,7 +120,7 @@ SELECT * FROM t order by a;
  10 | 10
 (10 rows)
 
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            2 |            0 |            1 |            0 |               0 |         0 |         3 |         0 |               .* |             .* |             .* |               .* |                   0 |                 0 |                 0 |                 0 |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
@@ -128,7 +128,7 @@ SELECT * FROM gs_sql_count;
 
 /* test 8 : track_sql_count is on, dml-update */
 update t set b = 11 where b = 1;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            3 |            1 |            1 |            0 |               0 |         0 |         5 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |                   0 |                 0 |                 0 |                 0
@@ -136,7 +136,7 @@ SELECT * FROM gs_sql_count;
 
 /* test 9 : track_sql_count is on, dml-delete */
 delete from t where b =11;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            4 |            1 |            1 |            1 |               0 |         0 |         7 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*
@@ -147,7 +147,7 @@ INSERT INTO t1 values(generate_series(1, 10), generate_series(1,10));
 ERROR:  relation "t1" does not exist
 LINE 2: INSERT INTO t1 values(generate_series(1, 10), generate_serie...
                     ^
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            5 |            1 |            1 |            1 |               0 |         0 |         8 |         0 |               .* |             .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*
@@ -160,7 +160,7 @@ SELECT * FROM pgxc_sql_count;
 ERROR:  must be system admin or monitor admin to use EXECUTE DIRECT
 CONTEXT:  SQL statement "EXECUTE DIRECT ON (datanode1) 'SELECT * FROM gs_sql_count'"
 PL/pgSQL function pgxc_get_sql_count() line 12 at FOR over EXECUTE statement
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 --?  node_name   | .* | select_count | update_count | insert_count | delete_count | mergeinto_count | ddl_count | dml_count | dcl_count | total_select_elapse | avg_select_elapse | max_select_elapse | min_select_elapse | total_update_elapse | avg_update_elapse | max_update_elapse | min_update_elapse | total_insert_elapse | avg_insert_elapse | max_insert_elapse | min_insert_elapse | total_delete_elapse | avg_delete_elapse | max_delete_elapse | min_delete_elapse 
 --?.*
 --? coordinator1 | .*       |            6 |            1 |            1 |            1 |               0 |         0 |         9 |         0 |               .* |              .* |             .* |               .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .* |               .* |             .* |             .* |             .*

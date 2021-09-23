@@ -28,7 +28,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "cstore.h"

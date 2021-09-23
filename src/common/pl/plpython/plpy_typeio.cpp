@@ -98,7 +98,7 @@ void PLy_typeinfo_dealloc(PLyTypeInfo* arg)
 
 /*
  * Conversion functions.  Remember output from Python is input to
- * PostgreSQL, and vice versa.
+ * openGauss, and vice versa.
  */
 void PLy_input_datum_func(PLyTypeInfo* arg, Oid typeOid, HeapTuple typeTup)
 {
@@ -377,7 +377,7 @@ static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
     element_type = get_element_type(arg->typoid);
 
     /*
-     * Select a conversion function to convert Python objects to PostgreSQL
+     * Select a conversion function to convert Python objects to openGauss
      * datums.	Most data types can go through the generic function.
      */
     switch (getBaseType(element_type ? element_type : arg->typoid)) {
@@ -675,9 +675,9 @@ static PyObject* PLyList_FromArray_recurse(
 }
 
 /*
- * Convert a Python object to a PostgreSQL bool datum.	This can't go
+ * Convert a Python object to a openGauss bool datum.	This can't go
  * through the generic conversion function, because Python attaches a
- * Boolean value to everything, more things than the PostgreSQL bool
+ * Boolean value to everything, more things than the openGauss bool
  * type can parse.
  */
 static Datum PLyObject_ToBool(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
@@ -695,7 +695,7 @@ static Datum PLyObject_ToBool(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 }
 
 /*
- * Convert a Python object to a PostgreSQL bytea datum.  This doesn't
+ * Convert a Python object to a openGauss bytea datum.  This doesn't
  * go through the generic conversion function to circumvent problems
  * with embedded nulls.  And it's faster this way.
  */
@@ -743,7 +743,7 @@ static Datum PLyObject_ToBytea(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 /*
  * Convert a Python object to a composite type. First look up the type's
  * description, then route the Python object through the conversion function
- * for obtaining PostgreSQL tuples.
+ * for obtaining openGauss tuples.
  */
 static Datum PLyObject_ToComposite(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 {
@@ -780,7 +780,7 @@ static Datum PLyObject_ToComposite(PLyObToDatum* arg, int32 typmod, PyObject* pl
 
 /*
  * Generic conversion function: Convert PyObject to cstring and
- * cstring into PostgreSQL type.
+ * cstring into openGauss type.
  */
 static Datum PLyObject_ToDatum(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 {

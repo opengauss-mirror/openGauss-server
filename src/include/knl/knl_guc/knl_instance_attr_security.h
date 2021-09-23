@@ -44,6 +44,7 @@ typedef struct knl_instance_attr_security {
     bool EnableSSL;
     bool enablePrivilegesSeparate;
     bool enable_nonsysadmin_execute_direct;
+    bool enable_tde;
     char* ssl_cert_file;
     char* ssl_key_file;
     char* ssl_ca_file;

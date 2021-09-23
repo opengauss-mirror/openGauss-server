@@ -1208,7 +1208,7 @@ int PoolManagerAbortTransactions(const char* dbname, const char* username, Threa
             pfree_ext(*pids);
             ereport(ERROR,
                 (errcode(ERRCODE_SYSTEM_ERROR),
-                    errmsg("pooler: Failed to send SIGTERM to postgres thread:%lu in "
+                    errmsg("pooler: Failed to send SIGTERM to openGauss thread:%lu in "
                            "PoolManagerAbortTransactions(), failed: %m",
                         tid)));
         }
@@ -1400,7 +1400,8 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
 
     rel = heap_open(PgxcNodeRelationId, AccessShareLock);
     scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
-    while ((tuple =  (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
+
+    while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         Form_pgxc_node node_form = (Form_pgxc_node)GETSTRUCT(tuple);
         Oid node_oid = InvalidOid;
         char* node_name = NULL;
@@ -1543,12 +1544,12 @@ InvalidBackendEntry* PoolManagerValidateConnection(bool clear, const char* co_no
         for (i = 0; i < (int)count; i++) {
             if (gs_signal_send(entry[i].send_sig_pid, SIGUSR2, entry[i].is_thread_pool_session) < 0) {
                 ereport(WARNING,
-                    (errmsg("pooler: Failed to send SIGUSR2 to postgres thread:%lu in "
+                    (errmsg("pooler: Failed to send SIGUSR2 to openGauss thread:%lu in "
                             "PoolManagerValidateConnection(), failed: %m",
                         entry[i].tid)));
             } else {
                 ereport(LOG,
-                    (errmsg("pooler: Success to send SIGUSR2 to postgres thread:%lu in "
+                    (errmsg("pooler: Success to send SIGUSR2 to openGauss thread:%lu in "
                             "PoolManagerValidateConnection(), current state: %s.",
                         entry[i].tid,
                         entry[i].is_connecting ? "connecting" : "connected")));
@@ -1627,7 +1628,7 @@ int agent_set_command(PoolAgent* agent, const char* set_command, PoolCommandType
     /*
      * Launch the new command to all the connections already hold by the agent
      * It does not matter if command is local or global as this has explicitely been sent
-     * by client. PostgreSQL backend also cannot send to its pooler agent SET LOCAL if current
+     * by client. openGauss backend also cannot send to its pooler agent SET LOCAL if current
      * transaction is not in a transaction block. This has also no effect on local Coordinator
      * session.
      */
@@ -1799,11 +1800,11 @@ int LibcommConnectdbParallel(
          * for standby we connect slave
          */
         if (info->node_mode[i] != POOL_NODE_STANDBY || IS_DN_MULTI_STANDYS_MODE()) {
-            conn[i]->libcomm_addrinfo.host = nodesDef[i]->nodehost.data;
+            conn[i]->libcomm_addrinfo.host = pstrdup(nodesDef[i]->nodehost.data);
             conn[i]->libcomm_addrinfo.ctrl_port = nodesDef[i]->nodectlport;
             conn[i]->libcomm_addrinfo.listen_port = nodesDef[i]->nodesctpport;
         } else {
-            conn[i]->libcomm_addrinfo.host = nodesDef[i]->nodehost1.data;
+            conn[i]->libcomm_addrinfo.host = pstrdup(nodesDef[i]->nodehost1.data);
             conn[i]->libcomm_addrinfo.ctrl_port = nodesDef[i]->nodectlport1;
             conn[i]->libcomm_addrinfo.listen_port = nodesDef[i]->nodesctpport1;
         }
@@ -1996,16 +1997,18 @@ int create_connections_parallel(
         ++j;
     }
     waitCreateCount = j;
-    
+    info->conndef->waitCreateCount = waitCreateCount;
+
     /* could not find node in the dbpool, return failed. */
     if (failedCount > 0) {
         pfree_ext(connectionStrs);
         pfree_ext(nodeCons);
         info->conndef->pgConn = NULL;
         info->conndef->pgConnCnt = 0;
+        info->conndef->waitCreateCount = 0;
         return failedCount;
     }
-    
+
     int no_error = 0;
     WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_UNDEFINED, true);
 
@@ -2018,11 +2021,11 @@ int create_connections_parallel(
         PQconnectdbParallel(connectionStrs, waitCreateCount, nodeCons, waitCreateNode);
     }
     (void)pgstat_report_waitstatus(oldStatus);
-    
+
     for (j = 0; j < waitCreateCount; j++) {
         node = needCreateNodeArray[indexMap[j]].nodeIndex;
         nodeid = needCreateNodeArray[indexMap[j]].nodeList[loopIndex];
-        
+
         if (nodeCons[j] && (CONNECTION_OK == nodeCons[j]->status)) {
             PGXCNodePoolSlot *slot = NULL;
             LWLockAcquire(PoolerLock, LW_SHARED);
@@ -2099,6 +2102,7 @@ int create_connections_parallel(
     pfree_ext(nodeCons);
     info->conndef->pgConn = NULL;
     info->conndef->pgConnCnt = 0;
+    info->conndef->waitCreateCount = 0;
     pfree_ext(waitCreateNode);
     pfree_ext(indexMap);
     return failedCount;
@@ -2350,7 +2354,7 @@ int agent_send_connection_params(PoolGeneralInfo* info, int node, bool is_noexce
      * @Temp Table. When we are acquiring new connection, just like session params,
      * we should set myTempNamespace in new connection, to let temp object's
      * operation be right. We use "set search_path to pg_temp_XXX" to tell new
-     * connected DN postgres set proper temp namespace. see set_config_option
+     * connected DN openGauss set proper temp namespace. see set_config_option
      * in guc.cpp.
      */
     if (info->node_type == POOL_NODE_DN && (info->temp_namespace != NULL)) {
@@ -4567,22 +4571,33 @@ ThreadId* abort_pids(int* len, ThreadId pid, const char* database, const char* u
 
     /* find all Pooler agents except this one */
     for (count = 0; count < agentCount; count++) {
-        if (poolAgents[count]->pid == pid)
+        AutoMutexLock agentLock(&poolAgents[count]->lock);
+        agentLock.lock();
+        if (poolAgents[count]->pid == pid) {
+            agentLock.unLock();
             continue;
+        }
 
-        if ((database != NULL) && strcmp(poolAgents[count]->pool->database, database) != 0)
+        if ((database != NULL) && strcmp(poolAgents[count]->pool->database, database) != 0) {
+            agentLock.unLock();
             continue;
+        }
 
         if (ENABLE_STATELESS_REUSE) {
-            if ((user_name != NULL) && strcmp(poolAgents[count]->user_name, user_name) != 0)
+            if ((user_name != NULL) && strcmp(poolAgents[count]->user_name, user_name) != 0) {
+                agentLock.unLock();
                 continue;
+            }
         } else {
-            if ((user_name != NULL) && strcmp(poolAgents[count]->pool->user_name, user_name) != 0)
+            if ((user_name != NULL) && strcmp(poolAgents[count]->pool->user_name, user_name) != 0) {
+                agentLock.unLock();
                 continue;
+            }
         }
 
         (*isthreadpool)[i] = poolAgents[count]->is_thread_pool_session;
         pids[i++] = poolAgents[count]->pid;
+        agentLock.unLock();
     }
 
     LWLockRelease(PoolerLock);

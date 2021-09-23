@@ -32,6 +32,8 @@
 #include "catalog/gs_masking_policy_actions.h"
 #include "catalog/gs_masking_policy_filters.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_language.h"
 #include "commands/user.h"
 #include "storage/lock/lock.h"
 #include "storage/spin.h"
@@ -41,8 +43,11 @@
 #include "commands/dbcommands.h"
 #include "gs_policy_labels.h"
 #include "gs_policy_plugin.h"
-#include "pgaudit.h"
 #include "gs_mask_policy.h"
+#include "gs_policy/gs_policy_masking.h"
+#include "parser/parse_node.h"
+#include "pgaudit.h"
+#include "tcop/tcopprot.h"
 
 #define CMP_STR(a, b)        \
 int res = strcasecmp(a, b);  \
@@ -137,25 +142,133 @@ static MaskingFuncsInfo masking_funcs_infos[] =
     { "alldigitsmasking", M_ALLDIGITS },
     { "shufflemasking", M_SHUFFLE },
     { "randommasking", M_RANDOM },
+    { "regexpmasking", M_REGEXP },
     { NULL, M_UNKNOWN }
 };
 
-static bool get_function_behavious(const char *func_name, int *masking_behavious)
+/* verify if language is supported */
+static bool is_valid_language(Oid lang_oid)
+{
+    HeapTuple lang_tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(lang_oid));
+    if (!HeapTupleIsValid(lang_tuple)) {
+        return false;
+    }
+    Form_pg_language pg_language_tuple = (Form_pg_language)GETSTRUCT(lang_tuple);
+    const char* lang_name = NameStr(pg_language_tuple->lanname);
+    if (lang_name == NULL) {
+        ReleaseSysCache(lang_tuple);
+        return false;
+    }
+    if (strcasecmp(lang_name, "sql") == 0 || strcasecmp(lang_name, "plpgsql") == 0) {
+        /* supported language */
+        ReleaseSysCache(lang_tuple);
+        return true;
+    }
+    ReleaseSysCache(lang_tuple);
+    return false;
+}
+
+/* validate function.
+ *
+ * function exists.
+ * function's language.
+ * validate function's params.
+ */
+static bool is_valid_for_masking(const char* func_name, Oid funcnsp, int& funcid,
+    const char* func_parameters, bool* invalid_params)
+{
+    CatCList   *catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
+    bool is_found = false;
+    if (catlist != NULL) {
+        func_params f_params;
+        if (func_parameters != NULL && strlen(func_parameters) > 0) {
+            parse_params(func_parameters, &f_params);
+        }
+        bool is_valid = true;
+        /* try to find function on pg_proc */
+        for (int i = 0; i < catlist->n_members && is_valid; ++i) {
+            HeapTuple	proctup = &catlist->members[i]->tuple;
+            Form_pg_proc procform = (Form_pg_proc) GETSTRUCT(proctup);
+            /* verify namespace */
+            if (procform->pronamespace != funcnsp) {
+                continue;
+            }
+            /* verify owner is policy admin */
+            if (procform->pronamespace == funcnsp && isPolicyadmin(procform->proowner)) {
+                is_found = true;
+            } else {
+                continue;
+            }
+            /* verify function language */
+            is_valid = is_valid_language(procform->prolang);
+            bool isNull = false;
+            Datum tmp = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prosrc, &isNull);
+            const char* procdescr = TextDatumGetCString(tmp);
+            if (is_valid && procdescr && strlen(procdescr) > 0) {
+                List* raw_parsetree_list = pg_parse_query(procdescr);
+                ListCell* lc = NULL;
+                ParseState *pstate = make_parsestate(NULL);
+                pstate->p_sourcetext = procdescr;
+                foreach(lc, raw_parsetree_list) {
+                    Node *parsetree = (Node *)lfirst(lc);
+                    is_valid &= IsA(parsetree, DoStmt);
+                }
+                free_parsestate(pstate);
+                pfree_ext(procdescr);
+            }
+            if (is_valid) {
+                func_types types;
+                int default_params = 0;
+                get_function_parameters(proctup, &types, &default_params);
+                /* verify parameter size and type */
+                if ((f_params.size() + default_params + 1) >= types.size() && verify_proc_params(&f_params, &types)) {
+                    funcid = HeapTupleGetOid(proctup);
+                    ReleaseSysCacheList(catlist);
+                    return true;
+                } else if (invalid_params) {
+                    *invalid_params = true;
+                }
+            }
+        }
+        if (!is_found) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmodule(MOD_UDF),
+                errmsg("Don't find function which can be used by masking"),
+                    errdetail("function should be created by poladmin or function is not found")));
+        }
+        ReleaseSysCacheList(catlist);
+        return is_valid && (funcid > 0);
+    }
+    return false;
+}
+
+static bool get_function_behavious(const char *func_name, Oid funcnsp, int *masking_behavious,
+    const char* func_parameters, bool* invalid_params = NULL, bool is_audit = false)
 {
     (*masking_behavious) = M_UNKNOWN;
-    for (int i = 0; masking_funcs_infos[i].func != NULL; ++i) {
+    /* verify predefine function */
+    for (int i = 0; funcnsp == PG_CATALOG_NAMESPACE && masking_funcs_infos[i].func != NULL; ++i) {
         if (strcmp(masking_funcs_infos[i].func, func_name) == 0) {
             (*masking_behavious) = masking_funcs_infos[i].type;
             return true;
         }
     }
-    return false;
+    /* it looks like UDF, verify it */
+    return is_audit ? false : is_valid_for_masking(func_name, funcnsp, *masking_behavious,
+        func_parameters, invalid_params);
 }
 
-bool validate_function_name(const char *func_name)
+/* is_audit is used to identify whether the call is from audit */
+bool validate_function_name(const char *func_name, const char* func_parameters, bool* invalid_params, bool is_audit)
 {
+    bool ret = false;
     int masking_behavious_dummy = M_UNKNOWN;
-    return get_function_behavious(func_name, &masking_behavious_dummy);
+    char *parsed_funcname = NULL;
+    Oid funcnsp = InvalidOid;
+    parse_function_name(func_name, &parsed_funcname, funcnsp);
+    ret =  get_function_behavious(parsed_funcname, funcnsp, &masking_behavious_dummy, 
+                                  func_parameters, invalid_params, is_audit);
+    pfree(parsed_funcname);
+    return ret;
 }
 
 bool load_masking_policies(bool reload)
@@ -216,7 +329,7 @@ gs_policy_set* get_masking_policies(const char *dbname)
     return loaded_policies;
 }
 
-static void parse_params(const gs_stl::gs_string arg, gs_stl::gs_vector<gs_stl::gs_string> *params)
+void parse_params(const gs_stl::gs_string& arg, gs_stl::gs_vector<gs_stl::gs_string> *params)
 {
     params->clear();
     if (arg.empty()) {
@@ -274,7 +387,11 @@ bool load_masking_actions(bool reload)
             continue;
         }
         GsMaskingAction item;
-        get_function_behavious(rel_data->actiontype.data, &item.m_func_id);
+        char *parsed_funcname = NULL;
+        Oid funcnsp = InvalidOid;
+        parse_function_name(rel_data->actiontype.data, &parsed_funcname, funcnsp);
+        get_function_behavious(parsed_funcname, funcnsp, &item.m_func_id, rel_data->actparams.data);
+        pfree(parsed_funcname);
         item.m_label_name = rel_data->actlabelname.data;
         item.m_modify_date = rel_data->actmodifydate;
         item.m_policy_id = rel_data->policyoid;
@@ -663,7 +780,7 @@ bool check_masking_policy_actions_for_label(const policy_labels_map *labels_to_d
  * validate function is part of predefined masking function
  * dont allow drop/replace/alter/rename/owner to/set schema
  */
-void validate_masking_function_name(List* full_funcname)
+void validate_masking_function_name(const List* full_funcname, bool is_audit)
 {
     /* Ignore checking when upgrade */
     if (u_sess->attr.attr_common.IsInplaceUpgrade) {
@@ -674,7 +791,8 @@ void validate_masking_function_name(List* full_funcname)
     errno_t rc = EOK;
     DeconstructQualifiedName(full_funcname, &nspname, &funcname);
 
-    if ((nspname == NULL || (nspname != NULL && !strcmp(nspname, "pg_catalog"))) && validate_function_name(funcname)) {
+    if ((nspname == NULL || (nspname != NULL && !strcmp(nspname, "pg_catalog"))) &&
+        validate_function_name(funcname, "", NULL, is_audit)) {
         char buff[BUFFSIZE] = {0};
         rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
                         "function: %s is part of predefined masking functions.", funcname);

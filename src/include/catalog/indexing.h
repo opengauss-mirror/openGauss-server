@@ -221,6 +221,12 @@ DECLARE_UNIQUE_INDEX(pg_rewrite_oid_index, 2692, on pg_rewrite using btree(oid o
 DECLARE_UNIQUE_INDEX(pg_rewrite_rel_rulename_index, 2693, on pg_rewrite using btree(ev_class oid_ops, rulename name_ops));
 #define RewriteRelRulenameIndexId  2693
 
+DECLARE_UNIQUE_INDEX(gs_package_oid_index, 9993, on gs_package using btree(oid oid_ops));
+#define PackageOidIndexId  9993
+
+DECLARE_UNIQUE_INDEX(gs_package_name_index, 9736, on gs_package using btree(pkgname name_ops, pkgnamespace oid_ops));
+#define PackageNameIndexId  9736
+
 /* This following index is not used for a cache and is not unique */
 DECLARE_INDEX(pg_shdepend_depender_index, 1232, on pg_shdepend using btree(dbid oid_ops, classid oid_ops, objid oid_ops, objsubid int4_ops));
 #define SharedDependDependerIndexId		1232
@@ -383,12 +389,16 @@ DECLARE_INDEX(pg_partition_indextblid_index,3474, on pg_partition using btree(in
 #define PartitionIndexTableIdIndexId 3474
 DECLARE_UNIQUE_INDEX(pg_partition_partoid_index, 3479, on pg_partition using btree(relname name_ops, parttype char_ops, parentid oid_ops));
 #define PartitionPartOidIndexId  3479
+/* Add index of indextable and parent oid for pg_partition */
+DECLARE_UNIQUE_INDEX(pg_partition_indextblid_parentoid_reloid_index, 9996, on pg_partition using btree(indextblid oid_ops, parentid oid_ops, oid oid_ops));
+#define PartitionIndexTableIdParentOidIndexId  9996
+
 
 /* Add index of table oid for pg_hashbucket */
-DECLARE_UNIQUE_INDEX(pg_hashbucket_oid_index, 3490, on pg_hashbucket using btree(oid oid_ops));
-#define HashBucketOidIndexId  3490
-DECLARE_INDEX(pg_hashbucket_bid_index,3491, on pg_hashbucket using btree(bucketid oid_ops, bucketcnt int4_ops));
-#define HashBucketBidIndexId 3491
+DECLARE_UNIQUE_INDEX(pg_hashbucket_oid_index, 3492, on pg_hashbucket using btree(oid oid_ops));
+#define HashBucketOidIndexId  3492
+DECLARE_INDEX(pg_hashbucket_bid_index,3493, on pg_hashbucket using btree(bucketid oid_ops, bucketcnt int4_ops, bucketmapsize int4_ops));
+#define HashBucketBidIndexId 3493
 
 /* Add index of table oid for pg_job, pg_job_proc */
 DECLARE_UNIQUE_INDEX(pg_job_oid_index, 3453, on pg_job using btree(oid oid_ops));
@@ -408,6 +418,12 @@ DECLARE_UNIQUE_INDEX(pg_directory_oid_index, 4349, on pg_directory using btree(o
 #define PgDirectoryOidIndexId 4349
 DECLARE_UNIQUE_INDEX(pg_directory_name_index, 4350, on pg_directory using btree(dirname name_ops));
 #define PgDirectoryDirectoriesNameIndexId 4350
+
+/* Add index of table oid for gs_global_chain */
+DECLARE_UNIQUE_INDEX(gs_global_chain_oid_index, 5510, on gs_global_chain using btree(oid oid_ops));
+#define GsGlobalChainOidIndexId  5510
+DECLARE_INDEX(gs_global_chain_relid_index, 5511, on gs_global_chain using btree(relid oid_ops));
+#define GsGlobalChainRelidIndexId 5511
 
 /* Add index of table oid for gs_policy_label */
 DECLARE_UNIQUE_INDEX(gs_policy_label_oid_index, 9501, on gs_policy_label using btree(oid oid_ops));
@@ -536,12 +552,40 @@ DECLARE_UNIQUE_INDEX(gs_client_global_keys_args_oid_index, 9731, on gs_client_gl
 /* Add index of table oid for gs_sec_column_encrption_keys_args */
 DECLARE_UNIQUE_INDEX(gs_column_keys_args_oid_index, 9741, on gs_column_keys_args using btree(oid oid_ops));
 #define ClientLogicColumnSettingsArgsOidIndexId  9741
+
+/* Add index of table oid for gs_encrypted_proc */
+DECLARE_UNIQUE_INDEX(gs_encrypted_proc_oid, 9751, on gs_encrypted_proc using btree(oid oid_ops));
+#define GsClProcOid  9751
+DECLARE_UNIQUE_INDEX(gs_encrypted_proc_func_id_index, 9752, on gs_encrypted_proc using btree(func_id oid_ops));
+#define GsClProcFuncIdIndexId  9752
+
 /* Add index for matview catalog*/
 DECLARE_UNIQUE_INDEX(gs_matview_oid_index, 9991, on gs_matview using btree(oid oid_ops));
 #define GsMatviewOidIndexId 9991
 DECLARE_UNIQUE_INDEX(gs_matviewdep_oid_index, 9992, on gs_matview_dependency using btree(oid oid_ops));
 #define GsMatviewDepOidIndexId 9992
 
+/* Add indexes for pg_recyclebin */
+DECLARE_UNIQUE_INDEX(gs_recyclebin_id_index, 8647, on gs_recyclebin using btree(oid oid_ops));
+#define RecyclebinIdIndexId  8647
+DECLARE_INDEX(gs_recyclebin_baseid_index, 8648, on gs_recyclebin using btree(rcybaseid oid_ops));
+#define RecyclebinBaseidIndexId  8648
+DECLARE_INDEX(gs_recyclebin_name_index, 8649, on gs_recyclebin using btree(rcyname name_ops));
+#define RecyclebinNameIndexId  8649
+DECLARE_INDEX(gs_recyclebin_dbid_nsp_oriname_index, 8650, on gs_recyclebin using btree(rcynamespace oid_ops, rcydbid oid_ops, rcyoriginname name_ops, rcyrecyclecsn int8_ops));
+#define RecyclebinDbidNspOrinameIndexId  8650
+DECLARE_INDEX(gs_recyclebin_dbid_spcid_rcycsn_index, 8651, on gs_recyclebin using btree(rcytablespace oid_ops, rcydbid oid_ops, rcyrecyclecsn int8_ops));
+#define RecyclebinDbidSpcidRcycsnIndexId  8651
+DECLARE_INDEX(gs_recyclebin_dbid_relid_index, 8652, on gs_recyclebin using btree(rcydbid oid_ops, rcyrelid oid_ops));
+#define RecyclebinDbidRelidIndexId  8652
+
+/* Add indexes for pg_snapshot */
+DECLARE_INDEX(gs_txn_snapshot_time_csn_index, 8653, on gs_txn_snapshot using btree(snptime timestamptz_ops desc, snpcsn int8_ops asc));
+#define SnapshotTimeCsnIndexId  8653
+DECLARE_INDEX(gs_txn_snapshot_csn_xmin_index, 8654, on gs_txn_snapshot using btree(snpcsn int8_ops desc, snpxmin int8_ops asc));
+#define SnapshotCsnXminIndexId  8654
+DECLARE_INDEX(gs_txn_snapshot_xmin_index, 8655, on gs_txn_snapshot using btree(snpxmin int8_ops));
+#define SnapshotXminIndexId  8655
 
 /* Add index of table model name for gs_opt_model */
 DECLARE_UNIQUE_INDEX(gs_opt_model_name_index, 9997, on gs_opt_model using btree(model_name name_ops));

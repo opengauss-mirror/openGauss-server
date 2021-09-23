@@ -34,6 +34,8 @@
 #include "catalog/pg_resource_pool.h"
 #include "catalog/pg_authid.h"
 #include "utils/snapmgr.h"
+#include "postmaster/snapcapturer.h"
+#include "postmaster/rbcleaner.h"
 
 const int RESOURCE_POOL_HASH_SIZE = 32;
 
@@ -55,7 +57,8 @@ static bool IsBackgroundXact()
 {
     if (IsJobSchedulerProcess() || t_thrd.role == WLM_WORKER || t_thrd.role == WLM_MONITOR ||
         !OidIsValid(u_sess->wlm_cxt->wlm_params.rpdata.rpoid) || t_thrd.role == AUTOVACUUM_WORKER ||
-        t_thrd.role == WLM_ARBITER || IsJobSnapshotProcess() ||
+        t_thrd.role == WLM_ARBITER || IsJobSnapshotProcess() || 
+        (IsTxnSnapCapturerProcess() || IsTxnSnapWorkerProcess() || IsRbCleanerProcess() || IsRbWorkerProcess()) ||
         strncmp(u_sess->attr.attr_common.application_name, "gs_clean", strlen("gs_clean")) == 0) {
         return true;
     }
@@ -260,7 +263,8 @@ static void InitInstrWorkloadTransactionUser(void)
 
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction", MEMORY_CONTEXT_CBB);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForWorkloadTransaction",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
 
     Relation relation = heap_open(AuthIdRelationId, AccessShareLock);
     SysScanDesc scan = systable_beginscan(relation, InvalidOid, false, NULL, 0, NULL);

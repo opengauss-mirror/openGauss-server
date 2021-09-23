@@ -2,7 +2,7 @@
 \! rm -rf @abs_bindir@/..//hotpatch/pat/* > /dev/null 2>&1
 --no patch file ,load failed
 \! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/datanode1 -a load -n @abs_bindir@/..//hotpatch/pat/GAUSSDBV500R001C10KERNELHP0001.pat
-\! $CODE_BASE/src/distribute/lib/hotpatch/tool/fastcheck/patch_tool_llt.sh @abs_bindir@/..//hotpatch/pat/ > /dev/null 2>&1
+\! sh $SERVER_CODE_BASE/distribute/lib/hotpatch/tool/fastcheck/patch_tool_llt.sh @abs_bindir@/..//hotpatch/pat/ > /dev/null 2>&1
 --generate patch file, load succeed
 \! @abs_bindir@/gs_ctl hotpatch -D @abs_srcdir@/tmp_check/datanode1 -a load -n @abs_bindir@/..//hotpatch/pat/GAUSSDBV500R001C10KERNELHP0001.pat
 --info, should show info, status is deactive

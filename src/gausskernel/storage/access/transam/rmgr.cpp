@@ -31,10 +31,13 @@
 #include "access/hash.h"
 #include "access/hash_xlog.h"
 #include "access/heapam.h"
+#include "access/ustore/knl_uredo.h"
 #include "access/multixact.h"
 #include "access/nbtree.h"
+#include "access/ubtree.h"
 #include "access/spgist.h"
 #include "access/xact.h"
+#include "access/ustore/undo/knl_uundoxlog.h"
 #include "access/xlog_internal.h"
 #include "catalog/storage_xlog.h"
 #include "commands/dbcommands.h"
@@ -50,9 +53,11 @@
 #include "storage/mot/mot_xlog.h"
 #endif
 
+#include "access/ustore/knl_uredo.h"
+
 /* must be kept in sync with RmgrData definition in xlog_internal.h */
-#define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint) \
-    { name, redo, desc, startup, cleanup, safe_restartpoint },
+#define PG_RMGR(symname, name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc) \
+        {name, redo, desc, startup, cleanup, safe_restartpoint, undo, undo_desc},
 
 const RmgrData RmgrTable[RM_MAX_ID + 1] = {
 #include "access/rmgrlist.h"

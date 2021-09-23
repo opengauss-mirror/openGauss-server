@@ -25,7 +25,10 @@
 #ifndef _PAGEWRITER_H
 #define _PAGEWRITER_H
 #include "storage/buf/buf.h"
+#include "storage/lock/lwlock.h"
 #include "catalog/pg_control.h"
+
+#define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
 
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
@@ -34,7 +37,7 @@ typedef struct ThrdDwCxt {
     char* dw_buf;
     uint16 write_pos;
     volatile int dw_page_idx;      /* -1 means data files have been flushed. */
-    bool contain_hashbucket;
+    bool is_new_relfilenode;
 } ThrdDwCxt;
 
 typedef struct PageWriterProc {

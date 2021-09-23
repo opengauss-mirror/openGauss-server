@@ -225,7 +225,7 @@ typedef SpGistInnerTupleData* SpGistInnerTuple;
 /*
  * SPGiST node tuple: one node within an inner tuple
  *
- * Node tuples use the same header as ordinary Postgres IndexTuples, but
+ * Node tuples use the same header as ordinary openGauss IndexTuples, but
  * we do not use a null bitmap, because we know there is only one column
  * so the INDEX_NULL_MASK bit suffices.  Also, pass-by-value datums are
  * stored as a full Datum, the same convention as for inner tuple prefixes

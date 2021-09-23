@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * elog.h
- *	  POSTGRES error reporting/logging definitions.
+ *	  openGauss error reporting/logging definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -206,6 +206,16 @@ extern int errhint(const char* fmt, ...)
        the supplied arguments. */
     __attribute__((format(PG_PRINTF_ATTRIBUTE, 1, 2)));
 
+extern int errcause(const char* fmt, ...)
+    /* This extension allows gcc to check the format string for consistency with
+ *        the supplied arguments. */
+    __attribute__((format(printf, 1, 2)));
+
+extern int erraction(const char* fmt, ...)
+    /* This extension allows gcc to check the format string for consistency with
+ *  *        the supplied arguments. */
+    __attribute__((format(printf, 1, 2)));
+
 extern int errquery(const char* fmt, ...)
     /* This extension allows gcc to check the format string for consistency with
        the supplied arguments. */
@@ -224,7 +234,7 @@ extern int errposition(int cursorpos);
 
 extern int internalerrposition(int cursorpos);
 extern int internalerrquery(const char* query);
-
+extern int ErrOutToClient(bool outToClient);
 extern int geterrcode(void);
 extern int geterrposition(void);
 extern int getinternalerrposition(void);
@@ -478,6 +488,8 @@ typedef struct ErrorData {
     int internalerrcode;   /* mppdb internal encoded */
     bool verbose;          /* the flag to indicate VACUUM FULL VERBOSE/ANALYZE VERBOSE message */
     bool ignore_interrupt; /* true to ignore interrupt when writing server log */
+    char* cause;
+    char* action;
 } ErrorData;
 
 /* The error data from remote */
@@ -490,6 +502,7 @@ typedef struct RemoteErrorData {
 } RemoteErrorData;
 
 extern int combiner_errdata(RemoteErrorData* pErrData);
+extern char *Geterrmsg(void);
 extern void EmitErrorReport(void);
 extern void stream_send_message_to_server_log(void);
 extern void stream_send_message_to_consumer(void);
@@ -500,6 +513,7 @@ extern void FlushErrorState(void);
 extern void FlushErrorStateWithoutDeleteChildrenContext(void);
 extern void ReThrowError(ErrorData* edata) __attribute__((noreturn));
 extern void pg_re_throw(void) __attribute__((noreturn));
+extern void PgRethrowAsFatal(void);
 
 /* GUC-configurable parameters */
 

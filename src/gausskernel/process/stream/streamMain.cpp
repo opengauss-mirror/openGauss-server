@@ -28,7 +28,7 @@
 #include "access/printtup.h"
 #include "distributelayer/streamMain.h"
 #include "distributelayer/streamProducer.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "executor/executor.h"
 #include "knl/knl_variable.h"
 #include "libpq/libpq.h"
@@ -86,7 +86,8 @@ int StreamMain()
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
-        t_thrd.int_cxt.ignoreBackendSignal = false;
+        /* reset signal block flag for threadpool worker */
+        ResetInterruptCxt();
         if (g_threadPoolControler) {
             g_threadPoolControler->GetSessionCtrl()->releaseLockIfNecessary();
         }
@@ -106,9 +107,7 @@ int StreamMain()
     
     MemoryContext oldMemory = MemoryContextSwitchTo(
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
-#ifdef ENABLE_LLVM_COMPILE
     CodeGenThreadInitialize();
-#endif
     (void)MemoryContextSwitchTo(oldMemory);
     
     /* We can now handle ereport(ERROR) */
@@ -199,7 +198,7 @@ static void InitStreamPath()
     /* Compute paths, if we didn't inherit them from postmaster */
     if (my_exec_path[0] == '\0') {
         if (find_my_exec("postgres", my_exec_path) < 0)
-            ereport(FATAL, (errmsg("postgres: could not locate my own executable path")));
+            ereport(FATAL, (errmsg("openGauss: could not locate my own executable path")));
     }
 
     if (t_thrd.proc_cxt.pkglib_path[0] == '\0')
@@ -240,7 +239,8 @@ static void InitStreamResource()
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
 
-    t_thrd.utils_cxt.TopResourceOwner = ResourceOwnerCreate(NULL, "stream thread", MEMORY_CONTEXT_EXECUTOR);
+    t_thrd.utils_cxt.TopResourceOwner = ResourceOwnerCreate(NULL, "stream thread",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
     t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopResourceOwner;
 
     if (t_thrd.mem_cxt.postmaster_mem_cxt) {
@@ -571,6 +571,9 @@ void ResetStreamEnv()
     u_sess->stream_cxt.in_waiting_quit = false;
     u_sess->stream_cxt.enter_sync_point = false;
     t_thrd.pgxc_cxt.GlobalNetInstr = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    u_sess->opt_cxt.query_dop = u_sess->attr.attr_sql.query_dop_tmp;
+#endif
 
     /*
      * When gaussdb backend running in Query or Operator level, we are going to use global

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hash.h
- *	  header file for postgres hash access method implementation
+ *	  header file for openGauss hash access method implementation
  *
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
@@ -415,6 +415,7 @@ extern Datum compute_hash(Oid type, Datum value, char locator);
 extern uint32 hashValueCombination(uint32 hashValue, Oid colType, Datum val, bool allIsNull, char locatorType = 'H');
 extern char* get_compute_hash_function(Oid type, char locator);
 extern Datum getbucket(PG_FUNCTION_ARGS);
+extern Datum getbucketbycnt(PG_FUNCTION_ARGS);
 extern ScalarVector* vgetbucket(PG_FUNCTION_ARGS);
 extern ScalarVector* vtable_data_skewness(PG_FUNCTION_ARGS);
 // template function implementation
@@ -434,6 +435,6 @@ typedef struct MultiHashKey
 /* compute the hash value of mulitily keys */
 extern uint32 hash_multikey(MultiHashKey* mkeys);
 
-#define GetBucketID(hashval)  (compute_modulo(abs((int)hashval), BUCKETDATALEN))
+#define GetBucketID(hashval, hashmapsize)  (compute_modulo(abs((int)hashval), hashmapsize))
 
 #endif   /* HASH_H */

@@ -29,7 +29,9 @@
 #include "catalog/pg_proc.h"
 #include "db4ai/predict_by.h"
 #include "access/transam.h"
+#include "storage/smgr/segment.h"
 #include "utils/fmgroids.h"
+
 #include "../utils/pg_builtin_proc.h"
 
 static_assert(sizeof(true) == sizeof(char), "illegal bool size");
@@ -46,29 +48,23 @@ static_assert(sizeof(false) == sizeof(char), "illegal bool size");
     };
 #endif
 
+static struct HTAB* nameHash = NULL;
+static struct HTAB* oidHash = NULL;
+
 const int g_nfuncgroups = sizeof(g_func_groups) / sizeof(FuncGroup);
 
-/* Search the built-in function by name, and return the group id of the matched functions */
-const FuncGroup* SearchBuiltinFuncByName(const char* funcname)
-{
-    int mid, cmp;
-    int low = 0;
-    int high = g_nfuncgroups - 1;
+static const int MAX_PROC_NAME_LEN = NAMEDATALEN;
 
-    while (low <= high) {
-        mid = (low + high) / 2;
-        cmp = pg_strcasecmp(funcname, g_func_groups[mid].funcName);
-        if (cmp == 0) {
-            return &g_func_groups[mid];
-        } else if (cmp < 0) {
-            high = mid - 1;
-        } else {
-            low = mid + 1;
-        }
-    }
-    // if not found the function
-    return NULL;
-}
+typedef struct HashEntryNameToFuncGroup {
+    char name[MAX_PROC_NAME_LEN];
+    const FuncGroup* group;
+} HashEntryNameToFuncGroup;
+
+
+typedef struct HashEntryOidToBuiltinFunc {
+    Oid oid;
+    const Builtin_func* func;
+} HashEntryOidToBuiltinFunc;
 
 static int cmp_func_by_oid(const void* a, const void* b)
 {
@@ -78,29 +74,104 @@ static int cmp_func_by_oid(const void* a, const void* b)
     return (int)fa->foid - (int)fb->foid;
 }
 
-int FuncGroupCmp(const void* a, const void* b)
+static int FuncGroupCmp(const void* a, const void* b)
 {
     return pg_strcasecmp(((FuncGroup*)a)->funcName, ((FuncGroup*)b)->funcName);
 }
 
-void SortBuiltinFuncGroups(FuncGroup* funcGroups)
+static void SortBuiltinFuncGroups(FuncGroup* funcGroups)
 {
     qsort(funcGroups, g_nfuncgroups, sizeof(FuncGroup), FuncGroupCmp);
 }
 
 const Builtin_func* g_sorted_funcs[nBuiltinFuncs];
 
+static void InitHashTable(int size)
+{
+    HASHCTL info = {0};
+    info.keysize = MAX_PROC_NAME_LEN;
+    info.entrysize = sizeof(HashEntryNameToFuncGroup);
+    info.hash = string_hash;
+    info.hcxt = g_instance.builtin_proc_context;
+    nameHash = hash_create("builtin proc name Lookup Table", size, &info,
+                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    info.keysize = sizeof(Oid);
+    info.entrysize = sizeof(HashEntryOidToBuiltinFunc);
+    info.hash = oid_hash;
+    info.hcxt = g_instance.builtin_proc_context;
+    oidHash = hash_create("builtin proc Oid Lookup Table", size, &info,
+                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+static const FuncGroup* NameHashTableAccess(HASHACTION action, const char* name, const FuncGroup* group)
+{
+    char temp_name[MAX_PROC_NAME_LEN] = {0};
+    int rc = strncpy_s((char*)temp_name, MAX_PROC_NAME_LEN, name, strlen(name));
+    securec_check(rc, "\0", "\0");
+    HashEntryNameToFuncGroup *result = NULL;
+    bool found = false;
+
+    Assert(name != NULL);
+
+    result = (HashEntryNameToFuncGroup *)hash_search(nameHash, &temp_name, action, &found);
+    if (action == HASH_ENTER) {
+        Assert(!found);
+        result->group = group;
+        return group;
+    }
+    else if (action == HASH_FIND) {
+        if (found)
+            return result->group;
+        else
+            return NULL;
+    } else
+        return NULL;
+}
+
+
+static const Builtin_func* OidHashTableAccess(HASHACTION action, Oid oid, const Builtin_func* func)
+{
+    HashEntryOidToBuiltinFunc *result = NULL;
+    bool found = false;
+    Assert(oid > 0);
+
+    result = (HashEntryOidToBuiltinFunc *)hash_search(oidHash, &oid, action, &found);
+    if (action == HASH_ENTER) {
+        Assert(!found);
+        result->func = func;
+        return func;
+    }
+    else if (action == HASH_FIND) {
+        if (found)
+            return result->func;
+        else
+            return NULL;
+    } else
+        return NULL;
+}
+
+
+static void CheckNameLength(const char* name)
+{
+    if (strlen(name) > MAX_PROC_NAME_LEN) {
+        ereport(PANIC,
+            (errmsg("the built-in function name length exceed the limit of %d", MAX_PROC_NAME_LEN)));
+    }
+}
+
 void initBuiltinFuncs()
 {
+    InitHashTable(g_nfuncgroups);
     SortBuiltinFuncGroups(g_func_groups);
-
     int nfunc = 0;
     for (int i = 0; i < g_nfuncgroups; i++) {
         const FuncGroup* fg = &g_func_groups[i];
-
-        Assert(nfunc + fg->fnums <= nBuiltinFuncs);
+        CheckNameLength(fg->funcName);
+        NameHashTableAccess(HASH_ENTER, fg->funcName, fg);
 
         for (int j = 0; j < fg->fnums; j++) {
+            CheckNameLength(fg->funcs[j].funcName);
+            OidHashTableAccess(HASH_ENTER, fg->funcs[j].foid, &fg->funcs[j]);
             g_sorted_funcs[nfunc++] = &fg->funcs[j];
         }
     }
@@ -110,30 +181,23 @@ void initBuiltinFuncs()
             (errmsg("initialize the built-in function failed: %s",
                 "the number of functions in is mismatch with the declaration")));
     }
-
     qsort(g_sorted_funcs, nBuiltinFuncs, sizeof(g_sorted_funcs[0]), cmp_func_by_oid);
 }
 
-const Builtin_func* SearchBuiltinFuncByOid(Oid id)
+const FuncGroup* SearchBuiltinFuncByName(const char* funcname)
 {
-    /* Roughly check  */
-    if (!IsSystemObjOid(id)) {
+    if (funcname == NULL){
         return NULL;
     }
 
-    int low = 0;
-    int high = nBuiltinFuncs - 1;
+    return NameHashTableAccess(HASH_FIND, funcname, NULL);
+}
 
-    while (low <= high) {
-        int mid = (low + high) / 2;
-        if (id == g_sorted_funcs[mid]->foid) {
-            return g_sorted_funcs[mid];
-        } else if (id < g_sorted_funcs[mid]->foid) {
-            high = mid - 1;
-        } else {
-            low = mid + 1;
-        }
+const Builtin_func* SearchBuiltinFuncByOid(Oid oid)
+{
+    if (!IsSystemObjOid(oid)){
+        return NULL;
     }
-    // if not found the function
-    return NULL;
+
+    return OidHashTableAccess(HASH_FIND, oid, NULL);
 }

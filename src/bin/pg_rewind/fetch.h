@@ -5,7 +5,7 @@
  *
  * This file includes the prototypes for functions used to copy files from
  * one data directory to another. The source to copy from can be a local
- * directory (copy method), or a remote PostgreSQL server (libpq fetch
+ * directory (copy method), or a remote openGauss server (libpq fetch
  * method).
  *
  * Copyright (c) 2013-2015, PostgreSQL Global Development Group
@@ -38,7 +38,7 @@ extern BuildErrorCode libpqConnect(const char* connstr);
 extern bool checkDummyStandbyConnection(void);
 extern void libpqDisconnect(void);
 extern BuildErrorCode libpqGetParameters(void);
-extern XLogRecPtr libpqGetCurrentXlogFlushLocation(void);
+extern XLogRecPtr libpqGetCurrentXlogInsertLocation(void);
 
 extern void libpqRequestCheckpoint(void);
 

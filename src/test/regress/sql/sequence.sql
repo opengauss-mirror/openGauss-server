@@ -96,7 +96,6 @@ SELECT * FROM serialTest ORDER BY f1, f2;
 --
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
---SET enforce_two_phase_commit TO off;
 
 --CREATE TEMP SEQUENCE myseq2;
 --CREATE TEMP SEQUENCE myseq3;

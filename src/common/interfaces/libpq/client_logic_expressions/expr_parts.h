@@ -35,6 +35,7 @@ typedef struct ExprParts {
           operators(NULL),
           aconst(NULL),
           param_ref(NULL),
+          cl_column_oid(0),
           is_empty_repeat(false)
     {}
 
@@ -45,6 +46,7 @@ typedef struct ExprParts {
     const List *operators;
     const A_Const *aconst;
     const ParamRef *param_ref;
+    Oid cl_column_oid;
     bool is_empty_repeat;
 } ExprParts;
 

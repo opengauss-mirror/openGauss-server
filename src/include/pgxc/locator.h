@@ -121,6 +121,7 @@ typedef struct {
      * area is allocated to hold the bucketmap content, just do pointer-assignment.
      */
     uint2* buckets_ptr; /* pointer to local bucket-node mapping */
+    int    buckets_cnt; /* bucket-node mapping elements count */
 } RelationLocInfo;
 
 #define IsRelationReplicated(rel_loc) IsLocatorReplicated((rel_loc)->locatorType)
@@ -205,6 +206,7 @@ typedef struct {
 #define IsExecNodesReplicated(en) IsLocatorReplicated((en)->baselocatortype)
 #define IsExecNodesColumnDistributed(en) IsLocatorColumnDistributed((en)->baselocatortype)
 #define IsExecNodesDistributedByValue(en) IsLocatorDistributedByValue((en)->baselocatortype)
+#define IsExecNodesDistributedBySlice(en) IsLocatorDistributedBySlice((en)->baselocatortype)
 
 /* Function for RelationLocInfo building and management */
 extern void RelationBuildLocator(Relation rel);
@@ -223,6 +225,7 @@ extern int GetRoundRobinNode(Oid relid);
 extern bool IsTypeDistributable(Oid colType);
 extern bool IsTypeDistributableForSlice(Oid colType);
 extern bool IsDistribColumn(Oid relid, AttrNumber attNum);
+extern HeapTuple SearchTableEntryCopy(char parttype, Oid relid);
 
 extern ExecNodes* GetRelationNodes(RelationLocInfo* rel_loc_info, Datum* values, const bool* nulls, Oid* attr,
     List* idx_dist_by_col, RelationAccessType accessType, bool needDistribution = true, bool use_bucketmap = true);
@@ -243,4 +246,6 @@ extern Expr* pgxc_check_distcol_opexpr(Index varno, AttrNumber attrNum, OpExpr* 
 extern void PruningDatanode(ExecNodes* execNodes, ParamListInfo boundParams);
 extern void ConstructSliceBoundary(ExecNodes* en);
 
+extern Expr* pgxc_find_distcol_expr(void* query, Index varno, AttrNumber attrNum, Node* quals);
+extern bool IsFunctionShippable(Oid foid);
 #endif /* LOCATOR_H */

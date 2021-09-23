@@ -27,6 +27,7 @@
 #include "storage/spin.h"
 #include "pgxc/barrier.h"
 
+
 /*
  * MAXCONNINFO: maximum size of a connection string.
  *
@@ -67,8 +68,9 @@ typedef enum {
  * Description	: NONE_ERROR		(first try to connect the primary)
  *				  CHANNEL_ERROR		(server should try next channel)
  *				  REPL_INFO_ERROR	(server should try next replconnlist)
+ *                DCF_LOG_ERROR     (server should replicate dcf log by full build)
  */
-typedef enum { NONE_ERROR, CHANNEL_ERROR, REPL_INFO_ERROR } WalRcvConnError;
+typedef enum { NONE_ERROR, CHANNEL_ERROR, REPL_INFO_ERROR, DCF_LOG_ERROR } WalRcvConnError;
 
 typedef struct WalRcvCtlBlock {
     XLogRecPtr receivePtr; /* last byte + 1 received in the standby. */
@@ -190,15 +192,12 @@ typedef struct WalRcvData {
     slock_t exitLock;
     char recoveryTargetBarrierId[MAX_BARRIER_ID_LENGTH];
     char recoveryStopBarrierId[MAX_BARRIER_ID_LENGTH];
+    char recoverySwitchoverBarrierId[MAX_BARRIER_ID_LENGTH];
     char lastRecoveredBarrierId[MAX_BARRIER_ID_LENGTH];
     XLogRecPtr lastRecoveredBarrierLSN;
+    bool isFirstTimeAccessObs;
     Latch* obsArchLatch;
-    bool archive_enabled;
-    XLogRecPtr standby_archive_start_point;
-    Latch* arch_latch;
-    bool arch_finish_result;
-    volatile unsigned int arch_task_status;
-    ArchiveXlogMessage archive_task;
+    struct ArchiveSlotConfig *archive_slot;
 } WalRcvData;
 
 typedef struct WalReceiverFunc {
@@ -257,7 +256,6 @@ extern void ProcessWSRmXLog(void);
 extern void ProcessWSRmData(void);
 extern void SetWalRcvWriterPID(ThreadId tid);
 extern bool WalRcvWriterInProgress(void);
-extern bool walRcvCtlBlockIsEmpty(void);
 extern void ProcessWalRcvInterrupts(void);
 extern ReplConnInfo* GetRepConnArray(int* cur_idx);
 extern void XLogWalRcvSendReply(bool force, bool requestReply);
@@ -265,16 +263,14 @@ extern int GetSyncPercent(XLogRecPtr startLsn, XLogRecPtr maxLsn, XLogRecPtr now
 extern const char* wal_get_role_string(ServerMode mode, bool getPeerRole = false);
 extern const char* wal_get_rebuild_reason_string(HaRebuildReason reason);
 extern Datum pg_stat_get_stream_replications(PG_FUNCTION_ARGS);
-extern void GetPrimaryServiceAddress(char* address, size_t address_len);
 extern void MakeDebugLog(TimestampTz sendTime, TimestampTz lastMsgReceiptTime, const char* msgFmt);
 extern void WalRcvSetPercentCountStartLsn(XLogRecPtr startLsn);
 extern void clean_failover_host_conninfo_for_dummy(void);
 extern void set_failover_host_conninfo_for_dummy(const char *remote_host, int remote_port);
 extern void get_failover_host_conninfo_for_dummy(int *repl);
 extern void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr);
-extern void setObsArchLatch(const Latch* latch);
-extern void SetStandbyArchLatch(const Latch* latch);
-
+extern void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
+extern void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr);
 
 static inline void WalRcvCtlAcquireExitLock(void)
 {

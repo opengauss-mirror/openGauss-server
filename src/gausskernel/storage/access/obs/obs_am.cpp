@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <iostream>
+#include <stdio.h>
 
 #define strpos(p, s) (strstr((p), (s)) != NULL ? strstr((p), (s)) - (p) : -1)
 
@@ -33,6 +34,7 @@
 #include "utils/elog.h"
 #include "utils/palloc.h"
 #include "utils/plog.h"
+#include "replication/walreceiver.h"
 
 // Some Windows stuff
 #ifndef FOPEN_EXTRA_FLAGS
@@ -48,6 +50,13 @@
 #define ERROR_MESSAGE_LEN 1024
 #define ERROR_DETAIL_LEN 4096
 #define MAX_PATH_LEN 1024
+
+#define OBS_MAX_PART 10000
+static int64 ifModifiedSince = -1;
+static int64 ifNotModifiedSince = -1;
+static char* ifMatch = 0;
+static char* ifNotMatch = 0;
+
 
 #define OBS_CIPHER_LIST "DHE-RSA-AES128-GCM-SHA256:" \
                         "DHE-RSA-AES256-GCM-SHA384:" \
@@ -209,6 +218,7 @@ static void getOBSCredential(char **client_crt_filepath)
         if (*client_crt_filepath == NULL) {
             return;
         }
+        canonicalize_path(*client_crt_filepath);
         if (strlen(*client_crt_filepath) > MAX_PATH_LEN - 1)
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                             errmsg("invalid client_crt_filepath length %lu", strlen(*client_crt_filepath))));
@@ -566,7 +576,8 @@ static obs_status listBucketObjectCallbackForQuery(int isTruncated, const char *
  * @See also:
  */
 int list_bucket_objects_loop(obs_options *pobsOption, char *prefix, cleanListCallback cleanList,
-                             obs_list_objects_handler *plistObjectsHandler, ListBucketCallBackData *callbackdata)
+                             obs_list_objects_handler *plistObjectsHandler, ListBucketCallBackData *callbackdata,
+                             bool reportError = true)
 {
     Assert(pobsOption && prefix && cleanList && plistObjectsHandler && callbackdata);
     Assert(pobsOption->bucket_options.bucket_name);
@@ -599,12 +610,21 @@ int list_bucket_objects_loop(obs_options *pobsOption, char *prefix, cleanListCal
         /* description: is callbackdata->objectList undefined ? */
         pgstat_report_waitevent(WAIT_EVENT_END);
         PROFILING_OBS_ERROR(list_length(callbackdata->objectList), DSRQ_LIST);
-        ereport(ERROR,
+        if (reportError == true) {
+            ereport(ERROR,
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("Fail to list bucket object in node:%s with error code: %s, %s the bucket name: %s, prefix "
                         "name: %s",
                         g_instance.attr.attr_common.PGXCNodeName, obs_get_status_name(statusG), errorMessageG,
                         pobsOption->bucket_options.bucket_name, prefix)));
+       } else {
+            ereport(WARNING,
+                (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("Fail to list bucket object in node:%s with error code: %s, %s the bucket name: %s, prefix "
+                        "name: %s",
+                        g_instance.attr.attr_common.PGXCNodeName, obs_get_status_name(statusG), errorMessageG,
+                        pobsOption->bucket_options.bucket_name, prefix)));
+        }
 
         if (strlen(errorDetailsG) > 0) {
             ereport(DEBUG1, (errmsg("Fail to list bucket object in node:%s, detail: %s",
@@ -789,7 +809,7 @@ List *list_obs_bucket_objects(const char *uri, bool encrypt, const char *access_
  * - Return:
  *      the list of the object's key on OBS bucket.
  */
-List *listObsObjects(OBSReadWriteHandler *handler)
+List *listObsObjects(OBSReadWriteHandler *handler, bool reportError)
 {
     List *result_list = NIL;
 
@@ -816,7 +836,7 @@ List *listObsObjects(OBSReadWriteHandler *handler)
         /* get objects, if not complete , the isTruncated will not zero and callbackdata.nextMarker will be set  for
          * next loop */
         isTruncated = list_bucket_objects_loop(&(handler->m_option), handler->m_object_info.key,
-                                               list_free_deep, &listBucketHandler, &callbackdata);
+                                               list_free_deep, &listBucketHandler, &callbackdata, reportError);
 
         /*  move object list elements to return list , and callbackdata clean in next loop when call
          * list_bucket_objects_loop */
@@ -1748,15 +1768,19 @@ bool is_ip_address_format(const char *addr)
 
 ObsArchiveConfig *getObsArchiveConfig()
 {
-    ReplicationSlot *obs_archive_slot = getObsReplicationSlot();
-    if (obs_archive_slot == NULL) {
-        ereport(LOG, (errmsg("Cannot get replication slots")));
-        return NULL;
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    if (walrcv->archive_slot == NULL) {
+        walrcv->archive_slot = getObsRecoverySlot();
+        if (walrcv->archive_slot == NULL) {
+            ereport(LOG, (errmsg("Cannot get replication slots!")));
+            return NULL;
+        }
     }
-    return obs_archive_slot->archive_obs;
+    return &walrcv->archive_slot->archive_obs;
 }
 
-static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, ObsArchiveConfig *obs_config = NULL)
+static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, ObsArchiveConfig *obs_config = NULL,
+                                bool shortenConnTime = false)
 {
     ObsArchiveConfig *archive_obs = NULL;
     errno_t rc = EOK;
@@ -1787,6 +1811,9 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Obs
     t_thrd.obs_cxt.pCAInfo = getCAInfo();
     handler->m_option.bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
     handler->m_option.request_options.ssl_cipher_list = OBS_CIPHER_LIST;
+    if (shortenConnTime == true) {
+        handler->m_option.request_options.connect_time = 1000;
+    }
 
     /* Fill in obs full file path */
     rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->obs_prefix, key);
@@ -1883,7 +1910,7 @@ int obsDelete(const char* fileName, ObsArchiveConfig *obs_config)
     return ret;
 }
 
-List* obsList(const char* prefix, ObsArchiveConfig *obs_config)
+List* obsList(const char* prefix, ObsArchiveConfig *obs_config, bool reportError, bool shortenConnTime)
 {
     OBSReadWriteHandler *handler;
     errno_t rc = EOK;
@@ -1894,13 +1921,747 @@ List* obsList(const char* prefix, ObsArchiveConfig *obs_config)
     securec_check(rc, "", "");
 
     /* Initialize bucket context object */
-    fillBucketContext(handler, prefix, obs_config);
+    fillBucketContext(handler, prefix, obs_config, shortenConnTime);
 
-    fileNameList = listObsObjects(handler);
+    fileNameList = listObsObjects(handler, reportError);
 
     pfree(handler->m_object_info.key);
     handler->m_object_info.key = NULL;
     pfree_ext(handler);
 
     return fileNameList;
+}
+
+void fillObsOption(obs_options *option, ObsArchiveConfig *obs_config = NULL)
+{
+    ObsArchiveConfig *archive_obs = NULL;
+
+    if (obs_config != NULL) {
+        archive_obs = obs_config;
+    } else {
+        archive_obs = getObsArchiveConfig();
+    }
+
+    if (archive_obs == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("Cannot get obs bucket config from replication slots")));
+    }
+
+
+    option->bucket_options.host_name = archive_obs->obs_address;
+    option->bucket_options.bucket_name = archive_obs->obs_bucket;
+    option->bucket_options.protocol = OBS_PROTOCOL_HTTPS;
+    option->bucket_options.uri_style = OBS_URI_STYLE_PATH;
+    option->bucket_options.access_key = archive_obs->obs_ak;
+    option->bucket_options.secret_access_key = archive_obs->obs_sk;
+    t_thrd.obs_cxt.pCAInfo = getCAInfo();
+    option->bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
+    option->request_options.ssl_cipher_list = OBS_CIPHER_LIST;
+
+}
+
+
+/*
+ * regist function responsePropertiesCallbackForWrite to show Response Properties
+ */
+static obs_status responsePropertiesCallbackForWrite(const obs_response_properties* properties, void* callbackData)
+{
+    OBSWriteData* data = (OBSWriteData*)callbackData;
+    int len = 0;
+    int nRet = 0;
+
+    if ((properties == NULL) || (data == NULL)) {
+        return OBS_STATUS_OK;
+    }
+    if (properties->etag) {
+        len = strlen(properties->etag);
+        nRet = memcpy_s(data->eTag, sizeof(data->eTag), properties->etag, (size_t)len);
+        securec_check_c(nRet, "\0", "\0");
+        data->eTag[len] = '\0';
+    }
+
+    return OBS_STATUS_OK;
+}
+
+/*
+ * regist function responsePropertiesCallbackForOpen to show Response Properties
+ */
+static obs_status responsePropertiesCallbackForOpen(const obs_response_properties* properties, void* callbackData)
+{
+    (void)callbackData;
+    return OBS_STATUS_OK;
+}
+
+/*
+ * print upload information
+ */
+obs_status CompleteMultipartUploadCallback(
+    const char* location, const char* bucket, const char* key, const char* eTag, void* callbackData)
+{
+    (void)callbackData;
+    ereport(DEBUG1, (errmsg("location = %s \n bucket = %s \n eTag = %s \n", location, bucket, eTag)));
+    return OBS_STATUS_OK;
+}
+
+/*
+ * regist function responsePropertiesCallbackForRead to show Response Properties
+ */
+static obs_status responsePropertiesCallbackForRead(const obs_response_properties* properties, void* callbackData)
+
+{
+    return OBS_STATUS_OK;
+}
+
+
+static obs_status openReadOBSFileCallback(int isTruncated, const char* nextMarker, int contentsCount,
+    const obs_list_objects_content* contents, int commonPrefixesCount, const char** commonPrefixes, void* callbackData)
+{
+    OBSReadFile* data = (OBSReadFile*)callbackData;
+    if (contentsCount != 1) {
+        ereport(LOG, (errmsg("openReadOBSFileCallback: The function is incorrect. value number is %d. ", 
+            contentsCount)));
+    }
+    if (data != NULL) {
+        const obs_list_objects_content* content = &(contents[0]);
+        data->fileSize = content->size;
+    }
+    return OBS_STATUS_OK;
+}
+
+
+/*
+ * return the length it need to read
+ */
+static obs_status readOBSFileCallback(int bufferSize, const char* buffer, void* callbackData)
+{
+    int nRet = 0;
+    OBSReadFile* obsFile = (OBSReadFile*)callbackData;
+
+    if (obsFile == NULL) {
+        return OBS_STATUS_OK;
+    }
+
+    if ((buffer != NULL) && (bufferSize > 0)) {
+        nRet = memcpy_s((char*)obsFile->bufData + obsFile->actualLen,
+            (size_t)(READ_BLOCK_SIZE - obsFile->actualLen),
+            buffer,
+            (size_t)bufferSize);
+        securec_check_c(nRet, "\0", "\0");
+    }
+
+    /* obsFile->actualLen : the length of that we have read in buffer-block-size.
+           After function GetObject() it be resetted to 0
+     * obsFile->offset    : the length that we have read from obs file.
+     */
+    obsFile->actualLen += bufferSize;
+    obsFile->offset += bufferSize;
+
+    if (obsFile->fileSize == obsFile->offset) {
+        obsFile->obs_eof = true;
+    }
+    return ((bufferSize < obsFile->byteCount && (obsFile->obs_eof == false)) ? OBS_STATUS_AbortedByCallback
+                                                                             : OBS_STATUS_OK);
+
+}
+
+obs_status head_properties_callback(const obs_response_properties *properties, void *callback_data)
+{
+    return OBS_STATUS_OK;
+}
+
+static void head_complete_callback(obs_status status,
+                                     const obs_error_details *error,
+                                     void *callback_data)
+{
+    HEAD_OBJECT_DATA *data = (HEAD_OBJECT_DATA *)callback_data;
+    data->ret_status = status;
+    statusG = status;
+}
+
+
+/*
+ * Create multipart upload file
+ */
+void* createOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config)
+{
+    OBSWriteFile* obsFile = NULL;
+    char uploadId[OBS_MAX_UPLOAD_ID_LEN] = {0};
+    int nRet = 0;
+    int retriesG = MAX_RETRIES;
+
+    /* init the option data by obs api */
+    obs_options option;
+    init_obs_options(&option);
+
+    /* fill the bucket context content */
+    fillObsOption(&option, obs_config);
+
+    /* struct putProperties */
+    obs_put_properties putProperties = {0};
+    init_put_properties(&putProperties);
+
+    obs_response_handler responseInitiateHandler = {responsePropertiesCallbackForWrite, responseCompleteCallback};
+
+    int ulIndex = 0;
+    int len = 0;
+
+    // initiate obsFile
+    obsFile = (OBSWriteFile*)palloc(sizeof(OBSWriteFile));
+    nRet = memset_s(obsFile, sizeof(OBSWriteFile), 0, sizeof(OBSWriteFile));
+    securec_check(nRet, "", "");
+
+    // initiate eTag list
+    obsFile->eTagList = (char**)palloc0(sizeof(char*) * OBS_MAX_PART);
+
+    for (ulIndex = 0; ulIndex < OBS_MAX_PART; ++ulIndex) {
+        obsFile->eTagList[ulIndex] = (char*)palloc0(sizeof(char) * OBS_MAX_ETAG_LEN);
+    }
+
+    // initiate part number
+    obsFile->partNum = 0;
+
+    ereport(LOG, (errmsg("[OBS] before InitiateMultipartUpload Create OBS file %s.", file_path)));
+
+    do {
+        initiate_multi_part_upload(&option,  (char*)file_path,  sizeof(uploadId),  uploadId,  &putProperties,
+            (server_side_encryption_params*)NULL, &responseInitiateHandler, NULL);
+    } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+
+    ereport(LOG, (errmsg("[OBS] after InitiateMultipartUpload Create OBS file %s.", file_path)));
+
+    if (statusG != OBS_STATUS_OK) {
+        // release the memory resource
+        for (ulIndex = 0; ulIndex < OBS_MAX_PART; ++ulIndex) {
+            pfree_ext(obsFile->eTagList[ulIndex]);
+        }
+        pfree_ext(obsFile->eTagList);
+        pfree_ext(obsFile);
+        ereport(ERROR, (errmsg("[OBS] Create OBS file %s failed. [OBS] Error: %s. [OBS] Error: %s", 
+            file_path, obs_get_status_name(statusG), errorDetailsG)));
+        return NULL;
+    }
+
+    /* write uploadId and file_path into obsFile */
+    len = strlen(uploadId);
+    nRet = memcpy_s(obsFile->uploadId, sizeof(obsFile->uploadId), uploadId, (size_t)len);
+    securec_check_c(nRet, "\0", "\0");
+    obsFile->uploadId[len] = '\0';
+
+    if (file_path != NULL) {
+        len = strlen(file_path);
+        nRet = memcpy_s(obsFile->filePath, sizeof(obsFile->filePath), file_path, (size_t)len);
+        securec_check_c(nRet, "\0", "\0");
+        obsFile->filePath[len] = '\0';
+        ereport(LOG, (errmsg("[OBS] Create OBS file %s successfully.", file_path)));
+    }
+
+    return (OBSFile*)obsFile;
+}
+
+/*
+ * write data to OBS
+ */
+int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, size_t* writeSize,
+    ObsArchiveConfig *obs_config)
+{
+    int eTagLen = 0;
+    int nRet = 0;
+    OBSWriteData OBSDataBuf;
+    int retriesG = MAX_RETRIES;
+
+    if (writeSize == NULL) {
+        return -1;
+    }
+    *writeSize = 0;
+
+    /* init the option data by obs api */
+    obs_options option;
+    init_obs_options(&option);
+
+    /* fill the bucket context content */
+    fillObsOption(&option, obs_config);
+
+    /* struct putProperties */
+    obs_put_properties putProperties = {0};
+    init_put_properties(&putProperties);
+
+    obs_upload_handler responseHandler = {
+        {responsePropertiesCallbackForWrite, responseCompleteCallback}, putTmpObjectDataCallback};
+
+    OBSWriteFile* obsFile = (OBSWriteFile*)fp;
+
+    if (obsFile == NULL) {
+        return -1;
+    }
+
+    /* init OBSDataBuf */
+    (void)memset_s(&OBSDataBuf, sizeof(OBSDataBuf), 0, sizeof(OBSDataBuf));
+    OBSDataBuf.bufData = (void*)write_data;
+    OBSDataBuf.byteCount = (size * len);
+
+    /* init obs_upload part info */
+    obs_upload_part_info uploadPartInfo;
+    (void)memset_s(&uploadPartInfo, sizeof(obs_upload_part_info), 0, sizeof(obs_upload_part_info));
+    uploadPartInfo.part_number = (obsFile->partNum) + 1;
+    uploadPartInfo.upload_id = obsFile->uploadId;
+
+    ereport(DEBUG1, (errmsg("[OBS] before call UploadPart, file: %s, partNum: %d",
+        obsFile->filePath, obsFile->partNum + 1)));
+
+    /* multipart upload. The segment size range is [5MB, 5GB], but the size of the last segment is [0,5GB] when
+     * performing a merge segment operation. There is also a range limit for the number of uploaded segments, which
+     * range is [1,10000].
+     */
+    do {
+        OBSDataBuf.actualLen = 0;    // reset offset at the begin of upload
+        upload_part(&option,  obsFile->filePath,  &uploadPartInfo,  OBSDataBuf.byteCount,  &putProperties,
+            0,  &responseHandler,  &OBSDataBuf);
+    } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+    if (statusG != OBS_STATUS_OK) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Write data to OBS file %s failed [PartNum: %d] with error code: %s %s",
+                            obsFile->filePath, obsFile->partNum, obs_get_status_name(statusG), errorMessageG),
+                        errdetail_log("%s", errorDetailsG)));
+
+        return -1;
+    }
+
+    eTagLen = strlen(OBSDataBuf.eTag);
+    (void)memset_s(
+        obsFile->eTagList[obsFile->partNum], sizeof(char) * OBS_MAX_ETAG_LEN, 0, sizeof(char) * OBS_MAX_ETAG_LEN);
+    ereport(DEBUG1, (errmsg("[OBS] obsFile->partNum: %d ETAG: %s", obsFile->partNum, OBSDataBuf.eTag)));
+    ereport(DEBUG1, (errmsg("[OBS] Get etag of data for file %s successfully.", obsFile->filePath)));
+
+    /* remeber the eTag */
+    nRet = memcpy_s(
+        obsFile->eTagList[obsFile->partNum], sizeof(char) * OBS_MAX_ETAG_LEN, OBSDataBuf.eTag, (size_t)eTagLen);
+    securec_check_c(nRet, "\0", "\0");
+    obsFile->eTagList[obsFile->partNum][eTagLen] = '\0';
+    ++(obsFile->partNum);
+
+    ereport(LOG, (errmsg("[OBS] Write data to OBS file %s successfully. PartNum: %d",
+        obsFile->filePath, obsFile->partNum)));
+
+    *writeSize = (size_t)(OBSDataBuf.actualLen);
+    return 0;
+}
+
+/*
+ * close OBS file
+ */
+int closeOBSFile(void* filePtr, ObsArchiveConfig *obs_config)
+{
+    int ulIndex = 0;
+    int retriesG = MAX_RETRIES;
+    OBSWriteFile* obsFile = (OBSWriteFile*)filePtr;
+
+    /* init the option data by obs api */
+    obs_options option;
+    init_obs_options(&option);
+
+    /* fill the bucket context content */
+    fillObsOption(&option, obs_config);
+
+    /* struct putProperties */
+    obs_put_properties putProperties = {0};
+    init_put_properties(&putProperties);
+
+    obs_complete_multi_part_upload_handler responseCompleteHandler = {
+        {responsePropertiesCallbackForWrite, responseCompleteCallback}, CompleteMultipartUploadCallback};
+    obs_response_handler responseAbortHandler = {&responsePropertiesCallbackForWrite, &responseCompleteCallback};
+
+    /* upload info */
+    obs_complete_upload_Info* uploadInfo = NULL;
+
+    if (obsFile == NULL) {
+        return 0;
+    }
+
+    /* init obs_complete_upload_Info */
+    uploadInfo = (obs_complete_upload_Info*)palloc(sizeof(obs_complete_upload_Info) * obsFile->partNum);
+
+    (void)memset_s(uploadInfo,
+        sizeof(obs_complete_upload_Info) * obsFile->partNum,
+        0,
+        sizeof(obs_complete_upload_Info) * obsFile->partNum);
+
+    for (ulIndex = 0; ulIndex < obsFile->partNum; ++ulIndex) {
+        /* write partNumber and eTag into uploadInfo */
+        uploadInfo[ulIndex].part_number = (unsigned int)(ulIndex + 1);
+        uploadInfo[ulIndex].etag = obsFile->eTagList[ulIndex];
+
+        ereport(DEBUG1, (errmsg("partNumber: %u", uploadInfo[ulIndex].part_number)));
+        ereport(DEBUG1, (errmsg("eTag: %s", uploadInfo[ulIndex].etag)));
+    }
+
+    do {
+        complete_multi_part_upload(&option, obsFile->filePath, obsFile->uploadId, obsFile->partNum,
+            uploadInfo, &putProperties, &responseCompleteHandler, 0);
+    } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+
+    retriesG = MAX_RETRIES;
+    // check whether complete operation is succeed or failed
+    if (statusG != OBS_STATUS_OK) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("[OBS] Complete OBS file failed.")));
+        if (statusG < OBS_STATUS_AccessDenied) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS), errmsg("[OBS] Error: %s", obs_get_status_name(statusG))));
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("[OBS] Error: %s %s", obs_get_status_name(statusG), errorDetailsG)));
+        }
+
+        do {
+            abort_multi_part_upload(&option, obsFile->filePath, obsFile->uploadId, &responseAbortHandler, 0);
+        } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+
+        // check whether abort operation is succeed or failed
+        ereport(LOG, (errmsg("[OBS] Abort OBS file result: %s.", obs_get_status_name(statusG))));
+
+        // release the memory resource
+        for (ulIndex = 0; ulIndex < OBS_MAX_PART; ++ulIndex) {
+            pfree_ext(obsFile->eTagList[ulIndex]);
+        }
+        pfree_ext(obsFile->eTagList);
+        pfree_ext(obsFile);
+        pfree_ext(uploadInfo);
+
+        return -1;
+    }
+
+    ereport(LOG, (errmsg("[OBS] Complete OBS file %s successful.", obsFile->filePath)));
+    ereport(DEBUG1, (errmsg("[OBS] Close OBS file!")));
+
+    for (ulIndex = 0; ulIndex < OBS_MAX_PART; ++ulIndex) {
+        pfree_ext(obsFile->eTagList[ulIndex]);
+    }
+    pfree_ext(obsFile->eTagList);
+    pfree_ext(obsFile);
+    pfree_ext(uploadInfo);
+
+    return 0;
+}
+
+/*
+ * open obs file
+ */
+void* openReadOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config)
+{
+    OBSReadFile* obsFile = NULL;
+    int retriesG = MAX_RETRIES;
+    /* create obs_option for list bucket objects */
+    obs_options option;
+    init_obs_options(&option);
+
+    /* struct bucket context for obs_option */
+    fillObsOption(&option, obs_config);
+
+    obs_list_objects_handler listBucketHandler = {
+        {responsePropertiesCallbackForOpen, responseCompleteCallback}, openReadOBSFileCallback};
+    int len = 0;
+    int nRet = 0;
+
+    if (file_path == NULL) {
+        return NULL;
+    }
+
+    obsFile = (OBSReadFile*)palloc(sizeof(OBSReadFile));
+
+    (void)memset_s(obsFile, sizeof(OBSReadFile), 0, sizeof(OBSReadFile));
+    len = strlen(file_path);
+    nRet = memcpy_s(obsFile->filePath, sizeof(obsFile->filePath), file_path, (size_t)len);
+    securec_check_c(nRet, "\0", "\0");
+    obsFile->filePath[len] = '\0';
+    obsFile->obs_eof = false;
+    obsFile->obs_error = false;
+    obsFile->offset = 0;
+    obsFile->bufData = NULL;
+    obsFile->byteCount = 0;
+    obsFile->actualLen = 0;
+    obsFile->fileSize = 0;
+
+    ereport(DEBUG1, (errmsg("[OBS] before ListObjects open OBS file %s", file_path)));
+
+    do {
+        list_bucket_objects(&option, (char *)file_path, 0, 0, 1, &listBucketHandler, (void*)obsFile);
+    } while (obs_status_is_retryable(statusG) && should_retry(retriesG));
+
+    ereport(DEBUG1, (errmsg("[OBS] before ListObjects open OBS file %s", file_path)));
+
+    if (statusG != OBS_STATUS_OK) {
+        pfree_ext(obsFile);
+        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("[OBS] OBS file %s does not exist when list_bucket_objects, with error code: %s %s",
+                            file_path, obs_get_status_name(statusG), errorMessageG),
+                        errdetail_log("%s", errorDetailsG)));
+        return NULL;
+    }
+    return obsFile;
+}
+
+/*
+ * do restore for read OBS file
+ * -1: failed
+ *  0: sucess
+ *  x: continue
+ */
+int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ObsArchiveConfig *obs_config)
+{
+    OBSReadFile* obsFile = (OBSReadFile*)fp;
+
+    if ((obsFile == NULL) || (data == NULL) || (readSize == NULL)) {
+        return -1;
+    }
+
+    /* struct obs_option */
+    obs_options option;
+    init_obs_options(&option);
+    fillObsOption(&option, obs_config);
+
+    /* set obs_object_info, including key and version ID */
+    obs_object_info object_info;
+    (void)memset_s(&object_info, sizeof(obs_object_info), 0, sizeof(obs_object_info));
+    object_info.key = obsFile->filePath;
+    object_info.version_id = (char*)NULL;
+
+    /* init get_condition info */
+    obs_get_conditions getcondition;
+    (void)memset_s(&getcondition, sizeof(obs_get_conditions), 0, sizeof(obs_get_conditions));
+    init_get_properties(&getcondition);
+
+    /* fill get_condition , indicates start_byte and byte_count */
+    getcondition.if_modified_since = ifModifiedSince;
+    getcondition.if_not_modified_since = ifNotModifiedSince;
+    getcondition.if_match_etag = ifMatch;
+    getcondition.if_not_match_etag = ifNotMatch;
+    getcondition.start_byte = obsFile->offset;
+    getcondition.byte_count = size * len;
+
+    obs_get_object_handler getObjectHandler = {
+        {responsePropertiesCallbackForRead, responseCompleteCallback}, readOBSFileCallback};
+    size_t totalReadSize = 0;
+    *readSize = 0;
+
+    if (obsFile->obs_error) {
+        return -1;
+    }
+
+    if (obsFile->obs_eof) {
+        return 0;
+    }
+
+    ereport(DEBUG1, (errmsg("[OBS] before GetObject read OBS file %s", obsFile->filePath)));
+
+    do {
+        obsFile->bufData = (char*)data + totalReadSize;
+        obsFile->actualLen = 0;
+
+        get_object(&option,                       /* obs option, including object's bucket context */
+            &object_info,                         /* object's prefix (key) and version ID */
+            &getcondition,                        /* get condition, the start cursor and read len */
+            (server_side_encryption_params*)NULL, /* server_side_encryption_params */
+            &getObjectHandler,
+            (void*)obsFile);
+
+        totalReadSize = totalReadSize + obsFile->actualLen;
+
+        if (statusG == OBS_STATUS_InvalidRange || obsFile->obs_eof) {
+            ereport(LOG, (errmsg("[OBS] OBS file %s reach the end", obsFile->filePath)));
+            obsFile->obs_eof = true;
+            *readSize = totalReadSize;
+            return 0;
+        } else if (statusG != OBS_STATUS_OK) {
+            obsFile->obs_eof = false;
+            obsFile->obs_error = true;
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("[OBS] Read from OBS file %s failed, with error code: %s %s",
+                            obsFile->filePath, obs_get_status_name(statusG), errorMessageG),
+                        errdetail_log("%s", errorDetailsG)));
+            return -1;
+        }
+    } while (totalReadSize < (size * len) && !obsFile->obs_eof);
+
+    *readSize = totalReadSize;
+    ereport(DEBUG1, (errmsg("[OBS] after GetObject read OBS file %s", obsFile->filePath)));
+    return 0;
+}
+
+/*
+ * OBS no need to do something, only release the memory
+ */
+int closeReadOBSFile(void* fp)
+{
+    OBSReadFile* obsFile = (OBSReadFile*)fp;
+    pfree_ext(obsFile);
+    return 0;
+}
+
+/*
+ * check whether the file exists in the OBS
+ */
+bool checkOBSFileExist(const char* file_path, ObsArchiveConfig *obs_config)
+{
+    HEAD_OBJECT_DATA data;
+    data.object_length = 0;
+    data.ret_status = OBS_STATUS_OK;
+    int retriesG = MAX_RETRIES;
+    int rc = 0;
+    char obsFilePath[MAXPGPATH] = {0};
+    /* create obs_option for list bucket objects */
+    obs_options option;
+    init_obs_options(&option);
+    /* struct bucket context for obs_option */
+    fillObsOption(&option, obs_config);
+    obs_response_handler response_handler = {
+        &head_properties_callback,
+        &head_complete_callback
+    };
+
+    rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", obs_config->obs_prefix, file_path);
+    securec_check_ss(rc, "\0", "\0");
+
+    ereport(DEBUG1, (errmsg("[OBS] before ListObjects check OBS file %s exist", obsFilePath)));
+
+    do {
+        obs_head_object(&option, obsFilePath, &response_handler, &data);
+    } while (obs_status_is_retryable((obs_status)data.ret_status) && should_retry(retriesG));
+
+    if ((statusG != OBS_STATUS_OK)) {
+        ereport(LOG, (errmsg("[OBS] OBS file %s does not exist.", obsFilePath)));
+        return false;
+    }
+
+    ereport(LOG, (errmsg("[OBS] OBS file %s exists.", obsFilePath)));
+    return true;
+}
+
+bool feofReadOBSFile(const void* fp)
+{
+    if (fp == NULL) {
+        return true;
+    }
+    return ((OBSReadFile*)fp)->obs_eof;
+}
+
+/*
+ *  init libs3 by S3_initialize
+ */
+void initializeOBS()
+{
+    obs_status status = OBS_STATUS_OK;
+
+
+    /* The last param should be NULL, now take "china" as default region */
+    status = obs_initialize(OBS_INIT_ALL);
+    return;
+}
+
+bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ObsArchiveConfig *obs_config)
+{
+    FILE *fpReadFromDisk = NULL;
+    OBSFile* fpWriteToNB = NULL;
+    char* buffer = NULL;
+    size_t readSize = 0;
+    size_t writeSize = 0;
+    int rc = 0;
+
+    canonicalize_path(localFilePath);
+    fpReadFromDisk = fopen(localFilePath, "r");
+    if (fpReadFromDisk == NULL) {
+        ereport(ERROR, (errmsg("Open local file %s failed: errirmsg %s", localFilePath, gs_strerror(errno))));
+        return  false;
+    }
+
+    if (fseek(fpReadFromDisk, 0, SEEK_SET) != 0) {
+        fclose(fpReadFromDisk);
+        ereport(ERROR, (errmsg("File [%s] seek failed: %s!", localFilePath, gs_strerror(errno))));
+        return false;
+    }
+
+    fpWriteToNB = (OBSFile *)createOBSFile(netBackupPath, "wb", obs_config);
+    if (fpWriteToNB == NULL) {
+        fclose(fpReadFromDisk);
+        ereport(ERROR, (errmsg("Open OBS file %s failed", netBackupPath)));
+        return false;
+    }
+
+    buffer = (char*)palloc(READ_BLOCK_SIZE + 1);
+
+    while (1) {
+        (void)memset_s(buffer, READ_BLOCK_SIZE, 0, READ_BLOCK_SIZE);
+        readSize = fread(buffer, 1, READ_BLOCK_SIZE, fpReadFromDisk);
+        if (readSize != READ_BLOCK_SIZE && !feof(fpReadFromDisk)) {
+            fclose(fpReadFromDisk);
+            pfree_ext(buffer);
+            ereport(ERROR, (errmsg("file read failed file path is : %s", netBackupPath)));
+            return false;
+        }
+        rc = writeOBSData(buffer, 1, readSize, fpWriteToNB, &writeSize, obs_config);
+        if (rc == -1) {
+            fclose(fpReadFromDisk);
+            pfree_ext(buffer);
+            ereport(ERROR, (errmsg("file write to net backup failed netbackup path is : %s", netBackupPath)));
+            return false;
+        }
+        if (readSize < READ_BLOCK_SIZE) {
+            ereport(LOG, (errmsg("write disk file to netbackup successfully")));
+            break;
+        }
+    }
+    closeOBSFile(fpWriteToNB, obs_config);
+    fclose(fpReadFromDisk);
+    pfree_ext(buffer);
+    return true;
+}
+
+bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ObsArchiveConfig *obs_config)
+{
+    ereport(LOG, (errmsg("start download obs file %s", netBackupPath)));
+    void* fp = NULL;
+    FILE* fpWriteToDisk = NULL;
+    char* metadataBuffer = NULL;
+    int nRet = 0;
+    size_t writeBytes = 0;
+    size_t readSize = 0;
+
+    canonicalize_path(localPath);
+    if ((fpWriteToDisk = fopen(localPath, "wb+")) == NULL) {
+        ereport(ERROR, (errmsg("Open file %s failed: errirmsg %s", localPath, gs_strerror(errno))));
+        return false;
+    }
+
+    if ((fp = openReadOBSFile(netBackupPath, "r", obs_config)) == NULL) {
+        ereport(LOG, (errmsg("Open file [%s] failed", netBackupPath)));
+        fclose(fpWriteToDisk);
+        return false;
+    }
+
+    metadataBuffer = (char*)palloc(READ_BLOCK_SIZE);
+    while (1) {
+        (void)memset_s(metadataBuffer, READ_BLOCK_SIZE, 0, READ_BLOCK_SIZE);
+        nRet = readOBSFile(metadataBuffer, 1, READ_BLOCK_SIZE, fp, &readSize, obs_config);
+        if (nRet == -1) {
+            fclose(fpWriteToDisk);
+            ereport(ERROR, (errmsg("readOBSFile failed")));
+            return false;
+        } else if (readSize != 0) {
+            writeBytes = fwrite(metadataBuffer, 1, readSize, fpWriteToDisk);
+            if (writeBytes != readSize) {
+                (void)closeReadOBSFile(fp);
+                fclose(fpWriteToDisk);
+                ereport(ERROR, (errmsg("readOBSFile failed, size not match")));
+                return false;
+            }
+        }
+
+        if (feofReadOBSFile(fp)) {
+            break;
+        }
+    }
+
+    ereport(LOG, (errmsg("Successful download obs file %s", netBackupPath)));
+
+    (void)closeReadOBSFile(fp);
+    fclose(fpWriteToDisk);
+    pfree_ext(metadataBuffer);
+    return true;
 }

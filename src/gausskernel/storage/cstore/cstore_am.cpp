@@ -3969,6 +3969,8 @@ static void CStoreUnlinkCuDataFiles(CUStorage* cuStorage)
     }
 }
 
+void md_register_forget_request(RelFileNode rnode, ForkNumber forknum, BlockNumber segno);
+
 // unlink bcm files: 16385_c1_bcm  16385_c1_bcm.1 16385_c1_bcm.2 ...
 static void CStoreUnlinkCuBcmFiles(CUStorage* cuStorage)
 {
@@ -3980,6 +3982,9 @@ static void CStoreUnlinkCuBcmFiles(CUStorage* cuStorage)
             break;
 
         cuStorage->GetBcmFileName(tmpFileName, fileId);
+        
+        md_register_forget_request(cuStorage->m_cnode.m_rnode, ColumnId2ColForkNum(cuStorage->m_cnode.m_attid), fileId);
+
         if (unlink(tmpFileName)) {
             ereport(WARNING, (errmsg("could not unlink file \"%s\": %m", tmpFileName)));
         }
@@ -4783,7 +4788,8 @@ CUDescScan::CUDescScan(_in_ Relation relation)
      * m_scanKey[0] = VitrualDelColID, m_scanKey[1] will be set to CUDI when doing scan.
      * We only init m_scanKey[0] = 0 here.
      */
-    ScanKeyInit(&m_scanKey[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ, Int32GetDatum(VitrualDelColID));
+    ScanKeyInit(&m_scanKey[0], (AttrNumber)CUDescColIDAttr, BTEqualStrategyNumber, F_INT4EQ,
+        Int32GetDatum(VitrualDelColID));
     ScanKeyInit(&m_scanKey[1], (AttrNumber)CUDescCUIDAttr, BTEqualStrategyNumber, F_OIDEQ, UInt32GetDatum(0));
 }
 

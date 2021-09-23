@@ -1,0 +1,486 @@
+create schema test_unione_fulljoin_mix_2;
+set current_schema='test_unione_fulljoin_mix_2';
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop type if exists composite_type;
+NOTICE:  type "composite_type" does not exist, skipping
+create type composite_type as (c1 int, c2 boolean, c3 money, c4 text, c5 date);
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+-- create table for post data insertion verification
+drop table if exists t1_v;
+NOTICE:  table "t1_v" does not exist, skipping
+drop table if exists t2_v;
+NOTICE:  table "t2_v" does not exist, skipping
+drop table if exists t3_v;
+NOTICE:  table "t3_v" does not exist, skipping
+create table t1_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t2_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+create table t3_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+-- case 1: joining empty tables
+create view join_view_case1_1 as (select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c1=t2.c1);
+create view join_view_case1_2 as (select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c1=t2.c1 full outer join t3 on t1.c1=t3.c1);
+select * from join_view_case1_1;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case1_2;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+-- case 2: joining with one empty table
+-- insert data for t1
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+\COPY t1_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+-- t1 data v
+create view t1_data_v as (select * from t1 except select * from t1_v);
+select * from t1_data_v;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view join_view_case2_1 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c5=t2.c5)
+except
+(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5));
+select * from join_view_case2_1;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+-- case 3: joining 2 and 3 tables with data
+-- insert data for t2
+\COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+\COPY t2_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+-- t2 data verificatoin
+create view t2_data_v as (select * from t2 except select * from t2_v);
+select * from t2_data_v;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view join_view_case3_1 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c1=t2.c1)
+except
+(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c1=t2_v.c1));
+create view join_view_case3_2 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c5=t2.c5)
+except
+(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5));
+create view join_view_case3_3 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c7=t2.c7)
+except
+(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c7=t2_v.c7));
+--create view join_view_case3_4 as (
+--(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c13=t2.c13)
+--except
+--(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c13=t2_v.c13));
+--create view join_view_case3_5 as (
+--(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c18=t2.c18)
+--except
+--(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c18=t2_v.c18));
+create view join_view_case3_6 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c16=t2.c16)
+except
+(select t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c16=t2_v.c16));
+select * from join_view_case3_1;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case3_2;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case3_3;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+--select * from join_view_case3_4;
+--select * from join_view_case3_5;
+select * from join_view_case3_6;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+-- insert data for t3
+\COPY t3 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data3.data' delimiter '|' csv header;
+\COPY t3_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data3.data' delimiter '|' csv header;
+-- t3 data v
+create view t3_data_v as (select * from t3 except select * from t3_v);
+select * from t3_data_v;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+create view join_view_case3_7 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c1=t2.c1 full outer join t3 on t1.c2=t3.c2)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c1=t2_v.c1 full outer join t3_v on t1_v.c2=t3_v.c2));
+create view join_view_case3_8 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c3=t2.c3 full outer join t3 on t1.c4=t3.c4)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c3=t2_v.c3 full outer join t3_v on t1_v.c4=t3_v.c4));
+create view join_view_case3_9 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c7=t2.c7 full outer join t3 on t1.c8=t3.c8)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c7=t2_v.c7 full outer join t3_v on t1_v.c8=t3_v.c8));
+create view join_view_case3_10 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c9=t2.c9 full outer join t3 on t1.c10=t3.c10)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c9=t2_v.c9 full outer join t3_v on t1_v.c10=t3_v.c10));
+--create view join_view_case3_11 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c16=t2.c16 full outer join t3 on t1.c17=t3.c17)
+--except
+--(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c16=t2_v.c16 full outer join t3_v on t1_v.c17=t3_v.c17));
+--create view join_view_case3_12 as (
+--(select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17, t3.c1 as t3_c1, t3.c2 as t3_c2, t3.c3 as t3_c3, t3.c4 as t3_c4, t3.c5 as t3_c5, t3.c6 as t3_c6, t3.c7 as t3_c7, t3.c8 as t3_c8, t3.c9 as t3_c9, t3.c10 as t3_c10, t3.c11 as t3_c11, t3.c12 as t3_c12, t3.c14 as t3_c14, t3.c15 as t3_c15, t3.c16 as t3_c16, t3.c17 as t3_c17 from t1 full outer join t2 on t1.c13=t2.c13 full outer join t3 on t1.c18=t3.c18)
+--except
+--(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17, t3_v.c1 as t3_v_c1, t3_v.c2 as t3_v_c2, t3_v.c3 as t3_v_c3, t3_v.c4 as t3_v_c4, t3_v.c5 as t3_v_c5, t3_v.c6 as t3_v_c6, t3_v.c7 as t3_v_c7, t3_v.c8 as t3_v_c8, t3_v.c9 as t3_v_c9, t3_v.c10 as t3_v_c10, t3_v.c11 as t3_v_c11, t3_v.c12 as t3_v_c12, t3_v.c14 as t3_v_c14, t3_v.c15 as t3_v_c15, t3_v.c16 as t3_v_c16, t3_v.c17 as t3_v_c17 from t1_v full outer join t2_v on t1_v.c13=t2_v.c13 full outer join t3_v on t1_v.c18=t3_v.c18));
+select * from join_view_case3_7;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case3_8;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case3_9;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case3_10;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 | t3_c1 | t3_c2 | t3_c3 | t3_c4 | t3_c5 | t3_c6 | t3_c7 | t3_c8 | t3_c9 | t3_c10 | t3_c11 | t3_c12 | t3_c14 | t3_c15 | t3_c16 | t3_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+--select * from join_view_case3_11;
+--select * from join_view_case3_12;
+-- case 4: joining + order by with operators
+create view join_view_case4_1 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c15=t2.c15 order by t1.c15)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c15=t2_v.c15 order by t1_v.c15));
+create view join_view_case4_2 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c17=t2.c17 order by t1.c17)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c17=t2_v.c17 order by t1_v.c17));
+create view join_view_case4_3 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c5=t2.c5 where t1.c1=1 order by t1.c5)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5 where t1_v.c1=1 order by t1_v.c5));
+create view join_view_case4_4 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c5=t2.c5 where t1.c6=false order by t1.c5)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5 where t1_v.c6=false order by t1_v.c5));
+create view join_view_case4_5 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c7=t2.c7 where t1.c3<500 order by t1.c7)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c7=t2_v.c7 where t1_v.c3<500 order by t1_v.c7));
+create view join_view_case4_6 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c5=t2.c5 where t1.c4>100 order by t1.c6)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5 where t1_v.c4>100 order by t1_v.c6));
+create view join_view_case4_7 as ((select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c5=t2.c5) as foo where foo.c6=false order by foo.c1 desc)
+except
+(select * from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5) as foo where foo.c6=false order by foo.c1 desc));
+create view join_view_case4_8 as ((select t1.c1 as t1_c1, t1.c2 as t1_c2, t1.c3 as t1_c3, t1.c4 as t1_c4, t1.c5 as t1_c5, t1.c6 as t1_c6, t1.c7 as t1_c7, t1.c8 as t1_c8, t1.c9 as t1_c9, t1.c10 as t1_c10, t1.c11 as t1_c11, t1.c12 as t1_c12, t1.c14 as t1_c14, t1.c15 as t1_c15, t1.c16 as t1_c16, t1.c17 as t1_c17, t2.c1 as t2_c1, t2.c2 as t2_c2, t2.c3 as t2_c3, t2.c4 as t2_c4, t2.c5 as t2_c5, t2.c6 as t2_c6, t2.c7 as t2_c7, t2.c8 as t2_c8, t2.c9 as t2_c9, t2.c10 as t2_c10, t2.c11 as t2_c11, t2.c12 as t2_c12, t2.c14 as t2_c14, t2.c15 as t2_c15, t2.c16 as t2_c16, t2.c17 as t2_c17 from t1 full outer join t2 on t1.c3=t2.c3 full outer join t3 on t1.c4=t3.c4 where t1.c4>5000 order by t1.c4)
+except
+(select  t1_v.c1 as t1_v_c1, t1_v.c2 as t1_v_c2, t1_v.c3 as t1_v_c3, t1_v.c4 as t1_v_c4, t1_v.c5 as t1_v_c5, t1_v.c6 as t1_v_c6, t1_v.c7 as t1_v_c7, t1_v.c8 as t1_v_c8, t1_v.c9 as t1_v_c9, t1_v.c10 as t1_v_c10, t1_v.c11 as t1_v_c11, t1_v.c12 as t1_v_c12, t1_v.c14 as t1_v_c14, t1_v.c15 as t1_v_c15, t1_v.c16 as t1_v_c16, t1_v.c17 as t1_v_c17, t2_v.c1 as t2_v_c1, t2_v.c2 as t2_v_c2, t2_v.c3 as t2_v_c3, t2_v.c4 as t2_v_c4, t2_v.c5 as t2_v_c5, t2_v.c6 as t2_v_c6, t2_v.c7 as t2_v_c7, t2_v.c8 as t2_v_c8, t2_v.c9 as t2_v_c9, t2_v.c10 as t2_v_c10, t2_v.c11 as t2_v_c11, t2_v.c12 as t2_v_c12, t2_v.c14 as t2_v_c14, t2_v.c15 as t2_v_c15, t2_v.c16 as t2_v_c16, t2_v.c17 as t2_v_c17 from t1_v full outer join t2_v on t1_v.c3=t2_v.c3 full outer join t3 on t1_v.c4=t3.c4 where t1_v.c4>5000 order by t1_v.c4));
+select * from join_view_case4_1;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_2;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_3;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_4;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_5;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_6;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+select * from join_view_case4_7;
+ c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 | c11 | c12 | c14 | c15 | c16 | c17 
+----+----+----+----+----+----+----+----+----+-----+-----+-----+-----+-----+-----+-----
+(0 rows)
+
+select * from join_view_case4_8;
+ t1_c1 | t1_c2 | t1_c3 | t1_c4 | t1_c5 | t1_c6 | t1_c7 | t1_c8 | t1_c9 | t1_c10 | t1_c11 | t1_c12 | t1_c14 | t1_c15 | t1_c16 | t1_c17 | t2_c1 | t2_c2 | t2_c3 | t2_c4 | t2_c5 | t2_c6 | t2_c7 | t2_c8 | t2_c9 | t2_c10 | t2_c11 | t2_c12 | t2_c14 | t2_c15 | t2_c16 | t2_c17 
+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------+-------+-------+-------+-------+-------+-------+-------+-------+-------+--------+--------+--------+--------+--------+--------+--------
+(0 rows)
+
+-- case 5: joining + group by with aggregate function and distinct 
+create view join_view_case5_1 as ((select count(*) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c5=t2.c5) as foo group by foo.c1)
+except
+(select count(*) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5) as foo group by foo.c1));
+create view join_view_case5_2 as ((select max(foo.c1) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c1=t2.c1) as foo group by foo.c1)
+except
+(select max(foo.c1) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c1=t2_v.c1) as foo group by foo.c1));
+create view join_view_case5_3 as ((select min(foo.c2) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c2=t2.c2) as foo group by foo.c2)
+except
+(select min(foo.c2) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c2=t2_v.c2) as foo group by foo.c2));
+create view join_view_case5_4 as ((select avg(foo.c1) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c3=t2.c3) as foo group by foo.c1)
+except
+(select avg(foo.c1) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c3=t2_v.c3) as foo group by foo.c1));
+create view join_view_case5_5 as ((select distinct  max(foo.c1) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c5=t2.c5) as foo group by foo.c1)
+except
+(select distinct  max(foo.c1) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c5=t2_v.c5) as foo group by foo.c1));
+create view join_view_case5_6 as ((select max(foo.c1) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c8=t2.c8) as foo group by foo.c1 order by foo.c1 desc)
+except
+(select max(foo.c1) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c8=t2_v.c8) as foo group by foo.c1 order by foo.c1 desc));
+create view join_view_case5_7 as ((select max(foo.c1) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c7=t2.c7) as foo group by foo.c1 order by foo.c1 asc)
+except
+(select max(foo.c1) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c7=t2_v.c7) as foo group by foo.c1 order by foo.c1 asc));
+create view join_view_case5_8 as ((select distinct foo.c1 from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full join t2 on t1.c1=t2.c1) as foo where foo.c1<100)
+except
+(select distinct foo.c1 from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full join t2_v on t1_v.c1=t2_v.c1) as foo where foo.c1<100));
+--create view join_view_case5_9 as (
+--(select distinct foo.c1 from (t1 full outer join t2 on t1.c13=t2.c13 full outer join t3 on t1.c18=t3.c18) where t1.c3<5000 order by t1.c1 asc)
+--except
+--(select distinct foo.c1 from (t1_v full outer join t2_v on t1_v.c13=t2_v.c13 full outer join t3_v on t1_v.c18=t3_v.c18) where t1_v.c3<5000 order by t1_v.c1 asc));
+select * from join_view_case5_1;
+ count 
+-------
+(0 rows)
+
+select * from join_view_case5_2;
+ max 
+-----
+(0 rows)
+
+select * from join_view_case5_3;
+ min 
+-----
+(0 rows)
+
+select * from join_view_case5_4;
+ avg 
+-----
+(0 rows)
+
+select * from join_view_case5_5;
+ max 
+-----
+(0 rows)
+
+select * from join_view_case5_6;
+ max 
+-----
+(0 rows)
+
+select * from join_view_case5_7;
+ max 
+-----
+(0 rows)
+
+select * from join_view_case5_8;
+ c1 
+----
+(0 rows)
+
+--select * from join_view_case5_9;
+-- case 6: joining + group by + having
+create view join_view_case6_1 as ((select count(*) from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c2=t2.c2) as foo where foo.c2=1 group by foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=false order by foo.c2)
+except
+(select count(*) from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c2=t2_v.c2) as foo where foo.c2=1 group by foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=false order by foo.c2));
+create view join_view_case6_3 as ((select distinct min(foo.c2), foo.c5, foo.c6 from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c17=t2.c17) as foo where foo.c2<5000 group by  foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=true order by foo.c5)
+except
+(select distinct min(foo.c2), foo.c5, foo.c6 from (select t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c17=t2_v.c17) as foo where foo.c2<5000 group by  foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=true order by foo.c5));
+--create view join_view_case6_4 as (
+--(select distinct min(foo.c2), foo.c5, foo.c6 from (select  t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 full outer join t2 on t1.c18=t2.c18) as foo where foo.c2<5000 group by foo.c1, foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=true order by foo.c5)
+--except
+--(select distinct min(foo.c2), foo.c5, foo.c6 from (select  t1_v.c1, t1_v.c2, t1_v.c3, t1_v.c4, t1_v.c5, t1_v.c6, t1_v.c7, t1_v.c8, t1_v.c9, t1_v.c10, t1_v.c11, t1_v.c12, t1_v.c14, t1_v.c15, t1_v.c16, t1_v.c17 from t1_v full outer join t2_v on t1_v.c18=t2_v.c18) as foo where foo.c2<5000 group by foo.c1, foo.c2, foo.c3, foo.c4, foo.c5, foo.c6, foo.c7, foo.c8, foo.c9, foo.c10, foo.c11, foo.c12, foo.c14, foo.c15, foo.c16, foo.c17 having foo.c6=true order by foo.c5));
+select * from join_view_case6_1;
+ count 
+-------
+(0 rows)
+
+select * from join_view_case6_3;
+ min | c5 | c6 
+-----+----+----
+(0 rows)
+
+--select * from join_view_case6_4;
+-- drop all tables and views
+drop view join_view_case1_1 CASCADE;
+drop view join_view_case1_2 CASCADE;
+drop view join_view_case2_1 CASCADE;
+drop view join_view_case3_1 CASCADE;
+drop view join_view_case3_2 CASCADE;
+drop view join_view_case3_3 CASCADE;
+--drop view join_view_case3_4 CASCADE;
+--drop view join_view_case3_5 CASCADE;
+drop view join_view_case3_6 CASCADE;
+drop view join_view_case3_7 CASCADE;
+drop view join_view_case3_8 CASCADE;
+drop view join_view_case3_9 CASCADE;
+drop view join_view_case3_10 CASCADE;
+--drop view join_view_case3_11 CASCADE;
+--drop view join_view_case3_12 CASCADE;
+drop view join_view_case4_1 CASCADE;
+drop view join_view_case4_2 CASCADE;
+drop view join_view_case4_3 CASCADE;
+drop view join_view_case4_4 CASCADE;
+drop view join_view_case4_5 CASCADE;
+drop view join_view_case4_6 CASCADE;
+drop view join_view_case4_7 CASCADE;
+drop view join_view_case4_8 CASCADE;
+drop view join_view_case5_1 CASCADE;
+drop view join_view_case5_2 CASCADE;
+drop view join_view_case5_3 CASCADE;
+drop view join_view_case5_4 CASCADE;
+drop view join_view_case5_5 CASCADE;
+drop view join_view_case5_6 CASCADE;
+drop view join_view_case5_7 CASCADE;
+drop view join_view_case5_8 CASCADE;
+--drop view join_view_case5_9 CASCADE;
+drop view join_view_case6_1 CASCADE;
+drop view join_view_case6_3 CASCADE;
+--drop view join_view_case6_4 CASCADE;
+drop table t1 CASCADE;
+NOTICE:  drop cascades to view t1_data_v
+drop table t2 CASCADE;
+NOTICE:  drop cascades to view t2_data_v
+drop table t3 CASCADE;
+NOTICE:  drop cascades to view t3_data_v
+drop table t1_v CASCADE;
+drop table t2_v CASCADE;
+drop table t3_v CASCADE;

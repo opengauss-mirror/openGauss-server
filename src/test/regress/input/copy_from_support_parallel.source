@@ -1,0 +1,121 @@
+drop table if exists copy_from_parallel_test;
+drop table if exists copy_from_parallel_test1;
+create table copy_from_parallel_test(id int not null, name varchar(20));
+create table copy_from_parallel_test1(id int not null, parallel varchar(20));
+
+----As a reference, create a basic table and export its data to copy_from_parallel_data.
+----create table basic_table(id int not null, name varchar(20));
+----\copy basic_table to '@abs_srcdir@/data/copy_from_parallel_data' csv;
+----\copy basic_table to '@abs_srcdir@/data/copy_from_parallel_data_binary' binary;
+
+----parallel configure in the left
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' with parallel 4 DELIMITER ',';
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+----parallel configure in the right
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+----parallel configure in the middle
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4 DELIMITER ',';
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' with parallel 2 (format 'csv', DELIMITER ',');
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+----parallel configure && transform column expr.
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' parallel 4 transform (name AS name || id) DELIMITER ',';
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+----without parallel configure
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv DELIMITER ',';
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+\copy copy_from_parallel_test1 from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4 transform (parallel as parallel || id);
+select * from copy_from_parallel_test1 order by id;
+truncate copy_from_parallel_test1;
+
+\copy copy_from_parallel_test1(id, parallel) from stdin csv parallel 4
+1, parallel
+2, books
+\.
+
+select * from copy_from_parallel_test1 order by id;
+truncate copy_from_parallel_test1;
+
+----parallel 0 will work, not follow parallel processes
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 0;
+select * from copy_from_parallel_test order by id;
+truncate copy_from_parallel_test;
+
+----abnormal cases: syntax error
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv paralle;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4a;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel -2;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 2 parallel 3;
+----parallel wrapped "()" will cause syntax error
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv (parallel 4);
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' (csv, parallel 4);
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv (parallel) 4;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel (4);
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' with (format 'csv', DELIMITER ',', parallel 2);
+
+----abnormal cases: execution error
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' parallel 4;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data_1' csv parallel 4;
+\copy copy_from_parallel_tes from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4 transform (names as name || id);
+
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' WITH (delimiter',',IGNORE_EXTRA_DATA 'on');
+select count(*) from copy_from_parallel_test;
+
+\copy copy_from_parallel_test from '@abs_srcdir@/data/copy_from_parallel_data' WITH csv delimiter ',' ESCAPE '"';
+select count(*) from copy_from_parallel_test;
+
+----aditional testcases
+----copy from parallel in a transaction
+start transaction;
+create table copy_from_parallel_in_trans(id int not null, name varchar(20));
+\copy copy_from_parallel_in_trans from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+select count(*) from copy_from_parallel_in_trans;
+commit;
+
+drop table copy_from_parallel_in_trans;
+drop table copy_from_parallel_test;
+drop table copy_from_parallel_test1;
+
+----temp table
+create temp table copy_from_parallel_tmp(id int not null, name varchar(20));
+\copy copy_from_parallel_tmp from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+select count(*) from copy_from_parallel_tmp;
+drop table copy_from_parallel_tmp;
+
+--binary file
+create table copy_from_parallel_binary(id int not null, name varchar(20));
+\copy copy_from_parallel_binary from '@abs_srcdir@/data/copy_from_parallel_data_binary' binary parallel 4;
+select count(*) from copy_from_parallel_binary;
+drop table copy_from_parallel_binary;
+
+----copy from parallel when change schema
+create schema copy_from_parallel;
+set current_schema = copy_from_parallel;
+create table copy_from_parallel_schema(id int not null, name varchar(20));
+\copy copy_from_parallel_schema from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+select count(*) from copy_from_parallel_schema;
+drop table copy_from_parallel_schema;
+drop schema copy_from_parallel;
+
+create schema copy_from_parallel;
+set search_path to copy_from_parallel;
+create table copy_from_parallel_schema(id int not null, name varchar(20));
+\copy copy_from_parallel_schema from '@abs_srcdir@/data/copy_from_parallel_data' csv parallel 4;
+select count(*) from copy_from_parallel_schema;
+drop table copy_from_parallel_schema;
+drop schema copy_from_parallel;

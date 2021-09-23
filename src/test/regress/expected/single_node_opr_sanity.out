@@ -431,7 +431,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
    77 | int4
    78 | char
    89 | version
-   90 | pgxc_version
+   90 | opengauss_version
    91 | oidvectorin_extend
    92 | oidvectorout_extend
   101 | eqsel
@@ -897,6 +897,21 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  1490 | line_in
  1491 | line_out
  1493 | line
+ 1500 | turn_off
+ 1501 | turn_on
+ 1502 | next
+ 1503 | abort
+ 1504 | attach
+ 1505 | info_locals
+ 1506 | continue
+ 1507 | add_breakpoint
+ 1508 | delete_breakpoint
+ 1509 | info_breakpoints
+ 1510 | backtrace
+ 1511 | info_code
+ 1512 | step
+ 1513 | local_debug_server_info
+ 1515 | print_var
  1530 | length
  1531 | length
  1532 | point
@@ -1119,6 +1134,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  1991 | comm_client_info
  1992 | global_comm_get_client_info
  1993 | shobj_description
+ 1995 | gs_comm_proxy_thread_status
  1998 | pg_get_running_xacts
  1999 | pg_check_xidlimit
  2000 | pg_get_xidlimit
@@ -1532,6 +1548,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2597 | domain_in
  2598 | domain_recv
  2599 | pg_timezone_abbrevs
+ 2600 | int2vectorin_extend
+ 2601 | int2vectorout_extend
+ 2602 | int2vectorrecv_extend
+ 2603 | int2vectorsend_extend
  2614 | xmlexists
  2621 | pg_reload_conf
  2622 | pg_rotate_logfile
@@ -1667,6 +1687,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2857 | pg_stat_get_backend_xact_start
  2858 | numeric_avg_accum
  2859 | pg_stat_get_buf_alloc
+ 2860 | gs_current_xlog_insert_end_location
  2878 | pg_stat_get_live_tuples
  2879 | pg_stat_get_dead_tuples
  2880 | pg_advisory_lock
@@ -2367,6 +2388,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3988 | track_memory_context
  3989 | gin_clean_pending_list
  3990 | track_memory_context_detail
+ 3991 | pg_cancel_session
  3998 | update_pgjob
  3999 | pg_tde_info
  4000 | gs_fault_inject
@@ -2607,6 +2629,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4345 | hll_hash_any
  4346 | hll_union_trans
  4348 | hll_union_collect
+ 4350 | hll_duplicatecheck
  4351 | hll_add_trans0
  4352 | hll_pack
  4353 | hll_hash_boolean
@@ -2632,6 +2655,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4374 | remote_bgwriter_stat
  4375 | local_single_flush_dw_stat
  4376 | remote_single_flush_dw_stat
+ 4378 | hll_log2explicit
+ 4379 | hll_log2sparse
  4380 | hll_add_agg
  4381 | hll_add_agg
  4382 | hll_add_agg
@@ -2650,6 +2675,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4424 | byteawithoutordercolrecv
  4425 | byteawithoutordercolsend
  4428 | byteawithoutordercolout
+ 4430 | gs_undo_meta
+ 4431 | gs_undo_translot
+ 4435 | gs_upload_obs_file
+ 4436 | gs_download_obs_file
  4440 | byteawithoutorderwithequalcolin
  4441 | table_distribution
  4442 | table_distribution
@@ -2697,6 +2726,23 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4703 | has_directory_privilege
  4704 | has_directory_privilege
  4705 | has_directory_privilege
+ 4750 | ubtinsert
+ 4751 | ubtbeginscan
+ 4752 | ubtgettuple
+ 4753 | ubtgetbitmap
+ 4754 | ubtrescan
+ 4755 | ubtendscan
+ 4756 | ubtmarkpos
+ 4757 | ubtrestrpos
+ 4758 | ubtmerge
+ 4759 | ubtbuild
+ 4760 | ubtbuildempty
+ 4761 | ubtbulkdelete
+ 4762 | ubtvacuumcleanup
+ 4763 | ubtcanreturn
+ 4764 | ubtoptions
+ 4765 | ubtcostestimate
+ 4767 | gs_read_block_from_remote
  4789 | remote_rto_stat
  4800 | job_cancel
  4801 | job_finish
@@ -2709,6 +2755,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4891 | hypopg_drop_index
  4892 | hypopg_estimate_size
  4893 | hypopg_reset_index
+ 4895 | gs_is_recycle_object
  4999 | remote_recovery_status
  5000 | get_instr_workload_info
  5001 | pg_stat_get_wlm_session_info_internal
@@ -2744,6 +2791,11 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5031 | pg_stat_get_wlm_instance_info
  5032 | pg_stat_get_wlm_instance_info_with_cleanup
  5033 | gs_stat_get_wlm_plan_operator_info
+ 5034 | gs_io_wait_status
+ 5035 | pg_get_indexdef
+ 5128 | gs_get_obs_file_context
+ 5129 | gs_set_obs_file_context
+ 5130 | gs_get_hadr_key_cn
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
@@ -2781,6 +2833,12 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5587 | smalldatetime_hash
  5600 | pg_stat_get_last_data_changed_time
  5601 | pg_stat_set_last_data_changed_time
+ 5681 | get_dn_hist_relhash
+ 5682 | ledger_gchain_check
+ 5683 | ledger_hist_archive
+ 5684 | ledger_gchain_archive
+ 5685 | ledger_hist_repair
+ 5686 | ledger_gchain_repair
  5702 | get_instr_unique_sql
  5703 | generate_wdr_report
  5705 | get_instr_wait_event
@@ -2796,10 +2854,16 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5719 | capture_view_to_json
  5720 | get_node_stat_reset_time
  5721 | get_local_active_session
+ 5722 | ledger_hist_check
  5723 | get_wait_event_info
  5730 | locktag_decode
  5731 | working_version_num
  5732 | statement_detail_decode
+ 5812 | hash16in
+ 5813 | hash16out
+ 5814 | hash32in
+ 5815 | hash32out
+ 5998 | gs_deployment
  5999 | get_gtm_lite_status
  6000 | getbucket
  6001 | bucketuuid
@@ -2831,12 +2895,15 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt
  6323 | gs_encrypt
- 6555 | array_remove
- 6556 | array_replace
- 6558 | first_transition
- 6559 | last_transition
- 6560 | first
- 6561 | last
+ 7000 | pg_stat_segment_space_info
+ 7001 | pg_stat_segment_extent_usage
+ 7002 | gs_space_shrink
+ 7003 | pg_stat_remain_segment_info
+ 7004 | pg_free_remain_segment
+ 7005 | local_segment_space_info
+ 7006 | local_space_shrink
+ 7007 | remote_segment_space_info
+ 7008 | global_space_shrink
  6666 | network_larger
  6667 | network_smaller
  6668 | max
@@ -2848,9 +2915,31 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7106 | db4ai_predict_by_float8
  7107 | db4ai_predict_by_numeric
  7108 | db4ai_predict_by_text
+ 6555 | array_remove
+ 6556 | array_replace
+ 6558 | first_transition
+ 6559 | last_transition
+ 6560 | first
+ 6561 | last
  7777 | sysdate
+ 7800 | init
+ 7801 | analyze_query
+ 7802 | get_analyzed_result
+ 7803 | run
+ 7804 | clean
+ 7805 | assign_table_type
+ 7806 | clean_workload
+ 7807 | get_distribution_key
+ 7808 | set_weight_params
+ 7809 | set_cost_params
+ 7810 | start_collect_workload
+ 7811 | end_collect_workload
+ 7812 | analyze_workload
+ 7893 | gs_stat_ustore
  7998 | set_working_grand_version_num_manually
+ 8001 | get_paxos_replication_info
  8050 | datalength
+ 8642 | gs_txid_oldestxmin
  9004 | smalldatetime_in
  9006 | smalldatetime_out
  9007 | smalldatetime_recv
@@ -2874,12 +2963,26 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9031 | gs_set_obs_delete_location
  9032 | gs_get_global_barrier_status
  9033 | gs_get_local_barrier_status
+ 9034 | gs_get_global_barriers_status
+ 9035 | gs_set_obs_delete_location_with_slotname
  9130 | has_cek_privilege
  9131 | has_cek_privilege
  9132 | has_cek_privilege
  9133 | has_cek_privilege
  9134 | has_cek_privilege
  9135 | has_cek_privilege
+ 9136 | gs_hadr_do_switchover
+ 9137 | gs_hadr_has_barrier_creator
+ 9138 | gs_hadr_in_recovery
+ 9982 | tdigest_mergep
+ 9983 | tdigest_in
+ 9984 | tdigest_out
+ 9985 | calculate_value_at
+ 9986 | value_of_percentile
+ 9987 | calculate_quantile_of
+ 9988 | tdigest_merge_to_one
+ 9989 | tdigest_merge
+ 9990 | percentile_of_value
  9999 | pg_test_err_contain_err
 --?.*
 
@@ -3589,7 +3692,8 @@ ORDER by 1, 2, 3;
  amname | amoplefttype | amoprighttype 
 --------+--------------+---------------
  btree  |         4402 |          4402
-(1 row)
+ ubtree |         4402 |          4402
+(2 rows)
 
 -- Currently, none of the AMs with fixed strategy sets support ordering ops.
 SELECT p1.amname, p2.amopfamily, p2.amopstrategy
@@ -3710,9 +3814,18 @@ ORDER BY 1, 2, 3;
        4239 |            3 | =
        4239 |            4 | >=
        4239 |            5 | >
+       4439 |            1 | <
+       4439 |            1 | ~<~
+       4439 |            2 | <=
+       4439 |            2 | ~<=~
+       4439 |            3 | =
+       4439 |            4 | >=
+       4439 |            4 | ~>=~
+       4439 |            5 | >
+       4439 |            5 | ~>~
        4444 |            1 | @@
        4444 |            2 | @@@
-(71 rows)
+(80 rows)
 
 -- Check that all opclass search operators have selectivity estimators.
 -- This is not absolutely required, but it seems a reasonable thing
@@ -3879,7 +3992,7 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amproclefttype = p3.amproclefttype AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
-      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin') THEN p1.amsupport - 1
+      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin', 'ubtree') THEN p1.amsupport - 1
             ELSE p1.amsupport END)
       AND p1.amsupport
 ORDER by 1, 2, 3;
@@ -3894,7 +4007,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin'
+WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL
 ORDER by 1, 2, 3;
@@ -3906,7 +4019,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin'
+WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin' OR am.amname = 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING (count(*) != amsupport AND count(*) != amsupport - 1)
     OR amprocfamily IS NULL

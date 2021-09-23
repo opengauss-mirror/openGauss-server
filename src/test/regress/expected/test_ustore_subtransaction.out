@@ -1,0 +1,261 @@
+/* Test1: simple rollback to savepoint */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+begin;
+savepoint s1;
+update t1 set c1 = 2;
+rollback to s1;
+select * from t1;
+ c1 
+----
+  1
+(1 row)
+
+savepoint s2;
+insert into t1 values (2);
+rollback to s2;
+select * from t1;
+ c1 
+----
+  1
+(1 row)
+
+savepoint s3;
+delete from t1;
+rollback to s2;
+select * from t1;
+ c1 
+----
+  1
+(1 row)
+
+update t1 set c1 = 2;
+commit;
+select * from t1;
+ c1 
+----
+  2
+(1 row)
+
+drop table t1;
+/* Test2: concurrent update */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 2
+begin
+    perform * from t1 for update;
+    begin
+        update t1 set c1 = 2;
+        pg_sleep(2.5);
+        raise exception '';
+    exception
+        when others then
+            pg_sleep(1);
+            update t1 set c1 = c1 * 2;
+    end;
+end;
+/
+begin
+    pg_sleep(2);
+    update t1 set c1 = c1 + 1;
+end;
+/
+\parallel off
+select * from t1; -- expected as 4
+ c1 
+----
+  4
+(1 row)
+
+drop table t1;
+/* Test3: concurrent update */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 2
+begin
+    begin
+        update t1 set c1 = 2;
+        pg_sleep(2.5);
+        raise exception '';
+    exception
+        when others then
+            pg_sleep(1);
+            update t1 set c1 = c1 * 2;
+    end;
+end;
+/
+begin
+    pg_sleep(2);
+    update t1 set c1 = c1 + 3;
+end;
+/
+\parallel off
+select * from t1; -- expected as 8
+ c1 
+----
+  8
+(1 row)
+
+drop table t1;
+/* Test4: select-for-update and select-for-share */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 2
+begin
+    perform * from t1 for update;
+    begin
+        update t1 set c1 = 2;
+        pg_sleep(2.5);
+        raise exception '';
+    exception
+        when others then
+            pg_sleep(1);
+            update t1 set c1 = c1 * 2;
+    end;
+end;
+/
+begin
+    pg_sleep(2);
+    perform * from t1 for share;
+    update t1 set c1 = c1 + 3;
+end;
+/
+\parallel off
+select * from t1; -- expected as 8
+ c1 
+----
+  8
+(1 row)
+
+drop table t1;
+/* Test5: concurrent delete and update */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 2
+begin
+    begin
+        update t1 set c1 = 3;
+        pg_sleep(2.5);
+        raise exception '';
+    exception
+        when others then
+            pg_sleep(1);
+            delete from t1 where c1 = 2; 
+    end;
+end;
+/
+begin
+    pg_sleep(1.5);
+    update t1 set c1 = 2;
+    begin
+        perform * from t1 for update;
+        update t1 set c1 = 4;
+        raise exception '';
+    exception
+        when others then
+            raise notice '';
+    end;
+end;
+/
+\parallel off
+NOTICE:  
+select * from t1; -- expected as nothing
+ c1 
+----
+(0 rows)
+
+drop table t1;
+/* Test6: test subtrans committed (2 clients)*/
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 2
+begin
+    begin
+        update t1 set c1 = 3;
+    exception
+        when others then
+            pg_sleep(2.5);
+            delete from t1 where c1 = 2;
+    end;
+
+    pg_sleep(1);	
+    update t1 set c1 = 2;
+end;
+/
+begin
+    pg_sleep(2);
+    perform * from t1 for update;
+    update t1 set c1 = c1 * 2;
+end;
+/
+\parallel off
+select * from t1; -- expected as 4
+ c1 
+----
+  4
+(1 row)
+
+drop table t1;
+/* Test7:  test subtrans committed/aborted */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+\parallel on 3
+begin
+    begin
+        update t1 set c1 = 3;
+    exception
+        when others then
+            pg_sleep(2.5);
+            delete from t1 where c1 = 2;
+    end;
+
+    pg_sleep(1);
+    update t1 set c1 = 2; -- this finishes first
+end;
+/
+begin
+    pg_sleep(2);
+    perform * from t1 for update;
+    update t1 set c1 = c1 * 2; -- 2 * 2
+    pg_sleep(0.2);
+end;
+/
+begin
+    pg_sleep(1.5);
+    begin
+        update t1 set c1 = 3; -- from 2 to 3
+        raise exception ''; -- abort
+    exception
+	-- here should do actual abort
+        when others then
+            pg_sleep(1); -- sleep and T2 should update the tuple
+	    update t1 set c1 = c1 * 2 + 1; -- 4 * 2 + 1
+    end;
+
+    update t1 set c1 = c1 + 1; -- 9 + 1
+end;
+/
+\parallel off
+select * from t1; -- expected as 10
+ c1 
+----
+ 10
+(1 row)
+
+drop table t1;
+/* Test8: release savepoint and top transaction does rollback */
+create table t1 (c1 int) with (storage_type=ustore);
+insert into t1 values (1);
+begin;
+insert into t1 values (2);
+savepoint s1;
+insert into t1 values (3);
+release s1;
+rollback;
+select * from t1;
+ c1 
+----
+  1
+(1 row)
+
+drop table t1;

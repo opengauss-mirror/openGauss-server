@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-DROP INDEX [ CONCURRENTLY ] [ IF EXISTS ] 
+DROP INDEX [ IF EXISTS ] 
 index_name [, ...] [ CASCADE | RESTRICT ];
 </synopsis>
 </refsynopsisdiv>

@@ -200,6 +200,7 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
         case RELKIND_INDEX:
             switch (rel->rd_rel->relam) {
                 case BTREE_AM_OID:
+                case UBTREE_AM_OID:
                     return pgstat_index(rel, BTREE_METAPAGE + 1, pgstat_btree_page, fcinfo);
                 case HASH_AM_OID:
                     return pgstat_index(rel, HASH_METAPAGE + 1, pgstat_hash_page, fcinfo);

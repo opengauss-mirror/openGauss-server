@@ -29,6 +29,7 @@
 #include "utils/snapmgr.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
+#include "storage/procarray.h"
 
 /* Working data for heap_page_prune and subroutines */
 typedef struct {
@@ -73,6 +74,7 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
     Page page = BufferGetPage(buffer);
     Size minfree;
     TransactionId oldest_xmin;
+    TransactionId CatalogXmin;
     /*
      * We can't write WAL in recovery mode, so there's no point trying to
      * clean the page. The master will likely issue a cleaning WAL record soon
@@ -81,12 +83,15 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
     if (RecoveryInProgress())
         return;
 
+    oldest_xmin = u_sess->utils_cxt.RecentGlobalXmin;
     if (IsCatalogRelation(relation) ||
         RelationIsAccessibleInLogicalDecoding(relation)) {
-        oldest_xmin = u_sess->utils_cxt.RecentGlobalXmin;
-    } else {
-        oldest_xmin = u_sess->utils_cxt.RecentGlobalDataXmin;
+        CatalogXmin = GetReplicationSlotCatalogXmin();
+        if (CatalogXmin != 0 && CatalogXmin < oldest_xmin) {
+            oldest_xmin = CatalogXmin;
+        }
     }
+
 
     Assert(TransactionIdIsValid(oldest_xmin));
 
@@ -99,8 +104,7 @@ void heap_page_prune_opt(Relation relation, Buffer buffer)
      * Keep prune page can be done in single mode (standlone --single), so just in PostmasterEnvironment.
      */
     if ((t_thrd.xact_cxt.useLocalSnapshot && IsPostmasterEnvironment) ||
-        g_instance.attr.attr_storage.IsRoachStandbyCluster || u_sess->attr.attr_common.upgrade_mode == 1 ||
-        InplaceUpgradePrecommit)
+        g_instance.attr.attr_storage.IsRoachStandbyCluster || u_sess->attr.attr_common.upgrade_mode == 1)
         return;
 
     /*

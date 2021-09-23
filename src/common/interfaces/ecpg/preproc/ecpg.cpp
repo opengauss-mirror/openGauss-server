@@ -1,6 +1,6 @@
 /* src/interfaces/ecpg/preproc/ecpg.c */
 
-/* Main for ecpg, the PostgreSQL embedded SQL precompiler. */
+/* Main for ecpg, the openGauss embedded SQL precompiler. */
 /* Copyright (c) 1996-2012, PostgreSQL Global Development Group */
 
 #include "postgres_fe.h"
@@ -26,7 +26,7 @@ struct _defines* defines = NULL;
 
 static void help(const char* progname)
 {
-    printf(_("%s is the PostgreSQL embedded SQL preprocessor for C programs.\n\n"), progname);
+    printf(_("%s is the openGauss embedded SQL preprocessor for C programs.\n\n"), progname);
     printf(_("Usage:\n"
              "  %s [OPTION]... FILE...\n\n"),
         progname);

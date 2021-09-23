@@ -1150,9 +1150,11 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
                      * If td_compatible_truncation equal true and no foreign table found,
                      * the auto truncation funciton should be enabled.
                      */
+
                     if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && pstate->p_target_relation != NULL &&
                         !RelationIsForeignTable(pstate->p_target_relation) &&
                         !RelationIsStream(pstate->p_target_relation)) {
+
                         if (u_sess->attr.attr_sql.td_compatible_truncation) {
                             pstate->p_is_td_compatible_truncation = true;
                         } else {
@@ -1291,6 +1293,11 @@ Query* transformMergeStmt(ParseState* pstate, MergeStmt* stmt)
 
             /* save it */
             qry->upsertQuery = insert_query;
+
+            if (rte->is_ustore) {
+                ereport(ERROR, ((errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                  errmsg("INSERT ON DUPLICATE KEY UPDATE is not supported on ustore."))));
+            }
         }
     }
 

@@ -824,21 +824,19 @@ int cmp_lists(List* list1, List* list2)
 
 int cmp_hba_line(HbaLine* hbaline1, HbaLine* hbaline2)
 {
-    int conection_type_order[] = {7, 4, 6, 5, 3, 0, 2, 1};
-    /* ipCmpMask, ipCmpSameHost, ipCmpSameNet, 	ipCmpAll */
+    int connection_type_order[] = {7, 4, 6, 5, 3, 0, 2, 1}; /* order: local > hostssl > hostnossl > host */
+    /* ipCmpMask, ipCmpSameHost, ipCmpSameNet, ipCmpAll */
     int ipaddr_order[] = {1, 3, 2, 0};
     bool list1_has_replication = false;
     bool list2_has_replication = false;
-    int retval;
+    int retval = 0;
 
+    /* compare replication database */
     list1_has_replication = (hbaline1->databases->length == 1) && list_has_keyword(hbaline1->databases, "replication");
-
     list2_has_replication = (hbaline2->databases->length == 1) && list_has_keyword(hbaline2->databases, "replication");
-
-    if ((hbaline1->conntype != hbaline2->conntype) || (list1_has_replication != list2_has_replication)) {
-
-        return ((conection_type_order[hbaline1->conntype + (4 * (int)list1_has_replication)]) -
-                (conection_type_order[hbaline2->conntype + (4 * (int)list2_has_replication)]));
+    if (list1_has_replication != list2_has_replication) {
+        return ((connection_type_order[hbaline1->conntype + (4 * (int)list1_has_replication)]) -
+                (connection_type_order[hbaline2->conntype + (4 * (int)list2_has_replication)]));
     }
 
     /* compare hostnames/ipaddress */
@@ -853,21 +851,25 @@ int cmp_hba_line(HbaLine* hbaline1, HbaLine* hbaline2)
 
         /* compare ipaddress [ipv4/ipv6] */
         retval = cmp_ip_type_and_prefix((struct sockaddr*)&hbaline1->mask, (struct sockaddr*)&hbaline2->mask);
-
-        if (0 != retval) {
+        if (retval != 0) {
             return retval;
         }
     }
 
+    /* compare connection type */
+    if (hbaline1->conntype != hbaline2->conntype) {
+        return (connection_type_order[hbaline1->conntype] - connection_type_order[hbaline2->conntype]);
+    }
+
     /* compare database names */
     retval = cmp_lists(hbaline1->databases, hbaline2->databases);
-    if (0 != retval) {
+    if (retval != 0) {
         return retval;
     }
 
     /* compare usernames names */
     retval = cmp_lists(hbaline1->roles, hbaline2->roles);
-    if (0 != retval) {
+    if (retval != 0) {
         return retval;
     }
 

@@ -1,21 +1,21 @@
 -- create a tablespace we can use
 CREATE TABLESPACE testspace LOCATION '@testtablespace@';
 CREATE TABLESPACE test_spc_base LOCATION '@testtablespace@/abcd/efgh';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd/efgh"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc1 LOCATION '@testtablespace@/abcd/efgh/ijkl';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd/efgh/ijkl"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc1 LOCATION '@testtablespace@/abcd/efgh/ijkl/';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd/efgh/ijkl"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc1 LOCATION '@testtablespace@/abcd';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc1 LOCATION '@testtablespace@/abcd/';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc1 LOCATION '@testtablespace@/abcd/ef';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd/ef"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc2 LOCATION '@testtablespace@/abcd/efghihj';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcd/efghihj"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc3 LOCATION '@testtablespace@/abcdefghihj';
-ERROR:  find conflict linkpath "@testtablespace@" in pg_tblspc, location "@testtablespace@/abcdefghihj"
+ERROR:  find conflict linkpath in pg_tblspc, try a different path.
 CREATE TABLESPACE test_spc4 LOCATION '@abs_srcdir@/tmp_check/peudocn/abc';
 CREATE TABLESPACE test_spc4 LOCATION '@abs_srcdir@/tmp_check/uhfk';
 ERROR:  tablespace "test_spc4" already exists
@@ -26,6 +26,7 @@ create user drop_space_user password "huawei@123";
 set role drop_space_user password "huawei@123";
 DROP TABLESPACE testspace;
 ERROR:  permission denied for tablespace testspace
+DETAIL:  N/A
 reset role;
 drop user drop_space_user;
 DROP TABLESPACE test_spc_base;

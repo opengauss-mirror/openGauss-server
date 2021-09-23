@@ -34,7 +34,7 @@ PreparedStatement::PreparedStatement()
       copy_state(NULL),
       original_data_types_oids(NULL),
       original_data_types_oids_size(0),
-      cacheRefresh(CacheRefreshType::NONE),
+      cacheRefresh(CacheRefreshType::CACHE_NONE),
       m_function_name("") {};
 
 PreparedStatement::~PreparedStatement()

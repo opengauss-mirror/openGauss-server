@@ -64,7 +64,6 @@ static bool check_join_method_alternative(
 static void mark_append_path(PlannerInfo* root, RelOptInfo* rel, Path* pathnode, List* subpaths);
 static bool is_ec_usable_for_join(
     Relids suitable_relids, EquivalenceClass* suitable_ec, Node* diskey, Expr* join_clause, bool is_left);
-static bool is_diskey_and_joinkey_compatible(Node* diskey, Node* joinkey);
 static List* get_otherside_key(
     PlannerInfo* root, List* rinfo, List* targetlist, RelOptInfo* otherside_rel, double* skew_multiple);
 static void add_hashjoin_broadcast_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
@@ -253,6 +252,203 @@ PathCostComparison compare_join_single_node_distribution(Path* path1, Path* path
     return COSTS_DIFFERENT;
 }
 
+inline bool IsSeqScanPath(const Path* path)
+{
+    return path->pathtype == T_SeqScan;
+}
+
+inline bool IsBtreeIndexPath(const Path* path)
+{
+    return path->type == T_IndexPath && 
+        ((IndexPath*)path)->indexinfo->relam == BTREE_AM_OID;
+}
+
+inline bool AreTwoBtreeIdxPaths(const Path* path1, const Path* path2)
+{
+    return IsBtreeIndexPath(path1) && IsBtreeIndexPath(path2);
+}
+
+inline bool IsBtreeIdxAndSeqPath(const Path* path1, const Path* path2)
+{
+    return (IsBtreeIndexPath(path1) && IsSeqScanPath(path2)) || 
+        (IsBtreeIndexPath(path2) && IsSeqScanPath(path1));
+}
+
+inline bool IsParamPath(const Path* path)
+{
+    return path->param_info != NULL;
+}
+
+inline bool BothParamPathOrBothNot(const Path* path1, const Path* path2)
+{
+    return (IsParamPath(path1) && IsParamPath(path2)) || 
+        (!IsParamPath(path1) && !IsParamPath(path2));
+}
+
+inline bool ContainUniqueCols(const IndexPath* path)
+{
+    return path->rulesforindexgen & BTREE_INDEX_CONTAIN_UNIQUE_COLS;
+}
+
+/*
+ * The main entry for unique index first rule.
+ * In this rule, we check two aspects: 
+ * 1. For Btree index pathA and pathB, pathA contains a unique btree columns and the constraint 
+ * conditions are equality constraints. We prefer pathA.
+ * Notice: Only consider unique index first rule when the two index paths are both parameterized path 
+ * or both not.
+ * 2. For Btree index pathA and SeqScan pathB, pathA contains a unique btree columns and the constraint 
+ * conditions are equality constraints. We prefer pathA.
+ * Notice: This rule is vaild when Btree index pathA is unparameterized path.
+ */
+bool ImplementUniqueIndexRule(const Path* path1, const Path* path2, PathCostComparison &cost_comparison)
+{
+    /* Check the first aspect */
+    if (AreTwoBtreeIdxPaths(path1, path2) && BothParamPathOrBothNot(path1, path2)) {
+        bool path1ContainUniqueCols = ContainUniqueCols((IndexPath*)path1);
+        bool path2ContainUniqueCols = ContainUniqueCols((IndexPath*)path2);
+        /* Compare with 1 to verify whether one path satisfy unique index first rule and another don't. */
+        if (path1ContainUniqueCols + path2ContainUniqueCols == 1) {
+            const int suppressionParam = g_instance.cost_cxt.disable_cost_enlarge_factor;
+            if (path1ContainUniqueCols == true && path1->total_cost < suppressionParam * path2->total_cost) {
+                cost_comparison = COSTS_BETTER1;
+                return true;
+            } else if (path2ContainUniqueCols == true && path2->total_cost < suppressionParam * path1->total_cost) {
+                cost_comparison = COSTS_BETTER2;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Check the second aspect */
+    if (IsBtreeIdxAndSeqPath(path1, path2)) {
+        const int suppressionParam = g_instance.cost_cxt.disable_cost_enlarge_factor;
+        if (IsSeqScanPath(path1) && !IsParamPath(path2) && ContainUniqueCols((IndexPath*)path2) && 
+            path2->total_cost < suppressionParam * path1->total_cost) {
+            cost_comparison = COSTS_BETTER2;           
+            return true;
+        } else if (IsSeqScanPath(path2) && !IsParamPath(path1) && ContainUniqueCols((IndexPath*)path1) && 
+            path1->total_cost < suppressionParam * path2->total_cost) {
+            cost_comparison = COSTS_BETTER1;
+            return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+void DebugPrintUniqueIndexFirstInfo(const Path* path1, const Path* path2, const PathCostComparison &cost_comparison)
+{
+    char* preferIndexName = NULL;
+    char* ruledOutIndexName = NULL;
+
+    if (cost_comparison == COSTS_BETTER1) {
+        preferIndexName = get_rel_name(((IndexPath*)path1)->indexinfo->indexoid);
+        ruledOutIndexName = IsBtreeIndexPath(path2) ? get_rel_name(((IndexPath*)path2)->indexinfo->indexoid) : NULL;
+    } else {
+        preferIndexName = get_rel_name(((IndexPath*)path2)->indexinfo->indexoid);
+        ruledOutIndexName = IsBtreeIndexPath(path1) ? get_rel_name(((IndexPath*)path1)->indexinfo->indexoid) : NULL;
+    }
+    
+    /* ruledOutIndexName = NULL means the ruled out path is a seqscan path. */
+    if (ruledOutIndexName == NULL) {
+        ereport(DEBUG1,
+            (errmodule(MOD_OPT),
+                errmsg("Implement Unique Index rule in selecting path: prefer to use index: %s, rule out seqscan.", 
+                    preferIndexName)));
+    } else {
+        ereport(DEBUG1,
+            (errmodule(MOD_OPT),
+                errmsg("Implement Unique Index rule in selecting path: prefer to use index: %s, rule out index: %s.", 
+                    preferIndexName, ruledOutIndexName)));
+    }
+
+    pfree_ext(preferIndexName);
+    pfree_ext(ruledOutIndexName);
+}
+
+/* Check whether unique index first rule can be used */
+bool CheckUniqueIndexFirstRule(const Path* path1, const Path* path2, PathCostComparison &cost_comparison)
+{
+    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && ImplementUniqueIndexRule(path1, path2, cost_comparison)) {
+        if (log_min_messages <= DEBUG1)
+            DebugPrintUniqueIndexFirstInfo(path1, path2, cost_comparison);
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Check Join Exec Type
+ *
+ * Return true represent execute on CN
+ *        false represent execute on DN
+ */
+bool CheckJoinExecType(PlannerInfo *root, Path *outer, Path *inner)
+{
+    if (!permit_gather(root)) {
+        return false;
+    }
+
+    /* Only both sides execute on Cn then return true */
+    if (EXEC_CONTAIN_COORDINATOR(inner->exec_type) &&
+        EXEC_CONTAIN_COORDINATOR(outer->exec_type)) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * Check inner and outer exec type same or not
+ *
+ * Return true represent two sides exec type same
+ *        false represent two sides exec type different
+ */
+bool IsSameJoinExecType(PlannerInfo* root, Path* outer, Path* inner)
+{
+    if (!permit_gather(root)) {
+        return true;
+    }
+
+    /* Both sides execute on CN then return true */
+    if (EXEC_CONTAIN_COORDINATOR(inner->exec_type) &&
+        EXEC_CONTAIN_COORDINATOR(outer->exec_type)) {
+        return true;
+    }
+
+    /* Both sides execute on DN then return true */
+    if (EXEC_CONTAIN_DATANODE(inner->exec_type) &&
+        EXEC_CONTAIN_DATANODE(outer->exec_type)) {
+        return true;
+    }
+
+    return false;
+}
+
+RemoteQueryExecType SetExectypeForJoinPath(Path* inner_path, Path* outer_path)
+{
+    if (outer_path->exec_type == EXEC_ON_COORDS || inner_path->exec_type == EXEC_ON_COORDS) {
+        return EXEC_ON_COORDS;
+    } else if (outer_path->exec_type == EXEC_ON_ALL_NODES && inner_path->exec_type == EXEC_ON_ALL_NODES) {
+        return EXEC_ON_ALL_NODES;
+    } else {
+        return EXEC_ON_DATANODES;
+    }
+}
+
+RemoteQueryExecType SetBasePathExectype(PlannerInfo* root, RelOptInfo* rel)
+{
+    RangeTblEntry* rte = root->simple_rte_array[rel->relid];
+    if (rte->rtekind == RTE_RELATION && is_sys_table(rte->relid)) {
+        return EXEC_ON_COORDS;
+    } else {
+        return EXEC_ON_DATANODES;
+    }
+}
+
 /*
  * compare_path_costs_fuzzily
  *	  Compare the costs of two paths to see if either can be said to
@@ -282,8 +478,18 @@ PathCostComparison compare_path_costs_fuzzily(Path* path1, Path* path2, double f
     else if (path1->hint_value < path2->hint_value)
         return COSTS_BETTER2;
 
+    PathCostComparison cost_comparison;
+
+    /*
+     * For index paths, we check if rules can be used to filter.
+     * Here, we tend to select path containing unique index columns.
+     */
+    if (CheckUniqueIndexFirstRule(path1, path2, cost_comparison)) {
+        return cost_comparison;
+    }
+
     /* dn gather RBO */
-    PathCostComparison cost_comparison = compare_join_single_node_distribution(path1, path2);
+    cost_comparison = compare_join_single_node_distribution(path1, path2);
     if (cost_comparison != COSTS_DIFFERENT) {
         return cost_comparison;
     }
@@ -412,7 +618,16 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
 
     AssertEreport(IsA(parent_rel, RelOptInfo), MOD_OPT_JOIN, "Paramter of set_cheapest() should be RelOptInfo");
 
-    if (parent_rel->pathlist == NIL)
+    /*
+     * When Cn Gather Hint switch on
+     * we will add gather path or exec_on cn path(like systable) to cheapest_gather_path
+     * so need to check both pathlist and cheapest_gather_path here, they will be added
+     * to parent_rel->pathlist later.
+     *
+     * Don't worry about when Cn Gather switch off here because there never exist gatherpath,
+     * so same as origin behavior.
+     * */
+    if (parent_rel->pathlist == NIL && parent_rel->cheapest_gather_path == NULL)
         elog(ERROR, "could not devise a query plan for the given query");
 
     cheapest_startup_path = cheapest_total_path = best_param_path = NULL;
@@ -513,12 +728,23 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
                 }
             }
         }
+
+        /* add best gather path to pathlist and cheapest total path */
+        if (parent_rel->cheapest_gather_path != NULL) {
+            parent_rel->pathlist = lappend(parent_rel->pathlist, parent_rel->cheapest_gather_path);
+            cheapest_total_path_list = lappend(cheapest_total_path_list, parent_rel->cheapest_gather_path);
+            cheapest_startup_path = parent_rel->cheapest_gather_path;
+        }
+
         /*
          * If interested path is so costed, that is, larger than cheapest path plus
          * redistribute cost, we should abondon it. Else, store it in global cheapest
          * path list
          */
-        cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_path);
+        if (cheapest_total_path) {
+            cheapest_total_path_list = lappend(cheapest_total_path_list, cheapest_total_path);
+        }
+
         foreach (p, itst_cheapest_path) {
             Path* tmp_path = (Path*)lfirst(p);
             Cost redistribute_cost = 0.0;
@@ -557,7 +783,7 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
      * If there is no unparameterized path, use the best parameterized path as
      * cheapest_total_path (but not as cheapest_startup_path).
      */
-    if (cheapest_total_path == NULL)
+    if (cheapest_total_path == NULL && best_param_path != NULL)
         cheapest_total_path_list = list_make1(best_param_path);
     Assert(cheapest_total_path_list != NULL);
 
@@ -606,6 +832,24 @@ void set_cheapest(RelOptInfo* parent_rel, PlannerInfo* root)
     }
 }
 
+Path *FindMatchedPath(PlannerInfo* root, RelOptInfo* rel)
+{
+    ListCell *lc = NULL;
+    Path* matched_path = NULL;
+
+    if (rel->rel_dis_keys.matching_keys != NIL) {
+        foreach (lc, rel->cheapest_total_path) {
+            Path* tmp_path = (Path*)lfirst(lc);
+            if (equal_distributekey(root, tmp_path->distribute_keys, rel->rel_dis_keys.matching_keys)) {
+                matched_path = tmp_path;
+                break;
+            }
+        }
+    }
+
+    return matched_path;
+}
+
 /*
  * get_cheapest_path
  * 	choose an optimal path from optimal path, superset key path and match path of target relation
@@ -631,16 +875,13 @@ Path* get_cheapest_path(PlannerInfo* root, RelOptInfo* rel, const double* agg_gr
     ListCell* lc = NULL;
     bool is_cheapest_super_path = false;
 
-    /* find matched path if any */
-    if (rel->rel_dis_keys.matching_keys != NIL) {
-        foreach (lc, rel->cheapest_total_path) {
-            Path* tmp_path = (Path*)lfirst(lc);
-            if (equal_distributekey(root, tmp_path->distribute_keys, rel->rel_dis_keys.matching_keys)) {
-                matched_path = tmp_path;
-                break;
-            }
-        }
+    /* just return cheapest gather path skip cost compare */
+    if(permit_gather(root) && rel->cheapest_gather_path != NULL) {
+        return rel->cheapest_gather_path;
     }
+
+    /* find matched path if any */
+    matched_path = FindMatchedPath(root, rel);
 
     /* find the cheapest path from superset key path, or mark cheapest total path as super key path */
     if (is_itst_path(root, rel, cheapest_path))
@@ -1089,6 +1330,137 @@ void set_hint_value(RelOptInfo* join_rel, Path* new_path, HintState* hstate)
     }
 }
 
+static void AddGatherJoinrel(PlannerInfo* root, RelOptInfo* parentRel,
+                                Path* oldPath, Path* newPath)
+{
+    PathCostComparison costcmp = COSTS_DIFFERENT;
+    GatherSource gatherHint = get_gather_hint_source(root);
+
+    if (IS_STREAM_TYPE(oldPath, STREAM_GATHER)) {
+        pfree_ext(newPath);
+        return;
+    }
+
+    /*
+     * if GATHER_JOIN Hint swicth on
+     */
+    if (gatherHint == HINT_GATHER_JOIN &&
+        IS_STREAM_TYPE(newPath, STREAM_GATHER) &&
+        !IS_STREAM_TYPE(oldPath, STREAM_GATHER)) {
+        /* free old one */
+        pfree_ext(oldPath);
+        parentRel->cheapest_gather_path = newPath;
+        return;
+    }
+
+    /* just compare cost */
+    costcmp = compare_path_costs_fuzzily(newPath, oldPath, FUZZY_FACTOR);
+
+    if (costcmp == COSTS_BETTER1) {
+        pfree_ext(oldPath);
+        parentRel->cheapest_gather_path = newPath;
+    } else {
+        pfree_ext(newPath);
+    }
+
+    return;
+}
+
+static void AddGatherBaserel(RelOptInfo* parentRel, Path* oldPath, Path* newPath)
+{
+    PathCostComparison costcmp = COSTS_DIFFERENT;
+
+    /* just compare cost */
+    costcmp = compare_path_costs_fuzzily(newPath, oldPath, FUZZY_FACTOR);
+
+    if (costcmp == COSTS_BETTER1) {
+        pfree_ext(oldPath);
+        parentRel->cheapest_gather_path = newPath;
+    } else {
+        pfree_ext(newPath);
+    }
+
+    return;
+}
+
+/*
+ * add gather path to RelOptInfo
+ */
+static void AddGatherPath(PlannerInfo* root, RelOptInfo* parentRel, Path* newPath)
+{
+    Path* oldPath = parentRel->cheapest_gather_path;
+
+    if (oldPath == NULL) {
+        parentRel->cheapest_gather_path = newPath;
+        return;
+    }
+
+    /* Add Path to baserel or joinrel */
+    if(parentRel->reloptkind == RELOPT_JOINREL) {
+        AddGatherJoinrel(root, parentRel, oldPath, newPath);
+    } else {
+        AddGatherBaserel(parentRel, oldPath, newPath);
+    }
+
+    return;
+}
+
+static bool AddPathPreCheck(Path* newPath)
+{
+    /*
+     * In Stream mode, it's not supported if there's param push under stream.
+     * So we skip this path in advance to avoid other paths are generated.
+     */
+    if (IS_STREAM_PLAN && (IsA(newPath, NestPath) || IsA(newPath, HashPath) ||
+                            IsA(newPath, MergePath))) {
+        JoinPath* np = (JoinPath*)newPath;
+        bool invalid = false;
+        ContainStreamContext context;
+
+        context.outer_relids = np->outerjoinpath->parent->relids;
+        context.upper_params = NULL;
+        context.only_check_stream = false;
+        context.under_materialize_all = false;
+        context.has_stream = false;
+        context.has_parameterized_path = false;
+        context.has_cstore_index_delta = false;
+
+        stream_path_walker(np->innerjoinpath, &context);
+
+        /*
+         * In Executor engine, we'll materializeAll to prevent deadlock when
+         * either outer or inner has stream, and meanwhile if there's parameterized
+         * path, it's forbidden, so we should exclude it to the candidate
+         */
+        if (context.has_parameterized_path) {
+            /* inner has stream */
+            if (context.has_stream || context.has_cstore_index_delta)
+                invalid = true;
+            /* If inner is not material, materializeAll is not used, so skip outer check */
+            else if (IsA(np->innerjoinpath, MaterialPath)) {
+                context.outer_relids = NULL;
+                context.only_check_stream = false;
+                context.under_materialize_all = false;
+                context.has_stream = false;
+                context.has_parameterized_path = false;
+                context.has_cstore_index_delta = false;
+
+                stream_path_walker(np->outerjoinpath, &context);
+                /* outer has stream */
+                if (context.has_stream || context.has_cstore_index_delta)
+                    invalid = true;
+            }
+        }
+
+        if (invalid) {
+            pfree_ext(newPath);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /*
  * add_path
  *	  Consider a potential implementation path for the specified parent rel,
@@ -1151,60 +1523,24 @@ void add_path(PlannerInfo* root, RelOptInfo* parent_rel, Path* new_path)
      */
     CHECK_FOR_INTERRUPTS();
 
-    /*
-     * In Stream mode, it's not supported if there's param push under stream.
-     * So we skip this path in advance to avoid other paths are generated.
-     */
-    if (IS_STREAM_PLAN && (IsA(new_path, NestPath) || IsA(new_path, HashPath) ||
-                            IsA(new_path, MergePath))) {
-        JoinPath* np = (JoinPath*)new_path;
-        bool invalid = false;
-        ContainStreamContext context;
-
-        context.outer_relids = np->outerjoinpath->parent->relids;
-        context.upper_params = NULL;
-        context.only_check_stream = false;
-        context.under_materialize_all = false;
-        context.has_stream = false;
-        context.has_parameterized_path = false;
-        context.has_cstore_index_delta = false;
-
-        stream_path_walker(np->innerjoinpath, &context);
-
-        /*
-         * In Executor engine, we'll materializeAll to prevent deadlock when
-         * either outer or inner has stream, and meanwhile if there's parameterized
-         * path, it's forbidden, so we should exclude it to the candidate
-         */
-        if (context.has_parameterized_path) {
-            /* inner has stream */
-            if (context.has_stream || context.has_cstore_index_delta)
-                invalid = true;
-            /* If inner is not material, materializeAll is not used, so skip outer check */
-            else if (IsA(np->innerjoinpath, MaterialPath)) {
-                context.outer_relids = NULL;
-                context.only_check_stream = false;
-                context.under_materialize_all = false;
-                context.has_stream = false;
-                context.has_parameterized_path = false;
-                context.has_cstore_index_delta = false;
-
-                stream_path_walker(np->outerjoinpath, &context);
-                /* outer has stream */
-                if (context.has_stream || context.has_cstore_index_delta)
-                    invalid = true;
-            }
-        }
-
-        if (invalid) {
-            pfree_ext(new_path);
-            return;
-        }
+    if (!AddPathPreCheck(new_path)) {
+        return;
     }
 
     /* Set path's hint_value. */
     if (root != NULL && root->parse->hintState != NULL) {
         set_hint_value(parent_rel, new_path, root->parse->hintState);
+    }
+
+    /* we will add cn gather path when cn gather hint switch on */
+    if (root != NULL && EXEC_CONTAIN_COORDINATOR(new_path->exec_type) && permit_gather(root)) {
+        RangeTblEntry* rte = root->simple_rte_array[parent_rel->relid];
+        bool isSysTable = (rte != NULL && rte->rtekind == RTE_RELATION && is_sys_table(rte->relid));
+
+        if (!isSysTable) {
+            AddGatherPath(root, parent_rel, new_path);
+            return;
+        }
     }
 
     if (OPTIMIZE_PLAN != u_sess->attr.attr_sql.plan_mode_seed) {
@@ -1533,6 +1869,7 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -1569,6 +1906,7 @@ Path* build_seqScanPath_by_indexScanPath(PlannerInfo* root, Path* index_path)
     pathnode->parent = index_path->parent;
     pathnode->param_info = index_path->param_info;
     pathnode->pathkeys = NIL;
+    pathnode->exec_type = index_path->exec_type;
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -1600,6 +1938,7 @@ Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop)
     pathnode->parent = rel;
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -1646,6 +1985,7 @@ Path* create_tsstorescan_path(PlannerInfo *root, RelOptInfo *rel, int dop)
     pathnode->parent = rel;
     pathnode->pathkeys = NIL;    /* seqscan has unordered result */
     pathnode->dop = dop;
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN)
@@ -1758,6 +2098,43 @@ bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual)
     }
 
     return containGlobalOrLocal;
+}
+
+/*
+ * CheckBitmapHeapPathIsCrossbucket
+ * Check if a given bit map qual path is/can Crossbucket.
+ * return true if bitmap heap is crossbucket.
+ */
+bool CheckBitmapHeapPathIsCrossbucket(Path* bitmapqual)
+{
+    if (IsA(bitmapqual, BitmapAndPath)) {
+        BitmapAndPath* apath = (BitmapAndPath*)bitmapqual;
+        ListCell* l = NULL;
+
+        foreach (l, apath->bitmapquals) {
+            if(!CheckBitmapHeapPathIsCrossbucket((Path*)lfirst(l))) {
+                return false;
+            }
+        }
+    } else if (IsA(bitmapqual, BitmapOrPath)) {
+        BitmapOrPath* opath = (BitmapOrPath*)bitmapqual;
+        ListCell* l = NULL;
+
+        foreach (l, opath->bitmapquals) {
+            if(!CheckBitmapHeapPathIsCrossbucket((Path*)lfirst(l))) {
+                return false;
+            }
+        }
+    } else if (IsA(bitmapqual, IndexPath)) {
+        return ((IndexPath*)bitmapqual)->indexinfo->crossbucket;
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_OPT),
+                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized node type: %d", nodeTag(bitmapqual))));
+    }
+
+    return true;
 }
 
 /*
@@ -1880,6 +2257,8 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     List* indexquals = NIL;
     List* indexqualcols = NIL;
 
+    pathnode->is_ustore = rel->is_ustore;
+
     pathnode->path.pathtype = indexonly ? T_IndexOnlyScan : T_IndexScan;
     pathnode->path.parent = rel;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
@@ -1896,6 +2275,7 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     pathnode->indexorderbys = indexorderbys;
     pathnode->indexorderbycols = indexorderbycols;
     pathnode->indexscandir = indexscandir;
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
         pathnode->path.distribute_keys = rel->distribute_keys;
@@ -1935,6 +2315,7 @@ BitmapHeapPath* create_bitmap_heap_path(PlannerInfo* root, RelOptInfo* rel, Path
     pathnode->path.parent = rel;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer, required_upper);
     pathnode->path.pathkeys = NIL; /* always unordered */
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
 
     pathnode->bitmapqual = bitmapqual;
 
@@ -1963,10 +2344,12 @@ BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* 
 {
     BitmapAndPath* pathnode = makeNode(BitmapAndPath);
 
+    pathnode->is_ustore = rel->is_ustore;
     pathnode->path.pathtype = T_BitmapAnd;
     pathnode->path.parent = rel;
     pathnode->path.param_info = NULL; /* not used in bitmap trees */
     pathnode->path.pathkeys = NIL;    /* always unordered */
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
 
     pathnode->bitmapquals = bitmapquals;
 
@@ -1997,10 +2380,12 @@ BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bi
 {
     BitmapOrPath* pathnode = makeNode(BitmapOrPath);
 
+    pathnode->is_ustore = rel->is_ustore;
     pathnode->path.pathtype = T_BitmapOr;
     pathnode->path.parent = rel;
     pathnode->path.param_info = NULL; /* not used in bitmap trees */
     pathnode->path.pathkeys = NIL;    /* always unordered */
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
 
     pathnode->bitmapquals = bitmapquals;
 
@@ -2035,6 +2420,7 @@ TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals)
     pathnode->path.parent = rel;
     pathnode->path.param_info = NULL; /* never parameterized at present */
     pathnode->path.pathkeys = NIL;    /* always unordered */
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
 
     pathnode->tidquals = tidquals;
 
@@ -2105,6 +2491,15 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
     pathnode->path.startup_cost = 0;
     pathnode->path.total_cost = 0;
 
+    pathnode->path.exec_type = EXEC_ON_DATANODES;
+    foreach (l, subpaths) {
+        Path* subpath = (Path*)lfirst(l);
+        if (subpath->exec_type == EXEC_ON_COORDS) {
+            pathnode->path.exec_type = EXEC_ON_COORDS;
+            break;
+        }
+    }
+
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
         /*
@@ -2115,6 +2510,7 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
     } else {
         pathnode->path.distribute_keys = rel->distribute_keys;
         pathnode->path.locator_type = rel->locator_type;
+
         Distribution* distribution = ng_get_default_computing_group_distribution();
         ng_copy_distribution(&pathnode->path.distribution, distribution);
 
@@ -2305,6 +2701,7 @@ MergeAppendPath* create_merge_append_path(
     } else {
         pathnode->path.distribute_keys = rel->distribute_keys;
         pathnode->path.locator_type = rel->locator_type;
+        pathnode->path.exec_type = SetBasePathExectype(root, rel);
         Distribution* distribution = ng_get_default_computing_group_distribution();
         ng_copy_distribution(&pathnode->path.distribution, distribution);
 
@@ -2406,6 +2803,7 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
         pathnode->path.total_cost = subpath->total_cost;
         pathnode->path.dop = subpath->dop;
         pathnode->path.stream_cost = subpath->stream_cost;
+        pathnode->path.exec_type = subpath->exec_type;
 #ifdef STREAMPLAN
         /* result path will inherit node group and distribute information from it's child node */
         inherit_path_locator_info((Path*)pathnode, subpath);
@@ -2418,6 +2816,7 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
         pathnode->path.startup_cost = 0;
         pathnode->path.total_cost = u_sess->attr.attr_sql.cpu_tuple_cost;
         pathnode->path.stream_cost = 0;
+        pathnode->path.exec_type = EXEC_ON_ALL_NODES;
 
         Distribution* distribution = ng_get_default_computing_group_distribution();
         ng_set_distribution(&pathnode->path.distribution, distribution);
@@ -2429,6 +2828,26 @@ ResultPath* create_result_path(PlannerInfo *root, RelOptInfo *rel, List* quals,
      * again in make_result; since this is only used for degenerate cases,
      * nothing interesting will be done with the path cost values...
      */
+    return pathnode;
+}
+
+/*
+ * create_resultscan_path
+ *       Creates a path corresponding to a scan of an RTE_RESULT relation,
+ *       returning the pathnode.
+ */
+Path *create_resultscan_path(PlannerInfo *root, RelOptInfo *rel,
+    Relids required_outer)
+{
+    Path       *pathnode = makeNode(Path);
+
+    pathnode->pathtype = T_BaseResult;
+    pathnode->parent = rel;
+    pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
+    pathnode->pathkeys = NIL;       /* result is always unordered */
+
+    cost_resultscan(pathnode, root, rel, pathnode->param_info);
+
     return pathnode;
 }
 
@@ -2449,6 +2868,7 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
     pathnode->path.pathkeys = subpath->pathkeys;
     pathnode->path.dop = subpath->dop;
     pathnode->materialize_all = materialize_all;
+    pathnode->path.exec_type = subpath->exec_type;
 
 #ifdef STREAMPLAN
     /* material path will inherit node group and distribute information from it's child node */
@@ -2667,6 +3087,7 @@ UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath
     pathnode->uniq_exprs = uniq_exprs;
     pathnode->both_method = false;
     pathnode->hold_tlist = false;
+    pathnode->path.exec_type = subpath->exec_type;
 
 #ifdef STREAMPLAN
     inherit_path_locator_info((Path*)pathnode, subpath);
@@ -2948,6 +3369,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
     pathnode->parent = rel;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->pathkeys = pathkeys;
+    pathnode->exec_type = rel->subplan->exec_type;
 
     cost_subqueryscan(pathnode, root, rel, pathnode->param_info);
 
@@ -3018,6 +3440,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
             rel->distribute_keys = NIL;
             rel->locator_type = LOCATOR_TYPE_REPLICATED;
         }
+        pathnode->exec_type = subplan->exec_type;
     }
 
     pathnode->distribute_keys = rel->distribute_keys;
@@ -3073,6 +3496,7 @@ Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List*
     pathnode->parent = rel;
     pathnode->param_info = get_subquery_parampathinfo(root, rel, required_outer, upper_params);
     pathnode->pathkeys = pathkeys;
+    pathnode->exec_type = rel->subplan->exec_type;
 
     cost_subqueryscan(pathnode, root, rel, pathnode->param_info);
 
@@ -3143,6 +3567,7 @@ Path* create_subqueryscan_path_reparam(PlannerInfo* root, RelOptInfo* rel, List*
             rel->distribute_keys = NIL;
             rel->locator_type = LOCATOR_TYPE_REPLICATED;
         }
+        pathnode->exec_type = subplan->exec_type;
     }
 
     pathnode->distribute_keys = rel->distribute_keys;
@@ -3172,6 +3597,7 @@ Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel, Relids requir
     pathnode->parent = rel;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL;    /* for now, assume unordered result */
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     pathnode->distribute_keys = rel->distribute_keys;
@@ -3211,6 +3637,7 @@ Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required
     pathnode->parent = rel;
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer); /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* result is always unordered */
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     pathnode->distribute_keys = NIL;
@@ -3249,6 +3676,7 @@ Path* create_ctescan_path(PlannerInfo* root, RelOptInfo* rel)
     pathnode->parent = rel;
     pathnode->param_info = NULL; /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* XXX for now, result is always unordered */
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     pathnode->distribute_keys = rel->distribute_keys;
@@ -3278,6 +3706,7 @@ Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel)
     pathnode->parent = rel;
     pathnode->param_info = NULL; /* never parameterized at present */
     pathnode->pathkeys = NIL;    /* result is always unordered */
+    pathnode->exec_type = SetBasePathExectype(root, rel);
 
 #ifdef STREAMPLAN
     /* build worktable's distribution info */
@@ -3343,6 +3772,7 @@ ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost st
     pathnode->path.total_cost = total_cost;
     pathnode->path.pathkeys = pathkeys;
     pathnode->path.locator_type = rel->locator_type;
+    pathnode->path.exec_type = SetBasePathExectype(root, rel);
     pathnode->path.stream_cost = 0;
 
     pathnode->fdw_private = fdw_private;
@@ -3743,6 +4173,8 @@ NestPath* create_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     pathnode->innerjoinpath = inner_path;
     pathnode->joinrestrictinfo = restrict_clauses;
 
+    pathnode->path.exec_type = SetExectypeForJoinPath(inner_path, outer_path);
+
 #ifdef STREAMPLAN
     pathnode->path.locator_type = locator_type_join(outer_path->locator_type, inner_path->locator_type);
     ProcessRangeListJoinType(&pathnode->path, outer_path, inner_path);
@@ -3797,6 +4229,9 @@ MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinTyp
     pathnode->path_mergeclauses = mergeclauses;
     pathnode->outersortkeys = outersortkeys;
     pathnode->innersortkeys = innersortkeys;
+
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(inner_path, outer_path);
+
     /* pathnode->materialize_inner will be set by final_cost_mergejoin */
 #ifdef STREAMPLAN
     pathnode->jpath.path.locator_type = locator_type_join(outer_path->locator_type, inner_path->locator_type);
@@ -3866,6 +4301,8 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     pathnode->jpath.innerjoinpath = inner_path;
     pathnode->jpath.joinrestrictinfo = restrict_clauses;
     pathnode->path_hashclauses = hashclauses;
+
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(inner_path, outer_path);
 
 #ifdef STREAMPLAN
     pathnode->jpath.path.locator_type = locator_type_join(inner_path->locator_type, outer_path->locator_type);
@@ -4328,7 +4765,7 @@ Node* join_clause_get_join_key(Node* join_clause, bool is_var_on_left)
 /*
  * see if distribute key and join key are compatible for hashing
  */
-static bool is_diskey_and_joinkey_compatible(Node* diskey, Node* joinkey)
+bool is_diskey_and_joinkey_compatible(Node* diskey, Node* joinkey)
 {
     Oid joinkey_type = InvalidOid;
     Oid diskey_type = InvalidOid;
@@ -4538,6 +4975,7 @@ Path* get_redist_unique(PlannerInfo* root, Path* path, StreamType stream_type, L
     newpath->path.parent = origin_path->path.parent;
     newpath->path.param_info = origin_path->path.param_info;
     newpath->path.pathkeys = stream_path->pathkeys;
+    newpath->path.exec_type = stream_path->exec_type;
 
 #ifdef STREAMPLAN
     inherit_path_locator_info((Path*)newpath, stream_path);
@@ -4785,6 +5223,7 @@ Path* get_unique_redist_unique(PlannerInfo* root, Path* path, StreamType stream_
     newpath->path.parent = origin_path->path.parent;
     newpath->path.param_info = origin_path->path.param_info;
     newpath->path.pathkeys = stream_path->pathkeys;
+    newpath->path.exec_type = stream_path->exec_type;
 
 #ifdef STREAMPLAN
     inherit_path_locator_info((Path*)newpath, stream_path);
@@ -5799,6 +6238,7 @@ static bool add_replica_join_path(RelOptInfo* joinrel, PlannerInfo* root, JoinTy
     if (is_subplan_exec_on_coordinator(outer_path) || is_subplan_exec_on_coordinator(inner_path)) {
         joinpath->path.locator_type = LOCATOR_TYPE_REPLICATED;
         joinpath->path.distribute_keys = NIL;
+        joinpath->path.exec_type = EXEC_ON_COORDS;
         replicate_outer = true;
         replicate_inner = true;
     }

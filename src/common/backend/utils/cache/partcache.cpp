@@ -48,7 +48,7 @@
 #include "commands/tablespace.h"
 #include "commands/trigger.h"
 #include "commands/vacuum.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "miscadmin.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planmain.h"
@@ -57,7 +57,8 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "catalog/storage.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -123,7 +124,7 @@ typedef struct partidcacheent {
  */
 static HeapTuple ScanPgPartition(Oid targetPartId, bool indexOK, Snapshot snapshot);
 static Partition AllocatePartitionDesc(Form_pg_partition relp);
-static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbucket);
+static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt);
 static void PartitionInitPhysicalAddr(Partition partition);
 static void PartitionDestroyPartition(Partition partition);
 static void PartitionFlushPartition(Partition partition);
@@ -232,7 +233,33 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
     return partition;
 }
 
-static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbukcet)
+StorageType PartitionGetStorageType(Oid parentOid)
+{
+    HeapTuple  pg_class_tuple;
+    StorageType  storageType;
+    bool  isNull = false;
+    Datum datum;
+
+    pg_class_tuple = ScanPgRelation(parentOid, true, false);
+    Assert(HeapTupleIsValid(pg_class_tuple));
+
+    /* fetch relbucketoid from pg_class tuple */
+    datum = heap_getattr(pg_class_tuple,
+                         Anum_pg_class_relbucket,
+                         GetDefaultPgClassDesc(),
+                         &isNull);
+    if (isNull) {
+        storageType = HEAP_DISK;
+    } else {
+        storageType = SEGMENT_PAGE;
+    }
+
+    heap_freetuple_ext(pg_class_tuple);
+
+    return storageType;
+}
+
+static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, bool insertIt)
 {
     Partition partition;
     Oid partid;
@@ -284,16 +311,29 @@ static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbukc
     PartitionInitLockInfo(partition); /* see lmgr.c */
 
     /*
-     * initialize physical addressing information for the relation
+     * initialize physical addressing information for the partition
      */
     if (partition->pd_part->parentid != InvalidOid) {
         PartitionInitPhysicalAddr(partition);
+        if (storage_type == INVALID_STORAGE) {
+            storage_type = PartitionGetStorageType(partition->pd_part->parentid);
+        }
     }
-    
-    partition->pd_node.bucketNode = isbukcet ? DIR_BUCKET_ID : InvalidBktId;
+
+    /*
+     * initialize storage type information for the partition
+     */
+    if (!PartitionIsPartitionedTable(partition) && storage_type == SEGMENT_PAGE) {
+        partition->pd_node.bucketNode = SegmentBktId;
+    } else {
+        partition->pd_node.bucketNode = InvalidBktId;
+    }
 
     /* make sure relation is marked as having no open file yet */
     partition->pd_smgr = NULL;
+
+    /* make sure the partrel is empty yet */
+    partition->partrel = NULL;
 
     /*
      * now we can free the memory allocated for pg_class_tuple
@@ -311,6 +351,7 @@ static Partition PartitionBuildDesc(Oid targetPartId, bool insertIt, bool isbukc
 
     return partition;
 }
+
 static void PartitionInitPhysicalAddr(Partition partition)
 {
     partition->pd_node.spcNode = ConvertToRelfilenodeTblspcOid(partition->pd_part->reltablespace);
@@ -342,10 +383,9 @@ static void PartitionInitPhysicalAddr(Partition partition)
  *
  *
  */
-Partition PartitionIdGetPartition(Oid partitionId, bool isbucket)
+Partition PartitionIdGetPartition(Oid partitionId, StorageType storage_type)
 {
     Partition pd;
-
     /*
      * first try to find reldesc in the cache
      */
@@ -365,7 +405,6 @@ Partition PartitionIdGetPartition(Oid partitionId, bool isbucket)
                 PartitionClearPartition(pd, true);
             }
         }
-
         return pd;
     }
 
@@ -373,7 +412,7 @@ Partition PartitionIdGetPartition(Oid partitionId, bool isbucket)
      * no partdesc in the cache, so have PartitionBuildDesc() build one and add
      * it.
      */
-    pd = PartitionBuildDesc(partitionId, true, isbucket);
+    pd = PartitionBuildDesc(partitionId, storage_type, true);
     if (PartitionIsValid(pd)) {
         PartitionIncrementReferenceCount(pd);
     }
@@ -424,7 +463,8 @@ void PartitionClose(Partition partition)
 #endif
 }
 
-Partition PartitionBuildLocalPartition(const char* relname, Oid partid, Oid partfilenode, Oid parttablespace)
+Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
+    StorageType storage_type)
 {
     Partition part;
     MemoryContext oldcxt;
@@ -467,13 +507,19 @@ Partition PartitionBuildLocalPartition(const char* relname, Oid partid, Oid part
 
     part->pd_part->relfilenode = partfilenode;
 
+
     /*belowing: cast out from Partition to Relation*/
     PartitionInitLockInfo(part); /* see lmgr.c */
 
     if (partfilenode != InvalidOid) {
         PartitionInitPhysicalAddr(part);
     }
-    part->pd_node.bucketNode = InvalidBktId;
+
+    if (storage_type == SEGMENT_PAGE) {
+        part->pd_node.bucketNode = SegmentBktId;
+    } else {
+        part->pd_node.bucketNode = InvalidBktId;
+    }
 
     /*
      * Okay to insert into the partcache hash tables.
@@ -519,9 +565,23 @@ static void PartitionDestroyPartition(Partition partition)
     if (partition->rd_options) {
         pfree_ext(partition->rd_options);
     }
+    if (partition->partrel) {
+        /* in function releaseDummyRelation, owner->nfakerelrefs decrease one due to ResourceOwnerForgetFakerelRef,
+         * which is not we expect, so we use ResourceOwnerRememberFakerelRef correspondingly */
+        if (!IsBootstrapProcessingMode()) {
+            ResourceOwnerRememberFakerelRef(t_thrd.utils_cxt.CurrentResourceOwner, partition->partrel);
+        }
+        releaseDummyRelation(&partition->partrel);
+    }
     pfree_ext(partition);
 }
 
+#define SWAPFIELD(fldtype, fldname)            \
+    do {                                       \
+        fldtype _tmp = newpart->fldname;       \
+        newpart->fldname = partition->fldname; \
+        partition->fldname = _tmp;             \
+    } while (0)
 /*
  * PartitionClearPartition
  *
@@ -634,7 +694,9 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
         errno_t rc = 0;
 
         /* Build temporary entry, but don't link it into hashtable */
-        newpart = PartitionBuildDesc(save_partid, false, partition->pd_node.bucketNode != InvalidBktId);
+        int4 tempNode = partition->pd_node.bucketNode;
+        newpart = PartitionBuildDesc(save_partid, INVALID_STORAGE, false);
+
         if (NULL == newpart) {
             /* Should only get here if partition was deleted */
             PartitionCacheDelete(partition);
@@ -643,6 +705,10 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
                 (errcode(ERRCODE_OBJECT_IN_USE), errmsg("partition %u deleted while still in use", save_partid)));
         }
 
+        if (tempNode != partition->pd_node.bucketNode) {
+            ereport(LOG, (errmsg("partition %u storage type changing from [%d] to [%d]", save_partid, tempNode,
+                partition->pd_node.bucketNode)));
+        }
         /*
          * Perform swapping of the partcache entry contents.  Within this
          * process the old entry is momentarily invalid, so there *must* be no
@@ -653,23 +719,13 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
          * to swap the whole structures and then re-swap those few fields we
          * didn't want swapped.
          */
-#define SWAPFIELD(fldtype, fldname)            \
-    do {                                       \
-        fldtype _tmp = newpart->fldname;       \
-        newpart->fldname = partition->fldname; \
-        partition->fldname = _tmp;             \
-    } while (0)
-
-        /* swap all Partition struct fields */
-        {
-            PartitionData tmpstruct;
-            rc = memcpy_s(&tmpstruct, sizeof(PartitionData), newpart, sizeof(PartitionData));
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(newpart, sizeof(PartitionData), partition, sizeof(PartitionData));
-            securec_check(rc, "\0", "\0");
-            rc = memcpy_s(partition, sizeof(PartitionData), &tmpstruct, sizeof(PartitionData));
-            securec_check(rc, "\0", "\0");
-        }
+        PartitionData tmpstruct;
+        rc = memcpy_s(&tmpstruct, sizeof(PartitionData), newpart, sizeof(PartitionData));
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(newpart, sizeof(PartitionData), partition, sizeof(PartitionData));
+        securec_check(rc, "\0", "\0");
+        rc = memcpy_s(partition, sizeof(PartitionData), &tmpstruct, sizeof(PartitionData));
+        securec_check(rc, "\0", "\0");
 
         /* rd_smgr must not be swapped, due to back-links from smgr level */
         SWAPFIELD(SMgrRelation, pd_smgr);
@@ -686,9 +742,15 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
         securec_check(rc, "\0", "\0");
 
         /* toast OID override must be preserved */
-        SWAPFIELD(Oid, pd_toastoid);
+        SWAPFIELD(Oid, pd_toastoid);	
         /* pgstat_info must be preserved */
         SWAPFIELD(struct PgStat_TableStatus*, pd_pgstat_info);
+
+        /* newcbi flag and its related information must be preserved */
+        if (newpart->newcbi) {
+            SWAPFIELD(bool, newcbi);
+            partition->pd_node.bucketNode = newpart->pd_node.bucketNode;
+        }
 
 #undef SWAPFIELD
 
@@ -1252,6 +1314,8 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->pgstat_info = part->pd_pgstat_info;
     relation->parentId = rel->rd_id;
     relation->rd_smgr = part->pd_smgr;
+    relation->rd_isblockchain = rel->rd_isblockchain;
+    relation->storage_type = rel->storage_type;
 
     /*detach the binding between partition and SmgrRelation*/
     part->pd_smgr = NULL;
@@ -1295,7 +1359,11 @@ void releaseDummyRelation(Relation* relation)
     /*detach the binding between Relation and SmgrRelation*/
     if ((*relation)->rd_smgr != NULL) {
         /* put SmgrRelation object into unowned list */
-        smgrclearowner(&(*relation)->rd_smgr, (*relation)->rd_smgr);
+        if (RelationIsBucket(*relation)) {
+            smgrclose((*relation)->rd_smgr);
+        } else {
+            smgrclearowner(&(*relation)->rd_smgr, (*relation)->rd_smgr);
+        }
     }
 
     if ((*relation)->rd_indexcxt != NULL) {
@@ -1392,13 +1460,23 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     bool nulls[Natts_pg_partition];
     bool replaces[Natts_pg_partition];
     errno_t rc;
+    bool isbucket;
 
     Assert((parent->rd_rel->relkind == RELKIND_INDEX || parent->rd_rel->relkind == RELKIND_SEQUENCE)
                ? freezeXid == InvalidTransactionId
                : TransactionIdIsNormal(freezeXid));
 
     /* Allocate a new relfilenode */
-    newrelfilenode = GetNewRelFileNode(part->pd_part->reltablespace, NULL, parent->rd_rel->relpersistence);
+    if (RelationGetStorageType(parent) == (uint4)HEAP_DISK) {
+        newrelfilenode = GetNewRelFileNode(part->pd_part->reltablespace, NULL, parent->rd_rel->relpersistence);
+    } else {
+        /* segment storage */
+        Assert(parent->storage_type == SEGMENT_PAGE);
+        isbucket = BUCKET_OID_IS_VALID(parent->rd_bucketoid) && !RelationIsCrossBucketIndex(parent);
+        newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(part->pd_part->reltablespace),
+                                           u_sess->proc_cxt.MyDatabaseId, isbucket, InvalidBlockNumber);
+    }
+
 
     /*
      * Get a writable copy of the pg_partition tuple for the given relation.
@@ -1451,6 +1529,10 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     newrnode.node = part->pd_node;
     newrnode.node.relNode = newrelfilenode;
     newrnode.backend = parent->rd_backend;
+
+    if (RelationIsCrossBucketIndex(parent)) {
+        part->newcbi = true;
+    }
 
     partition_create_new_storage(parent, part, newrnode);
 
@@ -1756,6 +1838,10 @@ static void UpdateWaitCleanGpiRelOptions(Relation pgPartition, HeapTuple partTup
 /* Set one partitioned relation's reloptions wait_clean_gpi */
 void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool enable, bool inplace)
 {
+    if (IS_PGXC_COORDINATOR) {
+        return;
+    }
+
     HeapTuple partTuple;
     Relation pgPartition;
 
@@ -1781,6 +1867,10 @@ void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool 
 /* Set one partition's reloptions wait_clean_gpi */
 void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
 {
+    if (IS_PGXC_COORDINATOR) {
+        return;
+    }
+
     Relation pgPartition;
     HeapTuple partTuple;
 
@@ -1827,7 +1917,9 @@ bool PartitionInvisibleMetadataKeep(Datum datumRelOptions)
     return ret;
 }
 
-/* Check whether a partition is properly used. */
+/*
+ * Check whether a partition is properly used.
+ */
 bool PartitionParentOidIsLive(Datum parentDatum)
 {
     Oid parentid = InvalidOid;
@@ -1860,6 +1952,9 @@ bool PartitionParentOidIsLive(Datum parentDatum)
  */
 void PartitionedSetEnabledClean(Oid parentOid)
 {
+    if (IS_PGXC_COORDINATOR) {
+        return;
+    }
     Relation pgPartition = NULL;
     SysScanDesc scan = NULL;
     ScanKeyData key[2];
@@ -1894,6 +1989,9 @@ void PartitionedSetEnabledClean(Oid parentOid)
 void PartitionSetEnabledClean(
     Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned)
 {
+    if (IS_PGXC_COORDINATOR) {
+        return;
+    }
     Relation pgPartition = NULL;
     TupleDesc partTupdesc = NULL;
     SysScanDesc scan = NULL;

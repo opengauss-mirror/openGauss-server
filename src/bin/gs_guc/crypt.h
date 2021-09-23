@@ -29,6 +29,7 @@
 #define KEY_SPLIT_LEN 15
 #define MAX_CHILD_NUM 3
 #define MAX_CHILD_PATH 1024
+#define MAX_COMMAND_LEN 4096
 
 #define CRYPT_FREE(ptr)    \
     do {                   \

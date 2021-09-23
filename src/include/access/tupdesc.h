@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * tupdesc.h
- *	  POSTGRES tuple descriptor definitions.
+ *	  openGauss tuple descriptor definitions.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -40,6 +40,10 @@ typedef enum tableAmType
     TAM_HEAP = 0,
     TAM_USTORE = 1,
 } TableAmType;
+
+/* index page split methods */
+#define INDEXSPLIT_NO_DEFAULT     0 /* default split method, aimed at equal split */
+#define INDEXSPLIT_NO_INSERTPT    1 /* insertpt */
 
 const static uint32 HEAP_TUPLE = 1;
 const static uint32 UHEAP_TUPLE = 2;
@@ -177,7 +181,7 @@ extern void TupleDescInitEntryCollation(TupleDesc desc, AttrNumber attribute_num
 
 extern void VerifyAttrCompressMode(int8 mode, int attlen, const char* attname);
 
-extern TupleDesc BuildDescForRelation(List* schema, Node* oriented_from, char relkind = '\0');
+extern TupleDesc BuildDescForRelation(List* schema, Node* oriented_from = NULL, char relkind = '\0');
 
 extern TupleDesc BuildDescFromLists(List* names, List* types, List* typmods, List* collations);
 
@@ -188,3 +192,4 @@ extern void copyDroppedAttribute(Form_pg_attribute target, Form_pg_attribute sou
 extern char GetGeneratedCol(TupleDesc tupdesc, int atti);
 
 #endif /* TUPDESC_H */
+

@@ -77,3 +77,5 @@
 <func> ExecCheckRTEPerms
 <func> ExecInitIndexScan
 <func> BypassExecutor
+<func> UheapgettupPagemode
+<func> Uheapgetpage

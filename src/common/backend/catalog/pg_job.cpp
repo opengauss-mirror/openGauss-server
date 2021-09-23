@@ -144,7 +144,7 @@ static char* get_real_search_schema()
  * Returns: void
  */
 static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_interval, int4 node_id,
-    Datum database_name, Datum node_name)
+    Datum database_name, Datum node_name, char* job_nspname = NULL)
 {
     /* just check in cluster mode */
     if (!(IsConnFromCoord() && IS_PGXC_DATANODE) && !IS_SINGLE_NODE && !IS_PGXC_COORDINATOR &&
@@ -175,8 +175,13 @@ static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_i
         values[Anum_pg_job_dbname - 1] = database_name;
     }
 
-    values[Anum_pg_job_nspname - 1] =
-        DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
+    if (PointerIsValid(job_nspname)) {
+        values[Anum_pg_job_nspname - 1] =
+            DirectFunctionCall1(namein, CStringGetDatum(job_nspname));
+    } else {
+        values[Anum_pg_job_nspname - 1] =
+            DirectFunctionCall1(namein, CStringGetDatum(get_real_search_schema()));
+    }
 
     if (node_name != 0) {
         /* submit_job_on_nodes */
@@ -368,6 +373,43 @@ static void update_pg_job_on_remote(const char* update_query, int64 job_id, Memo
                 errdetail("Synchronize fail reason: %s.", edata->message)));
     }
     PG_END_TRY();
+}
+
+void update_pg_job_dbname(Oid jobid, const char* dbname)
+{
+    Relation job_relation = NULL;
+    HeapTuple tup = NULL;
+    HeapTuple newtuple = NULL;
+    Datum values[Natts_pg_job];
+    bool nulls[Natts_pg_job];
+    bool replaces[Natts_pg_job];
+    errno_t rc = 0;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check_c(rc, "\0", "\0");
+ 
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check_c(rc, "\0", "\0");
+
+    replaces[Anum_pg_job_dbname - 1] = true;
+    values[Anum_pg_job_dbname - 1] = CStringGetDatum(dbname);
+
+    job_relation = heap_open(PgJobRelationId, RowExclusiveLock);
+
+    tup = get_job_tup(jobid);
+
+    newtuple = heap_modify_tuple(tup, RelationGetDescr(job_relation), values, nulls, replaces);
+
+    simple_heap_update(job_relation, &newtuple->t_self, newtuple);
+
+    CatalogUpdateIndexes(job_relation, newtuple);
+    ReleaseSysCache(tup);
+    heap_freetuple_ext(newtuple);
+
+    heap_close(job_relation, RowExclusiveLock);
 }
 
 /*
@@ -1121,7 +1163,7 @@ Datum isubmit_job_on_nodes(PG_FUNCTION_ARGS)
     rel = heap_open(PgJobRelationId, RowExclusiveLock);
     check_job_interval(fcinfo, rel, job_id, &job_interval, 5);
 
-    insert_pg_job(rel, job_id, next_date, job_interval, 0, database, node_name);
+    insert_pg_job(rel, job_id, next_date, job_interval, 0, database, node_name, "public");
     insert_pg_job_proc(job_id, what);
 
 #ifdef ENABLE_MULTIPLE_NODES

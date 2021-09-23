@@ -170,21 +170,23 @@ RETURNS tid
 AS '@libdir@/regress@DLSUFFIX@', 'funcA'
 LANGUAGE C STABLE NOT FENCED;
 ERROR:  permission denied for language c
+DETAIL:  N/A
 grant usage on language c to c_function_user1;
 ERROR:  permission denied for language c
+DETAIL:  N/A
 reset role;
 grant usage on language c to public;
 ERROR:  Forbid grant language c to public.
-HINT:  Only support grant language c to specified users.
+DETAIL:  Only support grant language c to specified users.
 grant usage on language c to c_function_user1 with grant option;
 ERROR:  Forbid grant language c to user with grant option.
-HINT:  Only support grant language c to user.
+DETAIL:  Only support grant language c to user.
 grant usage on language java to c_function_user1;
-ERROR:  language "java" is not trusted
-HINT:  Only system admin can use "java" languages.
+ERROR:  Grant/revoke on untrusted languages if forbidden.
+DETAIL:  language "java" is not trusted
 grant usage on language internal to c_function_user1;
-ERROR:  language "internal" is not trusted
-HINT:  Only system admin can use "internal" languages.
+ERROR:  Grant/revoke on untrusted languages if forbidden.
+DETAIL:  language "internal" is not trusted
 grant usage on language c to c_function_user1;
 grant c_function_user2 to c_function_user1;
 set role c_function_user1 password 'ttest@123';

@@ -37,6 +37,7 @@
 #include "nodes/nodes.h"
 #include "pgxc/pgxcnode.h"
 #include "storage/lock/lwlock.h"
+#include "storage/smgr/fd.h"
 #include "tcop/dest.h"
 #include "securec_check.h"
 
@@ -50,6 +51,7 @@ XLogRecParseState *barrier_redo_parse_to_block(XLogReaderState *record, uint32 *
 {
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
 
     *blocknum = 1;
@@ -58,9 +60,11 @@ XLogRecParseState *barrier_redo_parse_to_block(XLogReaderState *record, uint32 *
         return NULL;
     }
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_BARRIER_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_BARRIER_TYPE, filenode, recordstatehead);
 
     XLogRecSetBarrierState(&(recordstatehead->blockparse.extra_rec.blockbarrier), record->ReadRecPtr,
                            record->EndRecPtr);
+    recordstatehead->isFullSync = record->isFullSync;
     return recordstatehead;
 }

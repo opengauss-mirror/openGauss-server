@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -112,7 +112,6 @@ static void IsPagerNeeded(
     const printTableContent* cont, const int extra_lines, bool expanded, FILE** fout, bool* is_pager);
 
 static void print_aligned_vertical(const printTableContent* cont, FILE* fout);
-static char* GetEnvStr(const char* env);
 
 static void* pg_local_malloc(size_t size)
 {
@@ -1954,7 +1953,7 @@ void printTableInit(
     content->headers = (const char**)pg_local_calloc(ncolumns + 1, sizeof(*content->headers));
 
     if (ncolumns * nrows + 1 <= 0) {
-        fprintf(stderr, _("Integer Overflow:ncolumns * nrows + 1"));
+        fprintf(stderr, _("Error: Integer overflow when select execution.\n"));
         exit(EXIT_FAILURE);
     }
     content->cells = (const char**)pg_local_calloc(ncolumns * nrows + 1, sizeof(*content->cells));
@@ -2045,7 +2044,7 @@ void printTableAddCell(printTableContent* const content, char* cell, const bool 
         if (content->cellmustfree == NULL) {
             int64 res = (int64)content->ncolumns * (int64)content->nrows;
             if ((res + 1) >= (int64)PG_INT32_MAX) {
-                fprintf(stderr, _("Integer Overflow:content->ncolumns * content->nrows + 1\n"));
+                fprintf(stderr, _("Error: Integer overflow when select execution\n"));
                 exit(EXIT_FAILURE);
             }
             content->cellmustfree = (bool*)pg_local_calloc(res + 1, sizeof(bool));
@@ -2428,27 +2427,3 @@ void check_env_value(const char* input_env_value)
     }
 }
 
-/*
- * GetEnvStr
- *
- * Note: malloc space for get the return of getenv() function, then return the malloc space.
- *         so, this space need be free.
- */
-static char* GetEnvStr(const char* env)
-{
-    char* tmpvar = NULL;
-    const char* temp = getenv(env);
-    errno_t rc = 0;
-    if (temp != NULL) {
-        size_t len = strlen(temp);
-        if (0 == len)
-            return NULL;
-        tmpvar = (char*)malloc(len + 1);
-        if (tmpvar != NULL) {
-            rc = strcpy_s(tmpvar, len + 1, temp);
-            securec_check_c(rc, "\0", "\0");
-            return tmpvar;
-        }
-    }
-    return NULL;
-}

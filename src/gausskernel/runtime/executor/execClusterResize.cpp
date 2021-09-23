@@ -22,7 +22,7 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pgxc_group.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "optimizer/clauses.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
@@ -40,6 +40,7 @@
 #include "utils/snapmgr.h"
 
 #include "storage/lmgr.h"
+#include "postgres_ext.h"
 
 /*
  * ---------------------------------------------------------------------------------
@@ -128,11 +129,13 @@ static inline bool redis_ctid_retrive_function(const char* funcname, Oid rettype
  */
 void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, const Relation deldelta_rel)
 {
-    Assert(deldelta_rel);
-
     Datum values[Natts_pg_delete_delta];
     bool nulls[Natts_pg_delete_delta];
     HeapTuple tup = NULL;
+
+    Assert(deldelta_rel);
+    /* In redistribution, table delete_delta has 3 or 2 column. */
+    Assert(RelationGetDescr(deldelta_rel)->natts <= 3);
 
     /* Iterate through attributes initializing nulls and values */
     for (int i = 0; i < Natts_pg_delete_delta; i++) {
@@ -143,7 +146,7 @@ void RecordDeletedTuple(Oid relid, int2 bucketid, const ItemPointer tupleid, con
         UInt64GetDatum(((uint64)u_sess->pgxc_cxt.PGXCNodeIdentifier << 32) | relid);
     values[Anum_pg_delete_delta_tablebucketid_and_ctid - 1] =
         UInt64GetDatum(((uint64)ItemPointerGetBlockNumber(tupleid) << 16) | ItemPointerGetOffsetNumber(tupleid));
-    if (bucketid != InvalidBktId) {
+    if (BUCKET_NODE_IS_VALID(bucketid)) {
         values[Anum_pg_delete_delta_tablebucketid_and_ctid - 1] |= ((uint64)bucketid << 48);
     }
     /* Record delta */
@@ -194,7 +197,7 @@ bool RelationInClusterResizingReadOnly(const Relation rel)
     Assert(rel != NULL);
 
     /* Check relation's append_mode status */
-    if (!IsInitdb && (RelationInRedistributeReadOnly(rel) || RelationInRedistributeEndCatchup(rel)))
+    if (!IsInitdb && RelationInRedistributeReadOnly(rel))
         return true;
 
     return false;
@@ -458,7 +461,8 @@ void BlockUnsupportedDDL(const Node* parsetree)
         case T_AlterDatabaseSetStmt:
         case T_CreateTableSpaceStmt:
         case T_DropTableSpaceStmt:
-        case T_AlterTableSpaceOptionsStmt: {
+        case T_AlterTableSpaceOptionsStmt:
+        case T_CreateGroupStmt: {
             if (ClusterResizingInProgress()) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -639,7 +643,14 @@ void BlockUnsupportedDDL(const Node* parsetree)
                     case AT_AddNodeList:
                     case AT_DeleteNodeList:
                         break;
-
+                    case AT_UpdateSliceLike: {
+                        if (!ClusterResizingInProgress() && IS_PGXC_COORDINATOR) {
+                            ereport(ERROR,
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("Cannot alter table update slice like when it is not "
+                                           "under redistribution")));
+                        }
+                    } break;
                     case AT_ResetRelOptions:
                     case AT_SetRelOptions:
                         if (cmd->def) {

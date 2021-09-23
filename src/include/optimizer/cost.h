@@ -14,7 +14,7 @@
 #ifndef COST_H
 #define COST_H
 
-#include "executor/nodeHash.h"
+#include "executor/node/nodeHash.h"
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "optimizer/planmain.h"
@@ -81,6 +81,7 @@ extern double clamp_row_est(double nrows);
 extern double index_pages_fetched(
     double tuples_fetched, BlockNumber pages, double index_pages, PlannerInfo* root, bool ispartitionedindex);
 extern void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
+extern void cost_resultscan(Path *path, PlannerInfo *root, RelOptInfo *baserel, ParamPathInfo *param_info);
 extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info);
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
@@ -149,6 +150,7 @@ extern void set_function_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_values_size_estimates(PlannerInfo* root, RelOptInfo* rel);
 extern void set_cte_size_estimates(PlannerInfo* root, RelOptInfo* rel, Plan* cteplan);
 extern void set_foreign_size_estimates(PlannerInfo* root, RelOptInfo* rel);
+extern void set_result_size_estimates(PlannerInfo *root, RelOptInfo *rel);
 
 /*
  * prototypes for clausesel.c
@@ -188,7 +190,7 @@ extern double relation_byte_size(
     double tuples, int width, bool vectorized, bool aligned = true, bool issort = true, bool indexsort = false);
 extern MergeScanSelCache* cached_scansel(PlannerInfo* root, RestrictInfo* rinfo, PathKey* pathkey);
 
-extern double apply_random_page_cost_mod(double rand_page_cost, double seq_page_cost, int num_of_page);
+extern double apply_random_page_cost_mod(double rand_page_cost, double seq_page_cost, double num_of_page);
 
 #define ES_DEBUG_LEVEL DEBUG2 /* debug level for extended statistic in optimizor */
 
@@ -251,6 +253,7 @@ struct es_candidate {
 class ES_SELECTIVITY : public BaseObject {
 public:
     List* es_candidate_list;
+    List* es_candidate_saved; /* temporarily save es_candidate_list */
     List* unmatched_clause_group;
     PlannerInfo* root;       /* root from input */
     SpecialJoinInfo* sjinfo; /* sjinfo from input */
@@ -289,8 +292,10 @@ private:
     Selectivity cal_eqjoinsel_semi(es_candidate* es, RelOptInfo* inner_rel, bool inner_on_left);
     void cal_stadistinct_eqsel(es_candidate* es);
     bool cal_stadistinct_eqjoinsel(es_candidate* es);
+    void CalSelWithUniqueIndex(Selectivity &result);
     void clear_extended_stats(ExtendedStats* extended_stats) const;
     void clear_extended_stats_list(List* stats_list) const;
+    bool ContainIndexCols(const es_candidate* es, const IndexOptInfo* index) const;
     ExtendedStats* copy_stats_ptr(ListCell* l) const;
     void debug_print();
     double estimate_local_numdistinct(es_bucketsize* bucket, bool left, Path* path);
@@ -302,6 +307,7 @@ private:
     Bitmapset* make_attnums_by_clause_map(es_candidate* es, Bitmapset* attnums, bool left) const;
     void match_extended_stats(es_candidate* es, List* stats_list, bool left);
     bool match_pseudo_clauselist(List* clauses, es_candidate* es, List* origin_clause);
+    bool MatchUniqueIndex(const es_candidate* es) const;
     void modify_distinct_by_possion_model(es_candidate* es, bool left, SpecialJoinInfo* sjinfo) const;
     char* print_expr(const Node* expr, const List* rtable) const;
     void print_rel(RangeTblEntry* rel) const;

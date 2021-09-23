@@ -29,6 +29,11 @@ typedef struct SPITupleTable {
 /* Plans are opaque structs for standard users of SPI */
 typedef struct _SPI_plan* SPIPlanPtr;
 
+typedef struct SPICachedPlanStack {
+    CachedPlan* cplan;
+    SPICachedPlanStack* previous;
+} SPIPlanStack;
+
 #define SPI_ERROR_CONNECT (-1)
 #define SPI_ERROR_COPY (-2)
 #define SPI_ERROR_OPUNKNOWN (-3)
@@ -71,7 +76,7 @@ extern void SPI_pop(void);
 extern bool SPI_push_conditional(void);
 extern void SPI_pop_conditional(bool pushed);
 extern void SPI_restore_connection(void);
-extern int SPI_execute(const char* src, bool read_only, long tcount);
+extern int SPI_execute(const char* src, bool read_only, long tcount, bool isCollectParam = false);
 extern int SPI_execute_plan(SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only, long tcount);
 extern int SPI_execute_plan_with_paramlist(SPIPlanPtr plan, ParamListInfo params, bool read_only, long tcount);
 extern int SPI_exec(const char* src, long tcount);
@@ -118,7 +123,8 @@ extern void SPI_freetuptable(SPITupleTable* tuptable);
 extern Portal SPI_cursor_open(const char* name, SPIPlanPtr plan, Datum* Values, const char* Nulls, bool read_only);
 extern Portal SPI_cursor_open_with_args(const char* name, const char* src, int nargs, Oid* argtypes, Datum* Values,
     const char* Nulls, bool read_only, int cursorOptions);
-extern Portal SPI_cursor_open_with_paramlist(const char* name, SPIPlanPtr plan, ParamListInfo params, bool read_only);
+extern Portal SPI_cursor_open_with_paramlist(const char* name, SPIPlanPtr plan, ParamListInfo params,
+                                             bool read_only, bool isCollectParam = false);
 extern Portal SPI_cursor_find(const char* name);
 extern void SPI_cursor_fetch(Portal portal, bool forward, long count);
 extern void SPI_cursor_move(Portal portal, bool forward, long count);
@@ -139,15 +145,20 @@ extern void AtEOXact_SPI(bool isCommit, bool STP_rollback, bool STP_commit);
 extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid, bool STP_rollback, bool STP_commit);
 extern void AtEOSubXact_SPI(bool isCommit, SubTransactionId mySubid);
 extern DestReceiver* createAnalyzeSPIDestReceiver(CommandDest dest);
+
+extern void ReleaseSpiPlanRef();
 /* SPI execution helpers */
 extern void spi_exec_with_callback(CommandDest dest, const char* src, bool read_only, long tcount, bool direct_call,
     void (*callbackFn)(void*), void* clientData);
 
 extern void _SPI_error_callback(void *arg);
 
+extern List* _SPI_get_querylist(SPIPlanPtr plan);
 #ifdef PGXC
 extern int SPI_execute_direct(const char* src, char* nodename);
 #endif
 extern int _SPI_end_call(bool procmem);
 extern void _SPI_hold_cursor();
+extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan);
+extern void InitSPIPlanCxt();
 #endif /* SPI_H */

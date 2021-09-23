@@ -333,7 +333,7 @@ void constCompare(Const* value1, Const* value2, int& compare)
 
 #define partitonKeyCompareForRouting(value1, value2, len, compare)                                                  \
     do {                                                                                                            \
-        uint8 i = 0;                                                                                                \
+        uint32 i = 0;                                                                                                \
         Const* v1 = NULL;                                                                                           \
         Const* v2 = NULL;                                                                                           \
         for (; i < (len); i++) {                                                                                    \
@@ -1264,6 +1264,29 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     DestroyListElements(list_eles, list_map->listElementsNum);
 }
 
+bool CheckHashPartitionMap(HashPartElement* hash_eles, int len)
+{
+    int actualPartitionNum = 0;
+    for (int i = 0; i < len; i++) {
+        if (DatumGetInt32(hash_eles[i].boundary[0]->constvalue) > actualPartitionNum) {
+            actualPartitionNum = DatumGetInt32(hash_eles[i].boundary[0]->constvalue);
+        }
+    }
+    /* During DDL, like exchange partition, a temporary partition is added. 
+     * In this case, we do not check because the actual number of partitions may be larger than the original. 
+     */
+    if (actualPartitionNum != len - 1) {
+        return true;
+    }
+    // Constvalue must be in reverse order due to design issues.
+    for (int i = 0; i < len; i++) {
+        if (DatumGetInt32(hash_eles[len - 1 - i].boundary[0]->constvalue) != i) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void BuildHashPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list)
 {
@@ -1332,6 +1355,10 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
 
         hash_itr++;
     }
+
+    Assert(partitionKey->dim1 == 1);
+    qsort(hash_eles, hash_map->hashElementsNum, sizeof(HashPartElement), HashElementCmp);
+    Assert(CheckHashPartitionMap(hash_eles, hash_map->hashElementsNum));
 
     /* hash element array back in RangePartitionMap */
     old_context = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
@@ -1488,7 +1515,7 @@ Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datumValue,
  * 2. copy out the boundary of src partition, forming a new boundary list.
  * 3. decreace the ref count of partition map.
  */
-List* getPartitionBoundaryList(Relation rel, int sequence)
+List* getRangePartitionBoundaryList(Relation rel, int sequence)
 {
     List* result = NIL;
     RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
@@ -1508,7 +1535,68 @@ List* getPartitionBoundaryList(Relation rel, int sequence)
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid partition sequence: %d of relation \"%s\"", sequence, RelationGetRelationName(rel))));
+                errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
+                       "name are correct.",
+                    sequence,
+                    RelationGetRelationName(rel))));
+    }
+    decre_partmap_refcount(rel->partMap);
+    return result;
+}
+
+List* getListPartitionBoundaryList(Relation rel, int sequence)
+{
+    List* result = NIL;
+    ListPartitionMap* partMap = (ListPartitionMap*)rel->partMap;
+
+    if (!RELATION_IS_PARTITIONED(rel))
+        return NIL;
+
+    incre_partmap_refcount(rel->partMap);
+    if (sequence >= 0 && sequence < partMap->listElementsNum) {
+        int i = 0;
+        Const** srcBound = partMap->listElements[sequence].boundary;
+        int len = partMap->listElements[sequence].len;
+
+        for (i = 0; i < len; i++) {
+            result = lappend(result, (Const*)copyObject(srcBound[i]));
+        }
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
+                       "name are correct.",
+                    sequence,
+                    RelationGetRelationName(rel))));
+    }
+    decre_partmap_refcount(rel->partMap);
+    return result;
+}
+
+List* getHashPartitionBoundaryList(Relation rel, int sequence)
+{
+    List* result = NIL;
+    HashPartitionMap* partMap = (HashPartitionMap*)rel->partMap;
+
+    if (!RELATION_IS_PARTITIONED(rel))
+        return NIL;
+
+    incre_partmap_refcount(rel->partMap);
+    if (sequence >= 0 && sequence < partMap->hashElementsNum) {
+        int i = 0;
+        int partKeyNum = partMap->partitionKey->dim1;
+        Const** srcBound = partMap->hashElements[sequence].boundary;
+
+        for (i = 0; i < partKeyNum; i++) {
+            result = lappend(result, (Const*)copyObject(srcBound[i]));
+        }
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid partition sequence: %d of relation \"%s\", check whether the table name and partition "
+                       "name are correct.",
+                    sequence,
+                    RelationGetRelationName(rel))));
     }
     decre_partmap_refcount(rel->partMap);
     return result;
@@ -1578,7 +1666,7 @@ Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32
             rangeElementIterator = &(rangePartMap->rangeElements[local_part_id]);
 
             boundary = rangeElementIterator->boundary;
-            partitonKeyCompareForRouting(partKeyValue, boundary, keyNums, compare);
+            partitonKeyCompareForRouting(partKeyValue, boundary, (uint32)keyNums, compare);
 
             if (compare == 0) {
                 hit = local_part_id;
@@ -1633,7 +1721,7 @@ Oid getListPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq,
         int list_len = listPartMap->listElements[i].len;
         int j = 0;
         while (j < list_len) {
-            partitonKeyCompareForRouting(partKeyValue, boundary + j, keyNums, compare);
+            partitonKeyCompareForRouting(partKeyValue, boundary + j, (uint32)keyNums, compare);
             if (compare == 0) {
                 hit = i;
                 break;
@@ -1741,7 +1829,7 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
     Assert(partition->len == 1);
     int compare = 0;
     Const* lowBoundary = CalcLowBoundary(partition->boundary[0], intervalValue);
-    partitonKeyCompareForRouting(partKeyValue, &lowBoundary, partition->len, compare);
+    partitonKeyCompareForRouting(partKeyValue, &lowBoundary, (uint32)(partition->len), compare);
     pfree(lowBoundary);
     return compare;
 }
@@ -2086,15 +2174,17 @@ List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode)
     return indexPartitionList;
 }
 
-void releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode)
+void releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck)
 {
     ListCell* cell = NULL;
     Partition partition = NULL;
 
     foreach (cell, *partList) {
         partition = (Partition)lfirst(cell);
-        Assert(PointerIsValid(partition));
-        partitionClose(relation, partition, lockmode);
+        Assert(!validCheck || PointerIsValid(partition));
+        if (PointerIsValid(partition)) {
+            partitionClose(relation, partition, lockmode);
+        }
     }
 
     list_free_ext(*partList);
@@ -2264,6 +2354,22 @@ int rangeElementCmp(const void* a, const void* b)
     return partitonKeyCompare((Const**)rea->boundary, (Const**)reb->boundary, rea->len);
 }
 
+int HashElementCmp(const void* a, const void* b)
+{
+    const HashPartElement* rea = (const HashPartElement*)a;
+    const HashPartElement* reb = (const HashPartElement*)b;
+
+    int32 constvalue1 = DatumGetInt32((Const*)rea->boundary[0]->constvalue);
+    int32 constvalue2 = DatumGetInt32((Const*)reb->boundary[0]->constvalue);
+    if (constvalue1 < constvalue2) {
+        return 1;
+    } else if (constvalue1 > constvalue2) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
+
 /*
  * @@GaussDB@@
  * Brief		:
@@ -2330,42 +2436,6 @@ bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
     return ret;
 }
 
-// Description : Check the tuple whether locate the partition
-bool tupleLocateThePartition(Relation partTableRel, int partSeq, TupleDesc tupleDesc,  void * tuple)
-{
-    RangePartitionMap* partMap = NULL;
-    int2vector* partkeyColumns = NULL;
-    int partkeyColumnNum = 0;
-    int i = 0;
-    Const* tuplePartKeyValues[RANGE_PARTKEYMAXNUM];
-    Const consts[RANGE_PARTKEYMAXNUM];
-    Datum tuplePartKeyValue;
-    bool isNull = false;
-    bool isInPartition = false;
-
-    if (partSeq < 0 || partSeq >= ((RangePartitionMap*)(partTableRel->partMap))->rangeElementsNum)
-        return false;
-
-    incre_partmap_refcount(partTableRel->partMap);
-    partMap = (RangePartitionMap*)(partTableRel->partMap);
-
-    partkeyColumns = partMap->partitionKey;
-    partkeyColumnNum = partkeyColumns->dim1;
-
-    for (i = 0; i < partkeyColumnNum; i++) {
-        isNull = false;
-        tuplePartKeyValue = tableam_tops_tuple_getattr(tuple, (int)partkeyColumns->values[i], tupleDesc, &isNull);
-        tuplePartKeyValues[i] =
-            transformDatum2Const(tupleDesc, partkeyColumns->values[i], tuplePartKeyValue, isNull, &consts[i]);
-    }
-
-    isInPartition = isPartKeyValuesInPartition(partMap, tuplePartKeyValues, partkeyColumnNum, partSeq);
-
-    decre_partmap_refcount(partTableRel->partMap);
-
-    return isInPartition;
-}
-
 bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq)
 {
     Assert(partMap && partKeyValues);
@@ -2379,21 +2449,22 @@ bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValue
     if (0 == partSeq) {
         /* is in first partition (-inf, boundary) */
         greaterThanBottom = true;
-        partitonKeyCompareForRouting(partKeyValues, partMap->rangeElements[0].boundary, partkeyColumnNum, compareTop);
+        partitonKeyCompareForRouting(partKeyValues, partMap->rangeElements[0].boundary, 
+                                    (uint32)partkeyColumnNum, compareTop);
         if (compareTop < 0) {
             lessThanTop = true;
         }
     } else {
         /* is in [last_partiton_boundary,  boundary) */
         partitonKeyCompareForRouting(
-            partKeyValues, partMap->rangeElements[partSeq - 1].boundary, partkeyColumnNum, compareBottom);
+            partKeyValues, partMap->rangeElements[partSeq - 1].boundary, (uint32)partkeyColumnNum, compareBottom);
 
         if (compareBottom >= 0) {
             greaterThanBottom = true;
         }
 
         partitonKeyCompareForRouting(
-            partKeyValues, partMap->rangeElements[partSeq].boundary, partkeyColumnNum, compareTop);
+            partKeyValues, partMap->rangeElements[partSeq].boundary, (uint32)partkeyColumnNum, compareTop);
 
         if (compareTop < 0) {
             lessThanTop = true;
@@ -2434,7 +2505,7 @@ int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** val
     int compare = 0;
 
     incre_partmap_refcount((PartitionMap*)partMap);
-    partitonKeyCompareForRouting(values1, values2, partKeyNum, compare);
+    partitonKeyCompareForRouting(values1, values2, (uint32)partKeyNum, compare);
     decre_partmap_refcount((PartitionMap*)partMap);
 
     return compare;

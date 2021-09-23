@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * bitmapset.cpp
- *	  PostgreSQL generic bitmap set package
+ *	  openGauss generic bitmap set package
  *
  * A bitmap set can represent any set of nonnegative integers, although
  * it is mainly intended for sets where the maximum value is not large,

@@ -36,6 +36,7 @@
 #include "optimizer/paths.h"
 #include "optimizer/plancat.h"
 #include "optimizer/planner.h"
+#include "optimizer/planmain.h"
 #include "optimizer/prep.h"
 #include "optimizer/pruning.h"
 #include "optimizer/restrictinfo.h"
@@ -58,6 +59,9 @@ THR_LOCAL set_rel_pathlist_hook_type set_rel_pathlist_hook = NULL;
 
 /* Hook for plugins to get control in add_paths_to_joinrel() */
 THR_LOCAL set_join_pathlist_hook_type set_join_pathlist_hook = NULL;
+
+const int min_parallel_table_scan_size = 10737418240 / BLCKSZ;    /* 10GB */
+const int max_parallel_maintenance_workers = 4;
 
 static bool check_func_walker(Node* node, bool* found);
 static bool check_func(Node* node);
@@ -85,6 +89,7 @@ static void set_subquery_path(PlannerInfo *root, RelOptInfo *rel,
 static void set_function_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_values_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_cte_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
+static void set_result_pathlist(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte);
 static void set_worktable_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static RelOptInfo* make_rel_from_joinlist(PlannerInfo* root, List* joinlist);
 static bool subquery_is_pushdown_safe(Query* subquery, Query* topquery, bool* unsafeColumns);
@@ -638,6 +643,10 @@ void set_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* 
                 else
                     set_cte_pathlist(root, rel, rte);
                 break;
+            case RTE_RESULT:
+                /* Might as well just build the path immediately */
+                set_result_pathlist(root, rel, rte);
+                break;
             default:
                 ereport(ERROR,
                     (errmodule(MOD_OPT),
@@ -679,6 +688,30 @@ void set_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* 
 }
 
 /*
+ * Create baserel path for RTE_RELATION kind
+ */
+static void SetRelationPath(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte)
+{
+    /*
+     * If the rel can apply inlist2join and the guc qrw_inlist2join_optmode=rule_base
+     * So we can just convert inlist to join, there is no need to genenate other paths
+     */
+    if (rel->alternatives && u_sess->opt_cxt.qrw_inlist2join_optmode > QRW_INLIST2JOIN_CBO) {
+        set_cheapest(rel);
+        return;
+    }
+    if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
+        /* Foreign table */
+        set_foreign_pathlist(root, rel, rte);
+    } else {
+        /* Plain relation */
+        set_plain_rel_pathlist(root, rel, rte);
+    }
+
+    return;
+}
+
+/*
  * set_rel_pathlist
  *	  Build access paths for a base relation
  */
@@ -692,21 +725,7 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
     } else {
         switch (rel->rtekind) {
             case RTE_RELATION:
-                /*
-                 * If the rel can apply inlist2join and the guc qrw_inlist2join_optmode=rule_base
-                 * So we can just convert inlist to join, there is no need to genenate other paths
-                 */
-                if (rel->alternatives && u_sess->opt_cxt.qrw_inlist2join_optmode > QRW_INLIST2JOIN_CBO) {
-                    set_cheapest(rel);
-                    break;
-                }
-                if (rte->relkind == RELKIND_FOREIGN_TABLE || rte->relkind == RELKIND_STREAM) {
-                    /* Foreign table */
-                    set_foreign_pathlist(root, rel, rte);
-                } else {
-                    /* Plain relation */
-                    set_plain_rel_pathlist(root, rel, rte);
-                }
+                SetRelationPath(root, rel, rte);
                 break;
             case RTE_SUBQUERY:
                 /* Subquery --- fully handled during set_rel_size */
@@ -731,6 +750,9 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
             case RTE_CTE:
                 /* CTE reference --- fully handled during set_rel_size */
                 break;
+            case RTE_RESULT:
+                /* simple Result --- fully handled during set_rel_size */
+                break;
             default:
                 ereport(ERROR,
                     (errmodule(MOD_OPT),
@@ -746,6 +768,11 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
      */
     if (set_rel_pathlist_hook) {
         (*set_rel_pathlist_hook) (root, rel, rti, rte);
+    }
+
+    /* add baserel cn gather path when gather hint switch on */
+    if (IS_STREAM_PLAN && permit_gather(root, HINT_GATHER_REL)) {
+        CreateGatherPaths(root, rel, false);
     }
 
     debug1_print_rel(root, rel);
@@ -821,16 +848,6 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     if (rte->tablesample == NULL) {
         /* Mark rel with estimated output rows, width, etc */
         set_baserel_size_estimates(root, rel);
-
-        /*
-         * Check to see if we can extract any restriction conditions from join
-         * quals that are OR-of-AND structures.  If so, add them to the rel's
-         * restriction list, and redo the above steps.
-         */
-        if (create_or_index_quals(root, rel)) {
-            check_partial_indexes(root, rel);
-            set_baserel_size_estimates(root, rel);
-        }
     } else {
         /* Sampled relation */
         set_tablesample_rel_size(root, rel, rte);
@@ -2373,6 +2390,10 @@ static bool predpush_subquery(PlannerInfo* root, RelOptInfo* rel, Index rti,
             joininfo = lappend(joininfo, ri);
             continue;
         }
+        if (!isEqualExpr((Node *)(ri->clause))) {
+            joininfo = lappend(joininfo, ri);
+            continue;
+        }
 
         if (bms_equal(ri->left_relids, rel->relids)) {
             if (bms_num_members(ri->right_relids) != 1)
@@ -2627,6 +2648,7 @@ static void set_subquery_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti,
         Assert(param_subquery != NULL);
         Assert(new_rel != NULL);
         MemoryContext oldcxt = CurrentMemoryContext;
+        bool old_stream_support = u_sess->opt_cxt.is_stream_support;
         PG_TRY();
         {
             rel->alternatives = lappend(rel->alternatives, new_rel);
@@ -2639,6 +2661,7 @@ static void set_subquery_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti,
             MemoryContextSwitchTo(oldcxt);
             FlushErrorState();
             root->plan_params = NULL;
+            u_sess->opt_cxt.is_stream_support = old_stream_support;
         }
         PG_END_TRY();
     }
@@ -2868,6 +2891,35 @@ static void set_cte_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
 }
 
 /*
+ * set_result_pathlist
+ *             Build the (single) access path for an RTE_RESULT RTE
+ *
+ * There's no need for a separate set_result_size phase, since we
+ * don't support join-qual-parameterized paths for these RTEs.
+ */
+static void set_result_pathlist(PlannerInfo *root, RelOptInfo *rel,
+    RangeTblEntry *rte)
+{
+    Relids          required_outer;
+
+    /* Mark rel with estimated output rows, width, etc */
+    set_result_size_estimates(root, rel);
+
+    /*
+     * We don't support pushing join clauses into the quals of a Result scan,
+     * but it could still have required parameterization due to LATERAL refs
+     * in its tlist.
+     */
+    required_outer = rel->lateral_relids;
+
+    /* Generate appropriate path */
+    add_path(root, rel, create_resultscan_path(root, rel, required_outer));
+
+    /* Select cheapest path (pretty easy in this case...) */
+    set_cheapest(rel);
+}
+
+/*
  * set_worktable_pathlist
  *		Build the (single) access path for a self-reference CTE RTE
  *
@@ -3063,6 +3115,11 @@ RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* ini
          */
         foreach (lc, root->join_rel_level[lev]) {
             rel = (RelOptInfo*)lfirst(lc);
+
+            /* add joinrel cn gather path when gather hint switch on */
+            if (IS_STREAM_PLAN && permit_gather(root, HINT_GATHER_JOIN)) {
+                CreateGatherPaths(root, rel, true);
+            }
 
             /* Find and save the cheapest paths for this rel */
             set_cheapest(rel, root);
@@ -3828,7 +3885,7 @@ static void make_partiterator_pathkey(
 /*
  * Check scan path for partition table whether use global partition index
  */
-static bool CheckPathUseGlobalPartIndex(Path* path)
+bool CheckPathUseGlobalPartIndex(Path* path)
 {
     if (path->pathtype == T_IndexScan || path->pathtype == T_IndexOnlyScan) {
         IndexPath* indexPath = (IndexPath*)path;
@@ -3897,6 +3954,66 @@ static Path* create_partiterator_path(PlannerInfo* root, RelOptInfo* rel, Path* 
     }
 
     return result;
+}
+
+/*
+ * Compute the number of parallel workers that should be used to scan a
+ * relation.  We compute the parallel workers based on the size of the heap to
+ * be scanned and the size of the index to be scanned, then choose a minimum
+ * of those.
+ *
+ * "heap_pages" is the number of pages from the table that we expect to scan, or
+ * -1 if we don't expect to scan any.
+ *
+ */
+int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, int rel_maxworker)
+{
+    int  parallel_workers = 0;
+    int  max_workers = max_parallel_maintenance_workers;
+
+    if (rel_maxworker != -1) {
+        max_workers = Min(max_workers, rel_maxworker);
+    }
+
+    /*
+     * If the number of pages being scanned is insufficient to justify a
+     * parallel scan, just return zero ... unless it's an inheritance
+     * child. In that case, we want to generate a parallel path here
+     * anyway.  It might not be worthwhile just for this relation, but
+     * when combined with all of its inheritance siblings it may well pay
+     * off.
+     */
+    if ((rel->reloptkind == RELOPT_BASEREL &&
+        heap_pages >= 0 && heap_pages < min_parallel_table_scan_size) ||
+        max_workers == 0) {
+        return 0;
+    }
+
+    if (heap_pages >= 0) {
+        int  heap_parallel_threshold;
+        int  heap_parallel_workers = 1;
+        /*
+         * Select the number of workers based on the log of the size of
+         * the relation.  This probably needs to be a good deal more
+         * sophisticated, but we need something here for now.  Note that
+         * the upper limit of the min_parallel_table_scan_size GUC is
+         * chosen to prevent overflow here.
+         */
+        heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
+        while (heap_pages >= (BlockNumber)heap_parallel_threshold) {
+            heap_parallel_workers++;
+            heap_parallel_threshold *= 3;
+            if (heap_parallel_threshold > INT_MAX / 3) {
+                break;      /* avoid overflow */
+            }
+        }
+        parallel_workers = heap_parallel_workers;
+    }
+
+    /* In no case use more than caller supplied maximum number of workers */
+    parallel_workers = Min(parallel_workers, max_workers);
+
+    return parallel_workers;
 }
 
 /*

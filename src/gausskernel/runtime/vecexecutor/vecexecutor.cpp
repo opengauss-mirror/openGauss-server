@@ -25,13 +25,13 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
-#include "executor/nodeHashjoin.h"
-#include "executor/nodeMaterial.h"
-#include "executor/nodeRecursiveunion.h"
-#include "executor/nodeSetOp.h"
-#include "executor/nodeSort.h"
-#include "executor/nodeStub.h"
+#include "executor/node/nodeAgg.h"
+#include "executor/node/nodeHashjoin.h"
+#include "executor/node/nodeMaterial.h"
+#include "executor/node/nodeRecursiveunion.h"
+#include "executor/node/nodeSetOp.h"
+#include "executor/node/nodeSort.h"
+#include "executor/node/nodeStub.h"
 #include "miscadmin.h"
 #include "nodes/execnodes.h"
 #include "nodes/plannodes.h"
@@ -115,7 +115,6 @@ VectorEngineFunc VectorEngineRunner[] = {
     reinterpret_cast<VectorEngineFunc>(ExecVecMaterial),
     reinterpret_cast<VectorEngineFunc>(ExecVecMergeJoin),
     reinterpret_cast<VectorEngineFunc>(ExecVecWindowAgg),
-    reinterpret_cast<VectorEngineFunc>(ExecBatchSeqScan),
 };
 
 FORCE_INLINE

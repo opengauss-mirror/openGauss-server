@@ -33,6 +33,7 @@
 #define CSTRING_TYPE 3
 #define TID_TYPE 4
 #define FIXED_TYPE 5
+#define NAME_TYPE 6
 
 class StreamProducer : public StreamObj {
 public:
@@ -454,6 +455,8 @@ private:
 
     /* The bucket map for redistribute. */
     uint2* m_bucketMap;
+
+    int    m_bucketCnt;
 
     /* boundary extracted from ExecNodes if redistribute by range/list */
     ExecBoundary* m_sliceBoundary;

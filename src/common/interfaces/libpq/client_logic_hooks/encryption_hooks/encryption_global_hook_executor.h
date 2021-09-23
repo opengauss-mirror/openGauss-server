@@ -29,17 +29,13 @@
 #include "abstract_encryption_hook.h"
 #include "global_hook_executor.h"
 #include "client_logic/client_logic_enums.h"
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-#include "gs_ktool_interface.h"
-#else
-#include "localkms_gen_cmk.h"
-#endif
 #include <memory>
 #include <vector>
 #include <string>
 
 #define MAX_KEY_STORE_SIZE 256
 #define MAX_KEY_PATH_SIZE 4096
+#define MAX_KEY_ALGO_SIZE 56
 
 enum class KeyStore;
 
@@ -51,47 +47,64 @@ public:
     {
         add_allowed_value("key_store");
         add_allowed_value("key_path");
+        add_allowed_value("algorithm");
     }
     virtual ~EncryptionGlobalHookExecutor() {};
     bool pre_create(const StringArgs &args, const GlobalHookExecutor **existing_global_hook_executors,
         size_t existing_global_hook_executors_size) override;
     bool process(ColumnHookExecutor *column_hook_executor) override;
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    bool get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len);
-#endif
+    bool set_deletion_expected() override;
+    bool post_create(const StringArgs& args);
+    bool deprocess_column_setting(const unsigned char *processed_data, const size_t processed_data_size, 
+        const char *key_store, const char *key_path, const char *key_algo, unsigned char **data, size_t *data_size)
+        override;
 
 private:
-    const CmkKeyStore get_key_store() const;
+    const char *get_key_store() const;
     const char *get_key_path() const;
+    const char *get_key_algo() const;
     void save_private_variables() override;
 
 private:
     void set_keystore(const char *keystore, size_t keystore_size)
     {
-        if (keystore == NULL || keystore_size == 0 || m_keyStore == NULL) {
+        if (keystore == NULL || keystore_size == 0) {
             return;
         }
         errno_t securec_rc = EOK;
         Assert(keystore_size <= MAX_KEY_STORE_SIZE);
-        securec_rc = memcpy_s(m_keyStore, MAX_KEY_STORE_SIZE, keystore, keystore_size);
+        securec_rc = memcpy_s(m_key_store, MAX_KEY_STORE_SIZE, keystore, keystore_size);
         securec_check_c(securec_rc, "\0", "\0");
         return;
     }
 
     void set_keypath(const char *keypath, size_t keypath_size)
     {
-        if (keypath == NULL || keypath_size == 0 || m_keyPath == NULL) {
+        if (keypath == NULL || keypath_size == 0) {
             return;
         }
         errno_t securec_rc = EOK;
         Assert(keypath_size <= MAX_KEY_STORE_SIZE);
-        securec_rc = memcpy_s(m_keyPath, MAX_KEY_STORE_SIZE, keypath, keypath_size);
+        securec_rc = memcpy_s(m_key_path, MAX_KEY_STORE_SIZE, keypath, keypath_size);
         securec_check_c(securec_rc, "\0", "\0");
         return;
     }
 
-    char m_keyStore[MAX_KEY_STORE_SIZE] = {0};
-    char m_keyPath[MAX_KEY_PATH_SIZE] = {0};
+    void set_keyalgo(const char *cmk_algorithm, size_t cmk_algorithm_size)
+    {
+        if (cmk_algorithm == NULL || cmk_algorithm_size == 0) {
+            return;
+        }
+        errno_t securec_rc = EOK;
+        Assert(cmk_algorithm_size <= MAX_KEY_ALGO_SIZE);
+        securec_rc = memcpy_s(m_key_algo, MAX_KEY_ALGO_SIZE, cmk_algorithm, cmk_algorithm_size);
+        securec_check_c(securec_rc, "\0", "\0");
+        return;
+    }
+
+    char m_key_store[MAX_KEY_STORE_SIZE] = {0};
+    char m_key_path[MAX_KEY_PATH_SIZE] = {0};
+    char m_key_algo[MAX_KEY_ALGO_SIZE] = {0};
 };
 
 #endif

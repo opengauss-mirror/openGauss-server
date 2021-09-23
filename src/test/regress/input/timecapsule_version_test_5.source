@@ -1,0 +1,411 @@
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;
+
+create schema schema_test_ztt;
+set search_path = schema_test_ztt;
+
+-- TEST timestamp
+drop table t_tmp;
+create table t_tmp(id int, snaptime timestamp, snapcsn bigint);
+-- saveTimeCSN
+CREATE OR REPLACE FUNCTION saveTimeCSN(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+begin
+    insert into t_tmp select $1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+	return 1;
+end;
+$BODY$;
+
+-- findTime
+CREATE OR REPLACE FUNCTION findTime(int8)
+  RETURNS timestamp
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count timestamp;
+begin
+  count = (select snaptime from t_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+drop tablespace if exists new_tablespace_1;
+\! rm -rf @abs_srcdir@/new_tablespace_1
+CREATE TABLESPACE new_tablespace_1 location '@abs_srcdir@/new_tablespace_1';
+create user user1 WITH ENCRYPTED PASSWORD 'gauss@123';
+
+-- TEST ALTER TABLE
+select pg_sleep(4);
+select saveTimeCSN(0);
+drop table tab_x1;
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule timestamp findTime(0);
+timecapsule table tab_x1 to timestamp findTime(0); 
+
+select saveTimeCSN(-1);
+create UNIQUE index index_tab_x1_1 on tab_x1(a);
+
+select pg_sleep(4);
+select saveTimeCSN(1);
+insert into tab_x1 values(1,2),(3,4),(5,6);
+
+select pg_sleep(4);
+select saveTimeCSN(2);
+alter table tab_x1 add constraint constraint_1 primary key (a);
+select * from tab_x1 timecapsule timestamp findTime(1);  
+select * from tab_x1 timecapsule timestamp findTime(2);  
+timecapsule table tab_x1 to timestamp findTime(1);
+timecapsule table tab_x1 to timestamp findTime(2);
+truncate table t_tmp;
+
+select pg_sleep(4);
+select saveTimeCSN(1);
+alter table tab_x1 drop constraint constraint_1;
+select * from tab_x1 timecapsule timestamp findTime(1);
+timecapsule table tab_x1 to timestamp findTime(1); 
+
+select pg_sleep(4);
+select saveTimeCSN(2);
+alter table tab_x1 add constraint constraint_1 primary key (a);
+select * from tab_x1 timecapsule timestamp findTime(2);
+timecapsule table tab_x1 to timestamp findTime(2); 
+
+select pg_sleep(4);
+select saveTimeCSN(3);
+alter table tab_x1 drop constraint constraint_1;
+select * from tab_x1 timecapsule timestamp findTime(3);
+timecapsule table tab_x1 to timestamp findTime(3); 
+
+select pg_sleep(4);
+select saveTimeCSN(4);
+alter table tab_x1 add constraint constraint_2 check(a<100000);
+select * from tab_x1 timecapsule timestamp findTime(4);
+timecapsule table tab_x1 to timestamp findTime(4); 
+
+select pg_sleep(4);
+select saveTimeCSN(5);
+alter table tab_x1 rename constraint constraint_2 to constraint_2_r;
+select * from tab_x1 timecapsule timestamp findTime(5);
+timecapsule table tab_x1 to timestamp findTime(5); 
+
+select pg_sleep(4);
+select saveTimeCSN(6);
+alter table tab_x1 rename constraint constraint_2_r to constraint_2; 
+select * from tab_x1 timecapsule timestamp findTime(6);
+timecapsule table tab_x1 to timestamp findTime(6); 
+
+select pg_sleep(4);
+select saveTimeCSN(7);
+alter table tab_x1 add constraint constraint_3 primary key using index index_tab_x1_1;
+select * from tab_x1 timecapsule timestamp findTime(7);
+timecapsule table tab_x1 to timestamp findTime(7); 
+
+select pg_sleep(4);
+select saveTimeCSN(8);
+alter table tab_x1 drop constraint constraint_2;
+select * from tab_x1 timecapsule timestamp findTime(8);
+timecapsule table tab_x1 to timestamp findTime(8); 
+
+select pg_sleep(4);
+select saveTimeCSN(9);
+create UNIQUE index index_tab_x1_2 on tab_x1(a);
+alter table tab_x1 CLUSTER ON index_tab_x1_2;
+select * from tab_x1 timecapsule timestamp findTime(9);
+timecapsule table tab_x1 to timestamp findTime(9); 
+
+select pg_sleep(4);
+select saveTimeCSN(10);
+alter table tab_x1 owner to user1;
+select * from tab_x1 timecapsule timestamp findTime(10);
+timecapsule table tab_x1 to timestamp findTime(10); 
+
+select pg_sleep(4);
+select saveTimeCSN(11);
+alter table tab_x1 set tablespace new_tablespace_1;
+select * from tab_x1 timecapsule timestamp findTime(11);
+timecapsule table tab_x1 to timestamp findTime(11); 
+
+select pg_sleep(4);
+select saveTimeCSN(12);
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+	$$
+	DECLARE
+	BEGIN
+	RETURN NEW;
+	END
+	$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+	BEFORE INSERT ON tab_x1
+	FOR EACH ROW
+	EXECUTE PROCEDURE tri_insert_func();
+alter table tab_x1 DISABLE trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(12);
+timecapsule table tab_x1 to timestamp findTime(12); 
+
+select pg_sleep(4);
+select saveTimeCSN(13);
+alter table tab_x1 enable trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(13);
+timecapsule table tab_x1 to timestamp findTime(13); 
+
+select pg_sleep(4);
+select saveTimeCSN(14);
+alter table tab_x1 enable REPLICA trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(14);
+timecapsule table tab_x1 to timestamp findTime(14); 
+
+select pg_sleep(4);
+select saveTimeCSN(15);
+alter table tab_x1 enable ALWAYS trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(15);
+timecapsule table tab_x1 to timestamp findTime(15); 
+
+select pg_sleep(4);
+select saveTimeCSN(16);
+alter table tab_x1 DISABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(16);
+timecapsule table tab_x1 to timestamp findTime(16); 
+
+select pg_sleep(4);
+select saveTimeCSN(17);
+alter table tab_x1 ENABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(17);
+timecapsule table tab_x1 to timestamp findTime(17); 
+
+select pg_sleep(4);
+select saveTimeCSN(18);
+alter table tab_x1 FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(18);
+timecapsule table tab_x1 to timestamp findTime(18); 
+
+select pg_sleep(4);
+select saveTimeCSN(19);
+alter table tab_x1 NO FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(19);
+timecapsule table tab_x1 to timestamp findTime(19); 
+
+select pg_sleep(4);
+select saveTimeCSN(20);
+alter table tab_x1 add c varchar(10);
+select * from tab_x1 timecapsule timestamp findTime(20);
+timecapsule table tab_x1 to timestamp findTime(20); 
+
+select pg_sleep(4);
+select saveTimeCSN(21);
+alter table tab_x1 MODIFY c int;
+select * from tab_x1 timecapsule timestamp findTime(21);
+timecapsule table tab_x1 to timestamp findTime(21); 
+
+select pg_sleep(4);
+select saveTimeCSN(22);
+alter table tab_x1 drop IF EXISTS c;
+select * from tab_x1 timecapsule timestamp findTime(22);
+timecapsule table tab_x1 to timestamp findTime(22); 
+
+select pg_sleep(4);
+select saveTimeCSN(23);
+alter table tab_x1 add c int;
+select * from tab_x1 timecapsule timestamp findTime(23);
+timecapsule table tab_x1 to timestamp findTime(23);  
+ 
+select pg_sleep(4);
+select saveTimeCSN(24); 
+ALTER TABLE tab_x1 ALTER COLUMN c TYPE int;
+select * from tab_x1 timecapsule timestamp findTime(24);
+timecapsule table tab_x1 to timestamp findTime(24);  
+ 
+select pg_sleep(4);
+select saveTimeCSN(25);
+ALTER TABLE tab_x1 ALTER COLUMN c SET DEFAULT 1;
+select * from tab_x1 timecapsule timestamp findTime(25);
+timecapsule table tab_x1 to timestamp findTime(25); 
+
+select pg_sleep(4);
+select saveTimeCSN(26);
+truncate table tab_x1;
+insert into tab_x1 values(1,2,3),(4,5,6);
+ALTER TABLE tab_x1 ALTER COLUMN c set not null;
+select * from tab_x1 timecapsule timestamp findTime(26);
+timecapsule table tab_x1 to timestamp findTime(26);  
+
+select pg_sleep(4);
+select saveTimeCSN(27);
+ALTER TABLE tab_x1 ALTER COLUMN c drop not null;
+select * from tab_x1 timecapsule timestamp findTime(27);
+timecapsule table tab_x1 to timestamp findTime(27);  
+ 
+select pg_sleep(4);
+select saveTimeCSN(28);
+ALTER TABLE tab_x1 ALTER COLUMN c SET STATISTICS -1;
+select * from tab_x1 timecapsule timestamp findTime(28);
+timecapsule table tab_x1 to timestamp findTime(28); 
+
+
+ 
+select pg_sleep(4);
+select saveTimeCSN(29); 
+ALTER TABLE tab_x1 ADD STATISTICS ((b,c));
+select * from tab_x1 timecapsule timestamp findTime(29);
+timecapsule table tab_x1 to timestamp findTime(29); 
+
+
+select pg_sleep(4);
+select saveTimeCSN(30);
+ALTER TABLE tab_x1 DELETE STATISTICS ((b,c));
+select * from tab_x1 timecapsule timestamp findTime(30);
+timecapsule table tab_x1 to timestamp findTime(30); 
+ 
+select pg_sleep(4);
+select saveTimeCSN(31);
+ALTER TABLE tab_x1 ALTER COLUMN c SET (n_distinct = 7);
+select * from tab_x1 timecapsule timestamp findTime(31);
+timecapsule table tab_x1 to timestamp findTime(31); 
+
+select pg_sleep(4);
+select saveTimeCSN(32); 
+ALTER TABLE tab_x1 ALTER COLUMN c reset (n_distinct);
+select * from tab_x1 timecapsule timestamp findTime(32);
+timecapsule table tab_x1 to timestamp findTime(32); 
+
+select pg_sleep(4);
+select saveTimeCSN(33); 
+ALTER TABLE tab_x1 ALTER COLUMN c SET STORAGE PLAIN;
+select * from tab_x1 timecapsule timestamp findTime(33);
+timecapsule table tab_x1 to timestamp findTime(33);  
+
+select pg_sleep(4);
+select saveTimeCSN(34); 
+ALTER TABLE tab_x1 RENAME TO tab_x1_t;
+select * from tab_x1_t timecapsule timestamp findTime(34);
+timecapsule table tab_x1_t to timestamp findTime(34);  
+
+select pg_sleep(4);
+select saveTimeCSN(35);
+ALTER TABLE tab_x1_t RENAME TO tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(35);
+timecapsule table tab_x1 to timestamp findTime(35); 
+
+select pg_sleep(4);
+select saveTimeCSN(36); 
+ALTER TABLE tab_x1 RENAME a TO a_t;
+select * from tab_x1 timecapsule timestamp findTime(36);
+timecapsule table tab_x1 to timestamp findTime(36); 
+
+select pg_sleep(4);
+select saveTimeCSN(37); 
+ALTER TABLE tab_x1 RENAME a_t TO a;
+select * from tab_x1 timecapsule timestamp findTime(37);
+timecapsule table tab_x1 to timestamp findTime(37); 
+
+select pg_sleep(4);
+select saveTimeCSN(38); 
+vacuum full tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(38);
+timecapsule table tab_x1 to timestamp findTime(38);  
+
+-- TEST DROP TRIGGER
+select pg_sleep(4);
+select saveTimeCSN(39);
+drop trigger insert_trigger on tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(39);
+timecapsule table tab_x1 to timestamp findTime(39);  
+
+-- CREATE INDEX CASE
+select pg_sleep(4);
+select saveTimeCSN(41);
+create index index_tab_x1_b on tab_x1(b);
+select * from tab_x1 timecapsule timestamp findTime(41);
+timecapsule table tab_x1 to timestamp findTime(41);  
+ 
+-- ALTER INDEX CASE
+select pg_sleep(4);
+select saveTimeCSN(42);
+alter index index_tab_x1_b rename to index_tab_x1_b_t;
+select * from tab_x1 timecapsule timestamp findTime(42);
+timecapsule table tab_x1 to timestamp findTime(42);  
+
+select pg_sleep(4);
+select saveTimeCSN(43); 
+alter index index_tab_x1_b_t rename to index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(43);
+timecapsule table tab_x1 to timestamp findTime(43); 
+ 
+select pg_sleep(4);
+select saveTimeCSN(44); 
+alter index index_tab_x1_b SET TABLESPACE new_tablespace_1;
+select * from tab_x1 timecapsule timestamp findTime(44);
+timecapsule table tab_x1 to timestamp findTime(44);  
+
+select pg_sleep(4);
+select saveTimeCSN(47); 
+alter index index_tab_x1_b REBUILD;
+select * from tab_x1 timecapsule timestamp findTime(47);
+timecapsule table tab_x1 to timestamp findTime(47);  
+
+select pg_sleep(4);
+select saveTimeCSN(48); 
+alter index index_tab_x1_b UNUSABLE;
+select * from tab_x1 timecapsule timestamp findTime(48);
+timecapsule table tab_x1 to timestamp findTime(48);  
+
+select pg_sleep(4);
+select saveTimeCSN(49); 
+reindex index index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(49);
+timecapsule table tab_x1 to timestamp findTime(49); 
+ 
+select pg_sleep(4);
+select saveTimeCSN(50); 
+drop index index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(50);
+timecapsule table tab_x1 to timestamp findTime(50);  
+
+select * from tab_x1 timecapsule timestamp findTime(1);
+timecapsule table tab_x1 to timestamp findTime(1); 
+select * from tab_x1 timecapsule timestamp findTime(2);
+timecapsule table tab_x1 to timestamp findTime(2); 
+select * from tab_x1 timecapsule timestamp findTime(3);
+timecapsule table tab_x1 to timestamp findTime(3); 
+select * from tab_x1 timecapsule timestamp findTime(3);
+timecapsule table tab_x1 to timestamp findTime(4); 
+select * from tab_x1 timecapsule timestamp findTime(4);
+timecapsule table tab_x1 to timestamp findTime(5); 
+select * from tab_x1 timecapsule timestamp findTime(5);
+timecapsule table tab_x1 to timestamp findTime(6); 
+select * from tab_x1 timecapsule timestamp findTime(6); 
+
+-- END CASE
+drop table t_tmp;
+drop table tab_x1 cascade;
+drop function saveTimeCSN;
+drop function findTime;
+drop user user1 cascade;
+drop TABLESPACE new_tablespace_1;
+
+drop schema schema_test_ztt;
+reset search_path;
+
+
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;

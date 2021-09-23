@@ -14,7 +14,7 @@
  * ---------------------------------------------------------------------------------------
  * 
  * postinit.h
- *        init postgres thread.
+ *        init openGauss thread.
  * 
  * 
  * IDENTIFICATION
@@ -28,7 +28,7 @@
 #define PGAUDIT_MAXLENGTH 1024
 
 /* --------------------------------
- * POSTGRES Initialize POSTGRES.
+ * openGauss Initialize POSTGRES.
  *
  * The database can be specified by name, using the in_dbname parameter, or by
  * OID, using the dboid parameter.	In the latter case, the actual database
@@ -78,9 +78,19 @@ public:
 
     void InitCsnminSync();
 
+    void InitTxnSnapCapturer();
+
+    void InitTxnSnapWorker();
+
+    void InitRbCleaner();
+
+    void InitRbWorker();
+
     void InitCatchupWorker();
 
     void InitStreamWorker();
+
+    void InitBgWorker();
 
     void InitBackendWorker();
 
@@ -95,10 +105,16 @@ public:
     void InitCompactionWorker();
 
     void InitCompactionWorkerSwitchSession();
-    
+
     void InitStreamSession();
 
+    void InitUndoLauncher();
+
+    void InitUndoWorker();
+
     void InitBarrierCreator();
+
+    void InitFencedSysCache();
 
 public:
     const char* m_indbname;
@@ -137,6 +153,8 @@ private:
     void InitPlainWalSender();
 
     void SetDefaultDatabase();
+
+    void SetFencedMasterDatabase();
 
     void SetDatabase();
 

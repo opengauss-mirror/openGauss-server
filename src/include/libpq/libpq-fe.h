@@ -2,7 +2,7 @@
  * 
  * libpq-fe.h
  *	  This file contains definitions for structures and
- *	  externs for functions used by frontend postgres applications.
+ *	  externs for functions used by frontend openGauss applications.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -33,6 +33,9 @@ extern "C" {
  */
 #include "postgres_ext.h"
 #include "gs_thread.h"
+#ifdef HAVE_CE
+class ICachedRec;
+#endif
 
 /*
  * Option flags for PQcopyResult
@@ -41,6 +44,11 @@ extern "C" {
 #define PG_COPYRES_TUPLES 0x02 /* Implies PG_COPYRES_ATTRS */
 #define PG_COPYRES_EVENTS 0x04
 #define PG_COPYRES_NOTICEHOOKS 0x08
+
+#define RETURN_IF(condition, retValue)  \
+    if (condition) {                        \
+        return (retValue);                  \
+    }
 
 #define libpq_free(__p)      \
     do {                     \
@@ -244,6 +252,10 @@ typedef struct pgresAttDesc {
     Oid typid;     /* type id */
     int typlen;    /* type size */
     int atttypmod; /* type-specific modifier info */
+#ifdef HAVE_CE
+    int cl_atttypmod; /* original type-specific modifier info */
+    const ICachedRec* rec;
+#endif
 } PGresAttDesc;
 
 /* ----------------
@@ -276,6 +288,7 @@ extern PGconn* PQsetdbLogin(const char* pghost, const char* pgport, const char* 
 /* close the current connection and free the PGconn data structure */
 extern void PQfinish(PGconn* conn);
 
+extern PGconn* makeEmptyPGconn(void);
 extern void closePGconn(PGconn* conn);
 extern void freePGconn(PGconn* conn);
 
@@ -485,8 +498,11 @@ extern void PQclear(PGresult* res);
 extern void PQfreemem(void* ptr);
 
 /* Exists for backward compatibility.  bjm 2003-03-24 */
+#ifndef _MINGW32
 #define PQfreeNotify(ptr) PQfreemem(ptr)
-
+#else
+extern void PQfreeNotify(PGnotify* notify);
+#endif
 /* Create and manipulate PGresults */
 extern PGresult* PQmakeEmptyPGresult(PGconn* conn, ExecStatusType status);
 extern PGresult* PQcopyResult(const PGresult* src, unsigned int flags);
@@ -505,6 +521,7 @@ extern unsigned char* PQunescapeBytea(const unsigned char* strtext, size_t* retb
 /* These forms are deprecated! */
 extern size_t PQescapeString(char* to, const char* from, size_t length);
 extern unsigned char* PQescapeBytea(const unsigned char* from, size_t from_length, size_t* to_length);
+extern PGresult* checkRefreshCacheOnError(PGconn* conn);
 
 /* === in fe-print.c === */
 

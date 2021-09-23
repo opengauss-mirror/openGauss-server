@@ -5,6 +5,7 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
+set sql_beta_feature = 'index_cost_with_leaf_pages_only';
 --create table
 drop table if exists test_bypass_sql_partition;
 NOTICE:  table "test_bypass_sql_partition" does not exist, skipping
@@ -24,9 +25,6 @@ create index itest_bypass_sql_partition on test_bypass_sql_partition(col1,col2) 
 insert into test_bypass_sql_partition select generate_series(0,79,1), generate_series(0,100,10), repeat('a',7);
 prepare p11 as insert into test_bypass_sql_partition values($1,$2,$3);
 prepare p12 as insert into test_bypass_sql_partition(col1,col2) values ($1,$2);
-
-
-
 explain execute p11(0,0,'test_insert');
                               QUERY PLAN                               
 -----------------------------------------------------------------------
@@ -52,7 +50,6 @@ explain execute p12(1,1);
 execute p12(1,1);
 execute p12(22,22);
 execute p12(20,20);
-
 --nobypass
 execute p11(null,null,null);
 ERROR:  inserted partition key does not map to any table partition
@@ -150,8 +147,6 @@ explain execute p16(5,3,1,1);
 (7 rows)
 
 execute p16(5,3,1,1);
-
-
 prepare p101 as update test_bypass_sql_partition set col2=$1,col3=$2 where  col1=$3 ;
 execute p101 (111,'test_update2',-1);
 prepare p102 as select * from  test_bypass_sql_partition where col1=$1;
@@ -171,8 +166,6 @@ execute p102 (1);
     1 |   90 | aaaaaaa
     1 |  100 | aaaaaaa
 (12 rows)
-
-
 
 prepare p1011 as insert into test_bypass_sql_partition values(-3,-3,'test_pbe');
 prepare p1013 as update test_bypass_sql_partition set col2=10 where col1=-3;
@@ -255,7 +248,6 @@ execute p10141;
    -3 |   10
 (1 row)
 
-
 prepare p1021 as select * from  test_bypass_sql_partition where col1=$1 limit 1;
 explain execute p1021(1);
                                                               QUERY PLAN                                                              
@@ -276,7 +268,6 @@ execute p1021(1);
 (1 row)
 
 --bypass through index only scan
-
 prepare p10211 as select col1,col2 from  test_bypass_sql_partition where col1=$1 limit 1;
 explain execute p10211(1);
                                                                 QUERY PLAN                                                                
@@ -373,9 +364,6 @@ execute p10214(1);
     1 |   90
     1 |  100
 (12 rows)
-
-
-
 
 prepare p1024 as select * from  test_bypass_sql_partition where col1=0 order by col1 for update limit 1;
 prepare p1025 as select * from  test_bypass_sql_partition where col1=$1 for update limit 1;
@@ -512,7 +500,6 @@ execute p10601 (0,10,1);
     9 |   90
     9 |  100
 (91 rows)
-
 
 --nobypass
 prepare p1020 as  select * from  test_bypass_sql_partition where col1>0 order by col1 limit 1;
@@ -790,7 +777,6 @@ execute p106 (0,1);
     1 |   20
 (3 rows)
 
-
 --bypass
 prepare p17 as select * from test_bypass_sql_partition where col1=$1 and col2=$2 for update;
 execute p17 (3,3);
@@ -949,7 +935,6 @@ explain execute p181(111);
 (7 rows)
 
 execute p181(111);
-
 prepare p191 as select * from test_bypass_sql_partition where col1 is null  and col2 is null;
 prepare p192 as delete from  test_bypass_sql_partition where col1 is null  and col2 is null;
 execute p191;
@@ -958,7 +943,6 @@ execute p191;
 (0 rows)
 
 execute p192;
-
 --error
 execute p11(null,null,'test_null');
 ERROR:  inserted partition key does not map to any table partition
@@ -3294,8 +3278,6 @@ execute p119;
    79 |   10
 (10 rows)
 
-
-
 --bypass
 prepare p_select1 as select * from test_bypass_sql_partition where col1 = $1 limit 10;
 execute p_select1(0);
@@ -3329,10 +3311,7 @@ execute p_select2(0);
     0 |    8 | test
 (10 rows)
 
-
 --nobypass
-
-
 prepare p_select3 as select col1, col2 from test_bypass_sql_partition limit 10;
 execute p_select3;
  col1 | col2 
@@ -3348,7 +3327,6 @@ execute p_select3;
     0 |    5
     0 |    6
 (10 rows)
-
 
 prepare p_select4 as select col1, col2 from test_bypass_sql_partition where col1 < $1 and col1 > $2 limit 10;
 execute p_select4(20,10);
@@ -3383,16 +3361,13 @@ update test_bypass_sql_partition set col3='test_null' where true;
 update test_bypass_sql_partition set col1 = 1 where col1 > 1 and col1 < 10;
 prepare p_update3 as update test_bypass_sql_partition set col1 = $1 where col1 > $2 and col1 < $3;
 execute p_update3(1,1,10);
-
 prepare p_update4 as update test_bypass_sql_partition set col3=$1,col2=mod(5,3) where col1 > $2 and col1 < $3;
 execute p_update4('test_null',11,15);
 prepare p_update5 as update test_bypass_sql_partition set col3=$1,col2=col1-1 where col1 >= $2 and col1 <= $3;
 execute p_update5('test_null',1,10);
-
 --bypass
 prepare p_delete1 as delete from test_bypass_sql_partition where col1=$1;
 execute p_delete1 (1);
-
 --nobypass
 prepare p_delete3 as delete from test_bypass_sql_partition where col1 > $1 and col1 < $2;
 execute p_delete3(1,10);
@@ -3402,4 +3377,3 @@ prepare p_delete2 as delete from test_bypass_sql_partition where true;
 execute p_delete2;
 reset enable_partition_opfusion;
 drop table test_bypass_sql_partition;
-

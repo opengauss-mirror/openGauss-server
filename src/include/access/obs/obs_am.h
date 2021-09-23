@@ -32,6 +32,61 @@
 #include "replication/slot.h"
 #include "eSDKOBS.h"
 
+#define OBS_MAX_UPLOAD_ID_LEN 256
+#define OBS_MAX_FILE_PATH 1024
+#define OBS_MAX_ETAG_LEN 256
+#define READ_BLOCK_SIZE 67108864 //64MB
+
+typedef struct OBSWriteFile {
+    char uploadId[OBS_MAX_UPLOAD_ID_LEN];
+    char filePath[OBS_MAX_FILE_PATH];
+    char** eTagList;
+    int partNum;
+} OBSWriteFile;
+
+typedef struct OBSFile {
+    char filePath[OBS_MAX_FILE_PATH];
+
+    /* for write */
+    char uploadId[OBS_MAX_UPLOAD_ID_LEN];
+    char** eTagList;
+    int partNum;
+
+    /* for read */
+    uint64_t fileSize;
+    bool obs_eof;
+    bool obs_error;
+    void* bufData;
+    int byteCount;
+    int actualLen;
+    size_t offset;
+    char eTag[OBS_MAX_ETAG_LEN];
+} OBSFile;
+
+typedef struct OBSWriteData {
+    void* bufData;
+    int byteCount;
+    int actualLen;
+    char eTag[OBS_MAX_ETAG_LEN];
+} OBSWriteData;
+
+typedef struct OBSReadFile {
+    char filePath[OBS_MAX_FILE_PATH];
+    size_t fileSize;
+    bool obs_eof;
+    bool obs_error;
+    void* bufData;
+    int byteCount;
+    int actualLen;
+    size_t offset;
+} OBSReadFile;
+
+typedef struct HEAD_OBJECT_DATA {
+    int ret_status;
+    int object_length;
+} HEAD_OBJECT_DATA;
+
+
 /* OBS operation types */
 typedef enum {
     OBS_UNKNOWN,
@@ -150,5 +205,20 @@ ObsArchiveConfig *getObsArchiveConfig();
 size_t obsRead(const char* fileName, int offset, char *buffer, int length, ObsArchiveConfig *obs_config = NULL);
 int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ObsArchiveConfig *obs_config = NULL);
 int obsDelete(const char* fileName, ObsArchiveConfig *obs_config = NULL);
-List* obsList(const char* prefix, ObsArchiveConfig *obs_config = NULL);
+List* obsList(const char* prefix, ObsArchiveConfig *obs_config = NULL,
+            bool reportError = true, bool shortenConnTime = false);
+void* createOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config = NULL);
+int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, size_t* writeSize,
+    ObsArchiveConfig *obs_config = NULL);
+int closeOBSFile(void* filePtr, ObsArchiveConfig *obs_config = NULL);
+void* openReadOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config = NULL);
+int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ObsArchiveConfig *obs_config = NULL);
+int closeReadOBSFile(void* fp);
+bool checkOBSFileExist(const char* file_path, ObsArchiveConfig *obs_config = NULL);
+bool feofReadOBSFile(const void* fp);
+void initializeOBS();
+bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ObsArchiveConfig *obs_config = NULL);
+bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ObsArchiveConfig *obs_config = NULL);
+
+
 #endif /* OBS_AM_H */

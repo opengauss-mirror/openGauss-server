@@ -23,11 +23,12 @@
 #include "replication/dataqueue.h"
 #include "replication/datareceiver.h"
 #include "replication/walsender.h"
+#include "replication/dcf_replication.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/guc.h"
 #include "access/xlog.h"
 #include "access/multi_redo_api.h"
@@ -140,6 +141,8 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
              * would otherwise have to reopen this file to fsync it later
              */
             if (recvFile >= 0) {
+                char xlogfname[MAXFNAMELEN];
+
                 /*
                  * XLOG segment files will be re-read by recovery in startup
                  * process soon, so we don't advise the OS to release cache
@@ -150,15 +153,12 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
                                     errmsg("could not close log file %s: %m",
                                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
 
-#ifdef ENABLE_MULTIPLE_NODES
                 /*
                  * Create .done file forcibly to prevent the restored segment from
                  * being archived again later.
                  */
-                char xlogfname[MAXFNAMELEN];
                 XLogFileName(xlogfname, recvFileTLI, recvSegNo);
                 XLogArchiveForceDone(xlogfname);
-#endif
             }
             recvFile = -1;
 
@@ -250,6 +250,11 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
         ereport(DEBUG2, (errmsg("write xlog done: start %X/%X %lu bytes", (uint32)(recptr >> 32), (uint32)recptr,
                                 write_bytes)));
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+        UpdateRecordIdxState();
+    }
+#endif
 }
 
 void WalRcvXLogClose(void)
@@ -701,7 +706,8 @@ void walrcvWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "WalReceive Writer", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "WalReceive Writer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so

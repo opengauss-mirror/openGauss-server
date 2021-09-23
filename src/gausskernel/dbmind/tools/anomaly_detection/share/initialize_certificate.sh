@@ -16,9 +16,6 @@
 # initialize_certificate.sh
 #    initialize certificate
 #
-# IDENTIFICATION
-#    src/gausskernel/dbmind/tools/A-Detection/shell/initialize_certificate.sh
-#
 #-------------------------------------------------------------------------
 source ./common.sh
 

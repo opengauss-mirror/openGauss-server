@@ -98,6 +98,8 @@
 #include "utils/typcache.h"
 #include "utils/memutils.h"
 
+#include "access/ustore/knl_utuple.h"
+
 static TupleDesc ExecTypeFromTLInternal(List* target_list, bool has_oid, bool skip_junk, bool mark_dropped = false, TableAmType tam = TAM_HEAP);
 
 /* ----------------------------------------------------------------
@@ -151,7 +153,9 @@ TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt, TableAmType tupslotTable
  */
 TupleTableSlot* ExecAllocTableSlot(List** tuple_table, TableAmType tupslotTableAm)
 {
-    TupleTableSlot* slot = MakeTupleTableSlot();
+    TupleTableSlot* slot;
+
+    slot = MakeTupleTableSlot();
 
     *tuple_table = lappend(*tuple_table, slot);
 
@@ -177,9 +181,6 @@ void ExecResetTupleTable(List* tuple_table, /* tuple table */
     foreach (lc, tuple_table) {
         TupleTableSlot* slot = (TupleTableSlot*)lfirst(lc);
 
-        /* Sanity checks */
-        Assert(IsA(slot, TupleTableSlot));
-
         /* Always release resources and reset the slot to empty */
         (void)ExecClearTuple(slot);
         if (slot->tts_tupleDescriptor) {
@@ -200,8 +201,9 @@ void ExecResetTupleTable(List* tuple_table, /* tuple table */
     }
 
     /* If shouldFree, release the list structure */
-    if (should_free)
+    if (should_free) {
         list_free_ext(tuple_table);
+    }
 }
 
 TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTableSlot* slot, TableAmType tableAm)
@@ -233,15 +235,8 @@ TupleTableSlot* ExecMakeTupleSlot(Tuple tuple, TableScanDesc tableScan, TupleTab
  */
 TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tup_desc, bool allocSlotCxt, TableAmType tupslotTableAm)
 {
-    bool bHasSlotMemContxt = true;
-
-    if(allocSlotCxt) {
-        bHasSlotMemContxt = false;
-    }
-
-    TupleTableSlot* slot = MakeTupleTableSlot(bHasSlotMemContxt, tupslotTableAm);
+    TupleTableSlot* slot = MakeTupleTableSlot(allocSlotCxt, tupslotTableAm);
     ExecSetSlotDescriptor(slot, tup_desc);
-
     return slot;
 }
 
@@ -255,7 +250,6 @@ TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tup_desc, bool allocSlotCxt, 
 void ExecDropSingleTupleTableSlot(TupleTableSlot* slot)
 {
     /* This should match ExecResetTupleTable's processing of one slot */
-    Assert(IsA(slot, TupleTableSlot));
     (void)ExecClearTuple(slot);
     if (slot->tts_tupleDescriptor != NULL) {
         ReleaseTupleDesc(slot->tts_tupleDescriptor);
@@ -376,6 +370,13 @@ TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer,
     Assert(slot != NULL);
     Assert(slot->tts_tupleDescriptor != NULL);
 
+    HeapTuple htup = (HeapTuple)tuple;
+    if (slot->tts_tupslotTableAm == TAM_USTORE && htup->tupTableType == HEAP_TUPLE) {
+        tuple = (Tuple)HeapToUHeap(slot->tts_tupleDescriptor, (HeapTuple)tuple);
+    } else if (slot->tts_tupslotTableAm == TAM_HEAP && htup->tupTableType == UHEAP_TUPLE) {
+        tuple = (Tuple)UHeapToHeap(slot->tts_tupleDescriptor, (UHeapTuple)tuple);
+    }
+
     tableam_tslot_store_tuple(tuple, slot, buffer, should_free);
 
     return slot;
@@ -424,8 +425,7 @@ TupleTableSlot* ExecClearTuple(TupleTableSlot* slot) /* return: slot passed slot
     /*
      * clear the physical tuple or minimal tuple if present via TableAm.
      */
-    if (slot->tts_shouldFree || slot->tts_shouldFreeMin)
-    {
+    if (slot->tts_shouldFree || slot->tts_shouldFreeMin) {
     	Assert(slot->tts_tupleDescriptor != NULL);
     	tableam_tslot_clear(slot);
     }
@@ -577,31 +577,7 @@ MinimalTuple ExecCopySlotMinimalTuple(TupleTableSlot* slot, bool need_transform_
     Assert(slot != NULL);
     Assert(!slot->tts_isempty);
 
-    /*
-     * If we have a physical tuple then just copy it.  Prefer to copy
-     * tts_mintuple since that's a tad cheaper.
-     */
-    if (slot->tts_mintuple != NULL) {
-        return heap_copy_minimal_tuple(slot->tts_mintuple);
-    }
-    if (slot->tts_tuple != NULL) {
-        return heapFormMinimalTuple((HeapTuple) slot->tts_tuple,
-            slot->tts_tupleDescriptor,
-            (BufferIsValid(slot->tts_buffer) ? BufferGetPage(slot->tts_buffer) : NULL));
-    }
-
-#ifdef PGXC
-    /*
-     * Ensure values are extracted from data row to the Datum array
-     */
-    if (slot->tts_dataRow != NULL) {
-        tableam_tslot_getallattrs(slot);
-    }
-#endif
-    /*
-     * Otherwise we need to build a tuple from the Datum array.
-     */
-    return heap_form_minimal_tuple(slot->tts_tupleDescriptor, slot->tts_values, slot->tts_isnull);
+    return tableam_tslot_copy_minimal_tuple(slot);
 }
 
 /* --------------------------------

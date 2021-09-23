@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * sinval.h
- *	  POSTGRES shared cache invalidation communication definitions.
+ *	  openGauss shared cache invalidation communication definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -16,7 +16,7 @@
 
 #include <signal.h>
 
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 /*
  * We support several types of shared-invalidation messages:

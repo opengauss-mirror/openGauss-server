@@ -19,8 +19,10 @@
 #include "access/xlogdefs.h"
 #include "storage/buf/block.h"
 #include "storage/buf/buf.h"
-#include "storage/relfilenode.h"
+#include "storage/buf/bufpage.h"
+#include "storage/smgr/relfilenode.h"
 
+struct XLogPhyBlock;
 /*
  * The minimum size of the WAL construction working area. If you need to
  * register more than XLR_NORMAL_MAX_BLOCK_ID block references or have more
@@ -45,14 +47,16 @@
           * is taken */
 /* prototypes for public functions in xloginsert.c: */
 extern void XLogBeginInsert(void);
-extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId);
+extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId, 
+    bool isSwitchoverBarrier = false);
 extern void XLogEnsureRecordSpace(int nbuffers, int ndatas);
 extern void XLogRegisterData(char* data, int len);
-extern void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags);
-extern void XLogRegisterBlock(
-    uint8 block_id, RelFileNode* rnode, ForkNumber forknum, BlockNumber blknum, char* page, uint8 flags);
+extern void XLogRegisterBuffer(uint8 block_id, Buffer buffer, uint8 flags, TdeInfo* tdeinfo = NULL);
+extern void XLogRegisterBlock(uint8 block_id, RelFileNode *rnode, ForkNumber forknum, BlockNumber blknum, char *page,
+    uint8 flags, const XLogPhyBlock *pblk, TdeInfo* tdeinfo = NULL);
 extern void XLogRegisterBufData(uint8 block_id, char* data, int len);
 extern void XLogResetInsertion(void);
+extern bool XLogCheckBufferNeedsBackup(Buffer buffer);
 extern XLogRecPtr XLogSaveBufferForHint(Buffer buffer, bool buffer_std);
 extern void InitXLogInsert(void);
 extern void XLogIncludeOrigin(void);

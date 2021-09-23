@@ -27,9 +27,9 @@
 #include "access/tableam.h"
 #include "access/nbtree.h"
 #include "executor/executor.h"
-#include "executor/execdebug.h"
-#include "executor/nodeIndexscan.h"
-#include "executor/nodeBitmapIndexscan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeIndexscan.h"
+#include "executor/node/nodeBitmapIndexscan.h"
 #include "vecexecutor/vecnodecstoreindexctidscan.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "vecexecutor/vecexecutor.h"
@@ -221,16 +221,19 @@ CstoreBitmapIndexScanState* ExecInitCstoreBitmapIndexScan(CStoreIndexCtidScan* n
             /* Initialize table partition and index partition */
             ExecInitPartitionForBitmapIndexScan(indexstate, estate, currentrel);
 
-            /* get the first index partition */
-            currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
-            indexstate->biss_CurrentIndexPartition = partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
-
             ExecCloseScanRelation(currentrel);
 
-            indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
-                estate->es_snapshot,
-                indexstate->biss_NumScanKeys,
-                (ScanState*)indexstate);
+            /* get the first index partition */
+            if (indexstate->biss_IndexPartitionList != NIL) {
+                currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
+                indexstate->biss_CurrentIndexPartition = 
+                    partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
+
+                indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
+                    estate->es_snapshot,
+                    indexstate->biss_NumScanKeys,
+                    (ScanState*)indexstate);
+            }
         }
     } else {
         /*
@@ -317,6 +320,7 @@ CStoreIndexCtidScanState* ExecInitCstoreIndexCtidScan(CStoreIndexCtidScan* node,
         cctidscanstate->ps.type = T_CStoreIndexCtidScanState;
 
         cctidscanstate->m_cstoreBitmapIndexScan = ExecInitCstoreBitmapIndexScan(node, estate, eflags);
+        cctidscanstate->part_id = cctidscanstate->m_cstoreBitmapIndexScan->ss.part_id;
         cctidscanstate->m_btreeIndexScan = NULL;
         cctidscanstate->m_btreeIndexOnlyScan = NULL;
 

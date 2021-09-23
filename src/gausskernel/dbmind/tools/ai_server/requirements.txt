@@ -1,0 +1,9 @@
+flask
+flask_restful
+influxdb
+pymongo
+python-dateutil
+cryptography
+pytest
+pytest-cov
+setuptools_rust

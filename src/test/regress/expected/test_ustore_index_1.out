@@ -1,0 +1,518 @@
+set enable_seqscan to false;
+set enable_indexonlyscan to true;
+set enable_indexscan to true;
+set enable_bitmapscan to false;
+-- Test create index
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1(c1 int, c2 int, c3 char(8)) with (storage_type=USTORE);
+create index t1i1 on t1(c1, c3);
+insert into t1 values(1, 2, '12345678');
+insert into t1 values(1, 3, '123');
+insert into t1 values(2, 1, '1234');
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+create table t2(c1 int, c2 int) with (storage_type=USTORE);
+create unique index t2i1 on t2(c1);
+insert into t2 values(3, 4);
+insert into t2 values(5, 2);
+insert into t2 values(1, 6);
+-- Test IndexOnlyScan
+explain select c1, c3 from t1 where c1 = 2;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using t1i1 on t1  (cost=0.00..24.36 rows=6 width=40)
+   Index Cond: (c1 = 2)
+(3 rows)
+
+select c1, c3 from t1 where c1 = 2;
+ c1 |    c3    
+----+----------
+  2 | 1234    
+(1 row)
+
+explain select c1 from t2 order by c1;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using t2i1 on t2  (cost=0.00..80.49 rows=2149 width=4)
+(2 rows)
+
+select c1 from t2 order by c1;
+ c1 
+----
+  1
+  3
+  5
+(3 rows)
+
+-- Test IndexScan
+explain select * from t1 order by c1;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t1i1 on t1  (cost=0.00..64.81 rows=1104 width=44)
+(2 rows)
+
+select * from t1 order by c1;
+ c1 | c2 |    c3    
+----+----+----------
+  1 |  3 | 123     
+  1 |  2 | 12345678
+  2 |  1 | 1234    
+(3 rows)
+
+explain select c2 from t2 order by c1;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t2i1 on t2  (cost=0.00..80.49 rows=2149 width=8)
+(2 rows)
+
+select c2 from t2 order by c1;
+ c2 
+----
+  6
+  4
+  2
+(3 rows)
+
+-- Test Insert
+create table t3(c1 int, c2 int, c3 int) with (storage_type=USTORE);
+insert into t3 values(1, 10, 100);
+insert into t3 values(2, 10, 100);
+create unique index t3i1 on t3(c1, c3);
+insert into t3 values(3, 10, 100);
+-- Test duplicate key
+insert into t3 values(1, 10, 100);
+ERROR:  duplicate key value violates unique constraint "t3i1"
+DETAIL:  Key (c1, c3)=(1, 100) already exists.
+insert into t3 values(3, 10, 100);
+ERROR:  duplicate key value violates unique constraint "t3i1"
+DETAIL:  Key (c1, c3)=(3, 100) already exists.
+drop index t3i1;
+drop table t3;
+-- Test Update
+explain update t1 set c1 =4 where c3='12345678';
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ [Bypass]
+ Update on t1  (cost=0.00..36.59 rows=6 width=46)
+   ->  Index Scan using t1i1 on t1  (cost=0.00..36.59 rows=6 width=46)
+         Index Cond: (c3 = '12345678'::bpchar)
+(4 rows)
+
+update t1 set c1 =4 where c3='12345678';
+select * from t1 order by c1;
+ c1 | c2 |    c3    
+----+----+----------
+  1 |  3 | 123     
+  2 |  1 | 1234    
+  4 |  2 | 12345678
+(3 rows)
+
+explain update t2 set c1=4 where c1 = 1;
+                              QUERY PLAN                              
+----------------------------------------------------------------------
+ [Bypass]
+ Update on t2  (cost=0.00..8.27 rows=1 width=10)
+   ->  Index Scan using t2i1 on t2  (cost=0.00..8.27 rows=1 width=10)
+         Index Cond: (c1 = 1)
+(4 rows)
+
+update t2 set c1=4 where c1 = 1;
+select * from t2 order by c1;
+ c1 | c2 
+----+----
+  3 |  4
+  4 |  6
+  5 |  2
+(3 rows)
+
+-- Test multiple inserts and updates
+create table t3 (c1 int, c2 int, c3 int) with (storage_type=USTORE);
+create unique index t3i1 on t3(c1,c3);
+insert into t3 values(1,10,100);
+insert into t3 values(2,10,200);
+insert into t3 values(3,10,300);
+-- updated through opfusion layer, single row affected
+explain update t3 set c1=4 where c3=100;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ [Bypass]
+ Update on t3  (cost=0.00..50.94 rows=10 width=14)
+   ->  Index Scan using t3i1 on t3  (cost=0.00..50.94 rows=10 width=14)
+         Index Cond: (c3 = 100)
+(4 rows)
+
+update t3 set c1=4 where c3=100;
+update t3 set c1=5 where c3=300;
+update t3 set c1=6 where c3=200;
+update t3 set c2=20 where c3=200;
+update t3 set c2=20 where c3=300;
+insert into t3 values(1,10,100);
+insert into t3 values(2,10,100);
+insert into t3 values(3,10,100);
+-- violate uniqueness constraint
+update t3 set c1=1 where c3=100;
+ERROR:  duplicate key value violates unique constraint "t3i1"
+DETAIL:  Key (c1, c3)=(1, 100) already exists.
+-- updated through executor layer
+update t3 set c1=1 where c2=20;
+-- update a row affected by the executor layer update
+update t3 set c2 =30 where c3=300;
+select * from t3 order by c1;
+ c1 | c2 | c3  
+----+----+-----
+  1 | 10 | 100
+  1 | 20 | 200
+  1 | 30 | 300
+  2 | 10 | 100
+  3 | 10 | 100
+  4 | 10 | 100
+(6 rows)
+
+drop index t1i1;
+drop table t1;
+drop index t2i1;
+drop table t2;
+drop index t3i1;
+drop table t3;
+-- test multi-version index --
+set enable_opfusion to false;
+create table t(a int, b double precision) with (storage_type=USTORE);
+create index ti1 on t(a);
+create index ti2 on t(b);
+-- insert data --
+insert into t values(generate_series(1, 1000), generate_series(1, 1000));
+-- record initial size --
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 48 kB          | 48 kB
+(1 row)
+
+-- inplace update a: t and ti2 should not grow bigger --
+explain (costs off) update t set a = a + 1;
+     QUERY PLAN      
+---------------------
+ Update on t
+   ->  Seq Scan on t
+(2 rows)
+
+update t set a = a + 1;
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 112 kB         | 48 kB
+(1 row)
+
+-- inplace update b: t and ti1 should not grow bigger --
+explain (costs off) update t set b = b + 1.0;
+     QUERY PLAN      
+---------------------
+ Update on t
+   ->  Seq Scan on t
+(2 rows)
+
+update t set b = b + 1.0;
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 112 kB         | 112 kB
+(1 row)
+
+-- test delete --
+explain (costs off) delete from t where a > 50;
+           QUERY PLAN            
+---------------------------------
+ Delete on t
+   ->  Index Scan using ti1 on t
+         Index Cond: (a > 50)
+(3 rows)
+
+delete from t where a > 50;
+-- test index only scan: shouldn't see deleted tuple nor fetch uheap --
+explain (costs off) select count(*) from t where a > 0 and a < 100;
+                 QUERY PLAN                  
+---------------------------------------------
+ Aggregate
+   ->  Index Only Scan using ti1 on t
+         Index Cond: ((a > 0) AND (a < 100))
+(3 rows)
+
+select count(*) from t where a > 0 and a < 100;
+ count 
+-------
+    49
+(1 row)
+
+explain (costs off) select count(*) from t where b = 1.0;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Aggregate
+   ->  Index Only Scan using ti2 on t
+         Index Cond: (b = 1::double precision)
+(3 rows)
+
+select count(*) from t where b = 1.0;
+ count 
+-------
+     0
+(1 row)
+
+drop index ti1;
+drop index ti2;
+drop table t;
+-- test multi-version index with opfusion --
+set enable_opfusion to true;
+create table t(a int, b double precision) with (storage_type=USTORE);
+create index ti1 on t(a);
+create index ti2 on t(b);
+-- insert data --
+insert into t values(generate_series(1, 1000), generate_series(1, 1000));
+-- record initial size --
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 48 kB          | 48 kB
+(1 row)
+
+-- inplace update a: t and ti2 should not grow bigger --
+explain (costs off) update t set a = a + 1 where a >= 1 and a <= 1000;
+                   QUERY PLAN                   
+------------------------------------------------
+ [Bypass]
+ Update on t
+   ->  Index Scan using ti1 on t
+         Index Cond: ((a >= 1) AND (a <= 1000))
+(4 rows)
+
+update t set a = a + 1 where a >= 1 and a <= 1000;
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 112 kB         | 48 kB
+(1 row)
+
+-- inplace update b: t and ti1 should not grow bigger --
+explain (costs off) update t set b = b + 1.0 where b <= 1000;
+                    QUERY PLAN                     
+---------------------------------------------------
+ [Bypass]
+ Update on t
+   ->  Index Scan using ti2 on t
+         Index Cond: (b <= 1000::double precision)
+(4 rows)
+
+update t set b = b + 1.0 where b <= 1000;
+select pg_size_pretty(pg_relation_size('t')), pg_size_pretty(pg_relation_size('ti1')), pg_size_pretty(pg_relation_size('ti2'));
+ pg_size_pretty | pg_size_pretty | pg_size_pretty 
+----------------+----------------+----------------
+ 32 kB          | 112 kB         | 112 kB
+(1 row)
+
+-- test delete --
+explain (costs off) delete from t where a > 50;
+           QUERY PLAN            
+---------------------------------
+ [Bypass]
+ Delete on t
+   ->  Index Scan using ti1 on t
+         Index Cond: (a > 50)
+(4 rows)
+
+delete from t where a > 50;
+-- test index only scan: shouldn't see deleted tuple nor fetch uheap --
+explain (costs off) select count(*) from t where a > 0 and a < 100;
+                 QUERY PLAN                  
+---------------------------------------------
+ Aggregate
+   ->  Index Only Scan using ti1 on t
+         Index Cond: ((a > 0) AND (a < 100))
+(3 rows)
+
+select count(*) from t where a > 0 and a < 100;
+ count 
+-------
+    49
+(1 row)
+
+explain (costs off) select a from t where a >= 48 and a <= 52;
+               QUERY PLAN                
+-----------------------------------------
+ [Bypass]
+ Index Only Scan using ti1 on t
+   Index Cond: ((a >= 48) AND (a <= 52))
+(3 rows)
+
+select a from t where a >= 48 and a <= 52;
+ a  
+----
+ 48
+ 49
+ 50
+(3 rows)
+
+explain (costs off) select b from t where b = 1.0;
+               QUERY PLAN                
+-----------------------------------------
+ [Bypass]
+ Index Only Scan using ti2 on t
+   Index Cond: (b = 1::double precision)
+(3 rows)
+
+select b from t where b = 1.0;
+ b 
+---
+(0 rows)
+
+drop index ti1;
+drop index ti2;
+drop table t;
+-- test build index --
+-- test cid check support --
+create table t(a int, b int) with(storage_type=ustore);
+create index on t(a);
+insert into t values(generate_series(1, 10), 2);
+set enable_bitmapscan = off;
+set enable_seqscan = off;
+set enable_indexscan = off;
+set enable_indexonlyscan = off;
+begin;
+update t set a = 2;
+set enable_bitmapscan = on;
+explain select a from t where a < 10;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Bitmap Heap Scan on t  (cost=9.80..28.75 rows=716 width=4)
+   Recheck Cond: (a < 10)
+   ->  Bitmap Index Scan on t_a_idx  (cost=0.00..9.62 rows=716 width=0)
+         Index Cond: (a < 10)
+(4 rows)
+
+select a from t where a < 10;
+ a 
+---
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+(10 rows)
+
+set enable_bitmapscan = off;
+set enable_indexscan = on;
+explain select a from t where a < 10;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ [Bypass]
+ Index Scan using t_a_idx on t  (cost=0.00..56.78 rows=716 width=4)
+   Index Cond: (a < 10)
+(3 rows)
+
+select a from t where a < 10;
+ a 
+---
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+(10 rows)
+
+set enable_indexscan = off;
+set enable_indexonlyscan = on;
+explain select a from t where a < 10;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Seq Scan on t  (cost=10000000000.00..1000000003686.25 rows=716 width=4)
+   Filter: (a < 10)
+(2 rows)
+
+select a from t where a < 10;
+ a 
+---
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+ 2
+(10 rows)
+
+set enable_indexonlyscan = off;
+rollback;
+-- test cursor support --
+set enable_indexscan = on;
+begin;
+declare c1 cursor for select a from t where a < 10;
+update t set a = 2;
+declare c2 cursor for select a from t where a < 10;
+update t set a = 3;
+declare c3 cursor for select a from t where a < 10;
+fetch next from c1;
+ a 
+---
+ 1
+(1 row)
+
+fetch next from c1;
+ a 
+---
+ 2
+(1 row)
+
+fetch next from c2;
+ a 
+---
+ 2
+(1 row)
+
+fetch next from c3;
+ a 
+---
+ 3
+(1 row)
+
+rollback;
+set enable_indexscan = off;
+set enable_indexonlyscan = on;
+begin;
+declare c1 cursor for select a from t where a < 10;
+update t set a = 2;
+fetch next from c1;
+ a 
+---
+ 1
+(1 row)
+
+fetch next from c1;
+ a 
+---
+ 2
+(1 row)
+
+fetch next from c1;
+ a 
+---
+ 3
+(1 row)
+
+rollback;
+drop table t;

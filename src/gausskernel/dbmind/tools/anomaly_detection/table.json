@@ -1,0 +1,35 @@
+{
+  "sqlite": {
+    "database_exporter": {
+      "create_table": "create table if not exists database_exporter(timestamp bigint, guc_parameter text, current_connections int, qps int, process text, temp_file text);",
+      "insert": "insert into database_exporter values(%d, \"%s\", %d, %d, \"%s\", \"%s\");",
+      "count": "select count(1) from database_exporter;",
+      "limit_max_rows": "delete from database_exporter where timestamp in (select timestamp from database_exporter order by timestamp desc limit -1 offset %d)",
+      "limit_max_periods": "delete from database_exporter where timestamp < %d;"
+    },
+    "os_exporter": {
+      "create_table": "create table if not exists os_exporter(timestamp bigint, cpu_usage text, io_wait text, io_read text, io_write text, memory_usage text, disk_space text);",
+      "insert": "insert into os_exporter values(%d, \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\");",
+      "count": "select count(1) from os_exporter;",
+      "limit_max_rows": "delete from os_exporter where timestamp in (select timestamp from os_exporter order by timestamp desc limit -1 offset %d)",
+      "limit_max_periods": "delete from os_exporter where timestamp < %d;"
+    },
+    "wdr": {
+      "create_table": "create table if not exists wdr(timestamp bigint, db_name text, table_name text, query text, explain text, start_time text, finish_time text, indexes text, wdr_features text);",
+      "insert": "insert into wdr values(%d, \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\");",
+      "count": "select count(1) from wdr;",
+      "limit_max_rows": "delete from wdr where timestamp in (select timestamp from wdr order by timestamp desc limit -1 offset %d);",
+      "limit_max_periods": "delete from wdr where timestamp < %d;"
+    }
+  },
+  "function": {
+    "check_table": "select name from sqlite_master where type = 'table'",
+    "get_table_rows": "select count(*) from {table}",
+    "get_all_fields": "PRAGMA  table_info({table});",
+    "get_all_tables": "select name from sqlite_master where type = 'table'",
+    "get_timeseries_by_number": "select * from (select timestamp, {field} from {table} order by timestamp desc limit {number}) order by timestamp",
+    "get_timeseries_by_timestamp": "select timestamp, {field} from {table} where timestamp >= '{select_timestamp}'",
+    "get_earliest_timestamp": "select timestamp from {table} limit 1",
+    "get_latest_timestamp": "select timestamp from {table} order by timestamp desc limit 1"
+  }
+}

@@ -37,7 +37,7 @@
 #include "utils/snapmgr.h"
 #endif
 #include "catalog/pg_type.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -58,6 +58,7 @@
 #include "parser/parse_type.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
+#include "rewrite/rewriteRlsPolicy.h"
 #ifdef PGXC
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
@@ -75,14 +76,15 @@
 #endif
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/acl.h"
 #include "commands/explain.h"
+#include "commands/sec_rls_cmds.h"
 #include "streaming/streaming_catalog.h"
 #include "instruments/instr_unique_sql.h"
 #include "streaming/init.h"
 
 #include "db4ai/aifuncs.h"
 #include "db4ai/create_model.h"
-#include "db4ai/hyperparameter_validation.h"
 
 #ifndef ENABLE_MULTIPLE_NODES
 #include "optimizer/clauses.h"
@@ -122,6 +124,7 @@ static void set_subquery_is_under_insert(ParseState* subParseState);
 static void set_ancestor_ps_contain_foreigntbl(ParseState* subParseState);
 static bool include_groupingset(Node* groupClause);
 static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, List* targetList);
+static bool checkAllowedTableCombination(ParseState* pstate);
 
 /*
  * parse_analyze
@@ -177,12 +180,7 @@ Query* parse_analyze(
  * be modified or enlarged (via repalloc).
  */
 
-#ifdef ENABLE_MULTIPLE_NODES
 Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams)
-#else
-Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** paramTypes, int* numParams,
-    char** paramTypeNames)
-#endif
 {
     ParseState* pstate = make_parsestate(NULL);
     Query* query = NULL;
@@ -191,11 +189,8 @@ Query* parse_analyze_varparams(Node* parseTree, const char* sourceText, Oid** pa
     AssertEreport(sourceText != NULL, MOD_OPT, "para cannot be NULL");
 
     pstate->p_sourcetext = sourceText;
-#ifdef ENABLE_MULTIPLE_NODES	
+
     parse_variable_parameters(pstate, paramTypes, numParams);
-#else
-    parse_variable_parameters(pstate, paramTypes, numParams, paramTypeNames);	
-#endif	
 
     query = transformTopLevelStmt(pstate, parseTree);
 
@@ -868,6 +863,13 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
                 errdetail("Timeseries stored relation doesn't support DELETE returning")));
     }
 
+    if (!checkAllowedTableCombination(pstate)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Un-supported feature"),
+                errdetail("UStore relations cannot be used with other storage types in DELETE statement")));
+    }
+
     /* done building the range table and jointree */
     qry->rtable = pstate->p_rtable;
     qry->jointree = makeFromExpr(pstate->p_joinlist, qual);
@@ -912,8 +914,8 @@ static Query* transformDeleteStmt(ParseState* pstate, DeleteStmt* stmt)
 }
 
 /* @hdfs
- * brief: Check whether there is a postgres forein table in qry. Return true means
- *        postgres foreign table existed, false not existed
+ * brief: Check whether there is a openGauss forein table in qry. Return true means
+ *        openGauss foreign table existed, false not existed
  * input param @qry: the Query for foreign table
  */
 static bool IsFindPgfdwForeignTbl(Query* qry)
@@ -1602,8 +1604,8 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
         if (!bms_is_empty(subset)) {
             /*
-             * try to coerce unknown-type constants and params  to the target
-             * column's datatype
+             * Try to coerce unknown-type constants and params to the target
+             * column's datatype.
              */
             Assert(!bms_is_empty(resset));
 
@@ -1612,7 +1614,21 @@ static Query* transformInsertStmt(ParseState* pstate, InsertStmt* stmt)
 
                 respos = bms_first_member(resset);
                 Assert(respos > 0);
-                tle->expr = (Expr*)copyObject(list_nth(exprList, respos - 1));
+
+                ListCell* rescell = list_nth_cell(exprList, respos - 1);
+                tle->expr = (Expr*)copyObject(lfirst(rescell));
+
+                /*
+                 * After coercion, we need to transform those constants from
+                 * the HACKY representation to a normal Var node like others.
+                 *
+                 * Old exprs in exprList are replaced by the newly
+                 * generated Vars and then freed on each iteration.
+                 */
+                if ((IsA(tle->expr, Const) || IsA(tle->expr, Param)) &&
+                    exprType((Node*)tle->expr) != UNKNOWNOID) {
+                    lfirst(rescell) = (void*)makeVarFromTargetEntry(rtr->rtindex, tle);
+                }
             }
         }
     } else if (list_length(selectStmt->valuesLists) > 1) {
@@ -1922,6 +1938,20 @@ List* BuildExcludedTargetlist(Relation targetrel, Index exclRelIndex)
     return result;
 }
 
+static bool CheckRlsPolicyForUpsert(Relation targetrel)
+{
+    ListCell *item = NULL;
+    RlsPolicy *policy = NULL;
+    List *relRlsPolicies = targetrel->rd_rlsdesc->rlsPolicies;
+    foreach (item, relRlsPolicies) {
+        policy = (RlsPolicy *)lfirst(item);
+        if (policy->cmdName == ACL_UPDATE_CHR || policy->cmdName == RLS_CMD_ALL_CHR) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upsertClause, RangeVar* relation)
 {
     UpsertExpr* result = NULL;
@@ -1940,6 +1970,17 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
                  errmsg("triggers are not supported and will be ignored by INSERT ON DUPLICATE KEY UPDATE.")));
     }
 #endif
+
+    if (RelationHasRlspolicy(targetrel->rd_id) && CheckRlsPolicyForUpsert(targetrel)) {
+        ereport(ERROR,
+            (errmodule(MOD_SEC_POLICY),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Row level security policy is not supported by INSERT ON DUPLICATE KEY UPDATE."),
+                errdetail("Table %s with row level security policy.", RelationGetRelationName(targetrel)),
+                errcause("Target table with row level security policy."),
+                erraction("Shutdown row level security policy, Use INSERT and UPDATE instead INSERT ON DUPLICATE KEY "
+                          "UPDATE.")));
+    }
 
     if (upsertClause->targetList != NIL) {
         pstate->p_is_insert = false;
@@ -3587,6 +3628,7 @@ static Query* transformCreateTableAsStmt(ParseState* pstate, CreateTableAsStmt* 
     /* represent the command as a utility Query */
     result = makeNode(Query);
     result->commandType = CMD_UTILITY;
+    result->hintState = (HintState*)copyObject(((Query*)stmt->query)->hintState);
     result->utilityStmt = (Node*)stmt;
 
     return result;
@@ -4517,4 +4559,39 @@ static void transformGroupConstToColumn(ParseState* pstate, Node* groupClause, L
         GroupingSet* grouping_set = (GroupingSet*)groupClause;
         transformGroupConstToColumn(pstate, (Node*)grouping_set->content, targetList);
     }
+}
+
+static bool checkAllowedTableCombination(ParseState* pstate)
+{
+    RangeTblEntry* rte = NULL;
+    ListCell* lc = NULL;
+    bool has_ustore = false;
+    bool has_else = false;
+
+    // Check range table list for the presence of
+    // relations with different storages
+    foreach(lc, pstate->p_rtable) {
+        rte = (RangeTblEntry*)lfirst(lc);
+        if (rte && rte->rtekind == RTE_RELATION) {
+            if (rte->is_ustore) {
+                has_ustore = true;
+            } else {
+                has_else = true;
+            }
+        }
+    }
+
+    // Check target table for the type of storage
+    rte = pstate->p_target_rangetblentry;
+    if (rte && rte->rtekind == RTE_RELATION) {
+        if (rte->is_ustore) {
+            has_ustore = true;
+        } else {
+            has_else = true;
+        }
+    }
+
+    Assert(has_ustore || has_else);
+
+    return !(has_ustore && has_else);
 }

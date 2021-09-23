@@ -39,6 +39,7 @@
 #include "gssignal/gs_signal.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "access/extreme_rto/dispatcher.h"
+#include "replication/dcf_replication.h"
 
 /* Signal handlers */
 static void startupproc_quickdie(SIGNAL_ARGS);
@@ -92,6 +93,33 @@ static void StartupProcSigUsr1Handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+static void WaitApplyAllDCFLog(void)
+{
+    unsigned int all_applied = 0;
+    // Check if walreceiver has written all DCF log into xlog
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf &&
+        t_thrd.dcf_cxt.dcfCtxInfo->dcf_to_be_leader) {
+        ereport(LOG, (errmsg("Begin to wait read xlog from DCF!")));
+        /* Check if all the dcf log has been applied to xlog every 10 milliseconds. */
+        int ret = 0;
+        while ((ret = dcf_check_if_all_logs_applied(1, &all_applied)) == 0) {
+            if (all_applied != 0) {
+                t_thrd.dcf_cxt.dcfCtxInfo->dcf_to_be_leader = false;
+                ereport(LOG, (errmsg("All DCF log has been applied!")));
+                return;
+            }
+            pg_usleep(10000L); /* 10 milliseconds */
+        }
+        if (ret) {
+            t_thrd.dcf_cxt.dcfCtxInfo->dcf_to_be_leader = false;
+            ereport(FATAL, (errmsg("Apply all DCF log failed for dcf return false!")));
+        }
+    }
+}
+
+#endif
+
 /* SIGUSR2: set flag to finish recovery */
 /*
  * SIGUSR2 handler for the startup process
@@ -111,9 +139,15 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         t_thrd.startup_cxt.standby_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_FAILOVER)) {
         t_thrd.startup_cxt.failover_triggered = true;
+#ifndef ENABLE_MULTIPLE_NODES
+        WaitApplyAllDCFLog();
+#endif
         WakeupRecovery();
     } else if (CheckNotifySignal(NOTIFY_SWITCHOVER)) {
         t_thrd.startup_cxt.switchover_triggered = true;
+#ifndef ENABLE_MULTIPLE_NODES
+        WaitApplyAllDCFLog();
+#endif
         WakeupRecovery();
     }
 
@@ -239,6 +273,9 @@ void StartupProcessMain(void)
      */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     (void)gs_signal_unblock_sigusr2();
+
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "StartupXLOG",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     SetStaticConnNum();
     pgstat_report_appname("Startup");

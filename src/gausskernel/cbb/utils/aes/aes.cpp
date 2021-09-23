@@ -35,6 +35,10 @@
 
 #define MAX_INT_NUM 2147483647
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo);
 
 /*
@@ -234,7 +238,9 @@ static bool decryptFromFile(FILE* source, DecryptInfo* pDecryptInfo)
         char *tmp = NULL;
         cipherlen = strtoul((char *)cipherleninfo, &tmp, 10);
         if (*tmp != '\0' || cipherlen > PG_UINT32_MAX || cipherlen == 0) {
+#ifndef ENABLE_UT
             printf("Invalid cipherlen(%s), maybe the content is corrupt.\n", cipherleninfo);
+#endif
             return false;
         }
         ciphertext = (GS_UCHAR*)malloc((size_t)cipherlen);

@@ -596,11 +596,11 @@ SET ENABLE_SEQSCAN TO OFF;
        </para>
 
        <para>
-        The default permissions are <literal>0777</literal>, meaning
-        anyone can connect. Reasonable alternatives are
+        The default permissions are <literal>0700</literal>, meaning
+        only owner can connect. Reasonable alternatives are
         <literal>0770</literal> (only user and group, see also
-        <varname>unix_socket_group</varname>) and <literal>0700</literal>
-        (only user). (Note that for a Unix-domain socket, only write
+        <varname>unix_socket_group</varname>) and <literal>0777</literal>
+        (any user). (Note that for a Unix-domain socket, only write
         permission matters, so there is no point in setting or revoking
         read or execute permissions.)
        </para>

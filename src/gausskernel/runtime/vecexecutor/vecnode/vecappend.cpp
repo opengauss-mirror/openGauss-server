@@ -33,8 +33,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeAppend.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeAppend.h"
 #include "vecexecutor/vecappend.h"
 #include "vecexecutor/vecexecutor.h"
 

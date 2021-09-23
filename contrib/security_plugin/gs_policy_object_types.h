@@ -225,6 +225,12 @@ struct EqualToPolicyBase {
 
 int gs_policy_base_cmp(const void *key1, const void *key2);
 
+typedef gs_stl::gs_vector<Oid> func_types;
+typedef gs_stl::gs_vector<gs_stl::gs_string> func_params;
+
+bool get_function_parameters(HeapTuple tuple, func_types* types, int* default_params = NULL);
+bool verify_proc_params(const func_params* func_params, const func_types* proc_types);
+
 typedef gs_stl::gs_set<GsPolicyBase, gs_policy_base_cmp> gs_policy_base_set;
 /* policy id */
 typedef gs_stl::gs_map<long long, gs_policy_base_set> gs_policy_base_map;

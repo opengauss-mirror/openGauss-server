@@ -1,0 +1,18 @@
+<refentry id="SQL-SAMPLE_SNAPSHOT">
+<refmeta>
+<refentrytitle>SAMPLE SNAPSHOT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>SAMPLE SNAPSHOT</refname>
+<refpurpose>sample existing snapshot into one or more snapshots</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+SAMPLE SNAPSHOT <qualified_name> @ <version | ident | sconst>
+    [STRATIFY BY attr_list]
+    { AS <label> AT RATIO <num> [COMMENT IS <comment>] } [, …]
+</synopsis>
+</refsynopsisdiv>
+</refentry>

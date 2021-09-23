@@ -51,6 +51,12 @@
 #define HINT_FALSE "False"
 #define HINT_PRED_PUSH "Predpush"
 #define HINT_REWRITE "Rewrite_rule"
+#define HINT_GATHER "Gather"
+#define HINT_NO_EXPAND "No_expand"
+#define HINT_SET "Set"
+#define HINT_CPLAN "Use_cplan"
+#define HINT_GPLAN "Use_gplan"
+#define HINT_NO_GPC "No_gpc"
 
 #define BLOCK_COMMENT_START "/*"
 #define BLOCK_COMMENT_END "*/"
@@ -75,7 +81,7 @@ typedef struct pull_hint_warning_context {
 extern THR_LOCAL List* hint_list;
 extern THR_LOCAL List* hint_warning;
 
-/* hint keyword of enum type*/
+/* hint keyword of enum type. DO NOT change the order! */
 typedef enum HintKeyword {
     HINT_KEYWORD_NESTLOOP = 0,
     HINT_KEYWORD_MERGEJOIN,
@@ -91,14 +97,30 @@ typedef enum HintKeyword {
     HINT_KEYWORD_SKEW,
     HINT_KEYWORD_PREDPUSH,
     HINT_KEYWORD_REWRITE,
+    HINT_KEYWORD_GATHER,
+    HINT_KEYWORD_NO_EXPAND,
+    HINT_KEYWORD_SET,
+    HINT_KEYWORD_CPLAN,
+    HINT_KEYWORD_GPLAN,
+    HINT_KEYWORD_NO_GPC,
 } HintKeyword;
 
 /* hint status */
 typedef enum HintStatus {
     HINT_STATE_NOTUSED = 0, /* specified relation not used in query */
     HINT_STATE_USED,        /* hint is used */
-    HINT_STATE_DUPLICATION  /* specified hint duplication */
+    HINT_STATE_DUPLICATION, /* specified hint duplication */
+    HINT_STATE_ERROR        /* hint contains error */
 } HintStatus;
+
+/* gather source */
+typedef enum GatherSource {
+    HINT_GATHER_GUC = 0,    /* exist as guc */
+    HINT_GATHER_REL,        /* Gather baserel */
+    HINT_GATHER_JOIN,       /* Gather joinrel */
+    HINT_GATHER_ALL,        /* Gather baserel and joinrel, and find the best */
+    HINT_GATHER_UNKNOWN     /* unknown, should report error */
+} GatherSource;
 
 /* common data for all hints. */
 struct Hint {
@@ -223,6 +245,34 @@ typedef struct RewriteHint {
     unsigned int param_bits;
 } RewriteHint;
 
+/* Enable/disable CN gather with hint */
+typedef struct GatherHint {
+    Hint base; /* base hint */
+    GatherSource source;   /* rewrite parameters */
+} GatherHint;
+
+/* Enforce custom/generic plan with hint */
+typedef struct NoExpandHint {
+    Hint base; /* base hint */
+} NoExpandHint;
+
+/* Hint session level optimizer guc parameter */
+typedef struct SetHint {
+    Hint base; /* base hint */
+    char* name;
+    char* value;
+} SetHint;
+
+typedef struct PlanCacheHint {
+    Hint base; /* base hint */
+    bool chooseCustomPlan;
+} PlanCacheHint;
+
+/* Avoid saving global plan with hint */
+typedef struct NoGPCHint {
+    Hint base; /* base hint */
+} NoGPCHint;
+
 typedef struct hintKeyword {
     const char* name;
     int value;
@@ -250,6 +300,11 @@ extern void HintStateDelete(HintState* hintState);
 extern bool permit_predpush(PlannerInfo *root);
 extern bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params);
 extern Relids predpush_candidates_same_level(PlannerInfo *root);
+extern bool permit_gather(PlannerInfo *root, GatherSource src = HINT_GATHER_GUC);
+extern GatherSource get_gather_hint_source(PlannerInfo *root);
+extern bool check_set_hint_in_white_list(const char* name);
+extern bool has_no_expand_hint(Query* subquery);
+extern bool has_no_gpc_hint(HintState* hintState);
 
 #define skip_space(str)   \
     while (isspace(*str)) \

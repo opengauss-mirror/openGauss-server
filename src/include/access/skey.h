@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * skey.h
- *	  POSTGRES scan key definitions.
+ *	  openGauss scan key definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

@@ -132,7 +132,8 @@ WHERE p2.amopmethod = p1.oid AND
  amname | amoplefttype | amoprighttype 
 --------+--------------+---------------
  btree  |         4402 |          4402
-(1 row)
+ ubtree |         4402 |          4402
+(2 rows)
 
 -- Currently, none of the AMs with fixed strategy sets support ordering ops.
 SELECT p1.amname, p2.amopfamily, p2.amopstrategy
@@ -249,9 +250,18 @@ ORDER BY 1, 2, 3;
        4239 |            3 | =
        4239 |            4 | >=
        4239 |            5 | >
+       4439 |            1 | <
+       4439 |            1 | ~<~
+       4439 |            2 | <=
+       4439 |            2 | ~<=~
+       4439 |            3 | =
+       4439 |            4 | >=
+       4439 |            4 | ~>=~
+       4439 |            5 | >
+       4439 |            5 | ~>~
        4444 |            1 | @@
        4444 |            2 | @@@
-(71 rows)
+(80 rows)
 
 -- Check that all opclass search operators have selectivity estimators.
 -- This is not absolutely required, but it seems a reasonable thing
@@ -408,7 +418,7 @@ WHERE p2.opfmethod = p1.oid AND p3.amprocfamily = p2.oid AND
            p4.amproclefttype = p3.amproclefttype AND
            p4.amprocrighttype = p3.amprocrighttype)
     NOT BETWEEN
-      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin') THEN p1.amsupport - 1
+      (CASE WHEN p1.amname IN ('btree', 'gist', 'gin', 'ubtree') THEN p1.amsupport - 1
             ELSE p1.amsupport END)
       AND p1.amsupport;
  amname | opfname | amproclefttype | amprocrighttype 
@@ -422,7 +432,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin'
+WHERE am.amname <> 'btree' AND am.amname <> 'gist' AND am.amname <> 'gin' AND am.amname <> 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING count(*) != amsupport OR amprocfamily IS NULL;
  amname | opcname | count 
@@ -433,7 +443,7 @@ SELECT amname, opcname, count(*)
 FROM pg_am am JOIN pg_opclass op ON opcmethod = am.oid
      LEFT JOIN pg_amproc p ON amprocfamily = opcfamily AND
          amproclefttype = amprocrighttype AND amproclefttype = opcintype
-WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin'
+WHERE am.amname = 'btree' OR am.amname = 'gist' OR am.amname = 'gin' OR am.amname = 'ubtree'
 GROUP BY amname, amsupport, opcname, amprocfamily
 HAVING (count(*) != amsupport AND count(*) != amsupport - 1)
     OR amprocfamily IS NULL;

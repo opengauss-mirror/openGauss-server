@@ -327,7 +327,8 @@ void CStoreUpdate::BatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, in
     (void)MemoryContextSwitchTo(updateCnxt);
 }
 
-void CStoreUpdate::PartitionBatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options, JunkFilter *junkfilter)
+void CStoreUpdate::PartitionBatchDeleteAndInsert(VectorBatch *batch, int oriBatchCols, int options,
+    JunkFilter *junkfilter)
 {
     int currentCols = batch->m_cols;
     batch->m_cols = oriBatchCols;

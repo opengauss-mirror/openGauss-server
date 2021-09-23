@@ -72,6 +72,8 @@ typedef enum ObjectType {
     OBJECT_OPCLASS,
     OBJECT_OPERATOR,
     OBJECT_OPFAMILY,
+    OBJECT_PACKAGE,
+    OBJECT_PACKAGE_BODY,
     OBJECT_PARTITION,
     OBJECT_RLSPOLICY,
     OBJECT_PARTITION_INDEX,
@@ -115,6 +117,7 @@ typedef struct DropStmt {
     bool missing_ok;       /* skip error if object is missing? */
     bool concurrent;       /* drop index concurrently? */
     bool isProcedure;      /* true if it is DROP PROCEDURE */
+    bool purge;            /* true for physical DROP TABLE, false for logic DROP TABLE(to recyclebin) */
 } DropStmt;
 
 typedef struct AlterRoleStmt {
@@ -124,6 +127,15 @@ typedef struct AlterRoleStmt {
     int action;    /* +1 = add members, -1 = drop members */
     RoleLockType lockstatus;
 } AlterRoleStmt;
+
+typedef struct DropRoleStmt {
+    NodeTag type;
+    List* roles;              /* List of roles to remove */
+    bool missing_ok;          /* skip error if a role is missing? */
+    bool is_user;             /* drop user or role */
+    bool inherit_from_parent; /* whether user is inherited from parent user */
+    DropBehavior behavior;    /* CASCADE or RESTRICT */
+} DropRoleStmt;
 
 /*
  * TypeName - specifies a type in definitions
@@ -148,6 +160,7 @@ typedef struct TypeName {
     int32 typemod;     /* prespecified type modifier */
     List *arrayBounds; /* array bounds */
     int location;      /* token location, or -1 if unknown */
+    int end_location;  /* %TYPE and date specified, token end location */
 } TypeName;
 
 typedef enum FunctionParameterMode {
@@ -201,6 +214,9 @@ typedef struct DefElem {
     char *defname;
     Node *arg;               /* a (Value *) or a (TypeName *) */
     DefElemAction defaction; /* unspecified action, or SET/ADD/DROP */
+    int	begin_location;       /* token begin location, or -1 if unknown */
+    int	end_location;       /* token end location, or -1 if unknown */
+    int location;
 } DefElem;
 
 typedef enum SortByDir {
@@ -209,6 +225,14 @@ typedef enum SortByDir {
     SORTBY_DESC,
     SORTBY_USING /* not allowed in CREATE INDEX ... */
 } SortByDir;
+
+typedef struct CopyColExpr {
+    NodeTag type;
+    char *colname;      /* name of column */
+    TypeName *typname;  /* type of column */
+    Node *colexpr;      /* expr of column */
+} CopyColExpr;
+
 
 typedef enum SortByNulls {
     SORTBY_NULLS_DEFAULT,
@@ -333,6 +357,11 @@ typedef struct HintState {
     bool  multi_node_hint; /* multinode hint */
     List* predpush_hint;
     List* rewrite_hint;    /* rewrite hint list */
+    List* gather_hint;     /* gather hint */
+    List* set_hint;        /* query-level guc hint */
+    List* cache_plan_hint; /* enforce cplan or gplan */
+    List* no_expand_hint;  /* forbid sub query pull-up */
+    List* no_gpc_hint;     /* supress saving to global plan cache */
 } HintState;
 
 /* ----------------------
@@ -577,6 +606,7 @@ typedef struct CreateSchemaStmt {
     NodeTag type;
     char *schemaname;  /* the name of the schema to create */
     char *authid;      /* the owner of the created schema */
+    bool hasBlockChain;  /* whether this schema has blockchain */
     List *schemaElts;  /* schema components (list of parsenodes) */
     TempType temptype; /* if the schema is temp table's schema */
     List *uuids;       /* the list of uuid(only create sequence or table with serial type need) */
@@ -658,6 +688,7 @@ typedef enum AlterTableType {
     AT_EnableRls,         /* ENABLE ROW LEVEL SECURITY */
     AT_DisableRls,        /* DISABLE ROW LEVEL SECURITY */
     AT_ForceRls,          /* FORCE ROW LEVEL SECURITY */
+    AT_EncryptionKeyRotation, /* ENCRYPTION KEY ROTATION */
     AT_NoForceRls,        /* NO FORCE ROW LEVEL SECURITY */
     AT_AddInherit,        /* INHERIT parent */
     AT_DropInherit,       /* NO INHERIT parent */
@@ -670,6 +701,7 @@ typedef enum AlterTableType {
     AT_SubCluster,     /* TO [ NODE nodelist | GROUP groupname ] */
     AT_AddNodeList,    /* ADD NODE nodelist */
     AT_DeleteNodeList, /* DELETE NODE nodelist */
+    AT_UpdateSliceLike, /* UPDATE SLICE LIKE another table */
 #endif
     AT_GenericOptions, /* OPTIONS (...) */
     AT_EnableRowMoveMent,
@@ -679,7 +711,8 @@ typedef enum AlterTableType {
     AT_MergePartition,    /* MERGE PARTITION */
     AT_SplitPartition,    /* SPLIT PARTITION */
     /* this will be in a more natural position in 9.3: */
-    AT_ReAddConstraint /* internal to commands/tablecmds.c */
+    AT_ReAddConstraint, /* internal to commands/tablecmds.c */
+    AT_AddIntoCBI
 } AlterTableType;
 
 typedef enum AlterTableStatProperty { /* Additional Property for AlterTableCmd */
@@ -707,6 +740,11 @@ typedef struct AlterTableCmd { /* one subcommand of an ALTER TABLE */
     List *bucket_list;                          /* bucket list to drop */
     bool alterGPI;                              /* check whether is global partition index alter statement */
 } AlterTableCmd;
+
+typedef struct AddTableIntoCBIState {
+    NodeTag type;
+    RangeVar *relation;
+}AddTableIntoCBIState;
 
 /* ----------------------
  * REINDEX Statement
@@ -887,6 +925,26 @@ typedef struct RangePartitionStartEndDefState {
     char *tableSpaceName; /* table space to use, or NULL */
 } RangePartitionStartEndDefState;
 
+typedef struct ListPartitionDefState {
+    NodeTag type;
+    char* partitionName;  /* name of list partition */
+    List* boundary;       /* the boundary of a list partition */
+    char* tablespacename; /* table space to use, or NULL */
+} ListPartitionDefState;
+
+typedef struct HashPartitionDefState {
+    NodeTag type;
+    char* partitionName;  /* name of hash partition */
+    List* boundary;       /* the boundary of a hash partition */
+    char* tablespacename; /* table space to use, or NULL */
+} HashPartitionDefState;
+
+typedef struct RangePartitionindexDefState {
+    NodeTag type;
+    char* name;
+    char* tablespace;
+} RangePartitionindexDefState;
+
 /* *
  * definition of a range partition.
  * interval pattern: INTERVAL ([interval]) [tablespaceLists]
@@ -985,6 +1043,11 @@ typedef struct CreateStmt {
     char relkind;       /* type of object */
 } CreateStmt;
 
+typedef struct LedgerHashState {
+    bool has_histhash;
+    uint64 histhash;
+} LedgerHashState;
+
 /* ----------------------
  * 		Copy Statement
  *
@@ -1006,6 +1069,7 @@ typedef struct CopyStmt {
     /* adaptive memory assigned for the stmt */
     AdaptMem memUsage;
     bool encrypted;
+    LedgerHashState hashstate;
 } CopyStmt;
 
 #define ATT_KV_UNDEFINED (0)
@@ -1189,6 +1253,75 @@ typedef struct ColumnRef {
     List *fields; /* field names (Value strings) or A_Star */
     int location; /* token location, or -1 if unknown */
 } ColumnRef;
+
+/*
+ * TimeCapsuleClause - TIMECAPSULE appearing in a transformed FROM clause
+ *
+ * Unlike RangeTimeCapsule, this is a subnode of the relevant RangeTblEntry.
+ */
+typedef enum TvVersionType {
+    TV_VERSION_CSN = 1,
+    TV_VERSION_TIMESTAMP = 2,
+} TvVersionType;
+
+typedef struct TimeCapsuleClause {
+    NodeTag type;
+    TvVersionType tvtype;
+    Node* tvver;
+} TimeCapsuleClause;
+
+/* ----------------------
+ *				TimeCapsule Statement
+ * ----------------------
+ */
+typedef enum TimeCapsuleType {
+    TIMECAPSULE_VERSION,
+    TIMECAPSULE_DROP,
+    TIMECAPSULE_TRUNCATE,
+} TimeCapsuleType;
+
+typedef struct TimeCapsuleStmt {
+    NodeTag type;
+
+    /* Restore type */
+    TimeCapsuleType tcaptype;
+
+    /* for "timecapsule to before drop/truncate" stmt */
+    RangeVar *relation;
+    char *new_relname;
+
+    /* for "timecapsule to timestamp/csn" stmt */
+    Node *tvver;
+    TvVersionType tvtype;
+} TimeCapsuleStmt;
+
+
+/* ----------------------
+ *				Purge Statement
+ * ----------------------
+ */
+typedef enum PurgeType {
+    PURGE_TABLE = 0,
+    PURGE_INDEX = 1,
+    PURGE_TABLESPACE = 2,
+    PURGE_RECYCLEBIN = 3,
+} PurgeType;
+
+typedef struct PurgeStmt {
+    NodeTag type;
+    PurgeType purtype;
+    /* purobj->relname indicates tablespace name where PURGE_TABLESPACE */
+    RangeVar *purobj;
+} PurgeStmt;
+
+typedef struct RangeTimeCapsule {
+    NodeTag type;
+    Node* relation;
+    TvVersionType tvtype;
+    Node* tvver;
+    int location;
+} RangeTimeCapsule;
+
 
 /*
  * A_Star - '*' representing all columns of a table or compound field
@@ -1757,7 +1890,51 @@ typedef struct CreateFunctionStmt {
     List* options;        /* a list of DefElem */
     List* withClause;     /* a list of DefElem */
     bool isProcedure;     /* true if it is a procedure */
+    char* inputHeaderSrc;
+    bool isPrivate;       /* in package, it's true is a private procedure*/
+    bool isFunctionDeclare; /* in package,it's true is a function delcare*/
+    bool isExecuted;
+    char* queryStr;
 } CreateFunctionStmt;
+
+typedef struct FunctionSources {
+    char* headerSrc;
+    char* bodySrc;
+} FunctionSources;
+
+/* ----------------------
+ *		DO Statement
+ *
+ * DoStmt is the raw parser output, InlineCodeBlock is the execution-time API
+ * ----------------------
+ */
+typedef struct DoStmt {
+    NodeTag type;
+    List* args; /* List of DefElem nodes */
+    char* queryStr;
+    bool isSpec;
+    bool isExecuted;
+} DoStmt;
+
+/* ----------------------
+ *		Create Package Statement
+ * ----------------------
+ */
+typedef struct CreatePackageStmt {
+    NodeTag type;
+    bool replace;         /* T => replace if already exists */
+    List* pkgname;       /* qualified name of function to create */
+    List* options;        /* a list of DefElem */
+    char* pkgspec;            /* content of package spec */
+} CreatePackageStmt;
+
+typedef struct CreatePackageBodyStmt {
+    NodeTag type;
+    bool replace;         /* T => replace if already exists */
+    List* pkgname;       /* qualified name of function to create */
+    char* pkgbody;
+    char* pkginit;
+} CreatePackageBodyStmt;
 
 /* ----------------------
  *		Alter Object Rename Statement

@@ -76,7 +76,6 @@ llvm::Function* int4pl_codegen()
     rhs_value = builder.CreateTrunc(rhs_value, int32Type);
     const char* errorstr = "integer out of range";
 
-    /* in llvm10 sadd_with_overflow is define as uint value 229 */
     llvm::Function* func_sadd_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
     if (func_sadd_overflow == NULL) {
@@ -146,7 +145,6 @@ llvm::Function* int4mi_codegen()
     rhs_value = builder.CreateTrunc(rhs_value, int32Type);
     const char* errorstr = "integer out of range";
 
-    /* in llvm10 ssub_with_overflown is define as uint value 241 */
     llvm::Function* func_ssub_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_ssub_with_overflow, Intrinsic_Tys);
     if (func_ssub_overflow == NULL) {
@@ -216,7 +214,6 @@ llvm::Function* int4mul_codegen()
     rhs_value = builder.CreateTrunc(rhs_value, int32Type);
     const char* errorstr = "integer out of range";
 
-    /* in llvm10 smul_with_overflow is define as uint value 236 */
     llvm::Function* func_smul_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_smul_with_overflow, Intrinsic_Tys);
     if (func_smul_overflow == NULL) {
@@ -348,7 +345,6 @@ llvm::Function* int8pl_codegen()
 
     const char* errorstr = "bigint out of range";
 
-    /* in llvm10 sadd_with_overflow is define as uint value 229 */
     llvm::Function* func_sadd_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_sadd_with_overflow, Intrinsic_Tys);
     if (func_sadd_overflow == NULL) {
@@ -414,7 +410,6 @@ llvm::Function* int8mi_codegen()
 
     const char* errorstr = "bigint out of range";
 
-    /* in llvm10 ssub_with_overflow is define uint value 241 */
     llvm::Function* func_ssub_overflow =
         llvm::Intrinsic::getDeclaration(mod, llvm_ssub_with_overflow, Intrinsic_Tys);
     if (func_ssub_overflow == NULL) {

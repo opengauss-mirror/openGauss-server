@@ -104,7 +104,6 @@ drop table tenk1_bak;
 --
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 -- CREATE TEMPORARY TABLE bitwise_test(
 CREATE  TABLE bitwise_test(

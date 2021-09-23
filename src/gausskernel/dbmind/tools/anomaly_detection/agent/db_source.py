@@ -12,84 +12,48 @@ EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
+import sys
+import os
+import logging
 import threading
 import time
+import signal
 
-from .agent_logger import logger
 from .source import Source
 
+agent_logger = logging.getLogger('agent')
 
-class TaskHandler(threading.Thread):
+
+class DBSource(Source, threading.Thread):
     """
     This class inherits the threading.Thread, it is used for managing single task.
     """
 
-    def __init__(self, interval, function, *args, **kwargs):
-        """
-        :param interval: int, execute interval for task, unit is 'second'.
-        :param function: function object for task
-        :param args: list parameters
-        :param kwargs: dict parameters
-        """
+    def __init__(self, interval):
+        Source.__init__(self)
         threading.Thread.__init__(self)
-        self._function = function
-        self._interval = interval
-        self._args = args
-        self._kwargs = kwargs
         self._finished = threading.Event()
-        self._res = None
-        self._channel = None
+        self._tasks = {}
+        self._interval = interval
 
-    def set_channel(self, channel):
-        self._channel = channel
+    def add_task(self, name, task):
+        if name not in self._tasks:
+            self._tasks[name] = task
 
     def run(self):
-        t = threading.currentThread()
-        logger.info('current threading id is {id_}'.format(id_=t.ident))
         while not self._finished.is_set():
             try:
-                self._res = self._function(*self._args, **self._kwargs)
-                self._channel.put({'timestamp': int(time.time()), 'value': self._res})
+                content = {'timestamp': int(time.time())}
+                # All tasks are executed serially.
+                for task_name, task_handler in self._tasks.items():
+                    value = task_handler.output()
+                    content.update(**{task_name: value})
+                self._channel.put(content)
             except Exception as e:
-                logger.exception(e)
+                agent_logger.error(e)
+                process_id = os.getpid()
+                os.kill(process_id, signal.SIGTERM)
             self._finished.wait(self._interval)
 
     def cancel(self):
         self._finished.set()
-
-
-class DBSource(Source):
-    """
-    This class inhert from Source and is used for acquiring mutiple metric data
-    from database at a specified time interval.
-    """
-
-    def __init__(self):
-        Source.__init__(self)
-        self.running = False
-        self._tasks = {}
-
-    def add_task(self, name, interval, task, maxsize, *args, **kwargs):
-        """
-        Add task in DBSource object.
-        :param name: string, task name
-        :param interval: int, execute interval for task, unit is 'second'.
-        :param task: function object of task
-        :param maxsize: int, maxsize of channel in task.
-        :param args: list parameters
-        :param kwargs: dict parameters
-        :return: NA
-        """
-        if name not in self._tasks:
-            self._tasks[name] = TaskHandler(interval, task, *args, **kwargs)
-            self._channel_manager.add_channel(name, maxsize)
-            self._tasks[name].setDaemon(True)
-            self._tasks[name].set_channel(self._channel_manager.get_channel(name))
-
-    def start(self):
-        for _, task in self._tasks.items():
-            task.start()
-
-    def stop(self):
-        for _, task in self._tasks:
-            task.cancel()

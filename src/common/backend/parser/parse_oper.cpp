@@ -700,6 +700,12 @@ Expr* make_op(ParseState* pstate, List* opname, Node* ltree, Node* rtree, int lo
         /* otherwise, binary operator */
         ltypeId = exprType(ltree);
         rtypeId = exprType(rtree);
+        /* if one of the types is a encrypted type and we are in a function/procedure creation flow */
+        if (IsClientLogicType(ltypeId) || IsClientLogicType(rtypeId)) {
+            if(pstate != NULL && pstate->p_create_proc_operator_hook) {
+                pstate->p_create_proc_operator_hook(pstate, ltree, rtree, &ltypeId, &rtypeId);
+            }
+        }
         tup = oper(pstate, opname, ltypeId, rtypeId, false, location, inNumeric);
     }
 

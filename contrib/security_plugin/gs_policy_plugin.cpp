@@ -140,6 +140,7 @@ using StrMap = gs_stl::gs_map<gs_stl::gs_string, masking_result>;
 static THR_LOCAL StrMap* masked_prepared_stmts = NULL;
 static THR_LOCAL StrMap* masked_cursor_stmts = NULL;
 
+static void process_masking(ParseState *pstate, Query *query, const policy_set *policy_ids, bool audit_exist);
 static void gsaudit_next_PostParseAnalyze_hook(ParseState *pstate, Query *query);
 static void destroy_local_parameter();
 static void destory_thread_variables()
@@ -653,6 +654,40 @@ static void select_PostParseAnalyze(ParseState *pstate, Query *&query, const pol
     }
 }
 
+static bool process_union_masking(Node *union_node,
+    ParseState *pstate, const Query *query, const policy_set *policy_ids, bool audit_exist)
+{
+    if (union_node == NULL) {
+        return false;
+    }
+    switch (nodeTag(union_node)) {
+        /* For each union, we get its query recursively for masking until it doesn't have any union query */
+        case T_SetOperationStmt:
+        {
+            SetOperationStmt *stmt = (SetOperationStmt *)union_node;
+            if (stmt->op != SETOP_UNION) {
+                return false;
+            }
+            process_union_masking((Node *)(stmt->larg), pstate, query, policy_ids, audit_exist);
+            process_union_masking((Node *)(stmt->rarg), pstate, query, policy_ids, audit_exist);
+        }
+        break;
+        case T_RangeTblRef:
+        {
+            RangeTblRef *ref = (RangeTblRef *)union_node;
+            if (ref->rtindex <= 0 || ref->rtindex > list_length(query->rtable)) {
+                return false;
+            }
+            Query* mostQuery = rt_fetch(ref->rtindex, query->rtable)->subquery;
+            process_masking(pstate, mostQuery, policy_ids, audit_exist);
+        }
+        break;
+        default:
+        break;
+    }
+    return true;
+}
+
 /*
  * Main entrance for masking
  * Identify components in query tree that need to do masking.
@@ -665,47 +700,25 @@ static void process_masking(ParseState *pstate, Query *query, const policy_set *
         return;
     }
 
-    ListCell *lc = NULL;
-    /* For each Cte, we get its query recursively for masking, and then handle this query in normal way */
-    if (query->cteList != NIL) {
-        foreach(lc, query->cteList) {
-            CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
-            Query *cte_query = (Query *)cte->ctequery;
-            process_masking(pstate, cte_query, policy_ids, audit_exist);
-        }
-    }
-
-    /* find subquery and process each subquery node */
-    if (query->rtable != NULL) {
-        foreach(lc, query->rtable) {
-            RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
-            Query *subquery = (Query *)rte->subquery;
-            process_masking(pstate, subquery, policy_ids, audit_exist);
-        }
-    }
-
     /* set-operation tree UNION query */
-    if (query->setOperations != NULL) {
-        SetOperationStmt *stmt = (SetOperationStmt *)query->setOperations;
-        if (stmt->op == SETOP_UNION) {
-            /* Do masking for UNION left query */
-            if (stmt->larg != NULL && IsA(stmt->larg, RangeTblRef) && pstate->p_rtable != NULL) {
-                RangeTblRef *l = (RangeTblRef *)stmt->larg;
-                if (l->rtindex > 0 && l->rtindex <= list_length(pstate->p_rtable)) {
-                    Query* leftmostQuery = rt_fetch(l->rtindex, pstate->p_rtable)->subquery;
-                    select_PostParseAnalyze(pstate, leftmostQuery, policy_ids, audit_exist);
-                }
-            }
-            /* Do masking for UNION right query */
-            if (stmt->rarg != NULL && IsA(stmt->rarg, RangeTblRef) && pstate->p_rtable != NULL) {
-                RangeTblRef *r = (RangeTblRef *)stmt->rarg;
-                if (r->rtindex > 0 && r->rtindex <= list_length(pstate->p_rtable)) {
-                    Query* rightmostQuery = rt_fetch(r->rtindex, pstate->p_rtable)->subquery;
-                    select_PostParseAnalyze(pstate, rightmostQuery, policy_ids, audit_exist);
-                }
+    if (!process_union_masking(query->setOperations, pstate, query, policy_ids, audit_exist)) {
+        ListCell *lc = NULL;
+        /* For each Cte, we get its query recursively for masking, and then handle this query in normal way */
+        if (query->cteList != NIL) {
+            foreach(lc, query->cteList) {
+                CommonTableExpr *cte = (CommonTableExpr *) lfirst(lc);
+                Query *cte_query = (Query *)cte->ctequery;
+                process_masking(pstate, cte_query, policy_ids, audit_exist);
             }
         }
-    } else {
+        /* find subquery and process each subquery node */
+        if (query->rtable != NULL) {
+            foreach(lc, query->rtable) {
+                RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+                Query *subquery = (Query *)rte->subquery;
+                process_masking(pstate, subquery, policy_ids, audit_exist);
+            }
+        }
         select_PostParseAnalyze(pstate, query, policy_ids, audit_exist);
     }
 }
@@ -962,7 +975,7 @@ static void verify_drop_column(AlterTableStmt *stmt)
                 if (check_label_has_object(&find_obj, is_masking_has_object)) {
                     char buff[512] = {0};
                     int rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
-                        "Column: %s is part of some resource label, can not be dropped.", find_obj.m_column);
+                        "Column: %s is part of some resource label, can not be renamed.", find_obj.m_column);
                     securec_check_ss(rc, "\0", "\0");
                     gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
                     ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
@@ -1051,16 +1064,18 @@ static void light_unified_audit_executor(const Query *query)
 }
 
 static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString, ParamListInfoData *params,
-    bool isTopLevel, DestReceiver *dest, bool sentToRemote, char *completionTag)
+    bool isTopLevel, DestReceiver *dest, bool sentToRemote, char *completionTag, bool isCTAS = false)
 {
     /* do nothing when enable_security_policy is off */
     if (!u_sess->attr.attr_security.Enable_Security_Policy || !IsConnFromApp() ||
         u_sess->proc_cxt.IsInnerMaintenanceTools || IsConnFromCoord() ||
         !is_audit_policy_exist_load_policy_info()) {
         if (next_ProcessUtility_hook) {
-            next_ProcessUtility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag);
+            next_ProcessUtility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag,
+                false);
         } else {
-            standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag);
+            standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag,
+                false);
         }
         return;
     }
@@ -1810,9 +1825,11 @@ static void gsaudit_ProcessUtility_hook(Node *parsetree, const char *queryString
     PG_TRY();
     {
         if (next_ProcessUtility_hook) {
-            next_ProcessUtility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag);
+            next_ProcessUtility_hook(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag,
+                false);
         } else {
-            standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag);
+            standard_ProcessUtility(parsetree, queryString, params, isTopLevel, dest, sentToRemote, completionTag,
+                false);
         }
         flush_access_logs(AUDIT_OK);
         send_mng_events(AUDIT_OK);
@@ -2051,7 +2068,6 @@ void install_label_hook()
     load_labels_hook = load_policy_labels;
     query_from_view_hook = set_view_query_state;
     if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
-        check_labels_has_object_hook = is_labels_has_object;
         verify_label_hook = is_label_exist;
     }
 }

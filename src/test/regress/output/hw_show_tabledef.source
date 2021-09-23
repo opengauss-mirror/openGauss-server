@@ -433,91 +433,6 @@ select * from pg_get_tabledef('test_range_tsp_3');
  );
 (1 row)
 
---test list partition table
-create table test_list(m int, n int)
-partition by list(m)
-(
-	PARTITION p1 VALUES (110, 111, 112, 113, 114, 115, 116, 117, 118, 119),
-	PARTITION p2 VALUES (200, 201, 202, 203, 204, 205, 206),
-	PARTITION p3 VALUES (300, 301, 302, 303, 404, 505, 606)
-);
-
-select * from pg_get_tabledef('test_list');
-                                        pg_get_tabledef                                        
------------------------------------------------------------------------------------------------
- SET search_path = test_show_table;                                                           +
- CREATE TABLE test_list (                                                                     +
-         m integer,                                                                           +
-         n integer                                                                            +
- )                                                                                            +
- WITH (orientation=row, compression=no)                                                       +
- PARTITION BY LIST (m)                                                                        +
- (                                                                                            +
-          PARTITION p1 VALUES (110,111,112,113,114,115,116,117,118,119) TABLESPACE pg_default,+
-          PARTITION p2 VALUES (200,201,202,203,204,205,206) TABLESPACE pg_default,            +
-          PARTITION p3 VALUES (300,301,302,303,404,505,606) TABLESPACE pg_default             +
- );
-(1 row)
-
---test hash partition table
-create table test_hash(p_id int, p_name varchar, p_age int)
-partition by hash(p_id)
-(       
-        partition part_1,
-        partition part_2,
-        partition part_3
-);
-select * from pg_get_tabledef('test_hash');
-                 pg_get_tabledef                  
---------------------------------------------------
- SET search_path = test_show_table;              +
- CREATE TABLE test_hash (                        +
-         p_id integer,                           +
-         p_name character varying,               +
-         p_age integer                           +
- )                                               +
- WITH (orientation=row, compression=no)          +
- PARTITION BY HASH (p_id)                        +
- (                                               +
-          PARTITION part_1 TABLESPACE pg_default,+
-          PARTITION part_2 TABLESPACE pg_default,+
-          PARTITION part_3 TABLESPACE pg_default +
- );
-(1 row)
-
---test interval partition table
-create table test_interval(c_id integer not null, c_date DATE, c_info varchar(20) not null)
-partition by range(c_date)
-interval('2 day')
-(
-    partition p1 values less than ('2021-06-01 00:00:00'),
-    partition p2 values less than ('2021-06-03 00:00:00'),
-    partition p3 values less than ('2021-06-05 00:00:00'),
-    partition p4 values less than ('2021-06-07 00:00:00'),
-    partition p5 values less than ('2021-06-09 00:00:00')
-);
-select * from pg_get_tabledef('test_interval');
-                                    pg_get_tabledef                                    
----------------------------------------------------------------------------------------
- SET search_path = test_show_table;                                                   +
- CREATE TABLE test_interval (                                                         +
-         c_id integer NOT NULL,                                                       +
-         c_date timestamp(0) without time zone,                                       +
-         c_info character varying(20) NOT NULL                                        +
- )                                                                                    +
- WITH (orientation=row, compression=no)                                               +
- PARTITION BY RANGE (c_date)                                                          +
- INTERVAL('2 day')                                                                    +
- (                                                                                    +
-          PARTITION p1 VALUES LESS THAN ('2021-06-01 00:00:00') TABLESPACE pg_default,+
-          PARTITION p2 VALUES LESS THAN ('2021-06-03 00:00:00') TABLESPACE pg_default,+
-          PARTITION p3 VALUES LESS THAN ('2021-06-05 00:00:00') TABLESPACE pg_default,+
-          PARTITION p4 VALUES LESS THAN ('2021-06-07 00:00:00') TABLESPACE pg_default,+
-          PARTITION p5 VALUES LESS THAN ('2021-06-09 00:00:00') TABLESPACE pg_default +
- )                                                                                    +
- ENABLE ROW MOVEMENT;
-(1 row)
-
 --test collate
  CREATE   TABLE  collate_test1 (             
          a integer,                                
@@ -1426,9 +1341,6 @@ drop cascades to table test_show_table.hw_partition_update_tt
 drop cascades to table test_show_table.p_t1
 drop cascades to table test_show_table.p_t2
 drop cascades to table test_show_table.test_range_tsp_3
-drop cascades to table test_show_table.test_list
-drop cascades to table test_show_table.test_hash
-drop cascades to table test_show_table.test_interval
 drop cascades to table test_show_table.collate_test1
 drop cascades to table test_show_table.collate_test2
 drop cascades to table test_show_table.students

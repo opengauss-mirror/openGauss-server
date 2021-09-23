@@ -503,7 +503,8 @@ static void spgRedoVacuumRedirect(XLogReaderState *record)
             RelFileNode node;
 
             XLogRecGetBlockTag(record, 0, &node, NULL, NULL);
-            ResolveRecoveryConflictWithSnapshot(xldata->newestRedirectXid, node);
+            XLogRecPtr lsn = record->EndRecPtr;
+            ResolveRecoveryConflictWithSnapshot(xldata->newestRedirectXid, node, lsn);
         }
     }
 

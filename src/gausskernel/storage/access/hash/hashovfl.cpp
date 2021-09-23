@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hashovfl.cpp
- *	  Overflow page management code for the Postgres hash access method
+ *	  Overflow page management code for the openGauss hash access method
  *
  * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group

@@ -151,7 +151,6 @@ namespace dorado
 		(void)builder.CreateRet(result);
 		llvmCodeGen->FinalizeFunction(jitted_funptr);
 		return jitted_funptr;
-
 	}
 
 	/**

@@ -43,6 +43,8 @@
 #include "client_logic_fmt/gs_copy.h"
 #include "client_logic_processor/prepared_statement.h"
 #include "client_logic_processor/prepared_statements_list.h"
+#include "client_logic_common/client_logic_utils.h"
+#include "client_logic_cache/icached_column.h"
 #endif // HAVE_CE
 
 /*
@@ -489,7 +491,21 @@ static int getRowDescriptions(PGconn* conn, int msgLength)
         result->attDescs[i].tableid = tableid;
         result->attDescs[i].columnid = columnid;
         result->attDescs[i].format = format;
-        result->attDescs[i].typid = typid;
+        result->attDescs[i].typid = typid;        
+#ifdef HAVE_CE
+        if (is_clientlogic_datatype(typid)) {
+            if (tableid > 0 && columnid > 0) {
+                const ICachedColumn *cachedColumn =
+                    conn->client_logic->m_cached_column_manager->get_cached_column(tableid, columnid);
+                if (cachedColumn) {
+                    result->attDescs[i].cl_atttypmod = cachedColumn->get_origdatatype_mod();
+                    typlen = -1; // variable length
+                }
+            }
+        } else {
+            result->attDescs[i].rec = conn->client_logic->get_cl_rec(typid, result->attDescs[i].name);
+        }
+#endif
         result->attDescs[i].typlen = typlen;
         result->attDescs[i].atttypmod = atttypmod;
 
@@ -741,6 +757,7 @@ set_error_result:
 }
 
 #define ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA "2200Z"
+#define ERRCODE_CL_FUNCTION_UPDATE "42716"
 /*
  * Attempt to read an Error or Notice response message.
  * This is possible in several places, so we break it out as a subroutine.
@@ -788,6 +805,13 @@ int pqGetErrorNotice3(PGconn* conn, bool isError)
         if (pqGets(&workBuf, conn))
             goto fail;
 #ifdef HAVE_CE
+        if (strcmp(workBuf.data, ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA)==0) {
+            conn->client_logic->isInvalidOperationOnColumn = true; // failed to WRITE
+        } else if (strcmp(workBuf.data, ERRCODE_CL_FUNCTION_UPDATE)==0) {
+            conn->client_logic->should_refresh_function = true; // failed to WRITE
+            goto fail;
+        }
+
         pqSaveMessageField(res, id, workBuf.data, conn);
 #else
         pqSaveMessageField(res, id, workBuf.data);
@@ -1658,7 +1682,7 @@ int pqEndcopy3(PGconn* conn)
 }
 
 /*
- * PQfn - Send a function call to the POSTGRES backend.
+ * PQfn - Send a function call to the openGauss backend.
  *
  * See fe-exec.c for documentation.
  */

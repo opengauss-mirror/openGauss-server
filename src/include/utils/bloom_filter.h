@@ -268,6 +268,44 @@ public:
     uint64 length;
 };
 
+class Murmur3 {
+public:
+    static int64 hash64(const char* data, int32 length);
+
+    /**
+     * Murmur3 64-bit variant. Essentially, this is the MSB 8 bytes of the Murmur3 128-bit variant.
+     * @param data   - input byte array with variable type const char*
+     * @param length - length of array with variable type int32
+     * @param seed   - seed  with variable type int32. (default is 0)
+     * @return - hashcode with variable type int64
+     */
+    static int64 hash64(const char* data, int32 length, int32 seed);
+
+    static const int64 getNullHashCode();
+
+private:
+    static int64 rotateLeft(int64 n, uint32 i);
+
+    static int64 rotateRight(int64 n, uint32 i);
+
+    static int64 fmix64(int64 h);
+
+    // from 64-bit linear congruential generator
+    static const int64 NULL_HASHCODE = 2862933555777941757L;
+
+    // Constants for 128 bit variant
+    static const int64 C1 = 0x87c37b91114253d5L;
+    static const int64 C2 = 0x4cf5ad432745937fL;
+    static const int32 R1 = 31;
+    static const int32 R2 = 27;
+    static const int32 R3 = 33;
+    static const int32 M = 5;
+    static const int32 N1 = 0x52dce729;
+    static const int32 N2 = 0x38495ab5;
+
+    static const int32 DEFAULT_SEED = 104729;
+};
+
 template <typename baseType>
 class BloomFilterImpl : public BloomFilter {
 public:

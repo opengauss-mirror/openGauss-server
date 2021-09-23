@@ -439,7 +439,7 @@ SHOW io_control_unit;
 \! echo "io_control_unIt = 60000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
 \! echo "# io_control_uniT = 80000" >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
 ALTER SYSTEM SET "io_control_UNit" TO 90000;
-NOTICE:  There are 3 "io_control_UNit" not commented in "postgresql.conf", and only the last one in 915th line will be set and used.
+--? NOTICE:  There are 3 "io_control_UNit" not commented in "postgresql.conf", and only the last one in .*th line will be set and used.
 \! grep "io_control_" @abs_srcdir@/tmp_check/datanode1/postgresql.conf
 io_control_unit = 10000
 # io_control_Unit = 50000
@@ -465,7 +465,7 @@ SHOW io_control_unit;
 -------------------------------------------------------
 \! rm @abs_srcdir@/tmp_check/datanode1/postgresql.conf
 ALTER SYSTEM SET "io_control_unIT" TO 6000;
-NOTICE:  There are 3 "io_control_unIT" not commented in "postgresql.conf", and only the last one in 915th line will be set and used.
+--? NOTICE:  There are 3 "io_control_unIT" not commented in "postgresql.conf", and only the last one in .*th line will be set and used.
 select pg_sleep(1);
  pg_sleep 
 ----------

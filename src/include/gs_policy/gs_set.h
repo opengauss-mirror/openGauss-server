@@ -160,6 +160,25 @@ public:
         pfree(iter_wrapper);
     }
 
+    static void copyDataEntry(RBTree* rb, RBNode *dest, const RBNode *src)
+    {
+        /* We should use our defined function to copy data replace the default copy logic of the rb tree */
+        IteratorTreeNodeWrapper *iter_dest = (IteratorTreeNodeWrapper *)dest;
+        IteratorTreeNodeWrapper *iter_src = (IteratorTreeNodeWrapper *)src;
+        if (iter_dest->m_iter.first != NULL) {
+            if (std::is_trivial<Key>::value == 0) {
+                iter_dest->m_iter.first->~Key();
+            }
+            pfree(iter_dest->m_iter.first);
+        }
+        errno_t rc = memcpy_s(dest + 1, rb->node_size - sizeof(RBNode), src + 1, rb->node_size - sizeof(RBNode));
+        securec_check(rc, "\0", "\0");
+        MemoryContext oldContext = MemoryContextSwitchTo(GetSetMemory());
+        iter_dest->m_iter.first = (Key *)palloc(key_size);
+        new (static_cast<void *>(iter_dest->m_iter.first)) Key(*(iter_src->m_iter.first));
+        MemoryContextSwitchTo(oldContext);
+    }
+
 public:
     /* *
      * Constructs a set container object, initializing its contents.
@@ -326,6 +345,27 @@ public:
         return erase(*it.first);
     }
 
+    void update_iterator()
+    {
+        if (m_tree != NULL && !empty()) {
+            rb_begin_iterate(m_tree, DirectWalk); /* use preorder traversal */
+            RBNode *node = rb_iterate(m_tree);
+            IteratorTreeNodeWrapper *it = (IteratorTreeNodeWrapper *)node;
+            m_begin_iter = &it->m_iter;
+            m_begin_iter->m_prev = NULL;
+            while ((node = rb_iterate(m_tree)) != NULL) {
+                IteratorTreeNodeWrapper *cur = (IteratorTreeNodeWrapper *)node;
+                it->m_iter.m_next = &cur->m_iter;
+                cur->m_iter.m_prev = &it->m_iter;
+                it = cur;
+            }
+            it->m_iter.m_next = m_end_iter;
+            m_end_iter->m_prev = &it->m_iter;
+        } else {
+            m_begin_iter = m_end_iter;
+        }
+    }
+
     /* *
      * Erase element.
      * Removes from the set container a single element.
@@ -341,32 +381,9 @@ public:
             return 0;
         }
 
-        IteratorTreeNodeWrapper *it_wrapper = (IteratorTreeNodeWrapper *)res;
-        /*
-         * delete from head
-         * compare by key
-         */
-        if (*m_begin_iter->first == *it_wrapper->m_iter.first) {
-            m_begin_iter = m_begin_iter->m_next;
-            m_begin_iter->m_prev = NULL;
-        } else {  /* delete from middle */
-            if (it_wrapper->m_iter.m_prev && it_wrapper->m_iter.m_next) {
-                /* update prev node */
-                it_wrapper->m_iter.m_next->m_prev = it_wrapper->m_iter.m_prev;
-                /* update next node */
-                it_wrapper->m_iter.m_prev->m_next = it_wrapper->m_iter.m_next;
-            } else {
-                if (it_wrapper->m_iter.m_next) {
-                    it_wrapper->m_iter.m_next->m_prev = NULL;
-                }
-                if (it_wrapper->m_iter.m_prev) {
-                    it_wrapper->m_iter.m_prev->m_next = NULL;
-                }
-            }
-        }
-
         rb_delete(m_tree, res);
         m_size--;
+        update_iterator();
         return 1;
     }
 
@@ -425,7 +442,7 @@ private:
         m_size = 0;
 
         m_tree = rb_create(sizeof(IteratorTreeNodeWrapper), compareDataEntry, combineDataEntry, allocDataEntry,
-            deallocDataEntry, NULL);
+            deallocDataEntry, NULL, copyDataEntry);
 
         (void)MemoryContextSwitchTo(oldContext);
     }

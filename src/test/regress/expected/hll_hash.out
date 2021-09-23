@@ -12,51 +12,57 @@ set current_schema = hll_hash;
 -- 1. boolean
 ------------------------------------------
 SELECT hll_hash_boolean(FALSE);
-  hll_hash_boolean   
----------------------
- 5048724184180415669
+   hll_hash_boolean   
+----------------------
+ -5451962507482445012
 (1 row)
 
 SELECT hll_hash_boolean(0);
-  hll_hash_boolean   
----------------------
- 5048724184180415669
+   hll_hash_boolean   
+----------------------
+ -5451962507482445012
 (1 row)
 
 SELECT hll_hash_boolean('f');
-  hll_hash_boolean   
----------------------
- 5048724184180415669
+   hll_hash_boolean   
+----------------------
+ -5451962507482445012
 (1 row)
 
 SELECT hll_hash_boolean(FALSE,123);
   hll_hash_boolean   
 ---------------------
- 8437825682571635394
+ -311868024033323708
 (1 row)
 
 SELECT hll_hash_boolean(TRUE);
-  hll_hash_boolean   
----------------------
- 8849112093580131862
+   hll_hash_boolean   
+----------------------
+ -1080494166192057469
 (1 row)
 
 SELECT hll_hash_boolean('t');
-  hll_hash_boolean   
----------------------
- 8849112093580131862
+   hll_hash_boolean   
+----------------------
+ -1080494166192057469
 (1 row)
 
 SELECT hll_hash_boolean(1);
-  hll_hash_boolean   
----------------------
- 8849112093580131862
+   hll_hash_boolean   
+----------------------
+ -1080494166192057469
+(1 row)
+
+SELECT hll_hash_boolean(10);
+   hll_hash_boolean   
+----------------------
+ -1080494166192057469
 (1 row)
 
 SELECT hll_hash_boolean(TRUE,123);
    hll_hash_boolean   
 ----------------------
- -3070834203632142926
+ -2708574488252219055
 (1 row)
 
 ------------------------------------------
@@ -65,73 +71,73 @@ SELECT hll_hash_boolean(TRUE,123);
 SELECT hll_hash_smallint(0::smallint);
   hll_hash_smallint  
 ---------------------
- 3478107235931676136
+ 4233148493373801447
 (1 row)
 
 SELECT hll_hash_smallint(100::smallint);
-  hll_hash_smallint  
----------------------
- 4631120266694327276
+ hll_hash_smallint  
+--------------------
+ 962727970174027904
 (1 row)
 
 SELECT hll_hash_smallint(-100::smallint);
   hll_hash_smallint  
 ---------------------
- 5357168029120347761
+ 8971420925810349720
 (1 row)
 
 SELECT hll_hash_smallint(-100::smallint,123);
   hll_hash_smallint  
 ---------------------
- 4331947602081819780
+ 8674019381498133697
 (1 row)
 
 SELECT hll_hash_integer(0);
-   hll_hash_integer   
-----------------------
- -3485513579396041028
+  hll_hash_integer   
+---------------------
+ 5156626420896634997
 (1 row)
 
 SELECT hll_hash_integer(100);
    hll_hash_integer   
 ----------------------
- -5003248654201747171
+ -6135938474279799857
 (1 row)
 
 SELECT hll_hash_integer(-100);
-   hll_hash_integer   
-----------------------
- -2771615523823720964
+  hll_hash_integer   
+---------------------
+ 1324650067280376113
 (1 row)
 
 SELECT hll_hash_integer(21474836,123);
-  hll_hash_integer  
---------------------
- 523675059091473052
+  hll_hash_integer   
+---------------------
+ 6366454541598025835
 (1 row)
 
 SELECT hll_hash_bigint(0);
    hll_hash_bigint   
 ---------------------
- 2945182322382062539
+ 9135616379521106945
 (1 row)
 
 SELECT hll_hash_bigint(100);
-   hll_hash_bigint   
----------------------
- 8349353095166695771
+   hll_hash_bigint    
+----------------------
+ -2401963681423227794
 (1 row)
 
 SELECT hll_hash_bigint(-100);
    hll_hash_bigint   
 ---------------------
- -886862857196634693
+ -640391060824387460
 (1 row)
 
 SELECT hll_hash_bigint(223372036854775808,123);
-   hll_hash_bigint   
----------------------
- 7522273508534065145
+   hll_hash_bigint    
+----------------------
+ -5792425200623199177
 (1 row)
 
 ------------------------------------------
@@ -144,27 +150,27 @@ SELECT hll_hash_bytea(E'\\x');
 (1 row)
 
 SELECT hll_hash_bytea(E'\\x41');
-   hll_hash_bytea   
---------------------
- 243126998722523514
+   hll_hash_bytea    
+---------------------
+ 8300562148548292564
 (1 row)
 
 SELECT hll_hash_bytea(E'\\x42');
-    hll_hash_bytea    
-----------------------
- -4837624800923759386
+   hll_hash_bytea    
+---------------------
+ 5762763005027578923
 (1 row)
 
 SELECT hll_hash_bytea(E'\\x4142');
-   hll_hash_bytea    
----------------------
- 5365230931951287672
+    hll_hash_bytea    
+----------------------
+ -5666002586880275174
 (1 row)
 
 SELECT hll_hash_bytea(E'\\x4142',123);
    hll_hash_bytea    
 ---------------------
- 6601536545765057701
+ 1486601661778483452
 (1 row)
 
 SELECT hll_hash_text('');
@@ -174,27 +180,39 @@ SELECT hll_hash_text('');
 (1 row)
 
 SELECT hll_hash_text('A');
-   hll_hash_text    
---------------------
- 243126998722523514
+    hll_hash_text    
+---------------------
+ 8300562148548292564
 (1 row)
 
 SELECT hll_hash_text('B');
-    hll_hash_text     
-----------------------
- -4837624800923759386
+    hll_hash_text    
+---------------------
+ 5762763005027578923
 (1 row)
 
 SELECT hll_hash_text('AB');
-    hll_hash_text    
----------------------
- 5365230931951287672
+    hll_hash_text     
+----------------------
+ -5666002586880275174
 (1 row)
 
 SELECT hll_hash_text('AB',123);
     hll_hash_text    
 ---------------------
- 6601536545765057701
+ 1486601661778483452
+(1 row)
+
+SELECT hll_hash_text(
+'过零丁洋 - 百度汉语
+作者：文天祥
+辛苦遭逢起一经，干戈寥落四周星。
+山河破碎风飘絮，身世浮沉雨打萍。
+惶恐滩头说惶恐，零丁洋里叹零丁。
+人生自古谁无死？留取丹心照汗青。');
+    hll_hash_text     
+----------------------
+ -3901474691242731452
 (1 row)
 
 ------------------------------------------
@@ -205,6 +223,12 @@ SELECT hll_hash_boolean(FALSE) = hll_hash_any(FALSE);
  ?column? 
 ----------
  t
+(1 row)
+
+SELECT hll_hash_boolean(FALSE) = hll_hash_any(FALSE,123);
+ ?column? 
+----------
+ f
 (1 row)
 
 SELECT hll_hash_boolean(TRUE) = hll_hash_any(TRUE);
@@ -296,73 +320,73 @@ SELECT hll_hash_text('AB') = hll_hash_any('AB'::text,123);
 SELECT hll_hash_any('08:00:2b:01:02:03'::macaddr);
      hll_hash_any     
 ----------------------
- -4883882473551067169
+ -3719950434455589360
 (1 row)
 
 SELECT hll_hash_any('08002b010203'::macaddr);
      hll_hash_any     
 ----------------------
- -4883882473551067169
+ -3719950434455589360
 (1 row)
 
 SELECT hll_hash_any('01-23-45-67-89-ab'::macaddr);
     hll_hash_any     
 ---------------------
- 3974616115244794976
+ 6767567112710179035
 (1 row)
 
 SELECT hll_hash_any('012345-6789ab'::macaddr);
     hll_hash_any     
 ---------------------
- 3974616115244794976
+ 6767567112710179035
 (1 row)
 
 --- interval
 SELECT hll_hash_any('1 year 2 months 3 days 4 hours 5 minutes 6seconds'::interval);
-    hll_hash_any     
----------------------
- 1647734813508782007
+     hll_hash_any     
+----------------------
+ -6151755571924088519
 (1 row)
 
 SELECT hll_hash_any('P1Y2M3DT4H5M6S'::interval);
-    hll_hash_any     
----------------------
- 1647734813508782007
+     hll_hash_any     
+----------------------
+ -6151755571924088519
 (1 row)
 
 SELECT hll_hash_any('1997-06 20 12:00:00'::interval);
-    hll_hash_any     
----------------------
- 3706410791461549552
+     hll_hash_any     
+----------------------
+ -4555030409709248882
 (1 row)
 
 SELECT hll_hash_any('P1997-06-20T12:00:00'::interval);
-    hll_hash_any     
----------------------
- 3706410791461549552
+     hll_hash_any     
+----------------------
+ -4555030409709248882
 (1 row)
 
 -- test negative seed value
 SELECT hll_hash_any(1,-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_any
 SELECT hll_hash_smallint(1,-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_smallint
 SELECT hll_hash_bigint(1,-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_bigint
 SELECT hll_hash_integer(1,-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_integer
 SELECT hll_hash_boolean(FALSE,-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_boolean
 SELECT hll_hash_bytea(E'\\x',-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_bytea
 SELECT hll_hash_text('AB',-1);
-ERROR:  negative seed values not compatible
+ERROR:  negative seed value is invalid
 CONTEXT:  referenced column: hll_hash_text
 -- final cleaning up
 drop schema hll_hash cascade;

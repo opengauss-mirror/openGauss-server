@@ -202,6 +202,14 @@ extern THR_LOCAL bool OnlySelectFromPlanTable;
 extern THR_LOCAL bool OnlyDeleteFromPlanTable;
 extern THR_LOCAL bool PTFastQueryShippingStore;
 extern THR_LOCAL bool IsExplainPlanStmt;
+
+#define AFTER_EXPLAIN_APPLY_SET_HINT() \
+    /* Set PTFastQueryShippingStore in case of changed enable_fast_query_shipping */                \
+    bool savedPTFastQueryShippingStore = PTFastQueryShippingStore;                                  \
+    PTFastQueryShippingStore = u_sess->attr.attr_sql.enable_fast_query_shipping;                    
+
+#define AFTER_EXPLAIN_RECOVER_SET_HINT() \
+    PTFastQueryShippingStore = savedPTFastQueryShippingStore;
 /* --------------------------end--------------------------- */
 
 typedef int (*SortCompareFunc)(const MultiInfo* arg1, const MultiInfo* arg2, CompareInfo* ssup);

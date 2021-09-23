@@ -47,6 +47,7 @@
 #define MAX_THREAD_POOL_SIZE 4096
 #define MAX_STREAM_POOL_SIZE 16384
 #define MAX_THREAD_POOL_GROUPS 64
+#define CHAR_SIZE 512
 
 extern ThreadPoolControler* g_threadPoolControler;
 

@@ -61,6 +61,23 @@ void PageInit(Page page, Size pageSize, Size specialSize, bool isHeap)
     }
 }
 
+void SegPageInit(Page page, Size pageSize)
+{
+    PageHeader p = (PageHeader)page;
+
+    Assert(pageSize == BLCKSZ);
+
+    /* Make sure all fields of page are zero, as well as unused space */
+    errno_t ret = memset_s(p, pageSize, 0, pageSize);
+    securec_check(ret, "", "");
+
+    p->pd_upper = pageSize;
+    p->pd_special = pageSize;
+
+    p->pd_lower = SizeOfPageHeaderData;
+    PageSetPageSizeAndVersion(page, pageSize, PG_SEGMENT_PAGE_LAYOUT_VERSION);
+}
+
 void PageReinitWithDict(Page page, Size dictSize)
 {
     HeapPageHeader pd;

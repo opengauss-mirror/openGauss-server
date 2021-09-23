@@ -39,11 +39,13 @@
 #include "access/relscan.h"
 #include "access/tableam.h"
 #include "access/transam.h"
-#include "executor/execdebug.h"
-#include "executor/nodeBitmapHeapscan.h"
+#include "commands/cluster.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeBitmapHeapscan.h"
 #include "pgstat.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/predicate.h"
+#include "storage/tcap.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -51,13 +53,17 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 #include "nodes/execnodes.h"
+#include "access/ustore/knl_uscan.h"
+
+#include "nodes/makefuncs.h"
+#include "optimizer/pruning.h"
 
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
 
 static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node);
 static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node);
-static void bitgetpage(TableScanDesc scan, TBMIterateResult* tbmres);
+bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres);
 static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, EState* estate);
 static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node);
 void BitmapHeapPrefetchNext(
@@ -67,6 +73,7 @@ void BitmapHeapPrefetchNext(
 typedef struct PrefetchNode {
     BlockNumber blockNum;
     Oid partOid;
+    int2 bktId;
 } PrefetchNode;
 
 void BitmapHeapFree(BitmapHeapScanState* node)
@@ -94,14 +101,146 @@ static TupleTableSlot* BitmapHbucketTblNext(BitmapHeapScanState* node)
         node->ss.ps.hbktScanSlot.currSlot = hpScan->curr_slot;
         node->ss.ps.lefttree->hbktScanSlot.currSlot = hpScan->curr_slot;
         slot = BitmapHeapTblNext(node);
+
+        /* for crossbucket index */
+        if (tbm_is_crossbucket(node->tbm)) {
+            return slot;
+        }
+
+        /* for non-crossbucket index */
         if (!TupIsNull(slot)) {
             return slot;
         }
+
         if (!hbkt_bitmapheap_scan_nextbucket(hpScan)) {
             return NULL;
         }
+
         BitmapHeapFree(node);
     }
+}
+
+bool HeapamScanBitmapNextTuple(TableScanDesc scan,
+                             TBMIterateResult *tbmres,
+                             TupleTableSlot *slot)
+{
+    HeapScanDesc hscan = (HeapScanDesc) scan;
+    OffsetNumber targoffset;
+    Page         dp;
+    ItemId       lp;
+
+    /*
+     * Out of range?  If so, nothing more to look at on this page
+     */
+    if (hscan->rs_base.rs_cindex < 0 || hscan->rs_base.rs_cindex >= hscan->rs_base.rs_ntuples)
+        return false;
+
+    /*
+     * Okay to fetch the tuple
+     */
+    targoffset = hscan->rs_base.rs_vistuples[hscan->rs_base.rs_cindex];
+    dp = (Page)BufferGetPage(hscan->rs_base.rs_cbuf);
+    lp = PageGetItemId(dp, targoffset);
+    Assert(ItemIdIsNormal(lp));
+
+    hscan->rs_ctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lp);
+    hscan->rs_ctup.t_len = ItemIdGetLength(lp);
+    hscan->rs_ctup.t_tableOid = RelationGetRelid(hscan->rs_base.rs_rd);
+    hscan->rs_ctup.t_bucketId = RelationGetBktid(hscan->rs_base.rs_rd);
+    HeapTupleCopyBaseFromPage(&hscan->rs_ctup, dp);
+    ItemPointerSet(&hscan->rs_ctup.t_self, tbmres->blockno, targoffset);
+
+    pgstat_count_heap_fetch(hscan->rs_base.rs_rd);
+
+    /*
+     * Set up the result slot to point to this tuple. Note that the slot
+     * acquires a pin on the buffer.
+     */
+    (void)ExecStoreTuple(&hscan->rs_ctup, slot, hscan->rs_base.rs_cbuf, false);
+
+    hscan->rs_base.rs_cindex++;
+
+    return true;
+}
+
+static bool TableScanBitmapNextTuple(TableScanDesc scan, TBMIterateResult *tbmres, TupleTableSlot *slot)
+{
+    bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
+    if (isUstore) {
+        return UHeapScanBitmapNextTuple(scan, tbmres, slot);
+    } else {
+        return HeapamScanBitmapNextTuple(scan, tbmres, slot);
+    }
+}
+
+static bool TableScanBitmapNextBlock(TableScanDesc scan, TBMIterateResult *tbmres)
+{
+    bool isUstore = RelationIsUstoreFormat(scan->rs_rd);
+    if (isUstore) {
+        return UHeapScanBitmapNextBlock(scan, tbmres);
+    } else {
+        return heapam_scan_bitmap_next_block(scan, tbmres);
+    }
+}
+
+/*
+ * This is intended to locate the target child relation (partition or bucket).
+ * It is only applied to the underlying scan is a global index scan (GPI or GPI+CBI).
+ * 
+ * Return values: 0: success; -1: fail; 1: need to prefetch.
+ */
+static int TableScanBitmapNextTargetRel(TableScanDesc scan, BitmapHeapScanState *node)
+{
+    Assert(scan != NULL);
+    Assert(node != NULL);
+    Assert(node->tbm != NULL);
+    Assert(node->tbmres != NULL);
+
+    bool result = true;
+    TIDBitmap *tbm = node->tbm;
+    TBMIterateResult *tbmres = node->tbmres;
+    int2 bucketid = InvalidBktId;
+    bool need_reset_bucketid = false;
+
+    /* Check whether switch partition-fake-rel, use rd_rel save. */
+    if (BitmapNodeNeedSwitchPartRel(node)) { /* for global partitioned index */
+        GPISetCurrPartOid(node->gpi_scan, tbmres->partitionOid);
+        if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+            /* return 1 to indicate caller may need to call prefetch */
+            return 1;
+        }
+        scan->rs_rd = node->gpi_scan->fakePartRelation;
+        scan->rs_nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
+
+        /* 
+         * Reset the scanning bucketid to force reloading 
+         * the target bucket relation in this new partition.
+         */
+        need_reset_bucketid = true;
+    }
+
+    /*
+     * Check whether need to switch bucket, if the underlying
+     * indexscan is a cross-bucket indexscan.
+     */
+    if (tbm_is_crossbucket(tbm)) { /* for crossbucket index */
+        bucketid = tbmres->bucketid; /* set to the current iterating bucketid */
+        Assert(BUCKET_NODE_IS_VALID(bucketid));
+
+        need_reset_bucketid = (need_reset_bucketid || (scan->rs_rd->rd_node.bucketNode != bucketid));
+
+        if (need_reset_bucketid ) {
+            cbi_set_bucketid(node->cbi_scan, InvalidBktId);
+        }
+
+        if (cbi_scan_need_change_bucket(node->cbi_scan, bucketid)) {
+            cbi_set_bucketid(node->cbi_scan, bucketid);
+            result = cbi_bitmapheap_scan_nextbucket((HBktTblScanDesc)node->ss.ss_currentScanDesc, node->gpi_scan,
+                node->cbi_scan);
+        }
+    }
+
+    return (result ? 0 : -1);
 }
 
 /* ----------------------------------------------------------------
@@ -117,11 +256,11 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
     TIDBitmap* tbm = NULL;
     TBMIterator* tbmiterator = NULL;
     TBMIterateResult* tbmres = NULL;
+    HBktTblScanDesc hpscan = NULL;
 
 #ifdef USE_PREFETCH
     TBMIterator* prefetch_iterator = NULL;
 #endif
-    OffsetNumber targoffset;
     TupleTableSlot* slot = NULL;
 
     /*
@@ -129,7 +268,13 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
      */
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
-    scan = GetTableScanDesc(node->ss.ss_currentScanDesc, node->ss.ss_currentRelation);
+    if (node->ss.ss_currentRelation != NULL && RelationIsPartitionedHashBucketTable(node->ss.ss_currentRelation)) {
+        Assert(node->ss.ss_currentScanDesc != NULL);
+        hpscan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
+        scan = (TableScanDesc)hpscan->currBktScan;
+    } else {
+        scan = GetTableScanDesc(node->ss.ss_currentScanDesc, node->ss.ss_currentRelation);
+    }
     tbm = node->tbm;
     tbmiterator = node->tbmiterator;
     tbmres = node->tbmres;
@@ -173,10 +318,17 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
 #endif
     }
 
-    for (;;) {
-        Page dp;
-        ItemId lp;
+    /*
+     * Now tbm is not NULL, we have enough information to
+     * determine whether need to assign hpscan. Also need
+     * to make sure we are not scanning a virtual hashbucket
+     * table.
+     */
+    if (hpscan == NULL && tbm_is_crossbucket(tbm) && RELATION_OWN_BUCKET(node->ss.ss_currentScanDesc->rs_rd)) {
+        hpscan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
+    }
 
+    for (;;) {
         /*
          * Get next page of results if needed
          */
@@ -204,52 +356,39 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
             }
 #endif /* USE_PREFETCH */
 
-            /* Check whether switch partition-fake-rel, use rd_rel save */
-            if (BitmapNodeNeedSwitchPartRel(node)) {
-                GPISetCurrPartOid(node->gpi_scan, node->tbmres->partitionOid);
-                if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
-                    /* If the current partition is invalid, the next page is directly processed */
-                    tbmres = NULL;
+            int rc = TableScanBitmapNextTargetRel(scan, node);
+            if (rc != 0) {
+                /* 
+                 * If the current partition is invalid,
+                 * the next page is directly processed.
+                 */
+                tbmres = NULL;
 #ifdef USE_PREFETCH
+                if (rc == 1) {
                     BitmapHeapPrefetchNext(node, scan, tbm, &prefetch_iterator);
-#endif /* USE_PREFETCH */
-                    continue;
                 }
-                scan->rs_rd = node->gpi_scan->fakePartRelation;
-                scan->rs_nblocks = RelationGetNumberOfBlocks(scan->rs_rd);
+#endif /* USE_PREFETCH */
+                continue;
+            }
+
+            /* update bucket scan */
+            if (hpscan != NULL && scan != hpscan->currBktScan) {
+                scan = hpscan->currBktScan;
             }
 
             /*
-             * Ignore any claimed entries past what we think is the end of the
-             * relation.  (This is probably not necessary given that we got at
-             * least AccessShareLock on the table before performing any of the
-             * indexscans, but let's be safe.)
+             * Fetch the current table page and identify candidate tuples.
              */
-            if (tbmres->blockno >= scan->rs_nblocks) {
+            if (!TableScanBitmapNextBlock(scan, tbmres)) {
                 node->tbmres = tbmres = NULL;
                 continue;
             }
 
-            /*
-             * Fetch the current heap page and identify candidate tuples.
-             */
-            bitgetpage(scan, tbmres);
-
-            /* In single mode and hot standby, we may get a null buffer if index
-             * replayed before the tid replayed. This is acceptable, so we skip
-             * directly without reporting error.
-             */
-#ifndef ENABLE_MULTIPLE_NODES
-            if (!BufferIsValid(scan->rs_cbuf)) {
-                node->tbmres = tbmres = NULL;
-                continue;
+            if (tbmres->ntuples >= 0) {
+                node->exact_pages++;
+            } else {
+                node->lossy_pages++;
             }
-#endif
-
-            /*
-             * Set rs_cindex to first slot to examine
-             */
-            scan->rs_cindex = 0;
 
 #ifdef USE_PREFETCH
 
@@ -270,9 +409,8 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
 #endif /* USE_PREFETCH */
         } else {
             /*
-             * Continuing in previously obtained page; advance rs_cindex
+             * Continuing in previously obtained page.
              */
-            scan->rs_cindex++;
 
 #ifdef USE_PREFETCH
 
@@ -285,40 +423,18 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
 #endif /* USE_PREFETCH */
         }
 
-        /*
-         * Out of range?  If so, nothing more to look at on this page
-         */
-        if (scan->rs_cindex < 0 || scan->rs_cindex >= scan->rs_ntuples) {
-            node->tbmres = tbmres = NULL;
-            continue;
-        }
-
 #ifdef USE_PREFETCH
         BitmapHeapPrefetchNext(node, scan, tbm, &prefetch_iterator);
 #endif /* USE_PREFETCH */
 
         /*
-         * Okay to fetch the tuple
+         * Attempt to fetch tuple from AM.
          */
-        targoffset = scan->rs_vistuples[scan->rs_cindex];
-        dp = (Page)BufferGetPage(scan->rs_cbuf);
-        lp = PageGetItemId(dp, targoffset);
-        Assert(ItemIdIsNormal(lp));
-
-        ((HeapScanDesc)scan)->rs_ctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lp);
-        ((HeapScanDesc)scan)->rs_ctup.t_len = ItemIdGetLength(lp);
-        ((HeapScanDesc)scan)->rs_ctup.t_tableOid = RelationGetRelid(scan->rs_rd);
-        ((HeapScanDesc)scan)->rs_ctup.t_bucketId = RelationGetBktid(scan->rs_rd);
-        HeapTupleCopyBaseFromPage(&((HeapScanDesc)scan)->rs_ctup, dp);
-        ItemPointerSet(&((HeapScanDesc)scan)->rs_ctup.t_self, tbmres->blockno, targoffset);
-
-        pgstat_count_heap_fetch(scan->rs_rd);
-
-        /*
-         * Set up the result slot to point to this tuple. Note that the slot
-         * acquires a pin on the buffer.
-         */
-        (void)ExecStoreTuple(&((HeapScanDesc)scan)->rs_ctup, slot, scan->rs_cbuf, false);
+        if (!TableScanBitmapNextTuple(scan, tbmres, slot)) {
+            /* nothing more to look at on this page */
+            node->tbmres = tbmres = NULL;
+            continue;
+        }
 
         /*
          * If we are using lossy info, we have to recheck the qual conditions
@@ -353,39 +469,52 @@ static TupleTableSlot* BitmapHeapTblNext(BitmapHeapScanState* node)
  * builds an array indicating which tuples on the page are both potentially
  * interesting according to the bitmap, and visible according to the snapshot.
  */
-static void bitgetpage(TableScanDesc scan, TBMIterateResult* tbmres)
+bool heapam_scan_bitmap_next_block(TableScanDesc scan, TBMIterateResult* tbmres)
 {
+    HeapScanDesc hscan = (HeapScanDesc) scan;
     BlockNumber page = tbmres->blockno;
     Buffer buffer;
     Snapshot snapshot;
     int ntup;
 
+    hscan->rs_base.rs_cindex = 0;
+    hscan->rs_base.rs_ntuples = 0;
+
+    /*
+     * Ignore any claimed entries past what we think is the end of the
+     * relation. It may have been extended after the start of our scan (we
+     * only hold an AccessShareLock, and it could be inserts from this
+     * backend).
+     */
+    if (page >= hscan->rs_base.rs_nblocks)
+        return false;
+
     /*
      * Acquire pin on the target heap page, trading in any pin we held before.
      */
-    Assert(page < scan->rs_nblocks);
 
-    scan->rs_cbuf = ReleaseAndReadBuffer(scan->rs_cbuf, scan->rs_rd, page);
+    hscan->rs_base.rs_cbuf = ReleaseAndReadBuffer(hscan->rs_base.rs_cbuf, hscan->rs_base.rs_rd, page);
 
     /* In single mode and hot standby, we may get a null buffer if index
      * replayed before the tid replayed. This is acceptable, so we return
      * directly without reporting error.
      */
 #ifndef ENABLE_MULTIPLE_NODES
-    if (!BufferIsValid(scan->rs_cbuf)) {
-        return;
+    if (!BufferIsValid(hscan->rs_base.rs_cbuf)) {
+        return false;
     }
 #endif
 
-    buffer = scan->rs_cbuf;
-    snapshot = scan->rs_snapshot;
+    hscan->rs_base.rs_cblock = page;
+    buffer = hscan->rs_base.rs_cbuf;
+    snapshot = hscan->rs_base.rs_snapshot;
 
     ntup = 0;
 
     /*
      * Prune and repair fragmentation for the whole page, if possible.
      */
-    heap_page_prune_opt(scan->rs_rd, buffer);
+    heap_page_prune_opt(hscan->rs_base.rs_rd, buffer);
 
     /*
      * We must hold share lock on the buffer content while examining tuple
@@ -411,8 +540,8 @@ static void bitgetpage(TableScanDesc scan, TBMIterateResult* tbmres)
             HeapTupleData heapTuple;
 
             ItemPointerSet(&tid, page, offnum);
-            if (heap_hot_search_buffer(&tid, scan->rs_rd, buffer, snapshot, &heapTuple, NULL, NULL, true))
-                scan->rs_vistuples[ntup++] = ItemPointerGetOffsetNumber(&tid);
+            if (heap_hot_search_buffer(&tid, hscan->rs_base.rs_rd, buffer, snapshot, &heapTuple, NULL, NULL, true))
+                hscan->rs_base.rs_vistuples[ntup++] = ItemPointerGetOffsetNumber(&tid);
         }
     } else {
         /*
@@ -433,24 +562,26 @@ static void bitgetpage(TableScanDesc scan, TBMIterateResult* tbmres)
                 continue;
             loctup.t_data = (HeapTupleHeader)PageGetItem((Page)dp, lp);
             loctup.t_len = ItemIdGetLength(lp);
-            loctup.t_tableOid = RelationGetRelid(scan->rs_rd);
-            loctup.t_bucketId = RelationGetBktid(scan->rs_rd);
-            HeapTupleCopyBaseFromPage(&((HeapScanDesc)scan)->rs_ctup, dp);
+            loctup.t_tableOid = RelationGetRelid(hscan->rs_base.rs_rd);
+            loctup.t_bucketId = RelationGetBktid(hscan->rs_base.rs_rd);
+            HeapTupleCopyBaseFromPage(&hscan->rs_ctup, dp);
             HeapTupleCopyBaseFromPage(&loctup, dp);
             ItemPointerSet(&loctup.t_self, page, offnum);
             valid = HeapTupleSatisfiesVisibility(&loctup, snapshot, buffer);
             if (valid) {
-                scan->rs_vistuples[ntup++] = offnum;
-                PredicateLockTuple(scan->rs_rd, &loctup, snapshot);
+                hscan->rs_base.rs_vistuples[ntup++] = offnum;
+                PredicateLockTuple(hscan->rs_base.rs_rd, &loctup, snapshot);
             }
-            CheckForSerializableConflictOut(valid, scan->rs_rd, &loctup, buffer, snapshot);
+            CheckForSerializableConflictOut(valid, hscan->rs_base.rs_rd, (void *) &loctup, buffer, snapshot);
         }
     }
 
     LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 
     Assert(ntup <= MaxHeapTuplesPerPage);
-    scan->rs_ntuples = ntup;
+    hscan->rs_base.rs_ntuples = ntup;
+
+    return ntup > 0;
 }
 
 /*
@@ -499,13 +630,13 @@ void ExecReScanBitmapHeapScan(BitmapHeapScanState* node)
          * if there are partitions for scaning, switch to the next partition;
          * else return with doing nothing
          */
-        scan_handler_tbl_endscan(node->ss.ss_currentScanDesc, node->ss.ss_currentRelation);
+        scan_handler_tbl_endscan(node->ss.ss_currentScanDesc);
 
         /* switch to next partition for scan */
         ExecInitNextPartitionForBitmapHeapScan(node);
-        } else {
+    } else {
         /* rescan to release any page pin */
-        scan_handler_tbl_rescan(node->ss.ss_currentScanDesc, NULL, node->ss.ss_currentRelation);
+        scan_handler_tbl_rescan(node->ss.ss_currentScanDesc, NULL, node->ss.ss_currentRelation, true);
     }
 
     /* rescan to release any page pin */
@@ -555,11 +686,15 @@ void ExecEndBitmapHeapScan(BitmapHeapScanState* node)
      */
     BitmapHeapFree(node);
     if (node->ss.ss_currentScanDesc != NULL) {
-        scan_handler_tbl_endscan(node->ss.ss_currentScanDesc, relation);
+        scan_handler_tbl_endscan(node->ss.ss_currentScanDesc);
     }
 
     if (node->gpi_scan != NULL) {
         GPIScanEnd(node->gpi_scan);
+    }
+
+    if (node->cbi_scan != NULL) {
+        cbi_scan_end(node->cbi_scan);
     }
 
     /* close heap scan */
@@ -587,6 +722,9 @@ static inline void InitBitmapHeapScanNextMtd(BitmapHeapScanState* bmstate)
     bmstate->ss.ScanNextMtd = (ExecScanAccessMtd)BitmapHeapTblNext;
 }
 
+TableScanDesc UHeapBeginScan(Relation relation, Snapshot snapshot, int nkeys);
+
+
 /* ----------------------------------------------------------------
  *		ExecInitBitmapHeapScan
  *
@@ -597,6 +735,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
 {
     BitmapHeapScanState* scanstate = NULL;
     Relation currentRelation;
+    bool isUstoreRel = false;
+    Snapshot scanSnap;
 
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -617,6 +757,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->tbm = NULL;
     scanstate->tbmiterator = NULL;
     scanstate->tbmres = NULL;
+    scanstate->exact_pages = 0.0;
+    scanstate->lossy_pages = 0.0;
     scanstate->prefetch_iterator = NULL;
     scanstate->prefetch_pages = 0;
     scanstate->prefetch_target = 0;
@@ -624,8 +766,11 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->ss.currentSlot = 0;
     scanstate->ss.partScanDirection = node->scan.partScanDirection;
 
-    /* initilize Global partition index scan information */
+    /* initialize Global partition index scan information */
     GPIScanInit(&scanstate->gpi_scan);
+
+    /* initialize cross-bucket index scan information */
+    cbi_scan_init(&scanstate->cbi_scan);
 
     /*
      * Miscellaneous initialization
@@ -643,8 +788,6 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->ss.ps.qual = (List*)ExecInitExpr((Expr*)node->scan.plan.qual, (PlanState*)scanstate);
     scanstate->bitmapqualorig = (List*)ExecInitExpr((Expr*)node->bitmapqualorig, (PlanState*)scanstate);
 
-
-
     /*
      * open the base relation and acquire appropriate lock on it.
      */
@@ -653,12 +796,22 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
     scanstate->ss.ss_currentRelation = currentRelation;
     scanstate->gpi_scan->parentRelation = currentRelation;
 
+    isUstoreRel = RelationIsUstoreFormat(currentRelation);
+
     /*
      * tuple table initialization
      */
     ExecInitResultTupleSlot(estate, &scanstate->ss.ps, currentRelation->rd_tam_type);
     ExecInitScanTupleSlot(estate, &scanstate->ss, currentRelation->rd_tam_type);
+
     InitBitmapHeapScanNextMtd(scanstate);
+
+    /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(currentRelation, &node->scan, &scanstate->ss);
+
     /*
      * Even though we aren't going to do a conventional seqscan, it is useful
      * to create a HeapScanDesc --- most of the fields in it are usable.
@@ -676,13 +829,48 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
                 partition = (Partition)list_nth(scanstate->ss.partitions, 0);
                 partitiontrel = partitionGetRelation(currentRelation, partition);
                 scanstate->ss.ss_currentPartition = partitiontrel;
+
+                /*
+                 * Verify if a DDL operation that froze all tuples in the relation
+                 * occured after taking the snapshot. Skip for explain only commands.
+                 */
+                if (isUstoreRel && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+                    TransactionId relfrozenxid64 = getPartitionRelfrozenxid(partitiontrel);
+                    if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                        !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                        TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_SNAPSHOT_INVALID),
+                                 (errmsg("Snapshot too old."))));
+                    }
+                }
+
                 scanstate->ss.ss_currentScanDesc =
-                    scan_handler_tbl_beginscan_bm(partitiontrel, estate->es_snapshot, 0, NULL, &scanstate->ss);
+                    scan_handler_tbl_beginscan_bm(partitiontrel, scanSnap, 0, NULL, &scanstate->ss);
             }
         }
     } else {
-        scanstate->ss.ss_currentScanDesc =
-           scan_handler_tbl_beginscan_bm(currentRelation, estate->es_snapshot, 0, NULL, &scanstate->ss);
+        if (!isUstoreRel) {
+            scanstate->ss.ss_currentScanDesc =
+                scan_handler_tbl_beginscan_bm(currentRelation, scanSnap, 0, NULL, &scanstate->ss);
+        } else {
+            /*
+             * Verify if a DDL operation that froze all tuples in the relation
+             * occured after taking the snapshot. Skip for explain only commands.
+             */
+            if (!(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+                TransactionId relfrozenxid64 = getRelationRelfrozenxid(currentRelation);
+                if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                    !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                    TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_SNAPSHOT_INVALID),
+                             (errmsg("Snapshot too old."))));
+                }
+            }
+
+            scanstate->ss.ss_currentScanDesc = UHeapBeginScan(currentRelation, scanSnap, 0);
+        }
     }
     if (scanstate->ss.ss_currentScanDesc == NULL) {
         scanstate->ss.ps.stubType = PST_Scan;
@@ -786,17 +974,19 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
         PruningResult* resultPlan = NULL;
         if (plan->scan.pruningInfo->expr) {
             resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, currentRelation);
-            if (estate->pruningResult) {
-                destroyPruningResult(estate->pruningResult);
+            if (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+                if (estate->pruningResult) {
+                    destroyPruningResult(estate->pruningResult);
+                }
+                estate->pruningResult = resultPlan;
             }
-            estate->pruningResult = resultPlan;
         } else {
             resultPlan = plan->scan.pruningInfo;
         }
         if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-            scanstate->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            scanstate->ss.part_id = resultPlan->ls_rangeSelectedPartitions->length;
         } else {
-            scanstate->part_id = 0;
+            scanstate->ss.part_id = 0;
         }
 
         ListCell* cell = NULL;
@@ -816,36 +1006,198 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
     }
 }
 
+static Relation BitmapHeapPrefetchTargetRel(BitmapHeapScanState* node, Oid partoid, bool partmatched,
+    int2 bucketid, bool bktmatched)
+{
+    Relation targetheap = NULL;
+    HBktTblScanDesc hpscan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
+    bool partchanged = false;
+    bool bktchanged = false;
+    bool isgpi = OidIsValid(partoid);
+    bool iscbi = BUCKET_NODE_IS_VALID(bucketid);
+
+    if (isgpi && !partmatched) {
+        GPISetCurrPartOid(node->gpi_scan, partoid);
+        partchanged = GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock);
+        targetheap = node->gpi_scan->fakePartRelation;
+    }
+
+    if (iscbi) {
+        if (partchanged) {
+            cbi_set_bucketid(node->cbi_scan, InvalidBktId);
+        } else if (!bktmatched) {
+            cbi_set_bucketid(node->cbi_scan, bucketid);
+        }
+
+        targetheap = cbi_bitmapheap_scan_getbucket(hpscan, node->gpi_scan, node->cbi_scan, bucketid);
+        bktchanged = (targetheap != hpscan->currBktRel);
+    }
+
+    if (!partchanged && !bktchanged) {
+        return NULL;
+    }
+
+    return targetheap;
+}
+
 /* First sort by partition oid, then call PageListPrefetch to get the pages under each partition */
-void BitmapHeapPrefetchWithGpi(
-    BitmapHeapScanState* node, int prefetchNow, PrefetchNode* prefetchNode, BlockNumber* blockList)
+void BitmapHeapPrefetchWithCrossLevelIndex(BitmapHeapScanState* node, int prefetchNow, PrefetchNode* prefetchNode,
+    BlockNumber* blockList)
 {
     /*
      * we must save part Oid before switch relation, and recover it after prefetch.
      * The reason for this is to assure correctness while getting a new tbmres.
      */
+    HBktTblScanDesc hpscan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
     Oid originOid = GPIGetCurrPartOid(node->gpi_scan);
+    int2 originBktId = cbi_get_current_bucketid(node->cbi_scan);
     int blkCount = 0;
     Oid prevOid = prefetchNode[0].partOid;
+    int2 prevBktId = prefetchNode[0].bktId;
+    bool isgpi = OidIsValid(prevOid);
+    bool iscbi = BUCKET_NODE_IS_VALID(prevBktId);
+    bool partmatched, bktmatched;
+    Relation targetheap = NULL;
+
     for (int i = 0; i < prefetchNow; i++) {
-        if (prefetchNode[i].partOid == prevOid) {
-            blockList[blkCount++] = prefetchNode[i].blockNum;
-        } else {
-            GPISetCurrPartOid(node->gpi_scan, prevOid);
-            if (GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
-                PageListPrefetch(node->gpi_scan->fakePartRelation, MAIN_FORKNUM, blockList, blkCount, 0, 0);
-            }
+        partmatched = bktmatched = false;
+
+        if (isgpi && prefetchNode[i].partOid == prevOid) {
+            partmatched = true;
+        }
+        if (iscbi && prefetchNode[i].bktId == prevBktId) {
+            bktmatched = true;
+        }
+
+        targetheap = BitmapHeapPrefetchTargetRel(node, prevOid, partmatched, prevBktId, bktmatched);
+        if (RelationIsValid(targetheap)) {
+            PageListPrefetch(targetheap, MAIN_FORKNUM, blockList, blkCount, 0, 0);
+        }
+
+        if (isgpi && !partmatched) {
             blkCount = 0;
             prevOid = prefetchNode[i].partOid;
-            blockList[blkCount++] = prefetchNode[i].blockNum;
+        }
+        if (iscbi && !bktmatched) {
+            blkCount = 0;
+            prevBktId = prefetchNode[i].bktId;
+
+            if (RelationIsValid(targetheap) && targetheap != hpscan->currBktRel) {
+                bucketCloseRelation(targetheap);
+            }
+        }
+
+        blockList[blkCount++] = prefetchNode[i].blockNum;
+    }
+
+    targetheap = BitmapHeapPrefetchTargetRel(node, prevOid, false, prevBktId, false);
+    if (RelationIsValid(targetheap)) {
+        PageListPrefetch(targetheap, MAIN_FORKNUM, blockList, blkCount, 0, 0);
+        if (targetheap != hpscan->currBktRel) {
+            bucketCloseRelation(targetheap);
         }
     }
-    GPISetCurrPartOid(node->gpi_scan, prevOid);
-    if (GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
-        PageListPrefetch(node->gpi_scan->fakePartRelation, MAIN_FORKNUM, blockList, blkCount, 0, 0);
-    }
+
     /* recover old oid after prefetch switch */
     GPISetCurrPartOid(node->gpi_scan, originOid);
+    cbi_set_bucketid(node->cbi_scan, originBktId);
+}
+
+Relation BitmapHeapPrefetchNextTargetHeap(BitmapHeapScanState* node, TBMIterateResult* tbmpre, Relation curr_targetheap)
+{
+    bool need_reset_bucketid = false;
+    Relation targetheap = NULL;
+    Relation next_targetheap = curr_targetheap;
+
+    if (tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, tbmpre->partitionOid)) {
+        GPISetCurrPartOid(node->gpi_scan, tbmpre->partitionOid);
+        if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+            /* If the current partition is invalid, the next page is directly processed */
+            return NULL;
+        }
+
+        next_targetheap = node->gpi_scan->fakePartRelation;
+        need_reset_bucketid = true;
+    }
+
+    if (tbm_is_crossbucket(node->tbm)) { /* for crossbucket index */
+        HBktTblScanDesc hpscan = (HBktTblScanDesc)node->ss.ss_currentScanDesc;
+        int2 bucketid = tbmpre->bucketid; /* set to the current iterating bucketid */
+        Assert(BUCKET_NODE_IS_VALID(bucketid));
+
+        if (need_reset_bucketid) {
+            cbi_set_bucketid(node->cbi_scan, InvalidBktId);
+        }
+
+        targetheap = cbi_bitmapheap_scan_getbucket(hpscan, node->gpi_scan, node->cbi_scan, bucketid);
+        if (targetheap == NULL) {
+            return NULL;
+        }
+
+        /* update target relation to prefetch */
+        next_targetheap = targetheap;
+    }
+
+    return next_targetheap;
+}
+
+void BitmapHeapPrefetchNextAsync(BitmapHeapScanState* node, TableScanDesc scan, const TIDBitmap* tbm,
+    TBMIterator** prefetch_iterator)
+{
+    BlockNumber* blockList = NULL;
+    BlockNumber* blockListPtr = NULL;
+    PrefetchNode* prefetchNode = NULL;
+    PrefetchNode* prefetchNodePtr = NULL;
+    int prefetchNow = 0;
+    int prefetchWindow = node->prefetch_target - node->prefetch_pages;
+
+    /* We expect to prefetch at most prefetchWindow pages */
+    if (prefetchWindow > 0) {
+        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
+            prefetchNode = (PrefetchNode*)malloc(sizeof(PrefetchNode) * prefetchWindow);
+            prefetchNodePtr = prefetchNode;
+        }
+        blockList = (BlockNumber*)palloc(sizeof(BlockNumber) * prefetchWindow);
+        blockListPtr = blockList;
+    }
+    while (node->prefetch_pages < node->prefetch_target) {
+        TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
+
+        if (tbmpre == NULL) {
+            /* No more pages to prefetch */
+            tbm_end_iterate(*prefetch_iterator);
+            node->prefetch_iterator = *prefetch_iterator = NULL;
+            break;
+        }
+        node->prefetch_pages++;
+        /* we use PrefetchNode here to store relations between blockno and partition Oid */
+        if ((tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) && prefetchNodePtr != NULL) {
+            prefetchNodePtr->blockNum = tbmpre->blockno;
+            prefetchNodePtr->partOid = tbmpre->partitionOid;
+            prefetchNodePtr->bktId = tbmpre->bucketid;
+            prefetchNodePtr++;
+        }
+        /* For Async Direct I/O we accumulate a list and send it */
+        if (blockListPtr != NULL) {
+            *blockListPtr++ = tbmpre->blockno;
+        }
+        prefetchNow++;
+    }
+
+    /* Send the list we generated and free it */
+    if (prefetchNow && blockList != NULL) {
+        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
+            BitmapHeapPrefetchWithCrossLevelIndex(node, prefetchNow, prefetchNode, blockList);
+        } else {
+            PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
+        }
+    }
+    if (prefetchWindow > 0) {
+        pfree_ext(blockList);
+        if (tbm_is_global(tbm) || tbm_is_crossbucket(tbm)) {
+            pfree_ext(prefetchNode);
+        }
+    }
 }
 
 /*
@@ -861,68 +1213,27 @@ void BitmapHeapPrefetchNext(
     if (*prefetch_iterator == NULL) {
         return;
     }
+
+    Assert(node->tbm == tbm);
+
     ADIO_RUN()
     {
-        BlockNumber* blockList = NULL;
-        BlockNumber* blockListPtr = NULL;
-        PrefetchNode* prefetchNode = NULL;
-        PrefetchNode* prefetchNodePtr = NULL;
-        int prefetchNow = 0;
-        int prefetchWindow = node->prefetch_target - node->prefetch_pages;
-
-        /* We expect to prefetch at most prefetchWindow pages */
-        if (prefetchWindow > 0) {
-            if (tbm_is_global(tbm)) {
-                prefetchNode = (PrefetchNode*)malloc(sizeof(PrefetchNode) * prefetchWindow);
-                prefetchNodePtr = prefetchNode;
-            }
-            blockList = (BlockNumber*)palloc(sizeof(BlockNumber) * prefetchWindow);
-            blockListPtr = blockList;
-        }
-        while (node->prefetch_pages < node->prefetch_target) {
-            TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
-
-            if (tbmpre == NULL) {
-                /* No more pages to prefetch */
-                tbm_end_iterate(*prefetch_iterator);
-                node->prefetch_iterator = *prefetch_iterator = NULL;
-                break;
-            }
-            node->prefetch_pages++;
-            /* we use PrefetchNode here to store relations between blockno and partition Oid */
-            if (tbm_is_global(tbm) && prefetchNodePtr != NULL) {
-                prefetchNodePtr->blockNum = tbmpre->blockno;
-                prefetchNodePtr->partOid = tbmpre->partitionOid;
-                prefetchNodePtr++;
-            }
-            /* For Async Direct I/O we accumulate a list and send it */
-            if (blockListPtr != NULL) {
-                *blockListPtr++ = tbmpre->blockno;
-            }
-            prefetchNow++;
-        }
-
-        /* Send the list we generated and free it */
-        if (prefetchNow && blockList != NULL) {
-            if (tbm_is_global(tbm)) {
-                BitmapHeapPrefetchWithGpi(node, prefetchNow, prefetchNode, blockList);
-            } else {
-                PageListPrefetch(scan->rs_rd, MAIN_FORKNUM, blockList, prefetchNow, 0, 0);
-            }
-        }
-        if (prefetchWindow > 0) {
-            pfree_ext(blockList);
-            if (tbm_is_global(tbm)) {
-                pfree_ext(prefetchNode);
-            }
-        }
+        /* prefetch next asynchronously */
+        BitmapHeapPrefetchNextAsync(node, scan, tbm, prefetch_iterator);
     }
     ADIO_ELSE()
     {
+        /* prefetch next synchronously */
+        HBktTblScanDesc hpscan = NULL;
         Oid oldOid = GPIGetCurrPartOid(node->gpi_scan);
+        int2 oldBktId = cbi_get_current_bucketid(node->cbi_scan);
+        Relation oldheap = NULL;
+        
         while (node->prefetch_pages < node->prefetch_target) {
             TBMIterateResult* tbmpre = tbm_iterate(*prefetch_iterator);
             Relation prefetchRel = scan->rs_rd;
+            hpscan = (tbm_is_crossbucket(node->tbm) ? (HBktTblScanDesc)node->ss.ss_currentScanDesc : NULL);
+
             if (tbmpre == NULL) {
                 /* No more pages to prefetch */
                 tbm_end_iterate(*prefetch_iterator);
@@ -930,20 +1241,32 @@ void BitmapHeapPrefetchNext(
                 break;
             }
             node->prefetch_pages++;
-            if (tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, tbmpre->partitionOid)) {
-                GPISetCurrPartOid(node->gpi_scan, tbmpre->partitionOid);
-                if (!GPIGetNextPartRelation(node->gpi_scan, CurrentMemoryContext, AccessShareLock)) {
-                    /* If the current partition is invalid, the next page is directly processed */
-                    tbmpre = NULL;
-                    continue;
-                }
-                prefetchRel = node->gpi_scan->fakePartRelation;
+
+            prefetchRel = BitmapHeapPrefetchNextTargetHeap(node, tbmpre, prefetchRel);
+            if (prefetchRel == NULL) {
+                tbmpre = NULL;
+                continue;
             }
+
             /* For posix_fadvise() we just send the one request */
             PrefetchBuffer(prefetchRel, MAIN_FORKNUM, tbmpre->blockno);
+            if (RelationIsValid(oldheap) && oldheap != prefetchRel && PointerIsValid(hpscan) &&
+                oldheap != hpscan->currBktRel) {
+                /* release previous bucket fake relation except the current scanning one */
+                bucketCloseRelation(oldheap);
+                /* now oldheap is NULL */
+            }
+            oldheap = prefetchRel;
         }
+
+        if (RelationIsValid(oldheap) && PointerIsValid(hpscan) && oldheap != hpscan->currBktRel) {
+            /* release previous bucket fake relation except the current scanning one */
+            bucketCloseRelation(oldheap);
+        }
+
         /* recover old oid after prefetch switch */
         GPISetCurrPartOid(node->gpi_scan, oldOid);
+        cbi_set_bucketid(node->cbi_scan, oldBktId);
     }
     ADIO_END();
 }

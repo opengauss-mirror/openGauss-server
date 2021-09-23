@@ -35,7 +35,7 @@
 #include "utils/memutils.h"
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecexecutor.h"
-#include "executor/nodeForeignscan.h"
+#include "executor/node/nodeForeignscan.h"
 
 static VectorBatch* VecForeignNext(VecForeignScanState* node);
 static bool VecForeignRecheck(ForeignScanState* node, VectorBatch* batch);

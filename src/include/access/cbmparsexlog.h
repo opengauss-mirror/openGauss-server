@@ -31,7 +31,7 @@
 #include "port/pg_crc32c.h"
 #include "securec_check.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/hsearch.h"
 
 /* Struct for single bitmap file information */

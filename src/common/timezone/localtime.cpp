@@ -1402,3 +1402,8 @@ bool pg_tz_acceptable(pg_tz* tz)
 
     return true;
 }
+
+struct pg_tm* pg_localtime_s(const pg_time_t* timep, struct pg_tm* tmp, const pg_tz* tz)
+{
+    return localsub(timep, 0L, tmp, tz);
+}

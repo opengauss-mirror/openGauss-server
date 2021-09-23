@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * planner.cpp
- *	  The query optimizer external interface.
+ * The query optimizer external interface.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -27,8 +27,8 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/pgxc_node.h"
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/node/nodeAgg.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "gaussdb_version.h"
 #include "knl/knl_instance.h"
 #include "miscadmin.h"
@@ -85,6 +85,7 @@
 #include "tsdb/optimizer/planner.h"
 #endif
 #include "optimizer/stream_remove.h"
+#include "executor/node/nodeModifyTable.h"
 
 #ifndef MIN
 #define MIN(A, B) ((B) < (A) ? (B) : (A))
@@ -184,13 +185,6 @@ typedef struct {
     double multiple;
 } ExprMultipleData;
 
-/* Passthrough data for standard_qp_callback */
-typedef struct {
-    List* tlist;         /* preprocessed query targetlist */
-    List* activeWindows; /* active windows, if any */
-    List* groupClause;   /* overrides parse->groupClause */
-} standard_qp_extra;
-
 typedef enum path_key { windows_func_pathkey = 0, distinct_pathkey, sort_pathkey } path_key;
 
 typedef struct {
@@ -285,10 +279,12 @@ static Path* cost_agg_do_agg(Path* subpath, PlannerInfo* root, AggStrategy agg_s
 static void get_hashagg_gather_hashagg_path(PlannerInfo* root, Plan* lefttree, const AggClauseCosts* aggcosts,
     int numGroupCols, double numGroups, double final_groups, QualCost total_cost, Size hashentrysize,
     AggStrategy agg_strategy, bool needs_stream, Path* result_path);
+#ifdef ENABLE_MULTIPLE_NODES
 static void get_redist_hashagg_gather_hashagg_path(PlannerInfo* root, Plan* lefttree, const AggClauseCosts* aggcosts,
     int numGroupCols, double numGroups, double final_groups, List* distributed_key_less_skew, double multiple_less_skew,
     Distribution* target_distribution, QualCost total_cost, Size hashentrysize, AggStrategy agg_strategy,
     bool needs_stream, Path* result_path);
+#endif
 static void get_redist_hashagg_path(PlannerInfo* root, Plan* lefttree, const AggClauseCosts* aggcosts, int numGroupCols,
     double numGroups, double final_groups, List* distributed_key, double multiple, Distribution* target_distribution,
     QualCost total_cost, Size hashentrysize, bool needs_stream, Path* result_path);
@@ -412,8 +408,11 @@ static bool queryIsReadOnly(Query* query)
                 return false;
             default: {
                 ereport(ERROR,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unrecognized commandType: %d", (int)query->commandType)));
+                    (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("Unrecognized commandType when checking read-only attribute."),
+                        errdetail("CommandType: %d", (int)query->commandType),
+                        errcause("System error."),
+                        erraction("Contact Huawei Engineer.")));
             } break;
         }
     }
@@ -440,8 +439,9 @@ static void FillPlanBucketmap(PlannedStmt *result,
 #endif
 
     result->num_bucketmaps = nodeGroupInfoContext->num_bucketmaps;
-    for (int i = 0; i < MAX_SPECIAL_BUCKETMAP_NUM; i++) {
+    for (int i = 0; i < result->num_bucketmaps; i++) {
         result->bucketMap[i] = nodeGroupInfoContext->bucketMap[i];
+        result->bucketCnt[i] = nodeGroupInfoContext->bucketCnt[i];
     }
     pfree_ext(nodeGroupInfoContext);
 
@@ -449,7 +449,30 @@ static void FillPlanBucketmap(PlannedStmt *result,
         result->bucketMap[0] = GetGlobalStreamBucketMap(result);
         if (result->bucketMap[0] != NULL) {
             result->num_bucketmaps = 1;
+            result->bucketCnt[0] = BUCKETDATALEN;
         }
+    }
+}
+
+/*
+ * @Description: disable tsstore delete sql for pgxc plan.
+ *
+ * @param[IN] query:  query info
+ * @return: void
+ */
+static void checkTsstoreQuery(Query* query)
+{
+    if (query->commandType == CMD_DELETE) {
+        RangeTblEntry *rte = rt_fetch(query->resultRelation, query->rtable);
+        Relation rel = heap_open(rte->relid, AccessShareLock);
+        if (RelationIsTsStore(rel)) {
+            ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("PGXC Plan is not supported for tsdb deleting sql"),
+                        errdetail("modify parameters enable_stream_operator or enable_fast_query_shipping"),
+                        errcause("not supported"),
+                        erraction("modify parameters enable_stream_operator or enable_fast_query_shipping")));
+        }
+        heap_close(rel, AccessShareLock);
     }
 }
 
@@ -469,6 +492,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
     bool use_tenant = false;
     List* parse_hint_warning = NIL;
 
+    //if it is pgxc plan for tsstore delete sql.errport
+    if((!u_sess->attr.attr_sql.enable_stream_operator || !u_sess->opt_cxt.is_stream) && IS_PGXC_COORDINATOR) {
+        checkTsstoreQuery(parse);
+    }
+
     /*
      * Dynamic smp
      */
@@ -485,16 +513,6 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
     if (enable_check_implicit_cast())
         find_implicit_cast_var(parse);
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (IS_STREAM) {
-        shipping_context context;
-        stream_walker_context_init(&context);
-
-        (void)stream_walker((Node*)parse, (void*)(&context));
-        disable_unshipped_log(parse, &context);
-    }
-#endif
 
     /* Initilizing the work mem used by optimizer */
     if (IS_STREAM_PLAN) {
@@ -1112,6 +1130,49 @@ void check_is_support_recursive_cte(PlannerInfo* root)
     return;
 }
 
+/*
+ * Process set hint at top level. DO NOT handle subquery.
+ * apply_set_hint and recover_set_hint should wrap around pg_plan_query
+ * Returns the guc level.
+ */
+int apply_set_hint(const Query* parse)
+{
+    HintState* hintstate = parse->hintState;
+    if (hintstate == NULL) {
+        return -1;
+    }
+    int gucNestLevel = 0;
+    int ret;
+    ListCell* lc = NULL;
+    gucNestLevel = NewGUCNestLevel();
+    foreach (lc, hintstate->set_hint) {
+        SetHint* hint = (SetHint*)lfirst(lc);
+        if (unlikely(strcmp(hint->name, "node_name") == 0)) {
+            u_sess->attr.attr_common.node_name = hint->value;
+        } else {
+            ret = set_config_option(hint->name,
+                                    hint->value,
+                                    PGC_USERSET,     /* for now set hint only support */
+                                    PGC_S_SESSION,   /* session-level userset guc     */
+                                    GUC_ACTION_SAVE, /* need to rollback later        */
+                                    true,
+                                    WARNING,
+                                    false);
+            hint->base.state = (ret == 1) ? (HINT_STATE_USED) : (HINT_STATE_ERROR);
+        }
+    }
+    return gucNestLevel;
+}
+
+void recover_set_hint(int savedNestLevel)
+{
+    if (savedNestLevel < 0) {
+        return;
+    }
+    AtEOXact_GUC(true, savedNestLevel);
+    u_sess->attr.attr_common.node_name = "";
+}
+
 /* --------------------
  * subquery_planner
  *	  Invokes the planner on a subquery.  We recurse to here for each
@@ -1147,6 +1208,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     Plan* plan = NULL;
     List* newHaving = NIL;
     bool hasOuterJoins = false;
+    bool hasResultRTEs = false;
     ListCell* l = NULL;
     StringInfoData buf;
     char RewriteContextName[NAMEDATALEN] = {0};
@@ -1259,6 +1321,12 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
         SS_process_ctes(root);
     }
 
+    /*
+     * If the FROM clause is empty, replace it with a dummy RTE_RESULT RTE, so
+     * that we don't need so many special cases to deal with that situation.
+     */
+    replace_empty_jointree(parse);
+
 #ifdef STREAMPLAN
     /*
      * Since count(distinct) conversion can push down subquery, for sake of
@@ -1316,6 +1384,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     preprocess_rownum(root, parse);
     DEBUG_QRW("After preprocess rownum");
 #endif
+
     /*
      * Check to see if any subqueries in the jointree can be merged into this
      * query.
@@ -1342,13 +1411,16 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 
     /*
      * Detect whether any rangetable entries are RTE_JOIN kind; if not, we can
-     * avoid the expense of doing flatten_join_alias_vars().  Also check for
-     * outer joins --- if none, we can skip reduce_outer_joins(). This must be
-     * done after we have done pull_up_subqueries, of course.
+     * avoid the expense of doing flatten_join_alias_vars().  Likewise check
+     * whether any are RTE_RESULT kind; if not, we can skip
+     * remove_useless_result_rtes().  Also check for outer joins --- if none,
+     * we can skip reduce_outer_joins().  And check for LATERAL RTEs, too.
+     * This must be done after we have done pull_up_subqueries(), of course.
      */
     root->hasJoinRTEs = false;
     root->hasLateralRTEs = false;
     hasOuterJoins = false;
+
     foreach (l, parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
 
@@ -1357,6 +1429,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             if (IS_OUTER_JOIN(rte->jointype)) {
                 hasOuterJoins = true;
             }
+        } else if (rte->rtekind == RTE_RESULT) {
+            hasResultRTEs = true;
         }
         if (rte->lateral)
             root->hasLateralRTEs = true;
@@ -1409,10 +1483,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     /*
      * Expand any rangetable entries that are inheritance sets into "append
      * relations".  This can add entries to the rangetable, but they must be
-     * plain base relations not joins, so it's OK (and marginally more
-     * efficient) to do it after checking for join RTEs.  We must do it after
-     * pulling up subqueries, else we'd fail to handle inherited tables in
-     * subqueries.
+     * plain RTE_RELATION entries, so it's OK (and marginally more efficient)
+     * to do it after checking for joins and other special RTEs.  We must do
+     * this after pulling up subqueries, else we'd fail to handle inherited
+     * tables in subqueries.
      */
     expand_inherited_tables(root);
 
@@ -1510,6 +1584,15 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
             if (rte->tablesample) {
                 rte->tablesample =
                     (TableSampleClause*)preprocess_expression(root, (Node*)rte->tablesample, EXPRKIND_TABLESAMPLE);
+            }
+            if (rte->timecapsule) {
+#ifndef ENABLE_MULTIPLE_NODES
+                if (IS_STREAM) {
+                    mark_stream_unsupport();
+                }
+#endif
+                rte->timecapsule =
+                    (TimeCapsuleClause*)preprocess_expression(root, (Node*)rte->timecapsule, EXPRKIND_TIMECAPSULE);
             }
         } else if (rte->rtekind == RTE_SUBQUERY) {
             /*
@@ -1651,6 +1734,14 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     }
 
     /*
+     * If we have any RTE_RESULT relations, see if they can be deleted from
+     * the jointree.  This step is most effectively done after we've done
+     * expression preprocessing and outer join reduction.
+     */
+    if (hasResultRTEs)
+        remove_useless_result_rtes(root);
+
+    /*
      * Check if need auto-analyze for current query level.
      * No need to do auto-analyze for query on one table without Groupby.
      */
@@ -1741,9 +1832,11 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
      */
     if (plan == NULL)
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                (errmsg("Fail to generate subquery plan."))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Fail to generate subquery plan."),
+                errdetail("N/A"),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
 
     if (list_length(glob->subplans) != num_old_subplans || root->glob->nParamExec > 0)
         SS_finalize_plan(root, plan, true);
@@ -1872,9 +1965,11 @@ void preprocess_qual_conditions(PlannerInfo* root, Node* jtnode)
         j->quals = preprocess_expression(root, j->quals, EXPRKIND_QUAL);
     } else {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("unrecognized node type when process qual condition: %d", (int)nodeTag(jtnode))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("Unrecognized node type when processing qual condition."),
+                errdetail("Qual condition: %d", (int)nodeTag(jtnode)),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
     }
 }
 
@@ -1924,9 +2019,11 @@ void preprocess_const_params(PlannerInfo* root, Node* jtnode)
         j->quals = preprocess_const_params_worker(root, j->quals, EXPRKIND_QUAL);
     } else {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("unrecognized node type: %d", (int)nodeTag(jtnode))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("Unrecognized node type when processing const parameters."),
+                errdetail("Qual condition: %d", (int)nodeTag(jtnode)),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
     }
 }
 
@@ -2557,9 +2654,11 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
          */
         if (parse->rowMarks)
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("SELECT FOR UPDATE/SHARE is not allowed with UNION/INTERSECT/EXCEPT"))));
+                (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("SELECT FOR UPDATE/SHARE is not allowed with UNION/INTERSECT/EXCEPT"),
+                    errdetail("N/A"),
+                    errcause("SQL uses unsupported feature."),
+                    erraction("Modify SQL statement according to the manual.")));
 
         /*
          * Calculate pathkeys that represent result ordering requirements
@@ -2594,6 +2693,8 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         Size hash_entry_size = 0;
         char PathContextName[NAMEDATALEN] = {0};
         MemoryContext PathGenerateContext = NULL;
+        RelOptInfo* final_rel = NULL;
+        standard_qp_extra qp_extra;
 
         /* Apply memory context for generate path in optimizer. */
         rc = snprintf_s(PathContextName, NAMEDATALEN, NAMEDATALEN - 1, "PathGenerateContext_%d", root->query_level);
@@ -2760,78 +2861,6 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         }
 
         /*
-         * Calculate pathkeys that represent grouping/ordering requirements.
-         * Stash them in PlannerInfo so that query_planner can canonicalize
-         * them after EquivalenceClasses have been formed.	The sortClause is
-         * certainly sort-able, but GROUP BY and DISTINCT might not be, in
-         * which case we just leave their pathkeys empty.
-         */
-
-        /* To groupingSet, we need build it's groupPathKey according to it's lower levels sort clause.*/
-        if (parse->groupingSets) {
-            List* groupcls = (List*)llast(rollup_groupclauses);
-
-            if (groupcls && grouping_is_sortable(groupcls)) {
-                root->group_pathkeys = make_pathkeys_for_sortclauses(root, groupcls, tlist, false);
-            } else {
-                root->group_pathkeys = NIL;
-            }
-        } else if (parse->groupClause && grouping_is_sortable(parse->groupClause)) {
-            root->group_pathkeys = make_pathkeys_for_sortclauses(root, parse->groupClause, tlist, false);
-        } else {
-            root->group_pathkeys = NIL;
-        }
-
-        /* We consider only the first (bottom) window in pathkeys logic */
-        if (wflists != NULL && wflists->activeWindows != NIL) {
-            WindowClause* wc = NULL;
-
-            wc = (WindowClause*)linitial(wflists->activeWindows);
-
-            root->window_pathkeys = make_pathkeys_for_window(root, wc, tlist, false);
-        } else {
-            root->window_pathkeys = NIL;
-        }
-
-        if (parse->distinctClause && grouping_is_sortable(parse->distinctClause)) {
-
-            root->distinct_pathkeys = make_pathkeys_for_sortclauses(root, parse->distinctClause, tlist, false);
-        } else {
-            root->distinct_pathkeys = NIL;
-        }
-
-        root->sort_pathkeys = make_pathkeys_for_sortclauses(root, parse->sortClause, tlist, false);
-
-        /*
-         * Figure out whether we want a sorted result from query_planner.
-         *
-         * If we have a sortable GROUP BY clause, then we want a result sorted
-         * properly for grouping.  Otherwise, if we have window functions to
-         * evaluate, we try to sort for the first window.  Otherwise, if
-         * there's a sortable DISTINCT clause that's more rigorous than the
-         * ORDER BY clause, we try to produce output that's sufficiently well
-         * sorted for the DISTINCT.  Otherwise, if there is an ORDER BY
-         * clause, we want to sort by the ORDER BY clause.
-         *
-         * Note: if we have both ORDER BY and GROUP BY, and ORDER BY is a
-         * superset of GROUP BY, it would be tempting to request sort by ORDER
-         * BY --- but that might just leave us failing to exploit an available
-         * sort order at all.  Needs more thought.	The choice for DISTINCT
-         * versus ORDER BY is much easier, since we know that the parser
-         * ensured that one is a superset of the other.
-         */
-        if (root->group_pathkeys)
-            root->query_pathkeys = root->group_pathkeys;
-        else if (root->window_pathkeys)
-            root->query_pathkeys = root->window_pathkeys;
-        else if (list_length(root->distinct_pathkeys) > list_length(root->sort_pathkeys))
-            root->query_pathkeys = root->distinct_pathkeys;
-        else if (root->sort_pathkeys)
-            root->query_pathkeys = root->sort_pathkeys;
-        else
-            root->query_pathkeys = NIL;
-
-        /*
          * Figure out whether there's a hard limit on the number of rows that
          * query_planner's result subplan needs to return.  Even if we know a
          * hard limit overall, it doesn't apply if the query has any
@@ -2843,21 +2872,51 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         else
             sub_limit_tuples = limit_tuples;
 
-        /*
-         * Generate the best unsorted and presorted paths for this Query (but
-         * note there may not be any presorted path).  query_planner will also
-         * estimate the number of groups in the query, and canonicalize all
-         * the pathkeys.
+        /* Make tuple_fraction, limit_tuples accessible to lower-level routines */
+        root->tuple_fraction = tuple_fraction;
+        root->limit_tuples = sub_limit_tuples;
+
+        /* Set up data needed by standard_qp_callback */
+        standard_qp_init(root, (void*)&qp_extra, tlist,
+                    wflists ? wflists->activeWindows : NIL,
+                    parse->groupingSets ?
+                        (rollup_groupclauses ? (List*)llast(rollup_groupclauses) : NIL) :
+                        parse->groupClause);
+
+        /* 
+         * Generate pathlist by query_planner for final_rel and canonicalize 
+         * all the pathkeys.
          */
-        query_planner(root,
-            sub_tlist,
-            tuple_fraction,
-            sub_limit_tuples,
-            &cheapest_path,
-            &sorted_path,
-            dNumGroups,
-            rollup_groupclauses,
-            rollup_lists);
+        final_rel = query_planner(root, sub_tlist, standard_qp_callback, &qp_extra);
+
+        /* 
+         * In the following, generate the best unsorted and presorted paths for 
+         * this Query (but note there may not be any presorted path). 
+         */
+        bool has_groupby = true;
+
+        /* First of all, estimate the number of groups in the query. */
+        has_groupby = get_number_of_groups(root, 
+                                           final_rel, 
+                                           dNumGroups,
+                                           rollup_groupclauses, 
+                                           rollup_lists);
+
+        /* Then update the tuple_fraction by the number of groups in the query. */
+        update_tuple_fraction(root, 
+                              final_rel, 
+                              dNumGroups);
+
+        /* 
+         * Finally, generate the best unsorted and presorted paths for 
+         * this Query. 
+         */
+        generate_cheapest_and_sorted_path(root, 
+                                          final_rel,
+                                          &cheapest_path, 
+                                          &sorted_path, 
+                                          dNumGroups, 
+                                          has_groupby);
 
         /* restore superset keys */
         root->dis_keys.superset_keys = superset_key;
@@ -2944,10 +3003,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
         /*
          * Select the best path.  If we are doing hashed grouping, we will
-         * always read all the input tuples, so use the cheapest-total path.
+         * always read all the input tuples, in addition cn gather permit on
+         * then use the cheapest-total path.
          * Otherwise, trust query_planner's decision about which to use.
          */
-        best_path = choose_best_path((use_hashed_grouping || use_hashed_distinct || sorted_path == NULL),
+        best_path = choose_best_path((use_hashed_grouping || use_hashed_distinct ||
+                                        sorted_path == NULL || permit_gather(root)),
                                     root, cheapest_path, sorted_path);
 
         (void)MemoryContextSwitchTo(PlanGenerateContext);
@@ -3021,11 +3082,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 (!is_execute_on_datanodes(result_plan) || is_replicated_plan(result_plan))) {
                 if (!grouping_is_sortable(parse->groupClause)) {
                     ereport(ERROR,
-                        (errmodule(MOD_OPT),
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("could not implement GROUP BY"),
-                                errdetail("Some of the datatypes only support hashing, while others only support "
-                                          "sorting."))));
+                        (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("GROUP BY cannot be implemented."),
+                            errdetail("Some of the datatypes only support hashing, "
+                                "while others only support sorting."),
+                            errcause("GROUP BY uses unsupported datatypes."),
+                            erraction("Modify SQL statement according to the manual.")));
                 }
 
                 use_hashed_grouping = false;
@@ -3083,7 +3145,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                      * target list of the query according to the new targetlist
                      * set above. For now do this only for SELECT statements.
                      */
-                    if (IsA(result_plan, RemoteQuery) && parse->commandType == CMD_SELECT) {
+                    if (IsA(result_plan, RemoteQuery) && parse->commandType == CMD_SELECT && !permit_gather(root)) {
                         pgxc_rqplan_adjust_tlist(
                             root, (RemoteQuery*)result_plan, ((RemoteQuery*)result_plan)->is_simple ? false : true);
                         if (((RemoteQuery*)result_plan)->is_simple)
@@ -3112,7 +3174,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
 
                 locate_grouping_columns(root, tlist, result_plan->targetlist, groupColIdx);
             }
-
+#ifdef ENABLE_MULTIPLE_NODES
             /* shuffle to another node group in FORCE mode (CNG_MODE_FORCE) */
             if (IS_STREAM_PLAN && !parse->hasForUpdate &&
                 (parse->hasAggs || parse->groupClause != NIL || parse->groupingSets != NIL ||
@@ -3149,7 +3211,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     }
                 }
             }
-
+#endif
             /*
              * groupColIdx is now cast in stone, so record a mapping from
              * tleSortGroupRef to column index. setrefs.c needs this to
@@ -3202,11 +3264,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     use_hashed_grouping = false;
                 } else {
                     ereport(ERROR,
-                        (errmodule(MOD_OPT),
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("could not implement GROUP BY"),
-                                errdetail("Some of the datatypes only support hashing, "
-                                          "while others only support sorting"))));
+                        (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("GROUP BY cannot be implemented."),
+                            errdetail("Some of the datatypes only support hashing, "
+                                "while others only support sorting."),
+                            errcause("GROUP BY uses unsupported datatypes."),
+                            erraction("Modify SQL statement according to the manual.")));
                 }
 
                 if (IS_STREAM_PLAN && (is_hashed_plan(result_plan) || is_rangelist_plan(result_plan))) {
@@ -3235,6 +3298,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 } else {
                     needs_stream = needs_agg_stream(root, tlist, result_plan->distributed_keys, &result_plan->exec_nodes->distribution);
                 }
+#ifndef ENABLE_MULTIPLE_NODES
+                needs_stream = needs_stream && (result_plan->dop > 1);
+#endif
             }
 
             /*
@@ -3358,6 +3424,10 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 double multiple = 0.0;
                 List* distributed_key = NIL;
 
+#ifndef ENABLE_MULTIPLE_NODES
+                count_distinct_optimization = count_distinct_optimization && (result_plan->dop > 1);
+#endif
+
                 /* check whether two_level_sort is needed, only in two case:
                  * 1. there's no group by clause, AGG_PLAIN used.
                  * 2. there's group by clause, and a redistribution on group by clause is needed.
@@ -3413,7 +3483,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 if (parse->groupClause) {
                     /* if there's count(distinct), we now only support redistribute by group clause */
                     if (count_distinct_optimization && needs_stream &&
-                        (agg_costs.exprAggs != NIL || agg_costs.hasDnAggs)) {
+                        (agg_costs.exprAggs != NIL || agg_costs.hasDnAggs || agg_costs.numOrderedAggs > 0)) {
                         distributed_key = get_distributekey_from_tlist(
                             root, tlist, parse->groupClause, result_plan->plan_rows, &multiple);
                         /* we can apply local sortagg if count(distinct) expr is distribute column */
@@ -3953,6 +4023,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                 needs_stream = needs_agg_stream(root, distinct_expr, result_plan->distributed_keys);
                 list_free_ext(distinct_expr);
             }
+#ifndef ENABLE_MULTIPLE_NODES
+            needs_stream = needs_stream && (result_plan->dop > 1);
+#endif
         }
 
         if (use_hashed_distinct) {
@@ -4198,7 +4271,12 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     if (g_instance.attr.attr_common.enable_tsdb) {
         result_plan = tsdb_modifier(root, tlist, result_plan);
     } else if (has_ts_func(tlist)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("please enable tsdb to use tsdb functions !")));
+        ereport(ERROR,
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_INVALID_OPERATION),
+                errmsg("TSDB functions cannot be used if enable_tsdb is off."),
+                errdetail("N/A"),
+                errcause("Functions are not loaded."),
+                erraction("Turn on enable_tsdb according to manual.")));
     }
 #endif
     (void)MemoryContextSwitchTo(oldcontext);
@@ -4493,10 +4571,20 @@ static Plan* build_groupingsets_plan(PlannerInfo* root, Query* parse, List** tli
     bool need_stream = false;
     bool stream_plan = IS_STREAM_PLAN && is_execute_on_datanodes(result_plan) && !is_replicated_plan(result_plan);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (result_plan->dop == 1) {
+        stream_plan = false;
+        *need_hash = false;
+    }
+#endif
+
     /* We need add redistribute for distinct */
     if (stream_plan) {
         /* Judge above sort agg if need stream and hashagg */
         need_stream = needs_agg_stream(root, collectiveGroupExpr, result_plan->distributed_keys);
+#ifndef ENABLE_MULTIPLE_NODES
+        need_stream = need_stream && (result_plan->dop > 1);
+#endif
 
         if (list_length(agg_costs->exprAggs) == 1 && !agg_costs->hasdctDnAggs && !agg_costs->hasDnAggs) {
             double multiple;
@@ -4721,9 +4809,11 @@ Bitmapset* get_base_rel_indexes(Node* jtnode)
         result = bms_join(get_base_rel_indexes(j->larg), get_base_rel_indexes(j->rarg));
     } else {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("unrecognized node type when get base relation indexes: %d", (int)nodeTag(jtnode))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("Unrecognized node type when extracting index."),
+                errdetail("Node Type: %d", (int)nodeTag(jtnode)),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
         result = NULL; /* keep compiler quiet */
     }
     return result;
@@ -5069,9 +5159,11 @@ List* preprocess_groupclause(PlannerInfo* root, List* force)
             if (!OidIsValid(cl->sortop)) {
                 Node* expr = get_sortgroupclause_expr(cl, parse->targetList);
                 ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                        errmsg("could not identify an ordering operator for type %s", format_type_be(exprType(expr))),
-                        errdetail("Grouping set columns must be able to sort their inputs.")));
+                    (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_UNDEFINED_FUNCTION),
+                        errmsg("Ordering operator cannot be identified."),
+                        errdetail("Operator Type: %s", format_type_be(exprType(expr))),
+                        errcause("Grouping set columns must be able to sort their inputs."),
+                        erraction("Modify SQL statement according to the manual.")));
             }
 
             new_groupclause = lappend(new_groupclause, cl);
@@ -6207,10 +6299,12 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
             return false;
         } else {
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("could not implement GROUP BY"),
-                        errdetail("Some of the datatypes only support hashing, while others only support sorting."))));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("GROUP BY cannot be implemented."),
+                    errdetail("Some of the datatypes only support hashing, "
+                        "while others only support sorting."),
+                    errcause("GROUP BY uses unsupported datatypes."),
+                    erraction("Modify SQL statement according to the manual.")));
         }
     }
 
@@ -6425,10 +6519,12 @@ static bool choose_hashed_distinct(PlannerInfo* root, double tuple_fraction, dou
             return false;
         } else {
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("could not implement DISTINCT"),
-                        errdetail("Some of the datatypes only support hashing, while others only support sorting."))));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("DISTINCT cannot be implemented."),
+                    errdetail("Some of the datatypes only support hashing, "
+                        "while others only support sorting."),
+                    errcause("DISTINCT uses unsupported datatypes."),
+                    erraction("Modify SQL statement according to the manual.")));
         }
     }
 
@@ -6733,9 +6829,11 @@ static void locate_grouping_columns(PlannerInfo* root, List* tlist, List* sub_tl
 
         if (te == NULL)
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    (errmsg("failed to locate grouping columns"))));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("Failed to locate grouping columns."),
+                    errdetail("N/A"),
+                    errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
 
         groupColIdx[keyno++] = te->resno;
     }
@@ -6769,9 +6867,11 @@ static List* postprocess_setop_tlist(List* new_tlist, List* orig_tlist)
         orig_tlist_item = lnext(orig_tlist_item);
         if (orig_tle->resjunk) /* should not happen */
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_CASE_NOT_FOUND),
-                    (errmsg("resjunk output columns are not implemented"))));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_CASE_NOT_FOUND),
+                    errmsg("Resjunk output columns are not implemented."),
+                    errdetail("N/A"),
+                    errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
 
         AssertEreport(new_tle->resno == orig_tle->resno,
             MOD_OPT,
@@ -6780,9 +6880,11 @@ static List* postprocess_setop_tlist(List* new_tlist, List* orig_tlist)
     }
     if (orig_tlist_item != NULL)
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_CASE_NOT_FOUND),
-                (errmsg("resjunk output columns are not implemented"))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_CASE_NOT_FOUND),
+                errmsg("Resjunk output columns are not implemented."),
+                errdetail("N/A"),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
     return new_tlist;
 }
 
@@ -7019,16 +7121,18 @@ List* make_pathkeys_for_window(PlannerInfo* root, WindowClause* wc, List* tlist,
     /* Throw error if can't sort */
     if (!grouping_is_sortable(wc->partitionClause))
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("could not implement window PARTITION BY"),
-                    errdetail("Window partitioning columns must be of sortable datatypes."))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("PARTITION BY cannot be implemented."),
+                errdetail("Window partitioning columns must be of sortable datatypes."),
+                errcause("PARTITION BY uses unsupported datatypes."),
+                erraction("Modify SQL statement according to the manual.")));
     if (!grouping_is_sortable(wc->orderClause))
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("could not implement window ORDER BY"),
-                    errdetail("Window ordering columns must be of sortable datatypes."))));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("ORDER BY cannot be implemented."),
+                errdetail("Window partitioning columns must be of sortable datatypes."),
+                errcause("ORDER BY uses unsupported datatypes."),
+                erraction("Modify SQL statement according to the manual.")));
 
     /* Okay, make the combined pathkeys */
     window_sortclauses = list_concat(list_copy(wc->partitionClause), list_copy(wc->orderClause));
@@ -7124,9 +7228,11 @@ static void get_column_info_for_window(PlannerInfo* root, WindowClause* wc, List
         /* complain if we didn't eat exactly the right number of sort cols */
         if (scidx != numSortCols)
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_INVALID_OPERATION),
-                    (errmsg("failed to deconstruct sort operators into partitioning/ordering operators"))));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_INVALID_OPERATION),
+                    errmsg("Failed to deconstruct sort operators into partitioning/ordering operators."),
+                    errdetail("Deconstructed: %d, Total: %d", scidx, numSortCols),
+                    errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
     }
 }
 
@@ -7275,6 +7381,100 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
     indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, NIL, ForwardScanDirection, false, NULL, NULL, 1.0);
 
     return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
+}
+
+/*
+ * plan_create_index_workers
+ *		Use the planner to decide how many parallel worker processes
+ *		CREATE INDEX should request for use
+ *
+ * tableOid is the table on which the index is to be built.  indexOid is the
+ * OID of an index to be created or reindexed (which must be a btree index).
+ *
+ * Return value is the number of parallel worker processes to request.  It
+ * may be unsafe to proceed if this is 0.  Note that this does not include the
+ * leader participating as a worker (value is always a number of parallel
+ * worker processes).
+ *
+ * Note: caller had better already hold some type of lock on the table and
+ * index.
+ */
+int plan_create_index_workers(Oid tableOid)
+{
+    PlannerInfo *root;
+    Query *query;
+    PlannerGlobal *glob;
+    RangeTblEntry *rte;
+    Relation heap;
+    RelOptInfo *rel;
+    int parallel_workers;
+    RelPageType heap_blocks;
+    double reltuples;
+    double allvisfrac;
+
+    /* Set up largely-dummy planner state */
+    query = makeNode(Query);
+    query->commandType = CMD_SELECT;
+
+    glob = makeNode(PlannerGlobal);
+
+    root = makeNode(PlannerInfo);
+    root->parse = query;
+    root->glob = glob;
+    root->query_level = 1;
+    root->planner_cxt = CurrentMemoryContext;
+    root->wt_param_id = -1;
+
+    /*
+     * Build a minimal RTE.
+     *
+     * Set the target's table to be an inheritance parent.  This is a kludge
+     * that prevents problems within get_relation_info(), which does not
+     * expect that any IndexOptInfo is currently undergoing REINDEX.
+     */
+    rte = makeNode(RangeTblEntry);
+    rte->rtekind = RTE_RELATION;
+    rte->relid = tableOid;
+    rte->relkind = RELKIND_RELATION; /* Don't be too picky. */
+    rte->lateral = false;
+    rte->inh = true;
+    rte->inFromCl = true;
+    query->rtable = list_make1(rte);
+
+    /* Set up RTE/RelOptInfo arrays */
+    setup_simple_rel_arrays(root);
+
+    /* Build RelOptInfo */
+    rel = build_simple_rel(root, 1, RELOPT_BASEREL);
+
+    heap = heap_open(tableOid, NoLock);
+
+    /*
+     * Determine if it's safe to proceed.
+     *
+     * Currently, parallel workers can't access the leader's temporary tables,
+     * or the leader's relmapper.c state, which is needed for builds on mapped
+     * relations.
+     */
+    if (heap->rd_rel->relpersistence == RELPERSISTENCE_TEMP || RelationIsMapped(heap)) {
+        parallel_workers = 0;
+        goto done;
+    }
+    /*
+     * Estimate heap relation size ourselves, since rel->pages cannot be
+     * trusted (heap RTE was marked as inheritance parent)
+     */
+    estimate_rel_size(heap, NULL, &heap_blocks, &reltuples, &allvisfrac, NULL);
+
+    /*
+     * Determine number of workers to scan the heap relation using generic
+     * model
+     */
+    parallel_workers = compute_parallel_worker(rel, heap_blocks, RelationGetParallelWorkers(heap, -1));
+done:
+    heap_close(heap, NoLock);
+
+    return parallel_workers;
 }
 
 /*
@@ -8222,27 +8422,6 @@ static bool has_column_store_relation(Plan* top_plan)
             }
         } break;
 
-        case T_IndexScan:
-        case T_SeqScan: {
-            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
-                ListCell* cell = NULL;
-                TargetEntry* entry = NULL;
-                Var* var = NULL;
-                foreach (cell, top_plan->targetlist) {
-                    entry = (TargetEntry*)lfirst(cell);
-                    if (IsA(entry->expr, Var)) {
-                        var = (Var*)entry->expr;
-                        if (var->varattno > 0 && var->varoattno > 0 &&
-                            !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
-                            return false;
-                        }
-                    }
-                }
-                return true;
-            }
-            return false;
-        } break;
-
         default:
             if (outerPlan(top_plan)) {
                 if (has_column_store_relation(outerPlan(top_plan)))
@@ -8418,6 +8597,9 @@ Plan* try_vectorize_plan(Plan* top_plan, Query* parse, bool from_subplan, Planne
 static bool vector_engine_expression_walker(Node* node, DenseRank_context* context)
 {
     Oid funcOid = InvalidOid;
+    List* agg_distinct = NIL;
+    List* agg_order = NIL;
+
 
     if (node == NULL)
         return false;
@@ -8425,6 +8607,10 @@ static bool vector_engine_expression_walker(Node* node, DenseRank_context* conte
     if (IsA(node, Aggref)) {
         Aggref* aggref = (Aggref*)node;
         funcOid = aggref->aggfnoid;
+        if (list_length(aggref->args) > 1) {
+            agg_distinct = aggref->aggdistinct;
+            agg_order = aggref->aggorder;
+        }
     } else if (IsA(node, WindowFunc)) {
         WindowFunc* wfunc = (WindowFunc*)node;
         funcOid = wfunc->winfnoid;
@@ -8440,6 +8626,11 @@ static bool vector_engine_expression_walker(Node* node, DenseRank_context* conte
 
     if (funcOid != InvalidOid) {
         bool found = false;
+
+        /* distince and order by inside such agg are not yet supported */
+        if (agg_distinct || agg_order) {
+            return true;
+        }
 
         /*
          * Only ROW_NUMBER, RANK, AVG, COUNT, MAX, MIN and SUM are supported now
@@ -8509,22 +8700,6 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
                 return false;
             }
         case T_IndexScan:
-            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
-                ListCell* cell = NULL;
-                TargetEntry* entry = NULL;
-                Var* var = NULL;
-                foreach (cell, result_plan->targetlist) {
-                    entry = (TargetEntry*)lfirst(cell);
-                    if (IsA(entry->expr, Var)) {
-                        var = (Var*)entry->expr;
-                        if (var->varattno > 0 && var->varoattno > 0 &&
-                            !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }
         case T_IndexOnlyScan:
         case T_BitmapHeapScan:
         case T_TidScan:
@@ -8862,11 +9037,6 @@ static Plan* fallback_plan(Plan* result_plan)
             }
         } break;
 
-        case T_SeqScan: {
-            ((SeqScan*)result_plan)->executeBatch = false;
-            result_plan->vec_output = false;
-        } break;
-
         default:
             break;
     }
@@ -8932,14 +9102,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
                 break;
             }
         case T_SeqScan: {
-            if (result_plan->isDeltaTable || u_sess->attr.attr_sql.enable_force_vector_engine) {
-                ((SeqScan*)result_plan)->executeBatch = true;
-                result_plan->vec_output = true;
-            }
-            break;
-        }
-        case T_IndexScan: {
-            if (u_sess->attr.attr_sql.enable_force_vector_engine) {
+            if (result_plan->isDeltaTable) {
                 result_plan = (Plan*)make_rowtovec(result_plan);
             }
             break;
@@ -9441,7 +9604,7 @@ static void get_hashagg_gather_hashagg_path(PlannerInfo* root, Plan* lefttree, c
         }
     }
 }
-
+#ifdef ENABLE_MULTIPLE_NODES
 /*
  * get_redist_hashagg_gather_hashagg_path
  *     get result path for redist->agg(dn)->gather->agg(cn).
@@ -9545,7 +9708,7 @@ static void get_redist_hashagg_gather_hashagg_path(PlannerInfo* root, Plan* left
         }
     }
 }
-
+#endif
 /*
  * get_redist_hashagg_path: get result path for distributecost() + aggcost() + gathercost().
  *
@@ -9917,8 +10080,9 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
     Path result_path;
     errno_t rc = EOK; /* Initialize rc to keep compiler slient */
     bool force_slvl_agg = aggmethod_filter & FOREC_SLVL_AGG;
+#ifdef ENABLE_MULTIPLE_NODES
     bool disallow_cn_agg = aggmethod_filter & DISALLOW_CN_AGG;
-
+#endif
     /*
      *  Confirm whether the distributed_key has skew when do redistribution.
      *  With two cases : hint skew and null skew.
@@ -9988,7 +10152,7 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
 
     rc = memset_s(&result_path, sizeof(Path), 0, sizeof(Path));
     securec_check(rc, "\0", "\0");
-
+#ifdef ENABLE_MULTIPLE_NODES
     /* If lefttree is parallel, we need local redistribute, thus DN_AGG_CN_AGG is not allowed. */
     if (((root->query_level == 1 && (lefttree->dop <= 1 || need_stream)) ||
             (root->query_level > 1 && !need_stream && lefttree->dop <= 1)) &&
@@ -10052,7 +10216,7 @@ static SAggMethod get_optimal_hashagg(PlannerInfo* root, Plan* lefttree, const A
             }
         }
     }
-
+#endif
     if (distributed_key != NIL) {
         ListCell* lc = NULL;
         foreach (lc, distribution_list) {
@@ -10234,10 +10398,6 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
     uint32 skew_opt = SKEW_RES_NONE;
     uint32 aggmethod_filter = ALLOW_ALL_AGG;
 
-    /* Confirm whether the distributed_key has skew */
-    if (SKEW_OPT_OFF != u_sess->opt_cxt.skew_strategy_opt)
-        skew_info = New(CurrentMemoryContext) AggSkewInfo(root, plan, rel_info);
-
     temp_num_groups[0] = numGroups[0];
     temp_num_groups[1] = numGroups[1];
 
@@ -10252,6 +10412,32 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
     } else {
         qual = groupColIdx != NULL ? (List*)parse->havingQual : NIL;
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (plan->dop == 1) {
+        plan = (Plan*)make_agg(root,
+            final_list,
+            qual,
+            AGG_HASHED,
+            agg_costs,
+            numGroupCols,
+            local_groupColIdx,
+            groupColOps,
+            final_groups,
+            plan,
+            wflists,
+            *needs_stream,
+            trans_agg,
+            NIL,
+            hash_entry_size,
+            true,
+            agg_orientation);
+        return plan;
+    }
+#endif
+    /* Confirm whether the distributed_key has skew */
+    if (SKEW_OPT_OFF != u_sess->opt_cxt.skew_strategy_opt)
+        skew_info = New(CurrentMemoryContext) AggSkewInfo(root, plan, rel_info);
+
 
     if (groupColIdx == NULL) {
         group_exprs = get_sortgrouplist_exprs(groupClause, final_list);
@@ -10601,7 +10787,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
             final_agg_mp_option = DN_AGG_REDISTRIBUTE_AGG;
         }
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
     // Single node distribution.
     if (is_agg_distribution_compalible_with_child(final_distribution, &(plan->exec_nodes->distribution))) {
         plan = (Plan*)make_agg(root,
@@ -10631,7 +10817,7 @@ static Plan* generate_hashagg_plan(PlannerInfo* root, Plan* plan, List* final_li
         }
         return plan;
     }
-
+#endif
     if (agg_option == DN_REDISTRIBUTE_AGG_CN_AGG || agg_option == DN_REDISTRIBUTE_AGG_REDISTRIBUTE_AGG) {
         /* add first stream node */
         AssertEreport(distribute_key_less_skew != NULL, MOD_OPT, "invalid distribute key less skew.");
@@ -11003,6 +11189,9 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
         &new_tlist);
 
     *needs_stream = needs_agg_stream(root, new_tlist, result_plan->distributed_keys);
+#ifndef ENABLE_MULTIPLE_NODES
+    *needs_stream = *needs_stream && (result_plan->dop > 1);
+#endif
 
     if (check_subplan_in_qual(new_tlist, (List*)parse->havingQual)) {
         errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
@@ -11112,6 +11301,9 @@ static Plan* get_count_distinct_partial_plan(PlannerInfo* root, Plan* result_pla
     if (numGroupCols != 0)
         locate_grouping_columns(root, tlist, result_plan->targetlist, groupColIdx);
     *needs_stream = needs_agg_stream(root, tlist, result_plan->distributed_keys);
+#ifndef ENABLE_MULTIPLE_NODES
+    *needs_stream = *needs_stream && (result_plan->dop > 1);
+#endif
     *final_tlist = tlist;
 
     if (numGroupCols != 0)
@@ -11802,9 +11994,11 @@ static bool is_dfs_node(Plan* plan)
                 ((u_sess->opt_cxt.srvtype == T_OBS_SERVER || u_sess->opt_cxt.srvtype == T_TXT_CSV_OBS_SERVER) &&
                     T_HDFS_SERVER == srvType)) {
                 ereport(ERROR,
-                    (errmodule(MOD_ACCELERATE),
-                        errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                        errmsg("OBS and HDFS foreign table can NOT be in the same plan.")));
+                    (errmodule(MOD_ACCELERATE), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        errmsg("OBS and HDFS foreign table can NOT be in the same plan."),
+                        errdetail("N/A"),
+                        errcause("SQL uses unsupported feature."),
+                        erraction("Modify SQL statement according to the manual.")));
             }
 
             u_sess->opt_cxt.srvtype = srvType;
@@ -12235,7 +12429,12 @@ static bool estimate_acceleration_cost_for_obs(Plan* plan, const char* relname)
     uint64 size_per_thread = totalSize / (u_sess->pgxc_cxt.NumDataNodes * u_sess->opt_cxt.query_dop);
 
     if (unlikely(pl_size == 0)) {
-        ereport(ERROR, (errcode(ERRCODE_DIVISION_BY_ZERO), errmsg("pl_size should not be zero")));
+        ereport(ERROR,
+            (errmodule(MOD_ACCELERATE), errcode(ERRCODE_DIVISION_BY_ZERO),
+                errmsg("Pool size should not be zero"),
+                errdetail("N/A"),
+                errcause("Compute pool configuration file contains error."),
+                erraction("Please check the value of \"pl\" in cp_client.conf.")));
     }
     uint64 rp_per_thread = size_per_thread / pl_size + 1;
 
@@ -12298,6 +12497,27 @@ static bool estimate_acceleration_cost_for_obs(Plan* plan, const char* relname)
     return true;
 }
 
+MemoryContext SwitchToPlannerTempMemCxt(PlannerInfo *root)
+{
+    Assert(root && root->glob && root->glob->plannerContext);
+
+    root->glob->plannerContext->refCounter++;
+    return MemoryContextSwitchTo(root->glob->plannerContext->tempMemCxt);
+}
+
+MemoryContext ResetPlannerTempMemCxt(PlannerInfo *root, MemoryContext cxt)
+{
+    Assert(root && root->glob && root->glob->plannerContext);
+    root->glob->plannerContext->refCounter--;
+
+    if (root->glob->plannerContext->refCounter == 0) {
+        /* avoid early release caused by nested invocation. */
+        MemoryContextResetAndDeleteChildren(root->glob->plannerContext->tempMemCxt);
+    }
+
+    return MemoryContextSwitchTo(cxt);
+}
+
 static void init_optimizer_context(PlannerGlobal* glob)
 {
     glob->plannerContext = (PlannerContext*)palloc0(sizeof(PlannerContext));
@@ -12315,6 +12535,13 @@ static void init_optimizer_context(PlannerGlobal* glob)
             ALLOCSET_DEFAULT_INITSIZE,
             ALLOCSET_DEFAULT_MAXSIZE);
     }
+
+    glob->plannerContext->tempMemCxt = AllocSetContextCreate(glob->plannerContext->plannerMemContext,
+                                                            "Planner Temp MemoryContext",
+                                                            ALLOCSET_DEFAULT_MINSIZE,
+                                                            ALLOCSET_DEFAULT_INITSIZE,
+                                                            ALLOCSET_DEFAULT_MAXSIZE);
+    glob->plannerContext->refCounter = 0;
 }
 
 static void deinit_optimizer_context(PlannerGlobal* glob)
@@ -12323,6 +12550,8 @@ static void deinit_optimizer_context(PlannerGlobal* glob)
         MemoryContextDelete(glob->plannerContext->plannerMemContext);
         glob->plannerContext->plannerMemContext = NULL;
         glob->plannerContext->dataSkewMemContext = NULL;
+        glob->plannerContext->tempMemCxt = NULL;
+        glob->plannerContext->refCounter = 0;
     }
 }
 
@@ -12633,9 +12862,11 @@ static bool precheck_before_accelerate()
 
         if (u_sess->wlm_cxt->cp_runtime_info == NULL) {
             ereport(ERROR,
-                (errmodule(MOD_ACCELERATE),
-                    errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                    errmsg("Failed to get the runtime info from the compute pool.")));
+                (errmodule(MOD_ACCELERATE), errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                    errmsg("Failed to get the runtime info from the compute pool."),
+                    errdetail("N/A"),
+                    errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
         }
 
         ereport(DEBUG1,
@@ -12659,9 +12890,11 @@ static bool precheck_before_accelerate()
 
         if (!check_version_compatibility(u_sess->wlm_cxt->cp_runtime_info->version)) {
             ereport(ERROR,
-                (errmodule(MOD_ACCELERATE),
-                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                    errmsg("version is not compatible between local cluster and the compute pool")));
+                (errmodule(MOD_ACCELERATE), errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    errmsg("Version is not compatible between local cluster and the compute pool."),
+                    errdetail("Remote version: %s", u_sess->wlm_cxt->cp_runtime_info->version),
+                    errcause("Compute pool is not installed appropriately."),
+                    erraction("Configure compute pool according to manual.")));
         }
     }
     PG_CATCH();
@@ -12870,10 +13103,11 @@ static void check_index_column()
     if (found) {
         si->data[si->len - 2] = '\0';
         ereport(ERROR,
-            (errcode(ERRCODE_WARNING),
-                errmsg("There is no optional index path for index column: %s.\n"
-                       "Please check for potential performance problem.",
-                    si->data)));
+            (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_WARNING),
+                errmsg("No optional index path is found."),
+                errdetail("Index column: %s", si->data),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
     }
 }
 
@@ -13644,6 +13878,9 @@ void check_gtm_free_plan(PlannedStmt *stmt, int elevel)
     if (IS_PGXC_DATANODE || IS_SINGLE_NODE)
         return;
 
+    /* In redistribution, the user's distributed query is allowed. */
+    elevel = (elevel > WARNING && ClusterResizingInProgress()) ? WARNING : elevel;
+
     FindNodesContext context;
 
     collect_query_info(stmt, &context);
@@ -13755,9 +13992,11 @@ void check_entry_mergeinto_replicate(Query* parse)
             continue;
         if (GetLocatorType(rte->relid) != LOCATOR_TYPE_REPLICATED) {
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("MERGE INTO on replicated table does not yet support using distributed tables.")));
+                (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("MERGE INTO on replicated table does not yet support using distributed tables."),
+                    errdetail("N/A"),
+                    errcause("SQL uses unsupported feature."),
+                    erraction("Modify SQL statement according to the manual.")));
         }
     }
 }
@@ -13857,7 +14096,11 @@ Plan* get_foreign_scan(Plan* plan)
 
     if (!found) {
         ereport(ERROR,
-            (errcode(ERRCODE_NO_DATA_FOUND), errmodule(MOD_ACCELERATE), errmsg("Fail to find ForeignScan node!")));
+            (errmodule(MOD_ACCELERATE), errcode(ERRCODE_NO_DATA_FOUND),
+                errmsg("Fail to find ForeignScan node!"),
+                errdetail("Result node type: %d", (int)nodeTag(plan)),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
     }
 
     return plan;

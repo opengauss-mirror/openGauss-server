@@ -94,12 +94,12 @@
 #include "knl/knl_variable.h"
 
 #include "access/nbtree.h"
-#include "executor/execdebug.h"
-#include "executor/execStream.h"
-#include "executor/nodeMergejoin.h"
+#include "executor/exec/execdebug.h"
+#include "executor/exec/execStream.h"
+#include "executor/node/nodeMergejoin.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
-#include "executor/nodeHashjoin.h"
+#include "executor/node/nodeHashjoin.h"
 
 /*
  * Runtime data for each mergejoin clause

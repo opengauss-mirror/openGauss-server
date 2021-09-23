@@ -67,8 +67,13 @@ void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_
 
     END_CRIT_SECTION();
 
-    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
-        SyncRepWaitForLSN(recptr);
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            SyncPaxosWaitForLSN(recptr);
+        } else {
+            SyncRepWaitForLSN(recptr);
+        }
+    }
 }
 
 void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
@@ -95,8 +100,13 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
     END_CRIT_SECTION();
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
-        SyncRepWaitForLSN(Ptr);
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            SyncPaxosWaitForLSN(Ptr);
+        } else {
+            SyncRepWaitForLSN(Ptr);
+        }
+    }
 #endif
 }
 
@@ -118,8 +128,13 @@ void log_slot_drop(const char *name)
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
     END_CRIT_SECTION();
-    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH)
-        SyncRepWaitForLSN(Ptr);
+    if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            SyncPaxosWaitForLSN(Ptr);
+        } else {
+            SyncRepWaitForLSN(Ptr);
+        }
+    }
 }
 
 void LogCheckSlot()
@@ -144,8 +159,12 @@ void LogCheckSlot()
     END_CRIT_SECTION();
 
     if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
-        SyncRepWaitForLSN(recptr);
-        g_instance.comm_cxt.localinfo_cxt.set_term = true;
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            SyncPaxosWaitForLSN(recptr);
+        } else {
+            SyncRepWaitForLSN(recptr);
+            g_instance.comm_cxt.localinfo_cxt.set_term = true;
+        }
     }
 }
 
@@ -371,10 +390,11 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
     ReplicationSlotsComputeRequiredXmin(false);
     ReplicationSlotsComputeRequiredLSN(NULL);
     ReplicationSlotSave();
-    ReplicationSlotRelease();
     if (extra_content != NULL && strlen(extra_content) != 0) {
-        markObsSlotOperate(1);
+        markObsSlotOperate();
+        add_archive_slot_to_instance(t_thrd.slot_cxt.MyReplicationSlot);
     }
+    ReplicationSlotRelease();
 }
 
 /*
@@ -428,6 +448,7 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
 {
     Name name = PG_GETARG_NAME(0);
     bool for_backup = false;
+    bool isLogical = false;
 
     ValidateName(NameStr(*name));
 
@@ -437,6 +458,11 @@ Datum pg_drop_replication_slot(PG_FUNCTION_ARGS)
     }
 
     check_permissions(for_backup);
+
+    isLogical = IsLogicalReplicationSlot(NameStr(*name));
+    if (isLogical && RecoveryInProgress())
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("Standby mode doesn't support drop logical slot.")));
 
     CheckSlotRequirements();
 
@@ -619,7 +645,7 @@ static XLogRecPtr pg_logical_replication_slot_advance(XLogRecPtr moveto)
         ctx = CreateDecodingContext(InvalidXLogRecPtr, NIL, true, logical_read_local_xlog_page, NULL, NULL);
 
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner,
-                                                                    "logical decoding", MEMORY_CONTEXT_STORAGE);
+            "logical decoding", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
         /* invalidate non-timetravel entries */
         if (!RecoveryInProgress())
@@ -997,7 +1023,11 @@ void write_term_log(uint32 term)
     END_CRIT_SECTION();
 
     if (u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
-        SyncRepWaitForLSN(recptr);
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+            SyncPaxosWaitForLSN(recptr);
+        } else {
+            SyncRepWaitForLSN(recptr);
+        }
     }
 }
 
@@ -1019,7 +1049,8 @@ XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, b
     ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, InvalidXLogRecPtr, extra_content);
     /* log slot creation */
     log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data, t_thrd.slot_cxt.MyReplicationSlot->extra_content);
-    markObsSlotOperate(1);
+    markObsSlotOperate();
+    add_archive_slot_to_instance(t_thrd.slot_cxt.MyReplicationSlot);
 
     /* To make sure slot log lsn is less newest checkpoint.redo */
     if (u_sess->attr.attr_sql.enable_slot_log == true) {
@@ -1063,4 +1094,245 @@ XLogRecPtr create_physical_replication_slot_for_backup(const char* slot_name, bo
             (errmsg("advance restart lsn for initial backup slot, slotname: %s, restartlsn: %s", slot_name, end_lsn)));
 
     return restart_lsn;
+}
+
+void init_instance_slot()
+{
+    errno_t rc = EOK;
+    MemoryContext curr;
+    curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    g_instance.archive_obs_cxt.archive_status = (ArchiveTaskStatus *)palloc0(
+        sizeof(ArchiveTaskStatus) * g_instance.attr.attr_storage.max_replication_slots);
+    rc = memset_s(g_instance.archive_obs_cxt.archive_status, 
+        sizeof(ArchiveTaskStatus) * g_instance.attr.attr_storage.max_replication_slots, 0, 
+        sizeof(ArchiveTaskStatus) * g_instance.attr.attr_storage.max_replication_slots);
+    securec_check(rc, "", "");
+
+    g_instance.archive_obs_cxt.archive_config = (ArchiveSlotConfig *)palloc0(
+        sizeof(ArchiveSlotConfig) * g_instance.attr.attr_storage.max_replication_slots);
+
+    rc = memset_s(g_instance.archive_obs_cxt.archive_config, 
+        sizeof(ArchiveSlotConfig) * g_instance.attr.attr_storage.max_replication_slots, 0, 
+        sizeof(ArchiveSlotConfig) * g_instance.attr.attr_storage.max_replication_slots);
+    securec_check(rc, "", "");
+    MemoryContextSwitchTo(curr);
+}
+
+void init_instance_slot_thread()
+{
+    errno_t rc = EOK;
+    MemoryContext curr;
+    curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
+    g_instance.archive_obs_thread_info.obsArchPID = (ThreadId*)palloc0(
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
+    rc = memset_s(g_instance.archive_obs_thread_info.obsArchPID, 
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots, 0, 
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
+    securec_check(rc, "", "");
+    
+    g_instance.archive_obs_thread_info.obsBarrierArchPID = (ThreadId*)palloc0(
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
+    rc = memset_s(g_instance.archive_obs_thread_info.obsBarrierArchPID, 
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots, 0, 
+        sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
+    securec_check(rc, "", "");
+
+    g_instance.archive_obs_thread_info.slotName = (char **)palloc0(sizeof(char *) * 
+        g_instance.attr.attr_storage.max_replication_slots);
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        g_instance.archive_obs_thread_info.slotName[i] = (char *)palloc0(sizeof(char) * NAMEDATALEN);
+        rc = memset_s(g_instance.archive_obs_thread_info.slotName[i], sizeof(char) * NAMEDATALEN, 0, 
+            sizeof(char) * NAMEDATALEN);
+        securec_check(rc, "", "");
+    }
+    MemoryContextSwitchTo(curr);
+}
+
+
+void add_archive_slot_to_instance(ReplicationSlot *slot) 
+{
+    MemoryContext curr;
+    errno_t rc = EOK;
+    curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    
+    /* find a unused archive task status slot */
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[i];
+        SpinLockAcquire(&archive_status->mutex);
+        if (archive_status->in_use == false) {
+            rc = memset_s(archive_status, sizeof(ArchiveTaskStatus), 0, sizeof(ArchiveTaskStatus));
+            securec_check(rc, "\0", "\0");
+            archive_status->in_use = true;
+            rc = memcpy_s(archive_status->slotname, NAMEDATALEN, slot->data.name.data, NAMEDATALEN);
+            securec_check(rc, "\0", "\0");
+            SpinLockRelease(&archive_status->mutex);
+            break;
+        }
+        SpinLockRelease(&archive_status->mutex);
+    }
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveSlotConfig *archive_config = &g_instance.archive_obs_cxt.archive_config[i];
+        SpinLockAcquire(&archive_config->mutex);
+        if (archive_config->in_use == false) {
+            rc = memset_s(archive_config, sizeof(ArchiveTaskStatus), 0, sizeof(ArchiveTaskStatus));
+            securec_check(rc, "\0", "\0");
+            archive_config->in_use = true;
+            rc = memcpy_s(archive_config->slotname, NAMEDATALEN, slot->data.name.data, NAMEDATALEN);
+            securec_check(rc, "\0", "\0");
+            archive_config->slot_tline = g_instance.archive_obs_cxt.slot_tline;
+            if (slot->archive_obs != NULL) {
+                archive_config->archive_obs.obs_address = pstrdup(slot->archive_obs->obs_address);
+                archive_config->archive_obs.obs_ak = pstrdup(slot->archive_obs->obs_ak);
+                archive_config->archive_obs.obs_bucket = pstrdup(slot->archive_obs->obs_bucket);
+                archive_config->archive_obs.obs_prefix = pstrdup(slot->archive_obs->obs_prefix);
+                archive_config->archive_obs.obs_sk = pstrdup(slot->archive_obs->obs_sk);
+                archive_config->archive_obs.is_recovery = slot->archive_obs->is_recovery;
+            }
+            SpinLockRelease(&archive_config->mutex);
+            break;
+        }
+        SpinLockRelease(&archive_config->mutex);
+    }
+    MemoryContextSwitchTo(curr);
+}
+
+void remove_archive_slot_from_instance_list(const char *slot_name)
+{
+    /* find a unused archive task status slot */
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[i];
+        SpinLockAcquire(&archive_status->mutex);
+        if (archive_status->in_use == true && strcmp(archive_status->slotname, slot_name) == 0) {
+            archive_status->in_use = false;
+            SpinLockRelease(&archive_status->mutex);
+            break;
+        }
+        SpinLockRelease(&archive_status->mutex);
+    }
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveSlotConfig *archive_config = &g_instance.archive_obs_cxt.archive_config[i];
+        SpinLockAcquire(&archive_config->mutex);
+        if (archive_config->in_use == true && strcmp(archive_config->slotname, slot_name) == 0) {
+            archive_config->slot_tline = 0;
+            pfree_ext(archive_config->archive_obs.obs_address);
+            pfree_ext(archive_config->archive_obs.obs_ak);
+            pfree_ext(archive_config->archive_obs.obs_bucket);
+            pfree_ext(archive_config->archive_obs.obs_prefix);
+            pfree_ext(archive_config->archive_obs.obs_sk);
+
+            archive_config->in_use = false;
+            SpinLockRelease(&archive_config->mutex);
+            break;
+        }
+        SpinLockRelease(&archive_config->mutex);
+    }
+}
+
+ArchiveSlotConfig* find_archive_slot_from_instance_list(const char* name)
+{
+    ArchiveSlotConfig* result = NULL;
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveSlotConfig *archive_config = &g_instance.archive_obs_cxt.archive_config[i];
+        SpinLockAcquire(&archive_config->mutex);
+        if (archive_config->in_use == true && strcmp(archive_config->slotname, name) == 0) {
+            result = archive_config;
+            SpinLockRelease(&archive_config->mutex);
+            break;
+        }
+        SpinLockRelease(&archive_config->mutex);
+    }
+    return result;
+}
+
+void release_archive_slot(ArchiveSlotConfig** archive_conf)
+{
+    if (archive_conf == NULL || (*archive_conf) == NULL) {
+        return;
+    }
+    pfree_ext((*archive_conf)->archive_obs.obs_address);
+    pfree_ext((*archive_conf)->archive_obs.obs_ak);
+    pfree_ext((*archive_conf)->archive_obs.obs_bucket);
+    pfree_ext((*archive_conf)->archive_obs.obs_prefix);
+    pfree_ext((*archive_conf)->archive_obs.obs_sk);
+    pfree_ext((*archive_conf));
+}
+
+ArchiveSlotConfig* copy_archive_slot(ArchiveSlotConfig* archive_conf_origin)
+{
+    if (archive_conf_origin == NULL) {
+        return NULL;
+    }
+
+    ArchiveSlotConfig* archive_conf_copy = (ArchiveSlotConfig*)palloc0(sizeof(ArchiveSlotConfig));
+    int rc = memcpy_s(archive_conf_copy->slotname, NAMEDATALEN, archive_conf_origin->slotname, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+    archive_conf_copy->archive_obs.obs_address = pstrdup(archive_conf_origin->archive_obs.obs_address);
+    archive_conf_copy->archive_obs.obs_ak = pstrdup(archive_conf_origin->archive_obs.obs_ak);
+    archive_conf_copy->archive_obs.obs_bucket = pstrdup(archive_conf_origin->archive_obs.obs_bucket);
+    archive_conf_copy->archive_obs.obs_prefix = pstrdup(archive_conf_origin->archive_obs.obs_prefix);
+    archive_conf_copy->archive_obs.obs_sk = pstrdup(archive_conf_origin->archive_obs.obs_sk);
+    return archive_conf_copy;
+}
+
+ArchiveTaskStatus* find_archive_task_status(const char* name)
+{
+    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+        return NULL;
+    }
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[i];
+        if (archive_status->in_use && strcmp(archive_status->slotname, name) == 0) {
+            return archive_status;
+        }
+    }
+    return NULL;
+}
+
+ArchiveTaskStatus* find_archive_task_status(int *idx)
+{
+    Assert(t_thrd.role == ARCH);
+    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+        return NULL;
+    }
+
+    ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[*idx];
+    SpinLockAcquire(&archive_status->mutex);
+    if (archive_status->in_use && strcmp(archive_status->slotname, t_thrd.arch.slot_name) == 0) {
+        SpinLockRelease(&archive_status->mutex);
+        return archive_status;
+    }
+    SpinLockRelease(&archive_status->mutex);
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[i];
+        SpinLockAcquire(&archive_status->mutex);
+        if (archive_status->in_use == true && strcmp(archive_status->slotname, t_thrd.arch.slot_name) == 0) {
+            SpinLockRelease(&archive_status->mutex);
+            *idx = i;
+            return archive_status;
+        }
+        SpinLockRelease(&archive_status->mutex);
+    }
+    ereport(ERROR, (errmsg("can not find archive task, may be slot is remove")));
+    return NULL;
+}
+
+ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pitr_task_status)
+{
+    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+        return NULL;
+    }
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
+        ArchiveTaskStatus *archive_status = &g_instance.archive_obs_cxt.archive_status[i];
+        volatile unsigned int *pitr_task_status = &archive_status->pitr_task_status;
+        if (archive_status->in_use && *pitr_task_status == expected_pitr_task_status) {
+            return archive_status;
+        }
+    }
+    return NULL;
 }

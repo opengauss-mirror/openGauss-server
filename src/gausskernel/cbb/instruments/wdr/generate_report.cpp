@@ -3464,6 +3464,8 @@ void GenReport::get_summary_load_profile(report_params* params)
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
+/* summary ratios about instance effciency: buffer hit ratio, cpu efficiency ratio, radio of redo
+ *    with nowait, soft parse ratio and excution without parse ratio */
 static void get_summary_instance_efficiency_percentages(report_params* params, dashboard* dash)
 {
     List* query_result = NIL;
@@ -3471,12 +3473,13 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
     initStringInfo(&query);
 
     appendStringInfo(&query,
-        "select 'Buffer Hit %%: ' as \"Metric Name\", "
-        "    case when s.all_reads = 0 then 1 else round(s.blks_hit * 100 / s.all_reads) end as \"Metric Value\" "
+        "select "
+        "    unnest(array['Buffer Hit %%', 'Effective CPU %%', 'Redo NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
+        "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads) end, s2.cpu_to_elapsd, s3.redo_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
         "from "
         "  (select (snap_2.all_reads - coalesce(snap_1.all_reads, 0)) as all_reads, "
         "       (snap_2.blks_hit - coalesce(snap_1.blks_hit, 0)) as blks_hit "
-        "   from"
+        "   from "
         "     (select sum(coalesce(snap_blks_read, 0) + coalesce(snap_blks_hit, 0)) as all_reads, "
         "        coalesce(sum(snap_blks_hit), 0) as blks_hit "
         "        from snapshot.snap_summary_stat_database "
@@ -3484,8 +3487,64 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
         "     (select sum(coalesce(snap_blks_read, 0) + coalesce(snap_blks_hit, 0)) as all_reads, "
         "        coalesce(sum(snap_blks_hit), 0) as blks_hit "
         "        from snapshot.snap_summary_stat_database "
-        "        where snapshot_id = %ld) snap_2"
-        "   ) as s",
+        "        where snapshot_id = %ld) snap_2 "
+        "   ) s1, "
+        "  (select round(cpu_time.snap_value * 100 / greatest(db_time.snap_value, 1)) as cpu_to_elapsd "
+        "   from "
+        "     (select coalesce(snap_2.snap_value, 0) - coalesce(snap_1.snap_value, 0) as snap_value "
+        "      from "
+        "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
+        "           where snapshot_id = %ld and snap_stat_name = 'CPU_TIME') snap_1, "
+        "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
+        "           where snapshot_id = %ld and snap_stat_name = 'CPU_TIME') snap_2) cpu_time, "
+        "     (select coalesce(snap_2.snap_value, 0) - coalesce(snap_1.snap_value, 0) as snap_value "
+        "      from "
+        "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
+        "           where snapshot_id = %ld and snap_stat_name = 'DB_TIME') snap_1, "
+        "        (select snap_stat_name, snap_value from snapshot.snap_global_instance_time "
+        "           where snapshot_id = %ld and snap_stat_name = 'DB_TIME') snap_2) db_time "
+        "  ) s2, "
+        "  (select (bufferAccess.snap_wait - bufferFull.snap_wait) * 100 / greatest(bufferAccess.snap_wait, 1) as redo_nowait "
+        "   from "
+        "     (select coalesce(snap_2.snap_wait) - coalesce(snap_1.snap_wait, 0) as snap_wait "
+        "      from "
+        "        (select snap_wait from snapshot.snap_global_wait_events "
+        "           where snapshot_id = %ld and snap_event  = 'WALBufferFull') snap_1, "
+        "        (select snap_wait from snapshot.snap_global_wait_events "
+        "           where snapshot_id = %ld and snap_event  = 'WALBufferFull') snap_2) bufferFull, "
+        "     (select coalesce(snap_2.snap_wait) - coalesce(snap_1.snap_wait, 0) as snap_wait "
+        "      from "
+        "        (select snap_wait from snapshot.snap_global_wait_events " 
+        "           where snapshot_id = %ld and snap_event = 'WALBufferAccess') snap_1, "
+        "        (select snap_wait from snapshot.snap_global_wait_events "
+        "           where snapshot_id = %ld and snap_event = 'WALBufferAccess') snap_2) bufferAccess "
+        "  ) s3, "
+        "  (select round((snap_2.soft_parse - snap_1.soft_parse) * 100 / greatest((snap_2.hard_parse + snap_2.soft_parse)-(snap_1.hard_parse + snap_1.soft_parse), 1)) as soft_parse "
+        "   from "
+        "     (select sum(snap_n_soft_parse) as soft_parse, sum(snap_n_hard_parse) as hard_parse from snapshot.snap_summary_statement "
+        "        where snapshot_id = %ld ) snap_1, "
+        "     (select sum(snap_n_soft_parse) as soft_parse, sum(snap_n_hard_parse) as hard_parse from snapshot.snap_summary_statement "
+        "        where snapshot_id = %ld ) snap_2 "
+        "  ) s4, "
+        "  (select round((snap_2.elapse_time - snap_1.elapse_time) * 100 /greatest((snap_2.elapse_time + snap_2.parse_time)-(snap_1.elapse_time + snap_1.parse_time), 1)) as non_parse "
+        "   from "
+        "     (select sum(snap_total_elapse_time) as elapse_time, sum(snap_parse_time) as parse_time from snapshot.snap_summary_statement "
+        "        where snapshot_id = %ld ) snap_1, "
+        "     (select sum(snap_total_elapse_time) as elapse_time, sum(snap_parse_time) as parse_time from snapshot.snap_summary_statement "
+        "        where snapshot_id = %ld ) snap_2 "
+        "  ) s5; ",
+        params->begin_snap_id,
+        params->end_snap_id,
+        params->begin_snap_id,
+        params->end_snap_id,
+        params->begin_snap_id,
+        params->end_snap_id,
+        params->begin_snap_id,
+        params->end_snap_id,
+        params->begin_snap_id,
+        params->end_snap_id,
+        params->begin_snap_id,
+        params->end_snap_id,
         params->begin_snap_id,
         params->end_snap_id);
 
@@ -3506,7 +3565,7 @@ static void get_summary_instance_efficiency_percentages(report_params* params, d
     appendStringInfo(&query,
         "select "
         "    unnest(array['Buffer Hit %%', 'Effective CPU %%', 'WalWrite NoWait %%', 'Soft Parse %%', 'Non-Parse CPU %%']) as \"Metric Name\", "
-        "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads) end, s2.cpu_to_elapsd, s3.walwrite_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
+        "    unnest(array[case when s1.all_reads = 0 then 1 else round(s1.blks_hit * 100 / s1.all_reads, 2) end, s2.cpu_to_elapsd, s3.walwrite_nowait, s4.soft_parse, s5.non_parse]) as \"Metric Value\" "
         "from "
         "  (select (snap_2.all_reads - coalesce(snap_1.all_reads, 0)) as all_reads, "
         "       (snap_2.blks_hit - coalesce(snap_1.blks_hit, 0)) as blks_hit "
@@ -3602,7 +3661,7 @@ static void get_summary_instance_efficiency(report_params* params)
     dash->tableTitle = "Instance Efficiency Percentages (Target 100%)";
     dash->desc = lappend(dash->desc, (void*)desc);
 
-    /* instance efficiency, Buffer Hit %: */
+    /* instance efficiency, Buffer Hit %, Effective CPU % extra */
     get_summary_instance_efficiency_percentages(params, dash);
     GenReport::add_data(dash, &params->Contents);
 }
@@ -4168,9 +4227,9 @@ static bool IsSnapStatNormal(report_params* params)
     /* using global_node reset time */
     appendStringInfo(&query,
         " SELECT MAX(EXTRACT(EPOCH FROM (snap_2.snap_reset_time - snap_1.snap_reset_time)))::int8 FROM "
-        " (SELECT * FROM snapshot.snap_global_record_reset_time WHERE snapshot_id = %ld) AS snap_1, "
+        " (SELECT * FROM snapshot.snap_global_record_reset_time WHERE snapshot_id = %ld) AS snap_1 inner join"
         " (SELECT * from snapshot.snap_global_record_reset_time WHERE snapshot_id = %ld) AS snap_2 "
-        " WHERE snap_2.snap_node_name = snap_1.snap_node_name",
+        " on snap_2.snap_node_name = snap_1.snap_node_name",
         params->begin_snap_id,
         params->end_snap_id);
 

@@ -93,6 +93,7 @@ typedef struct RangeVar {
 #ifdef ENABLE_MOT
     Oid foreignOid;
 #endif
+    bool withVerExpr;
 } RangeVar;
 
 /*
@@ -406,6 +407,7 @@ typedef struct FuncExpr {
     Expr xpr;
     Oid funcid;              /* PG_PROC OID of the function */
     Oid funcresulttype;      /* PG_TYPE OID of result value */
+    int32 funcresulttype_orig; /* PG_TYPE OID of original result value */
     bool funcretset;         /* true if function returns set */
     /* true if variadic arguments have been  combined into an array last argument */
     bool funcvariadic;     
@@ -1403,7 +1405,7 @@ typedef struct UpsertExpr {
 
 /*
  * DB4AI
-*/
+ */
 #define DB4AI_SNAPSHOT_VERSION_DELIMITER 1
 #define DB4AI_SNAPSHOT_VERSION_SEPARATOR 2
 
@@ -1423,7 +1425,7 @@ typedef enum GradientDescentExprField {
     GD_EXPR_NUM_ITERATIONS,
     GD_EXPR_EXEC_TIME_MSECS,
     GD_EXPR_PROCESSED_TUPLES,
-   GD_EXPR_DISCARDED_TUPLES,
+    GD_EXPR_DISCARDED_TUPLES,
     GD_EXPR_WEIGHTS,
     GD_EXPR_CATEGORIES,
     // scores
@@ -1437,6 +1439,5 @@ typedef struct GradientDescentExpr {
     GradientDescentExprField    field;
     Oid fieldtype;      /* pg_type OID of the datatype */
 } GradientDescentExpr;
-
 
 #endif /* PRIMNODES_H */

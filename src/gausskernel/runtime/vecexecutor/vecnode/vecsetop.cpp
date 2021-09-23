@@ -16,7 +16,7 @@
 
 #include "commands/explain.h"
 #include "executor/executor.h"
-#include "executor/nodeSetOp.h"
+#include "executor/node/nodeSetOp.h"
 #include "vecexecutor/vecexecutor.h"
 #include "vecexecutor/vecsetop.h"
 #include "utils/dynahash.h"

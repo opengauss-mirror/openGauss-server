@@ -625,7 +625,8 @@ static bool grow_memtuples(Tuplestorestate* state)
     int memtupsize = state->memtupsize;
     int64 memNowUsed = state->allowedMem - state->availMem;
     bool needAutoSpread = false;
-    double growRatio = Min(DEFAULT_GROW_RATIO, ((double)(MaxAllocSize / sizeof(void*)) / memtupsize));
+    int64 growMemTotal = (state->allowedMem > (int64)MaxAllocSize) ? state->allowedMem : (int64)MaxAllocSize;
+    double growRatio = Min(DEFAULT_GROW_RATIO, ((double)((double)growMemTotal / sizeof(void*)) / memtupsize));
     double unspreadGrowRatio = growRatio;
 
     /* Forget it if we've already maxed out memtuples, per comment above */
@@ -737,7 +738,7 @@ static bool grow_memtuples(Tuplestorestate* state)
     /* OK, do it */
     FREEMEM(state, GetMemoryChunkSpace(state->memtuples));
     state->memtupsize = (int)(memtupsize * growRatio);
-    state->memtuples = (void**)repalloc(state->memtuples, state->memtupsize * sizeof(void*));
+    state->memtuples = (void**)repalloc_huge(state->memtuples, state->memtupsize * sizeof(void*));
     USEMEM(state, GetMemoryChunkSpace(state->memtuples));
     if (state->availMem < 0)
         goto noalloc;

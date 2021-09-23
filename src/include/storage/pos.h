@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pos.h
- *	  POSTGRES "position" definitions.
+ *	  openGauss "position" definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -15,7 +15,7 @@
 #define POS_H
 
 /*
- * a 'position' used to be <pagenumber, offset> in postgres.  this has
+ * a 'position' used to be <pagenumber, offset> in openGauss.  this has
  * been changed to just <offset> as the notion of having multiple pages
  * within a block has been removed.
  *

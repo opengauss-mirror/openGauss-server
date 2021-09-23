@@ -48,6 +48,7 @@ static int getNotify(PGconn* conn);
 PostgresPollingStatusType pqSetenvPoll(PGconn* conn)
 {
     PGresult* res = NULL;
+    char setQuery[100]; /* note length limit in sprintf below */
 
     if (conn == NULL || conn->status == CONNECTION_BAD)
         return PGRES_POLLING_FAILED;
@@ -101,8 +102,7 @@ PostgresPollingStatusType pqSetenvPoll(PGconn* conn)
                  * different state is used.
                  */
             case SETENV_STATE_CLIENT_ENCODING_SEND: {
-                char setQuery[100]; /* note length limit in
-                                     * sprintf below */
+
                 const char* val = conn->client_encoding_initial;
 
                 if (val != NULL) {
@@ -133,8 +133,6 @@ PostgresPollingStatusType pqSetenvPoll(PGconn* conn)
                  * transaction blocks, even in a 7.3 server with
                  * autocommit off.
                  */
-                char setQuery[100]; /* note length limit in
-                                     * sprintf below */
 
                 if (conn->next_eo->envName != NULL) {
                     const char* val = gs_getenv_r(conn->next_eo->envName);
@@ -252,7 +250,7 @@ PostgresPollingStatusType pqSetenvPoll(PGconn* conn)
                     if ((val != NULL) && strncmp(val, "PostgreSQL ", 11) == 0) {
                         char* ptr = NULL;
 
-                        /* strip off PostgreSQL part */
+                        /* strip off openGauss part */
                         val += 11;
 
                         /*
@@ -1269,7 +1267,7 @@ int pqEndcopy2(PGconn* conn)
 }
 
 /*
- * PQfn - Send a function call to the POSTGRES backend.
+ * PQfn - Send a function call to the openGauss backend.
  *
  * See fe-exec.c for documentation.
  */

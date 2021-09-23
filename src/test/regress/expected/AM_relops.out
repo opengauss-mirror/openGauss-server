@@ -97,7 +97,7 @@ DROP TABLE RELOPTIONS_TBL;
 --   as related API are not implemented yet.
 CREATE TABLE RELOPTIONS_TBL(C1 char, B1 bool) WITH (TABLE_ACCESS_METHOD =  HBUCKT);
 ERROR:  Invalid string for "TABLE_ACCESS_METHOD" option.
-DETAIL:  Valid strings are "HEAP", "USTORE"
+DETAIL:  Valid strings are "ASTORE", "USTORE"
 
 -- fetch the reloptions for this table from pg_class, 'table_access_method = hbuckt' should be visible in the result.
 SELECT reloptions FROM pg_class WHERE relname = 'reloptions_tbl';
@@ -111,6 +111,6 @@ ERROR:  table "reloptions_tbl" does not exist
 --  This should throw an error while table creation as specified option is not valid!
 CREATE TABLE RELOPTIONS_TBL(C1 char, B1 bool) WITH (TABLE_ACCESS_METHOD =  INVALID);
 ERROR:  Invalid string for "TABLE_ACCESS_METHOD" option.
-DETAIL:  Valid strings are "HEAP", "USTORE"
+DETAIL:  Valid strings are "ASTORE", "USTORE"
  
  

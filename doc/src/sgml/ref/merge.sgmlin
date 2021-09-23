@@ -12,7 +12,7 @@
 
 <refsynopsisdiv>
 <synopsis>
-MERGE INTO table_name [ [ AS ] alias ]
+MERGE [/*+ plan_hint */] INTO table_name [ [ AS ] alias ]
 USING { { table_name | view_name } | subquery } [ [ AS ] alias ]
 ON ( condition )
 [

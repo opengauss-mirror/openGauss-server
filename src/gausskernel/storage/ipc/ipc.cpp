@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * ipc.cpp
- *	  POSTGRES inter-process communication definitions.
+ *	  openGauss inter-process communication definitions.
  *
  * This file is misnamed, as it no longer has much of anything directly
  * to do with IPC.	The functionality here is concerned with managing
@@ -31,15 +31,18 @@
 #include "storage/ipc.h"
 #include "tcop/tcopprot.h"
 #include "libpq/libpq-be.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/latch.h"
+#include "storage/procarray.h"
 #include "gssignal/gs_signal.h"
 #include "storage/pmsignal.h"
 #include "access/gtm.h"
 #include "access/dfs/dfs_am.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 #include "workload/workload.h"
 #include "postmaster/syslogger.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
+#include "postmaster/bgworker.h"
 #ifndef WIN32_ONLY_COMPILER
     #include "dynloader.h"
 #else
@@ -69,7 +72,7 @@ extern void pq_close(int code, Datum arg);
 extern void AtProcExit_Files(int code, Datum arg);
 extern void audit_processlogout(int code, Datum arg);
 extern void CancelAutoAnalyze();
-
+extern void DestoryAutonomousSession(bool force);
 #ifdef ENABLE_MOT
 static void MOTCleanupSession(int code, Datum arg)
 {
@@ -80,6 +83,7 @@ static void MOTCleanupSession(int code, Datum arg)
 static const pg_on_exit_callback on_sess_exit_list[] = {
     ShutdownPostgres,
     PGXCNodeCleanAndRelease,
+    PlDebugerCleanUp,
 #ifdef ENABLE_MOT
     /*
      * 1. Must come after ShutdownPostgres(), in case there is abort/rollback callback.
@@ -241,15 +245,20 @@ void proc_exit(int code)
     if (IS_THREAD_POOL_WORKER) {
         if (t_thrd.threadpool_cxt.worker != NULL)
             t_thrd.threadpool_cxt.worker->CleanUpSessionWithLock();
+        DecreaseUserCount(u_sess->proc_cxt.MyRoleId);
     }
-
     RemoveFromDnHashTable();
 
     /* Clean up Dfs Reader stuffs */
     CleanupDfsHandlers(true);
 
+    BgworkerListSyncQuit();
     /* Clean up everything that must be cleaned up */
     proc_exit_prepare(code);
+
+    if (u_sess->SPI_cxt.autonomous_session) {
+        DestoryAutonomousSession(true);
+    }
 
     /*
      * Protect the node group incase the ShutPostgres Callback function
@@ -351,16 +360,19 @@ void proc_exit(int code)
     SQMCloseLogFile();
     ASPCloseLogFile();
 
-    if (IS_THREAD_POOL_WORKER) {
+    if (IS_THREAD_POOL_WORKER && t_thrd.threadpool_cxt.worker) {
         CurrentMemoryContext = NULL;
         t_thrd.threadpool_cxt.worker->ShutDown();
-    } else if (IS_THREAD_POOL_LISTENER) {
+    } else if (IS_THREAD_POOL_LISTENER && t_thrd.threadpool_cxt.listener) {
         t_thrd.threadpool_cxt.listener->ResetThreadId();
-    } else if (IS_THREAD_POOL_SCHEDULER) {
+    } else if (IS_THREAD_POOL_SCHEDULER && t_thrd.threadpool_cxt.scheduler) {
         t_thrd.threadpool_cxt.scheduler->SetShutDown(true);
-    } else if (IS_THREAD_POOL_STREAM) {
+    } else if (IS_THREAD_POOL_STREAM && t_thrd.threadpool_cxt.stream) {
         t_thrd.threadpool_cxt.stream->ShutDown();
     }
+
+    GlobalStatsCleanupFiles();
+
     gs_thread_exit(code);
 }
 
@@ -445,6 +457,7 @@ void sess_exit(int code)
      */
     StreamNodeGroup::syncQuit(STREAM_ERROR);
     StreamNodeGroup::destroy(STREAM_ERROR);
+    BgworkerListSyncQuit();
     CloseClientSocket(u_sess, true);
 
     CancelAutoAnalyze();
@@ -484,7 +497,7 @@ void sess_exit_prepare(int code)
 	
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
-
+    
     t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);

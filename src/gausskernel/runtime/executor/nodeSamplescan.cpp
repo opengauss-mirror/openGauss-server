@@ -29,8 +29,8 @@
 #include "access/tableam.h"
 #include "commands/vacuum.h"
 #include "executor/executor.h"
-#include "executor/nodeSamplescan.h"
-#include "executor/nodeSeqscan.h"
+#include "executor/node/nodeSamplescan.h"
+#include "executor/node/nodeSeqscan.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #ifdef PGXC
@@ -43,6 +43,7 @@
 #include "utils/snapmgr.h"
 #include "vecexecutor/vecnodecstorescan.h"
 #include "nodes/execnodes.h"
+#include "access/ustore/knl_uscan.h"
 
 static double sample_random_fract(void);
 
@@ -100,6 +101,39 @@ static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
     return (((RowTableSample*)node->sampleScanInfo.tsm_state)->scanSample)();
 }
 
+static inline UHeapTuple USampleFetchNextTuple(SeqScanState* node)
+{
+    UHeapScanDesc uheapScanDesc = (UHeapScanDesc)node->ss_currentScanDesc;
+    uheapScanDesc->rs_base.rs_ss_accessor = node->ss_scanaccessor;
+
+    /*
+     * Get the next tuple for table sample, and return it.
+     * Scans the relation using the sampling method and returns
+     * the next qualifying tuple. We call the ExecScan() routine and pass it
+     * the appropriate access method functions.
+     */
+    return (((UstoreTableSample*)node->sampleScanInfo.tsm_state)->scanSample)();
+}
+
+TupleTableSlot* HeapSeqSampleNext(SeqScanState* node)
+{
+    TupleTableSlot* slot = node->ss_ScanTupleSlot;
+    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
+    HeapTuple tuple = SampleFetchNextTuple(node);
+    return ExecMakeTupleSlot(tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), slot, node->ss_currentRelation->rd_tam_type);
+}
+
+TupleTableSlot* UHeapSeqSampleNext(SeqScanState* node)
+{
+    TupleTableSlot* slot = node->ss_ScanTupleSlot;
+    UHeapTuple tuple = USampleFetchNextTuple(node);
+    if (tuple != NULL) {
+        return ExecStoreTuple(tuple, slot, InvalidBuffer, true);
+    }
+
+    return ExecClearTuple(slot);
+}
+
 /*
  * Description: Get the next tuple from the table for sample scan.
  *
@@ -111,11 +145,12 @@ static inline HeapTuple SampleFetchNextTuple(SeqScanState* node)
  */
 TupleTableSlot* SeqSampleNext(SeqScanState* node)
 {
-    TupleTableSlot* slot = node->ss_ScanTupleSlot;
-    HeapTuple tuple = SampleFetchNextTuple(node);
-
-    node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
-    return ExecMakeTupleSlot(tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation), slot, node->ss_currentRelation->rd_tam_type);
+    bool isUstore = RelationIsUstoreFormat(node->ss_currentRelation);
+    if (!isUstore) {
+        return HeapSeqSampleNext(node);
+    } else {
+        return UHeapSeqSampleNext(node);
+    }
 }
 
 TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
@@ -140,7 +175,7 @@ TupleTableSlot* HbktSeqSampleNext(SeqScanState* node)
 
     node->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType = node->ss_currentRelation->rd_tam_type;
     return ExecMakeTupleSlot(
-            tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation),
+            (Tuple) tuple, GetTableScanDesc(node->ss_currentScanDesc, node->ss_currentRelation),
             slot,
             node->ss_currentRelation->rd_tam_type);
 }
@@ -692,6 +727,167 @@ HeapTuple RowTableSample::scanSample()
 }
 
 /*
+ * Description: Initialize Sample Scan parameter.
+ *
+ * Parameters:
+ *	@in scanstate: ScanState information
+ *
+ * Returns: void
+ */
+UstoreTableSample::UstoreTableSample(ScanState* scanstate) : BaseTableSample(scanstate)
+{}
+
+UstoreTableSample::~UstoreTableSample()
+{}
+
+/*
+ * Description: Get max offset for current block.
+ *
+ * Parameters: null
+ *
+ * Returns: void
+ */
+void UstoreTableSample::getMaxOffset()
+{
+    TableScanDesc scan = sampleScanState->ss_currentScanDesc;
+    UHeapScanDesc uheapscan = (UHeapScanDesc)scan;
+
+    Assert(BlockNumberIsValid(currentBlock));
+
+    Assert (scanTupState == NEWBLOCK);
+    UHeapGetPage(scan, currentBlock);
+
+    curBlockMaxoffset = uheapscan->rs_base.rs_ntuples;
+}
+
+/*
+ * Description: Scan tuple according to currentblock and current currentoffset.
+ *
+ * Parameters: null
+ *
+ * Returns: ScanValid (the flag which identify the tuple is valid or not)
+ */
+ScanValid UstoreTableSample::scanTup()
+{
+    UHeapScanDesc scan = (UHeapScanDesc)sampleScanState->ss_currentScanDesc;
+
+    if (!BlockNumberIsValid(currentBlock)) {
+        return INVALIDBLOCKNO;
+    }
+
+    if (currentOffset >= 1 && currentOffset <= curBlockMaxoffset) {
+        scan->rs_cutup = scan->rs_visutuples[currentOffset - 1];
+        return VALIDDATA;
+    }
+
+    return INVALIDOFFSET;
+}
+
+/*
+ * Description: Get sample tuple for row table.
+ *
+ * Parameters: null
+ *
+ * Returns: HeapTuple
+ */
+UHeapTuple UstoreTableSample::scanSample()
+{
+    UHeapScanDesc scan = (UHeapScanDesc)sampleScanState->ss_currentScanDesc;
+
+    if (finished == true) {
+        return NULL;
+    }
+
+    /* Return NULL if no data or percent value is 0. */
+    if ((scan->rs_base.rs_nblocks == 0) ||
+        (sampleScanState->sampleScanInfo.sampleType == BERNOULLI_SAMPLE && percent[0] == 0) ||
+        (sampleScanState->sampleScanInfo.sampleType == SYSTEM_SAMPLE && percent[0] == 0) ||
+        (sampleScanState->sampleScanInfo.sampleType == HYBRID_SAMPLE && percent[BERNOULLI_SAMPLE] == 0 &&
+            percent[SYSTEM_SAMPLE] == 0)) {
+        Assert(!BufferIsValid(scan->rs_base.rs_cbuf));
+        return NULL;
+    }
+
+    for (;;) {
+        CHECK_FOR_INTERRUPTS();
+
+        switch (runState) {
+            /* Get num of max block. */
+            case GETMAXBLOCK: {
+                totalBlockNum = scan->rs_base.rs_nblocks;
+                runState = GETBLOCKNO;
+                elog(DEBUG2,
+                    "Get %u blocks for relation: %s on %s.",
+                    totalBlockNum,
+                    NameStr(scan->rs_base.rs_rd->rd_rel->relname),
+                    g_instance.attr.attr_common.PGXCNodeName);
+                break;
+            }
+            case GETBLOCKNO: {
+                /* Get current block no with method of function. */
+                (this->*nextSampleBlock_function)();
+
+                if (BlockNumberIsValid(currentBlock)) {
+                    runState = GETMAXOFFSET;
+                } else {
+                    runState = GETDATA;
+                }
+
+                scanTupState = NEWBLOCK;
+                break;
+            }
+            case GETMAXOFFSET: {
+                getMaxOffset();
+                runState = GETOFFSET;
+                elog(DEBUG2,
+                    "Get %d tuples in blockno: %u for relation: %s on %s.",
+                    curBlockMaxoffset,
+                    currentBlock,
+                    NameStr(scan->rs_base.rs_rd->rd_rel->relname),
+                    g_instance.attr.attr_common.PGXCNodeName);
+                break;
+            }
+            case GETOFFSET: {
+                (this->*nextSampleTuple_function)();
+
+                runState = GETDATA;
+                break;
+            }
+            case GETDATA: {
+                ScanValid scanState = scanTup();
+
+                switch (scanState) {
+                    case VALIDDATA: {
+                        runState = GETOFFSET;
+                        return scan->rs_cutup;
+                    }
+                    case NEXTDATA: {
+                        runState = GETOFFSET;
+                        break;
+                    }
+                    case INVALIDBLOCKNO: {
+                        /* All block alreadly be scaned finish. */
+                        finished = true;
+                        return NULL;
+                    }
+                    case INVALIDOFFSET: {
+                        runState = GETBLOCKNO;
+                        break;
+                    }
+                    default: {
+                        break;
+                    }
+                }
+                break;
+            }
+            default: {
+                break;
+            }
+        }
+    }
+}
+
+/*
  * Description: Initialize Sample Scan parameter for CStoreScanState.
  *
  * Parameters:
@@ -837,8 +1033,7 @@ void ColumnTableSample::getBatchBySamples(VectorBatch* vbout)
 /*
  * Description: Scan each offsets and get sample VectorBatch by tids.
  *
- * Parameters:
- *	@in pOutBatch: return values of VectorBatch
+ * Parameters: @in pOutBatch: return values of VectorBatch
  *
  * Returns: ScanValid (the flag which identify the tuple is valid or not)
  */

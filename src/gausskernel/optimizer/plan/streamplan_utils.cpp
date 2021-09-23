@@ -1464,6 +1464,52 @@ List* check_random_expr(Plan* result_plan)
     return random_list;
 }
 
+static void set_bucketmap_index_by_group(ExecNodes *exec_node, NodeGroupInfoContext *node_group_info_context,
+    Oid groupoid)
+{
+    char *group_name = get_pgxc_groupname(groupoid);
+    if (group_name == NULL)
+        return;
+
+    char *installation_group_name = pstrdup(PgxcGroupGetInstallationGroup());
+    char *group_parent_name = NULL;
+    int current_num_bucketmaps = node_group_info_context->num_bucketmaps;
+    int bucketlen;
+    if (strncmp(group_name, installation_group_name, NAMEDATALEN) == 0 ||
+        (((group_parent_name = get_pgxc_groupparent(groupoid)) != NULL) &&
+        strncmp(group_parent_name, installation_group_name, NAMEDATALEN) == 0)) {
+        node_group_info_context->groupOids[current_num_bucketmaps] = groupoid;
+        node_group_info_context->bucketMap[current_num_bucketmaps] = BucketMapCacheGetBucketmap(group_name, &bucketlen);
+        node_group_info_context->bucketCnt[current_num_bucketmaps] = bucketlen;
+        exec_node->bucketmapIdx = node_group_info_context->num_bucketmaps;
+        node_group_info_context->num_bucketmaps++;
+    } else {
+        char in_redistribution = get_pgxc_group_redistributionstatus(groupoid);
+        if ('y' != in_redistribution) {
+            char *group_parent = get_pgxc_groupparent(groupoid);
+            if (group_parent != NULL) {
+                Oid group_parent_oid = get_pgxc_groupoid(group_parent, false);
+                in_redistribution = get_pgxc_group_redistributionstatus(group_parent_oid);
+            }
+        }
+        uint2 *bucketmap = BucketMapCacheGetBucketmap(group_name, &bucketlen);
+        if ('y' == in_redistribution) {
+            node_group_info_context->groupOids[current_num_bucketmaps] = groupoid;
+            node_group_info_context->bucketMap[current_num_bucketmaps] = bucketmap;
+            node_group_info_context->bucketCnt[current_num_bucketmaps] = bucketlen;
+            exec_node->bucketmapIdx = node_group_info_context->num_bucketmaps;
+            node_group_info_context->num_bucketmaps++;
+        } else {
+            exec_node->bucketmapIdx = (int)(BUCKETMAP_DEFAULT_INDEX_BIT | bucketlen);
+        }
+    }
+    AssertEreport(node_group_info_context->num_bucketmaps <= MAX_SPECIAL_BUCKETMAP_NUM, MOD_OPT,
+        "The number of bucketmaps exceeded the max special bucketmap num");
+    pfree_ext(group_name);
+    pfree_ext(group_parent_name);
+    pfree_ext(installation_group_name);
+}
+
 /*
  * record the bucketmap and the index of bucketmap.
  */
@@ -1472,7 +1518,7 @@ static void set_bucketmap_index(ExecNodes* exec_node, NodeGroupInfoContext* node
     if (exec_node == NULL)
         return;
 
-    exec_node->bucketmapIdx = BUCKETMAP_DEFAULT_INDEX;
+    exec_node->bucketmapIdx = (int)(BUCKETMAP_DEFAULT_INDEX_BIT | BUCKETDATALEN);
     Oid groupoid = exec_node->distribution.group_oid;
 
     if (groupoid == InvalidOid)
@@ -1484,36 +1530,7 @@ static void set_bucketmap_index(ExecNodes* exec_node, NodeGroupInfoContext* node
             return;
         }
     }
-
-    char* group_name = get_pgxc_groupname(groupoid);
-    if (group_name == NULL)
-        return;
-
-    char* installation_group_name = pstrdup(PgxcGroupGetInstallationGroup());
-    int current_num_bucketmaps = node_group_info_context->num_bucketmaps;
-
-    if (strncmp(group_name, installation_group_name, NAMEDATALEN) == 0) {
-        node_group_info_context->groupOids[current_num_bucketmaps] = groupoid;
-        node_group_info_context->bucketMap[current_num_bucketmaps] = BucketMapCacheGetBucketmap(group_name);
-
-        exec_node->bucketmapIdx = node_group_info_context->num_bucketmaps;
-        node_group_info_context->num_bucketmaps++;
-    } else {
-        char in_redistribution = get_pgxc_group_redistributionstatus(groupoid);
-        if ('y' == in_redistribution) {
-            node_group_info_context->groupOids[current_num_bucketmaps] = groupoid;
-            node_group_info_context->bucketMap[current_num_bucketmaps] = BucketMapCacheGetBucketmap(group_name);
-
-            exec_node->bucketmapIdx = node_group_info_context->num_bucketmaps;
-            node_group_info_context->num_bucketmaps++;
-        }
-    }
-
-    AssertEreport(node_group_info_context->num_bucketmaps <= MAX_SPECIAL_BUCKETMAP_NUM,
-        MOD_OPT,
-        "The number of bucketmaps exceeded the max special bucketmap num");
-    pfree_ext(group_name);
-    pfree_ext(installation_group_name);
+    set_bucketmap_index_by_group(exec_node, node_group_info_context, groupoid);
 }
 
 static bool is_execute_on_multinodes(Plan* plan)

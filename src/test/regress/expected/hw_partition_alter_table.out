@@ -1032,8 +1032,8 @@ ERROR:  EXCLUDE constraint is not yet supported.
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A)) LOCAL;
 ERROR:  unique index columns must contain the partition key and collation must be default collation
 --ERROR: partitioned table does not support global index
-CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A));
-ERROR:  Global partition index only support single node mode.
+-- NEEDTOADJUST -- CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (INT4UP(A));
+-- NEEDTOADJUST -- ERROR:  Global partition index only support single node mode.
 -- partitioned index does not support partial index
 -- ERROR: syntax error at or near "LOCAL"
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100) LOCAL;
@@ -1041,8 +1041,8 @@ ERROR:  syntax error at or near "LOCAL"
 LINE 1: ...DEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100) LOCAL;
                                                                  ^
 -- ERROR: partitioned table does not support global index
-CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100);
-ERROR:  Global partition index only support single node mode.
+-- NEEDTOADJUST -- CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A) WHERE (A < 100);
+-- NEEDTOADJUST -- ERROR:  Global partition index only support single node mode.
 -- partitioned index does not support b-tree index without default sort ordering
 CREATE UNIQUE INDEX INDEX_ON_TEST_CON ON TEST_CON (A DESC NULLS LAST) LOCAL;
 with partitioned_obj_oids as

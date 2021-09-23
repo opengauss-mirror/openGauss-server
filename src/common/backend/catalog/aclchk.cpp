@@ -46,6 +46,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
@@ -53,6 +54,7 @@
 #include "catalog/pg_ts_dict.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/pg_extension_data_source.h"
+#include "catalog/gs_global_chain.h"
 #include "catalog/gs_global_config.h"
 #include "commands/dbcommands.h"
 #include "commands/proclang.h"
@@ -60,7 +62,7 @@
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
 #include "commands/directory.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "foreign/foreign.h"
 #include "gs_policy/policy_common.h"
 #include "libpq/auth.h"
@@ -144,6 +146,8 @@ const struct AclObjectType {
         gettext_noop("invalid privilege type %s for function")},
     {ACL_OBJECT_LANGUAGE, ACL_ALL_RIGHTS_LANGUAGE, ACL_ALL_DDL_RIGHTS_LANGUAGE, 
         gettext_noop("invalid privilege type %s for language")},
+    {ACL_OBJECT_PACKAGE, ACL_ALL_RIGHTS_PACKAGE, ACL_ALL_DDL_RIGHTS_PACKAGE, 
+        gettext_noop("invalid privilege type %s for package")},
     {ACL_OBJECT_LARGEOBJECT, ACL_ALL_RIGHTS_LARGEOBJECT, ACL_ALL_DDL_RIGHTS_LARGEOBJECT, 
         gettext_noop("invalid privilege type %s for large object")},
     {ACL_OBJECT_NAMESPACE, ACL_ALL_RIGHTS_NAMESPACE, ACL_ALL_DDL_RIGHTS_NAMESPACE, 
@@ -200,6 +204,7 @@ const struct AclClassId {
     {DatabaseRelationId, ACL_OBJECT_DATABASE},
     {TypeRelationId, ACL_OBJECT_TYPE},
     {ProcedureRelationId, ACL_OBJECT_FUNCTION},
+    {PackageRelationId, ACL_OBJECT_PACKAGE},
     {LanguageRelationId, ACL_OBJECT_LANGUAGE},
     {LargeObjectRelationId, ACL_OBJECT_LARGEOBJECT},
     {NamespaceRelationId, ACL_OBJECT_NAMESPACE},
@@ -219,6 +224,7 @@ static void ExecGrant_Database(InternalGrant* grantStmt);
 static void ExecGrant_Fdw(InternalGrant* grantStmt);
 static void ExecGrant_ForeignServer(InternalGrant* grantStmt);
 static void ExecGrant_Function(InternalGrant* grantStmt);
+static void ExecGrant_Package(InternalGrant* istmt);
 static void ExecGrant_Language(InternalGrant* grantStmt);
 static void ExecGrant_Largeobject(InternalGrant* grantStmt);
 static void ExecGrant_Namespace(InternalGrant* grantStmt);
@@ -266,6 +272,12 @@ static void dumpacl(Acl* acl)
 #endif /* ACLDEBUG */
 
 #define DATA_NODE_CHECK()  if (IS_PGXC_DATANODE)  break;
+/* if we have a detoasted copy of acl, free it */
+#define FREE_DETOASTED_ACL(acl, aclDatum) do {                          \
+    if ((acl) && ((Pointer)(acl) != DatumGetPointer((aclDatum)))) {     \
+        pfree_ext((acl));                                               \
+    }                                                                   \
+} while (0)
 
 /*
  * If is_grant is true, adds the given privileges for the list of
@@ -303,8 +315,10 @@ static Acl* merge_acl_with_grant(Acl* old_acl, bool is_grant, bool grant_option,
          * is impossible to clean up.
          */
         if (is_grant && grant_option && aclitem.ai_grantee == ACL_ID_PUBLIC)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("grant options can only be granted to roles")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("invalid grant operation"), errdetail("Grant options can only be granted to roles."),
+                    errcause("Grant options cannnot be granted to public."),
+                        erraction("Grant grant options to roles.")));
 
         aclitem.ai_grantor = grantorId;
         ddl_aclitem.ai_grantor = grantorId;
@@ -361,7 +375,10 @@ static void restrict_and_check_grant(AclMode* this_privileges, bool is_grant,
     }
     
     if (!kind_flag) {
-        ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized object kind: %d", objkind)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("unrecognized object kind: %d", objkind), errdetail("N/A"),
+                errcause("The object type is not supported for GRANT/REVOKE."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
         /* not reached, but keep compiler quiet */
         whole_mask = ACL_NO_RIGHTS;
         whole_ddl_mask = ACL_NO_DDL_RIGHTS;
@@ -486,9 +503,10 @@ List* GrantStmtGetObjectOids(GrantStmt* stmt)
             break;
             /* ACL_TARGET_DEFAULTS should not be seen here */
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized GrantStmt.targtype: %d", (int)stmt->targtype)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized GrantStmt.targtype: %d", (int)stmt->targtype), errdetail("N/A"),
+                    errcause("The target type is not supported for GRANT/REVOKE."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported target types.")));
     }
     return objects;
 }
@@ -536,9 +554,11 @@ void ExecuteGrantStmt(GrantStmt* stmt)
             /* In securitymode, grant to public operation is forbidden */
             if (stmt->is_grant && isSecurityMode && !IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade &&
                 !u_sess->exec_cxt.extension_is_valid) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg("grant to public operation is forbidden in security mode")));
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid grant operation"),
+                        errdetail("Grant to public operation is forbidden in security mode."),
+                            errcause("Grant to public operation is forbidden in security mode."),
+                                erraction("Don't grant to public in security mode.")));
             }
             istmt.grantees = lappend_oid(istmt.grantees, ACL_ID_PUBLIC);
         } else
@@ -559,9 +579,10 @@ void ExecuteGrantStmt(GrantStmt* stmt)
         }
     }
     if (!type_flag) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                errmsg("unrecognized GrantStmt.objtype: %d", (int)stmt->objtype)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("unrecognized object type"), errdetail("unrecognized GrantStmt.objtype: %d", (int)stmt->objtype),
+                errcause("The object type is not supported for GRANT/REVOKE."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
         /* keep compiler quiet */
         all_privileges = ACL_NO_RIGHTS;
         all_ddl_privileges = ACL_NO_DDL_RIGHTS;
@@ -592,9 +613,11 @@ void ExecuteGrantStmt(GrantStmt* stmt)
              */
             if (privnode->cols) {
                 if (stmt->objtype != ACL_OBJECT_RELATION)
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                            errmsg("column privileges are only valid for relations")));
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                        errmsg("invalid grant/revoke operation"),
+                            errdetail("Column privileges are only valid for relations."),
+                                errcause("Column privileges are only valid for relations in GRANT/REVOKE."),
+                                    erraction("Use the column privileges only for relations.")));
                 
                 if (privnode->priv_name == NULL) {
                     istmt.col_ddl_privs = lappend(istmt.col_ddl_privs, privnode);
@@ -611,10 +634,11 @@ void ExecuteGrantStmt(GrantStmt* stmt)
                 continue;
             }
 
-            if (privnode->priv_name == NULL) /* parser mistake? */
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg("AccessPriv node must specify privilege or columns")));
+            if (privnode->priv_name == NULL) { /* parser mistake? */
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid AccessPriv node"), errdetail("AccessPriv node must specify privilege or columns"),
+                        errcause("System error."), erraction("Contact engineer to support.")));
+            }
 
             priv = string_to_privilege(privnode->priv_name);
             if (stmt->objtype == ACL_OBJECT_NODEGROUP && strcmp(privnode->priv_name, "create") == 0) {
@@ -623,15 +647,21 @@ void ExecuteGrantStmt(GrantStmt* stmt)
 
             if (ACLMODE_FOR_DDL(priv)) {
                 if (priv & ~((AclMode)all_ddl_privileges)) {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg(errormsg, privilege_to_string(priv))));
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                        errmsg(errormsg, privilege_to_string(priv)), errdetail("N/A"),
+                            errcause("The privilege type is not supported for the object."),
+                                erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types "
+                                    "for the object type.")));
                 }
 
                 istmt.ddl_privileges |= priv;
             } else {
                 if (priv & ~((AclMode)all_privileges)) {
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg(errormsg, privilege_to_string(priv))));
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                        errmsg(errormsg, privilege_to_string(priv)), errdetail("N/A"),
+                            errcause("The privilege type is not supported for the object."),
+                                erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types "
+                                    "for the object type.")));
                 }
 
                 istmt.privileges |= priv;
@@ -670,6 +700,9 @@ static void ExecGrantStmt_oids(InternalGrant* istmt)
         case ACL_OBJECT_FUNCTION:
             ExecGrant_Function(istmt);
             break;
+        case ACL_OBJECT_PACKAGE:
+            ExecGrant_Package(istmt);
+            break;
         case ACL_OBJECT_LANGUAGE:
             ExecGrant_Language(istmt);
             break;
@@ -698,41 +731,40 @@ static void ExecGrantStmt_oids(InternalGrant* istmt)
             ExecGrant_Directory(istmt);
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized GrantStmt.objtype: %d", (int)istmt->objtype)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized GrantStmt.objtype: %d", (int)istmt->objtype), errdetail("N/A"),
+                    errcause("The object type is not supported for GRANT/REVOKE."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
     }
 }
 
 static void get_global_objects(const List *objnames, List **objects)
 {
-    ListCell *cell = NULL;
-    foreach (cell, objnames) {
-        const char *srcname = strVal(lfirst(cell));
-        KeyCandidateList clist = GlobalSettingGetCandidates(stringToQualifiedNameList(srcname), false);
-        if (!clist) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
-                errmsg("client master key \"%s\" does not exist", srcname)));
-        }
-        for (; clist; clist = clist->next) {
-            *objects = lappend_oid(*objects, clist->oid);
-        }
+    KeyCandidateList clist = GlobalSettingGetCandidates(objnames, false);
+    if (!clist) {
+        ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_UNDEFINED_KEY),
+            errmsg("undefined client master key"), errdetail("client master key \"%s\" does not exist",
+                NameListToString(objnames)),
+                errcause("The client master key does not exist."),
+                    erraction("Check whether the client master key exists.")));
+    }
+    for (; clist; clist = clist->next) {
+        *objects = lappend_oid(*objects, clist->oid);
     }
 }
 
 static void get_column_objects(const List *objnames, List **objects)
 {
-    ListCell *cell = NULL;
-    foreach (cell, objnames) {
-        const char *srcname = strVal(lfirst(cell));
-        KeyCandidateList clist = CeknameGetCandidates(stringToQualifiedNameList(srcname), false);
-        if (!clist) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
-                errmsg("column encryption key \"%s\" does not exist", srcname)));
-        }
-        for (; clist; clist = clist->next) {
-            *objects = lappend_oid(*objects, clist->oid);
-        }
+    KeyCandidateList clist = CeknameGetCandidates(objnames, false);
+    if (!clist) {
+        ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_UNDEFINED_KEY),
+            errmsg("undefined column encryption key"),
+                errdetail("column encryption key \"%s\" does not exist", NameListToString(objnames)),
+                    errcause("The column encryption key does not exist."),
+                        erraction("Check whether the column encryption key exists.")));
+    }
+    for (; clist; clist = clist->next) {
+        *objects = lappend_oid(*objects, clist->oid);
     }
 }
 
@@ -792,6 +824,14 @@ static List *objectNamesToOids(GrantObjectType objtype, List *objnames)
                 objects = lappend_oid(objects, funcid);
             }
             break;
+        case ACL_OBJECT_PACKAGE:
+            foreach (cell, objnames) {
+                Oid pkgid;
+                List* pkgname = (List*)lfirst(cell);
+                pkgid = PackageNameListGetOid(pkgname,false);
+                objects = lappend_oid(objects, pkgid);
+            }
+            break;
         case ACL_OBJECT_LANGUAGE:
             foreach (cell, objnames) {
                 char* langname = strVal(lfirst(cell));
@@ -806,8 +846,10 @@ static List *objectNamesToOids(GrantObjectType objtype, List *objnames)
                 Oid lobjOid = oidparse((Node*)lfirst(cell));
 
                 if (!LargeObjectExists(lobjOid))
-                    ereport(
-                        ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobjOid)));
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("large object %u does not exist", lobjOid), errdetail("N/A"),
+                            errcause("The large object does not exist."),
+                                erraction("Check whether the large object exists.")));
 
                 objects = lappend_oid(objects, lobjOid);
             }
@@ -896,8 +938,10 @@ static List *objectNamesToOids(GrantObjectType objtype, List *objnames)
             break;
 
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized GrantStmt.objtype: %d", (int)objtype)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized GrantStmt.objtype: %d", (int)objtype), errdetail("N/A"),
+                    errcause("The object type is not supported for GRANT/REVOKE."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
     }
 
     return objects;
@@ -962,6 +1006,22 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                 heap_close(rel, AccessShareLock);
             }
                 break;
+            case ACL_OBJECT_PACKAGE: {
+                ScanKeyData key[1];
+                Relation rel = NULL;
+                TableScanDesc scan = NULL;
+                HeapTuple tuple = NULL;
+                ScanKeyInit(
+                    &key[0], Anum_gs_package_pkgnamespace, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(namespaceId));
+                rel = heap_open(PackageRelationId, AccessShareLock);
+                scan = heap_beginscan(rel, SnapshotNow, 1, key);
+                while ((tuple = heap_getnext(scan, ForwardScanDirection)) != NULL) {
+                    objects = lappend_oid(objects, HeapTupleGetOid(tuple));
+                }
+                heap_endscan(scan);
+                heap_close(rel, AccessShareLock);
+            }
+            break;
             case ACL_OBJECT_GLOBAL_SETTING: {
                 ScanKeyData key[1];
                 Relation rel;
@@ -1004,9 +1064,10 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                 break;
             default:
                 /* should not happen */
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unrecognized GrantStmt.objtype: %d", (int)objtype)));
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                    errmsg("unrecognized GrantStmt.objtype: %d", (int)objtype), errdetail("N/A"),
+                        errcause("The object type is not supported for GRANT/REVOKE."),
+                            erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
         }
     }
 
@@ -1049,15 +1110,27 @@ static void DeconstructOptions(const List* options, List** rolenames, List** nsp
         DefElem *defel = (DefElem *)lfirst(cell);
 
         if (strcmp(defel->defname, "schemas") == 0) {
-            if (*dnspnames != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            if (*dnspnames != NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("redundant options"), errdetail("the syntax \"schemas\" is redundant"),
+                        errcause("The syntax \"schemas\" is redundant in ALTER DEFAULT PRIVILEGES statement."),
+                            erraction("Check ALTER DEFAULT PRIVILEGES syntax.")));
+            }
             *dnspnames = defel;
         } else if (strcmp(defel->defname, "roles") == 0) {
-            if (*drolenames != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            if (*drolenames != NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("redundant options"), errdetail("the syntax \"roles\" is redundant"),
+                            errcause("The syntax \"roles\" is redundant in ALTER DEFAULT PRIVILEGES statement."),
+                                erraction("Check ALTER DEFAULT PRIVILEGES syntax.")));
+            }
             *drolenames = defel;
-        } else
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
+        } else {
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+                errmsg("option \"%s\" not recognized", defel->defname), errdetail("N/A"),
+                    errcause("The option in ALTER DEFAULT PRIVILEGES statement is not supported."),
+                        erraction("Check ALTER DEFAULT PRIVILEGES syntax.")));
+        }
     }
 
     if (*dnspnames != NULL)
@@ -1132,6 +1205,11 @@ void ExecAlterDefaultPrivilegesStmt(AlterDefaultPrivilegesStmt* stmt)
             all_ddl_privileges = ACL_ALL_DDL_RIGHTS_FUNCTION;
             errormsg = gettext_noop("invalid privilege type %s for function");
             break;
+        case ACL_OBJECT_PACKAGE:
+            all_privileges = ACL_ALL_RIGHTS_PACKAGE;
+            all_ddl_privileges = ACL_ALL_DDL_RIGHTS_PACKAGE;
+            errormsg = gettext_noop("invalid privilege type %s for package");
+            break;
         case ACL_OBJECT_TYPE:
             all_privileges = ACL_ALL_RIGHTS_TYPE;
             all_ddl_privileges = ACL_ALL_DDL_RIGHTS_TYPE;
@@ -1148,9 +1226,10 @@ void ExecAlterDefaultPrivilegesStmt(AlterDefaultPrivilegesStmt* stmt)
             errormsg = gettext_noop("invalid privilege type %s for column encryption key");
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized GrantStmt.objtype: %d", (int)action->objtype)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized GrantStmt.objtype: %d", (int)action->objtype), errdetail("N/A"),
+                    errcause("The object type is not supported for ALTER DEFAULT PRIVILEGES."),
+                        erraction("Check ALTER DEFAULT PRIVILEGES syntax to obtain the supported object types.")));
             /* keep compiler quiet */
             all_privileges = ACL_NO_RIGHTS;
             all_ddl_privileges = ACL_NO_DDL_RIGHTS;
@@ -1175,25 +1254,39 @@ void ExecAlterDefaultPrivilegesStmt(AlterDefaultPrivilegesStmt* stmt)
             AccessPriv* privnode = (AccessPriv*)lfirst(cell);
             AclMode priv;
 
-            if (privnode->cols != NULL)
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("default privileges cannot be set for columns")));
+            if (privnode->cols != NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid alter default privileges operation"),
+                        errdetail("Default privileges cannot be set for columns."),
+                            errcause("Default privileges cannot be set for columns."),
+                                erraction("Check ALTER DEFAULT PRIVILEGES syntax.")));
+            }
 
-            if (privnode->priv_name == NULL) /* parser mistake? */
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("AccessPriv node must specify privilege")));
+            if (privnode->priv_name == NULL) { /* parser mistake? */
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid AccessPriv node"), errdetail("AccessPriv node must specify privilege"),
+                     errcause("System error."), erraction("Contact engineer to support.")));
+            }
             priv = string_to_privilege(privnode->priv_name);
 
             if (ACLMODE_FOR_DDL(priv)) {
-                if (priv & ~((AclMode)all_ddl_privileges))
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg(errormsg, privilege_to_string(priv))));
+                if (priv & ~((AclMode)all_ddl_privileges)) {
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                        errmsg(errormsg, privilege_to_string(priv)), errdetail("N/A"),
+                            errcause("The privilege type is not supported for the object type."),
+                                erraction("Check ALTER DEFAULT PRIVILEGES syntax to obtain the supported "
+                                    "privilege types for the object type.")));
+                }
 
                 iacls.ddl_privileges |= priv;
             } else {
-                if (priv & ~((AclMode)all_privileges))
-                    ereport(ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg(errormsg, privilege_to_string(priv))));
+                if (priv & ~((AclMode)all_privileges)) {
+                    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                        errmsg(errormsg, privilege_to_string(priv)), errdetail("N/A"),
+                            errcause("The privilege type is not supported for the object type."),
+                                erraction("Check ALTER DEFAULT PRIVILEGES syntax to obtain the supported "
+                                    "privilege types for the object type.")));
+                }
 
                 iacls.privileges |= priv;
             }
@@ -1333,7 +1426,14 @@ static void SetDefaultACL(InternalDefaultACL* iacls)
                 this_privileges[DDL_PRIVS_INDEX] = ACL_ALL_DDL_RIGHTS_FUNCTION;
             }
             break;
-
+        case ACL_OBJECT_PACKAGE:
+            objtype = DEFACLOBJ_FUNCTION;
+            if (iacls->all_privs && this_privileges[DML_PRIVS_INDEX] == ACL_NO_RIGHTS &&
+                REMOVE_DDL_FLAG(this_privileges[DDL_PRIVS_INDEX]) == ACL_NO_RIGHTS) {
+                this_privileges[DML_PRIVS_INDEX] = ACL_ALL_RIGHTS_PACKAGE;
+                this_privileges[DDL_PRIVS_INDEX] = ACL_ALL_DDL_RIGHTS_PACKAGE;
+            }
+            break;
         case ACL_OBJECT_TYPE:
             objtype = DEFACLOBJ_TYPE;
             if (iacls->all_privs && this_privileges[DML_PRIVS_INDEX] == ACL_NO_RIGHTS &&
@@ -1359,8 +1459,10 @@ static void SetDefaultACL(InternalDefaultACL* iacls)
             }
             break;
         default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)iacls->objtype)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized objtype: %d", (int)iacls->objtype), errdetail("N/A"),
+                    errcause("The object type is not supported for default privileges."),
+                        erraction("Check ALTER DEFAULT PRIVILEGES syntax to obtain the supported object types.")));
             objtype = 0; /* keep compiler quiet */
             break;
     }
@@ -1531,8 +1633,9 @@ void RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
         tuple = systable_getnext(scan);
 
         if (!HeapTupleIsValid(tuple))
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("could not find tuple for default ACL %u", objid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("could not find tuple for default ACL %u", objid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         pg_default_acl_tuple = (Form_pg_default_acl)GETSTRUCT(tuple);
 
         iacls.roleid = pg_default_acl_tuple->defaclrole;
@@ -1548,6 +1651,9 @@ void RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
             case DEFACLOBJ_FUNCTION:
                 iacls.objtype = ACL_OBJECT_FUNCTION;
                 break;
+            case DEFACLOBJ_PACKAGE:
+                iacls.objtype = ACL_OBJECT_PACKAGE;
+                break;
             case DEFACLOBJ_TYPE:
                 iacls.objtype = ACL_OBJECT_TYPE;
                 break;
@@ -1559,9 +1665,10 @@ void RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
                 break;
             default:
                 /* Shouldn't get here */
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg("unexpected default ACL type: %d", (int)pg_default_acl_tuple->defaclobjtype)));
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("unexpected default ACL type: %d", (int)pg_default_acl_tuple->defaclobjtype),
+                        errdetail("N/A"), errcause("The object type is not supported for default privilege."),
+                            erraction("Check ALTER DEFAULT PRIVILEGES syntax to obtain the supported object types.")));
                 break;
         }
 
@@ -1590,8 +1697,10 @@ void RemoveRoleFromObjectACL(Oid roleid, Oid classid, Oid objid)
             }
         }
         if (!id_flag) {
-            ereport(
-                ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("unexpected object class %u", classid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("invalid object id"), errdetail("unexpected object class %u", classid),
+                    errcause("The object type is not supported for GRANT/REVOKE."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
         }
 
         istmt.is_grant = false;
@@ -1628,8 +1737,9 @@ void RemoveDefaultACLById(Oid defaclOid)
     tuple = systable_getnext(scan);
 
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("could not find tuple for default ACL %u", defaclOid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("could not find tuple for default ACL %u", defaclOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     simple_heap_delete(rel, &tuple->t_self);
     systable_endscan(scan);
@@ -1653,14 +1763,18 @@ static void expand_col_privileges(
         AttrNumber attnum;
 
         attnum = get_attnum(table_oid, colname);
-        if (attnum == InvalidAttrNumber)
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_COLUMN),
-                    errmsg("column \"%s\" of relation \"%s\" does not exist", colname, get_rel_name(table_oid))));
+        if (attnum == InvalidAttrNumber) {
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("undefined column"),
+                errdetail("column \"%s\" of relation \"%s\" does not exist", colname, get_rel_name(table_oid)),
+                    errcause("The column of the relation does not exist."),
+                        erraction("Check whether the column exists.")));
+        }
         attnum -= FirstLowInvalidHeapAttributeNumber;
-        if (attnum <= 0 || attnum >= num_col_privileges)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("column number out of range"))); /* safety check */
+        if (attnum <= 0 || attnum >= num_col_privileges) { /* safety check */
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("column number out of range"), errdetail("column number \"%d\"out of range", attnum),
+                    errcause("System error."), erraction("Contact engineer to support.")));
+        }
         col_privileges[attnum] |= this_privileges;
     }
 }
@@ -1698,9 +1812,9 @@ static void expand_all_col_privileges(
 
         attTuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(table_oid), Int16GetDatum(curr_att));
         if (!HeapTupleIsValid(attTuple)) {
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for attribute %d of relation %u", curr_att, table_oid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for attribute %d of relation %u", curr_att, table_oid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         }
 
         isdropped = ((Form_pg_attribute)GETSTRUCT(attTuple))->attisdropped;
@@ -1745,9 +1859,9 @@ static void ExecGrant_Attribute(InternalGrant* istmt, Oid relOid, const char* re
 
     attr_tuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(relOid), Int16GetDatum(attnum));
     if (!HeapTupleIsValid(attr_tuple)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for attribute %d of relation %u", attnum, relOid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for attribute %d of relation %u", attnum, relOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
     pg_attribute_tuple = (Form_pg_attribute)GETSTRUCT(attr_tuple);
 
@@ -1780,8 +1894,9 @@ static void ExecGrant_Attribute(InternalGrant* istmt, Oid relOid, const char* re
     Form_pg_class pg_class_tuple = NULL;
     HeapTuple class_tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relOid));
     if (!HeapTupleIsValid(class_tuple)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relOid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+            errmsg("cache lookup failed for relation %u", relOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
     pg_class_tuple = (Form_pg_class)GETSTRUCT(class_tuple);
     Oid namespaceId = pg_class_tuple->relnamespace;
@@ -1888,18 +2003,24 @@ static void ExecGrantRelationTypeCheck(Form_pg_class classTuple, const InternalG
 {
     /* Not sensible to grant on an index */
     if (classTuple->relkind == RELKIND_INDEX || classTuple->relkind == RELKIND_GLOBAL_INDEX)
-        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("\"%s\" is an index", NameStr(classTuple->relname))));
+        ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("unsupported object type"), errdetail("\"%s\" is an index", NameStr(classTuple->relname)),
+                errcause("Index type is not supported for GRANT/REVOKE."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
 
     /* Composite types aren't tables either */
     if (classTuple->relkind == RELKIND_COMPOSITE_TYPE)
-        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("\"%s\" is a composite type", NameStr(classTuple->relname))));
+        ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("unsupported object type"), errdetail("\"%s\" is a composite type", NameStr(classTuple->relname)),
+                errcause("Composite type is not supported for GRANT/REVOKE."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
 
     /* Used GRANT SEQUENCE on a non-sequence? */
     if (istmt->objtype == ACL_OBJECT_SEQUENCE && classTuple->relkind != RELKIND_SEQUENCE)
-        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("\"%s\" is not a sequence", NameStr(classTuple->relname))));
+        ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("wrong object type"), errdetail("\"%s\" is not a sequence", NameStr(classTuple->relname)),
+                errcause("GRANT/REVOKE SEQUENCE only support sequence objects."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
 
     /* Adjust the default permissions based on object type */
     if (istmt->all_privs && istmt->privileges == ACL_NO_RIGHTS && istmt->ddl_privileges == ACL_NO_DDL_RIGHTS) {
@@ -1947,8 +2068,10 @@ static void ExecGrantRelationPrivilegesCheck(Form_pg_class tuple, AclMode* privi
                 * because we didn't in the combined TABLE | SEQUENCE
                 * check.
                 */
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_GRANT_OPERATION), errmsg("invalid privilege type USAGE for table")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("invalid privilege type USAGE for table"), errdetail("N/A"),
+                    errcause("GRANT/REVOKE TABLE do not support USAGE privilege."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types for tables.")));
         }
     }
 }
@@ -1985,8 +2108,9 @@ static void ExecGrant_Relation(InternalGrant* istmt)
 
         tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relOid));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relOid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for relation %u", relOid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         pg_class_tuple = (Form_pg_class)GETSTRUCT(tuple);
 
         ExecGrantRelationTypeCheck(pg_class_tuple, istmt, &privileges, &ddl_privileges);
@@ -2028,10 +2152,10 @@ static void ExecGrant_Relation(InternalGrant* istmt)
             Datum datum;
 
             datum = heap_getattr(tuple, Anum_pg_class_relbucket, GetDefaultPgClassDesc(), &isNull);
-            if (!isNull) {
+            if (!isNull && DatumGetObjectId(datum) != VirtualSegmentOid) {
                 Assert(OidIsValid(DatumGetObjectId(datum)));
-				hasbucket = true;
-            }			
+                hasbucket = true;
+            }
             expand_all_col_privileges(relOid, pg_class_tuple, privileges & ACL_ALL_RIGHTS_COLUMN,
                 col_privileges, num_col_privileges, hasbucket);
             expand_all_col_privileges(relOid, pg_class_tuple, ddl_privileges & ACL_ALL_DDL_RIGHTS_COLUMN,
@@ -2167,8 +2291,11 @@ static void ExecGrant_Relation(InternalGrant* istmt)
                 privileges = string_to_privilege(col_privs->priv_name);
 
             if (privileges & ~((AclMode)ACL_ALL_RIGHTS_COLUMN))
-                ereport(ERROR, (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg("invalid privilege type %s for column", privilege_to_string(privileges))));
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid privilege type %s for column", privilege_to_string(privileges)), errdetail("N/A"),
+                        errcause("The privilege type is not supported for column object."),
+                            erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types "
+                                "for column object.")));
 
             if (pg_class_tuple->relkind == RELKIND_SEQUENCE && (privileges & ~((AclMode)ACL_SELECT))) {
                 /*
@@ -2196,9 +2323,11 @@ static void ExecGrant_Relation(InternalGrant* istmt)
                 ddl_privileges = string_to_privilege(col_privs->priv_name);
 
             if (ddl_privileges & ~((AclMode)ACL_ALL_DDL_RIGHTS_COLUMN))
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                        errmsg("invalid privilege type %s for column", privilege_to_string(ddl_privileges))));
+                ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                    errmsg("invalid privilege type %s for column", privilege_to_string(ddl_privileges)),
+                        errdetail("N/A"), errcause("The privilege type is not supported for column object."),
+                            erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types "
+                                "for column object.")));
 
             expand_col_privileges(col_privs->cols, relOid, ddl_privileges, col_ddl_privileges, num_col_privileges);
             have_col_privileges = true;
@@ -2267,8 +2396,9 @@ static void ExecGrant_Database(InternalGrant* istmt)
 
         tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(datId));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for database %u", datId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for database %u", datId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_database_tuple = (Form_pg_database)GETSTRUCT(tuple);
 
@@ -2399,9 +2529,9 @@ static void ExecGrant_Fdw(InternalGrant* istmt)
 
         tuple = SearchSysCache1(FOREIGNDATAWRAPPEROID, ObjectIdGetDatum(fdwid));
         if (!HeapTupleIsValid(tuple))
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for foreign-data wrapper %u", fdwid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for foreign-data wrapper %u", fdwid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_fdw_tuple = (Form_pg_foreign_data_wrapper)GETSTRUCT(tuple);
 
@@ -2553,8 +2683,9 @@ static void ExecGrant_ForeignServer(InternalGrant* istmt)
 
         tuple = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(srvid));
         if (!HeapTupleIsValid(tuple))
-            ereport(ERROR,
-                (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for foreign server %u", srvid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for foreign server %u", srvid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_server_tuple = (Form_pg_foreign_server)GETSTRUCT(tuple);
 
@@ -2691,8 +2822,9 @@ static void ExecGrant_Function(InternalGrant* istmt)
 
         tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcId));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for function %u", funcId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_proc_tuple = (Form_pg_proc)GETSTRUCT(tuple);
 
@@ -2827,8 +2959,9 @@ static void ExecGrant_Language(InternalGrant* istmt)
 
         tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(langId));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for language %u", langId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for language %u", langId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_language_tuple = (Form_pg_language)GETSTRUCT(tuple);
 
@@ -2839,10 +2972,11 @@ static void ExecGrant_Language(InternalGrant* istmt)
          * both system admin and common users can use "c" languages.
          */
         if (!pg_language_tuple->lanpltrusted && ClanguageId != langId)
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("language \"%s\" is not trusted", NameStr(pg_language_tuple->lanname)),
-                    errhint("Only system admin can use \"%s\" languages.", NameStr(pg_language_tuple->lanname))));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("Grant/revoke on untrusted languages if forbidden."),
+                    errdetail("language \"%s\" is not trusted", NameStr(pg_language_tuple->lanname)),
+                        errcause("Grant/revoke on untrusted languages if forbidden."),
+                            erraction("Support grant/revoke on trusted C languages")));
 
         /*
          * Get owner ID and working copy of existing ACL. If there's no ACL,
@@ -2884,16 +3018,18 @@ static void ExecGrant_Language(InternalGrant* istmt)
 
         /* For language c, prevent uncontrolled grant permission. */
         if (ClanguageId == langId && istmt->grant_option)
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Forbid grant language c to user with grant option."),
-                    errhint("Only support grant language c to user.")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Forbid grant language c to user with grant option."),
+                    errdetail("Only support grant language c to user."),
+                        errcause("Forbid grant language c to user with grant option."),
+                            erraction("Only support grant language c to user.")));
 
         if (ClanguageId == langId && list_member_oid(istmt->grantees, ACL_ID_PUBLIC))
-            ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Forbid grant language c to public."),
-                    errhint("Only support grant language c to specified users.")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Forbid grant language c to public."),
+                    errdetail("Only support grant language c to specified users."),
+                        errcause("Forbid grant language c to public."),
+                            erraction("Grant language c to specified users.")));
 
         /*
          * Generate new ACL.
@@ -2946,6 +3082,121 @@ static void ExecGrant_Language(InternalGrant* istmt)
     heap_close(relation, RowExclusiveLock);
 }
 
+static void ExecGrant_Package(InternalGrant* istmt)
+{
+    Relation relation = NULL;
+    ListCell* cell = NULL;
+    if (istmt->all_privs && istmt->privileges == ACL_NO_RIGHTS && istmt->ddl_privileges == ACL_NO_DDL_RIGHTS) {
+        istmt->privileges = ACL_ALL_RIGHTS_PACKAGE;
+        istmt->ddl_privileges = (t_thrd.proc->workingVersionNum >= PRIVS_VERSION_NUM) ?
+            ACL_ALL_DDL_RIGHTS_FUNCTION : ACL_NO_DDL_RIGHTS;
+    }
+    relation = heap_open(PackageRelationId, RowExclusiveLock);
+    foreach (cell, istmt->objects) {
+        Oid pkgId = lfirst_oid(cell);
+        Form_gs_package gs_package_tuple = NULL;
+        Datum aclDatum;
+        bool isNull = false;
+        AclMode avail_goptions;
+        AclMode avail_ddl_goptions;
+        AclMode this_privileges[PRIVS_ATTR_NUM];
+        Acl* old_acl = NULL;
+        Acl* new_acl = NULL;
+        Oid grantorId;
+        Oid ownerId;
+        HeapTuple tuple = NULL;
+        HeapTuple newtuple = NULL;
+        Datum values[Natts_gs_package];
+        bool nulls[Natts_gs_package] = {false};
+        bool replaces[Natts_gs_package] = {false};
+        int noldmembers;
+        int nnewmembers;
+        Oid* oldmembers = NULL;
+        Oid* newmembers = NULL;
+        errno_t rc = EOK;
+        tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(pkgId));
+        if (!HeapTupleIsValid(tuple))
+            ereport(
+                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgId)));
+        gs_package_tuple = (Form_gs_package)GETSTRUCT(tuple);
+        /*
+         * Get owner ID and working copy of existing ACL. If there's no ACL,
+         * substitute the proper default.
+         */
+        ownerId = gs_package_tuple->pkgowner;
+        aclDatum = SysCacheGetAttr(PACKAGEOID, tuple, Anum_gs_package_pkgacl, &isNull);
+        if (isNull) {
+            old_acl = acldefault(ACL_OBJECT_PACKAGE, ownerId);
+            /* There are no old member roles according to the catalogs */
+            noldmembers = 0;
+            oldmembers = NULL;
+        } else {
+            old_acl = DatumGetAclPCopy(aclDatum);
+            /* Get the roles mentioned in the existing ACL */
+            noldmembers = aclmembers(old_acl, &oldmembers);
+        }
+        /* Determine ID to do the grant as, and available grant options */
+        /* Need special treatment for procs in schema dbe_perf */
+        Oid namespaceId = gs_package_tuple->pkgnamespace;
+        select_best_grantor(GetUserId(), istmt->privileges, istmt->ddl_privileges, old_acl, ownerId,
+            &grantorId, &avail_goptions, &avail_ddl_goptions, IsPerformanceNamespace(namespaceId));
+        /*
+         * Restrict the privileges to what we can actually grant, and emit the
+         * standards-mandated warning and error messages.
+         */
+        restrict_and_check_grant(this_privileges, istmt->is_grant,
+            avail_goptions,
+            avail_ddl_goptions,
+            istmt->all_privs,
+            istmt->privileges,
+            istmt->ddl_privileges,
+            pkgId,
+            grantorId,
+            ACL_KIND_PROC,
+            NameStr(gs_package_tuple->pkgname),
+            0,
+            NULL);
+        /*
+         * Generate new ACL.
+         */
+        new_acl = merge_acl_with_grant(old_acl,
+            istmt->is_grant,
+            istmt->grant_option,
+            istmt->behavior,
+            istmt->grantees,
+            this_privileges,
+            grantorId,
+            ownerId);
+        /*
+         * We need the members of both old and new ACLs so we can correct the
+         * shared dependency information.
+         */
+        nnewmembers = aclmembers(new_acl, &newmembers);
+        /* finished building new ACL value, now insert it */
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+        securec_check(rc, "\0", "\0");
+        replaces[Anum_gs_package_pkgacl - 1] = true;
+        values[Anum_gs_package_pkgacl - 1] = PointerGetDatum(new_acl);
+        newtuple = heap_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
+        simple_heap_update(relation, &newtuple->t_self, newtuple);
+        /* keep the catalog indexes up to date */
+        CatalogUpdateIndexes(relation, newtuple);
+        /* Update the shared dependency ACL info */
+        updateAclDependencies(
+            PackageRelationId, pkgId, 0, ownerId, noldmembers, oldmembers, nnewmembers, newmembers);
+        ReleaseSysCache(tuple);
+        pfree_ext(new_acl);
+        /* Recode time of grant function. */
+        UpdatePgObjectMtime(pkgId, OBJECT_TYPE_PKGSPEC);
+        /* prevent error when processing duplicate objects */
+        CommandCounterIncrement();
+    }
+    heap_close(relation, RowExclusiveLock);
+}
 static void ExecGrant_Largeobject(InternalGrant* istmt)
 {
     Relation relation = NULL;
@@ -2991,8 +3242,9 @@ static void ExecGrant_Largeobject(InternalGrant* istmt)
 
         tuple = systable_getnext(scan);
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for large object %u", loid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for large object %u", loid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         form_lo_meta = (Form_pg_largeobject_metadata)GETSTRUCT(tuple);
 
@@ -3131,8 +3383,9 @@ static void ExecGrant_Namespace(InternalGrant* istmt)
 
         tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nspid));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for namespace %u", nspid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for namespace %u", nspid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_namespace_tuple = (Form_pg_namespace)GETSTRUCT(tuple);
 
@@ -3248,11 +3501,11 @@ static void check_vc_create_priv(Oid groupId, const FormData_pgxc_group *pgxc_gr
 {
     if (is_logic_cluster(groupId)) {
         if (!superuser() && get_current_lcgroup_oid() != groupId) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                    (errmsg("Role %s has not privilege to grant/revoke node group %s.",
-                        GetUserNameFromId(GetUserId()),
-                        NameStr(pgxc_group_tuple->group_name)))));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("Role %s has not privilege to grant/revoke node group %s.", GetUserNameFromId(GetUserId()),
+                    NameStr(pgxc_group_tuple->group_name)), errdetail("Must have sysadmin privilege."),
+                        errcause("Role has not privilege to grant/revoke node group."),
+                            erraction("Must have sysadmin privilege.")));
         }
 
         /* Check if virtual cluster CREATE privilege can be granted. */
@@ -3271,13 +3524,11 @@ static void check_vc_create_priv(Oid groupId, const FormData_pgxc_group *pgxc_gr
                                     continue;
                             }
                         }
-                        ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                                (errmsg("Can not grant CREATE privilege on node group %u "
-                                        "to role %u in node group %u.",
-                                    groupId,
-                                    roleid,
-                                    group_oid))));
+                        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                            (errmsg("Can not grant CREATE privilege on node group %u to role %u in node group %u.",
+                                groupId, roleid, group_oid), errdetail("Must have sysadmin privilege."),
+                                    errcause("Role has not privilege to grant CREATE privilege node group."),
+                                        erraction("Must have sysadmin privilege."))));
                     }
                 }
             }
@@ -3549,8 +3800,9 @@ static void ExecGrant_Tablespace(InternalGrant* istmt)
         /* Search syscache for pg_tablespace */
         tuple = SearchSysCache1(TABLESPACEOID, ObjectIdGetDatum(tblId));
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for tablespace %u", tblId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for tablespace %u", tblId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_tablespace_tuple = (Form_pg_tablespace)GETSTRUCT(tuple);
 
@@ -3681,21 +3933,25 @@ static void ExecGrant_Type(InternalGrant* istmt)
         /* Search syscache for pg_type */
         tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typId));
         if (!HeapTupleIsValid(tuple))
-            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for type %u", typId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         pg_type_tuple = (Form_pg_type)GETSTRUCT(tuple);
 
         if (pg_type_tuple->typelem != 0 && pg_type_tuple->typlen == -1)
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_GRANT_OPERATION),
-                    errmsg("cannot set privileges of array types"),
-                    errhint("Set the privileges of the element type instead.")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INVALID_GRANT_OPERATION),
+                errmsg("cannot set privileges of array types"),
+                    errdetail("Set the privileges of the element type instead."),
+                        errcause("Cannot set privileges of array types."),
+                            erraction("Set the privileges of the element type instead.")));
 
         /* Used GRANT DOMAIN on a non-domain? */
         if (istmt->objtype == ACL_OBJECT_DOMAIN && pg_type_tuple->typtype != TYPTYPE_DOMAIN)
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"%s\" is not a domain", NameStr(pg_type_tuple->typname))));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmsg("wrong object type"), errdetail("\"%s\" is not a domain", NameStr(pg_type_tuple->typname)),
+                    errcause("GRANT/REVOKE DOMAIN only support domain objects."),
+                    erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
 
         /*
          * Get owner ID and working copy of existing ACL. If there's no ACL,
@@ -3825,10 +4081,9 @@ static void ExecGrant_DataSource(InternalGrant* istmt)
 
         tuple = SearchSysCache1(DATASOURCEOID, ObjectIdGetDatum(srcid));
         if (!HeapTupleIsValid(tuple))
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for data source %u", srcid)));
+            ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for data source %u", srcid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         ec_source_tuple = (Form_pg_extension_data_source)GETSTRUCT(tuple);
 
@@ -3959,8 +4214,9 @@ static void ExecGrant_Cmk(InternalGrant *istmt)
 
         tuple = SearchSysCache1(GLOBALSETTINGOID, ObjectIdGetDatum(keyId));
         if (!HeapTupleIsValid(tuple)) {
-            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for client master key %u", keyId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for client master key %u", keyId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         }
 
         cmk_tuple = (Form_gs_client_global_keys)GETSTRUCT(tuple);
@@ -4077,8 +4333,9 @@ static void ExecGrant_Cek(InternalGrant *istmt)
 
         tuple = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(keyId));
         if (!HeapTupleIsValid(tuple)) {
-            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmsg("cache lookup failed for column encryption key %u", keyId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for column encryption key %u", keyId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         }
 
         cek_tuple = (Form_gs_column_keys)GETSTRUCT(tuple);
@@ -4199,8 +4456,9 @@ static void ExecGrant_Directory(InternalGrant* istmt)
         /* Search syscache for pg_directory */
         tuple = SearchSysCache1(DIRECTORYOID, ObjectIdGetDatum(dirId));
         if (!HeapTupleIsValid(tuple)) {
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for directory %u", dirId)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for directory %u", dirId), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
             return;
         }
 
@@ -4325,7 +4583,10 @@ static AclMode string_to_privilege(const char* privname)
         }
     }
 
-    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("unrecognized privilege type \"%s\"", privname)));
+    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_SYNTAX_ERROR),
+        errmsg("unrecognized privilege type \"%s\"", privname), errdetail("N/A"),
+            errcause("The privilege type is not supported."),
+                erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types.")));
     return 0; /* appease compiler */
 }
 
@@ -4345,7 +4606,10 @@ static const char* privilege_to_string(AclMode privilege)
         }
     }
 
-    ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized privilege: %d", (int)privilege)));
+    ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+        errmsg("unrecognized privilege: %d", (int)privilege), errdetail("N/A"),
+            errcause("The privilege type is not supported."),
+                erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types.")));
     return NULL; /* appease compiler */
 }
 
@@ -4406,6 +4670,8 @@ static const char* const no_priv_msg[MAX_ACL_KIND] = {
     gettext_noop("permission denied for column encryption key %s"),
     /* ACL_KIND_GLOBAL_SETTING */
     gettext_noop("permission denied for client master key %s"),
+    /* ACL_KIND_PACKAGE */
+    gettext_noop("permission denied for package %s"),
 };
 
 static const char* const not_owner_msg[MAX_ACL_KIND] = {
@@ -4468,14 +4734,21 @@ void aclcheck_error(AclResult aclerr, AclObjectKind objectkind, const char* obje
             /* no error, so return to caller */
             break;
         case ACLCHECK_NO_PRIV:
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg(no_priv_msg[objectkind], objectname)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg(no_priv_msg[objectkind], objectname), errdetail("N/A"),
+                    errcause("Insufficient privileges for the object."),
+                        erraction("Select the system tables to get the acl of the object.")));
             break;
         case ACLCHECK_NOT_OWNER:
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg(not_owner_msg[objectkind], objectname)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg(not_owner_msg[objectkind], objectname), errdetail("N/A"),
+                    errcause("Not the owner of the object."),
+                        erraction("Select the system tables to get the owner of the object.")));
             break;
         default:
-            ereport(
-                ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized AclResult: %d", (int)aclerr)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized AclResult"), errdetail("unrecognized AclResult: %d", (int)aclerr),
+                    errcause("System error."), erraction("Contact engineer to support.")));
             break;
     }
 }
@@ -4487,17 +4760,22 @@ void aclcheck_error_col(AclResult aclerr, AclObjectKind objectkind, const char* 
             /* no error, so return to caller */
             break;
         case ACLCHECK_NO_PRIV:
-            ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("permission denied for column \"%s\" of relation \"%s\"", colname, objectname)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied for column \"%s\" of relation \"%s\"", colname, objectname), errdetail("N/A"),
+                    errcause("Insufficient privileges for the column."),
+                        erraction("Select the system tables to get the acl of the column.")));
             break;
         case ACLCHECK_NOT_OWNER:
             /* relation msg is OK since columns don't have separate owners */
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg(not_owner_msg[objectkind], objectname)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg(not_owner_msg[objectkind], objectname), errdetail("N/A"),
+                    errcause("Not the owner of the column."),
+                        erraction("Select the system tables to get the owner of the column.")));
             break;
         default:
-            ereport(
-                ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized AclResult: %d", (int)aclerr)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized AclResult"), errdetail("unrecognized AclResult: %d", (int)aclerr),
+                    errcause("System error."), erraction("Contact engineer to support.")));
             break;
     }
 }
@@ -4521,7 +4799,9 @@ static bool has_rolcatupdate(Oid roleid)
 
     tuple = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("role with OID %u does not exist", roleid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("role with OID %u does not exist", roleid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     rolcatupdate = ((Form_pg_authid)GETSTRUCT(tuple))->rolcatupdate;
 
@@ -4572,10 +4852,10 @@ static AclMode pg_aclmask(
         case ACL_KIND_GLOBAL_SETTING:
             return gs_sec_cmk_aclcheck(table_oid, roleid, mask, how);
         default:
-            ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmsg("unrecognized objkind: %d", (int)objkind)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                errmsg("unrecognized objkind: %d", (int)objkind), errdetail("N/A"),
+                    errcause("The object type is not supported for privilege check."),
+                        erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
             /* not reached, but keep compiler quiet */
             return ACL_NO_RIGHTS;
     }
@@ -4616,16 +4896,16 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
      */
     attTuple = SearchSysCache2(ATTNUM, ObjectIdGetDatum(table_oid), Int16GetDatum(attnum));
     if (!HeapTupleIsValid(attTuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("attribute %d of relation with OID %u does not exist", attnum, table_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_COLUMN),
+            errmsg("attribute %d of relation with OID %u does not exist", attnum, table_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     attributeForm = (Form_pg_attribute)GETSTRUCT(attTuple);
 
     /* Throw error on dropped columns, too */
     if (attributeForm->attisdropped)
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg("attribute %d of relation with OID %u does not exist", attnum, table_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("the column has been dropped"),
+            errdetail("attribute %d of relation with OID %u does not exist", attnum, table_oid),
+                errcause("The column does not exist."), erraction("Check whether the column exists.")));
 
     aclDatum = SysCacheGetAttr(ATTNUM, attTuple, Anum_pg_attribute_attacl, &isNull);
 
@@ -4669,8 +4949,7 @@ AclMode pg_attribute_aclmask(Oid table_oid, AttrNumber attnum, Oid roleid, AclMo
     }
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(attTuple);
 
@@ -4699,7 +4978,9 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
      */
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(table_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation with OID %u does not exist", table_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_TABLE),
+            errmsg("relation with OID %u does not exist", table_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     classForm = (Form_pg_class)GETSTRUCT(tuple);
 
     /* Check current user has privilige to this group */
@@ -4708,7 +4989,9 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         Oid group_oid = get_pgxc_class_groupoid(table_oid);
         AclResult aclresult = ACLCHECK_OK;
         if (InvalidOid == group_oid) {
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("computing nodegroup is not a valid group.")));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_DATA_EXCEPTION), errmsg("invalid group"),
+                errdetail("computing nodegroup is not a valid group."),
+                    errcause("System error."), erraction("Contact engineer to support.")));
         } else {
             aclresult = pg_nodegroup_aclcheck(group_oid, roleid, ACL_USAGE);
             if (aclresult != ACLCHECK_OK) {
@@ -4745,6 +5028,17 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         return mask;
     }
 
+    /* Blockchain hist table cannot be modified */
+    if (table_oid == GsGlobalChainRelationId || classForm->relnamespace == PG_BLOCKCHAIN_NAMESPACE) {
+        if (isRelSuperuser() || isAuditadmin(roleid)) {
+            mask &= ~(ACL_INSERT | ACL_UPDATE | ACL_DELETE | ACL_TRUNCATE | ACL_USAGE | ACL_REFERENCES);
+        } else {
+            mask &= ACL_NO_RIGHTS;
+        }
+        ReleaseSysCache(tuple);
+        return mask;
+    }
+
     /* Otherwise, superusers bypass all permission-checking, except access independent role's objects. */
     /* Database Security:  Support separation of privilege. */
     if (!is_ddl_privileges && !IsMonitorSpace(namespaceId) && (superuser_arg(roleid) || systemDBA_arg(roleid)) &&
@@ -4756,7 +5050,6 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         ReleaseSysCache(tuple);
         return mask;
     }
-
 
     if (is_security_policy_relation(table_oid) && isPolicyadmin(roleid)) {
         ReleaseSysCache(tuple);
@@ -4826,8 +5119,7 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
     }
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -4860,7 +5152,9 @@ AclMode pg_database_aclmask(Oid db_oid, Oid roleid, AclMode mask, AclMaskHow how
      */
     tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(db_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database with OID %u does not exist", db_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_DATABASE),
+            errmsg("database with OID %u does not exist", db_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_database)GETSTRUCT(tuple))->datdba;
 
@@ -4877,8 +5171,7 @@ AclMode pg_database_aclmask(Oid db_oid, Oid roleid, AclMode mask, AclMaskHow how
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -4911,7 +5204,9 @@ AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow h
      */
     tuple = SearchSysCache1(DIRECTORYOID, ObjectIdGetDatum(dir_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("directory with OID %u does not exist", dir_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("directory with OID %u does not exist", dir_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_directory)GETSTRUCT(tuple))->owner;
 
@@ -4928,8 +5223,7 @@ AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow h
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -4957,7 +5251,9 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
      */
     tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function with OID %u does not exist", proc_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("function with OID %u does not exist", proc_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
 
@@ -4997,8 +5293,7 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
     }
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5027,8 +5322,9 @@ AclMode gs_sec_cmk_aclmask(Oid global_setting_oid, Oid roleid, AclMode mask, Acl
      */
     tuple = SearchSysCache1(GLOBALSETTINGOID, ObjectIdGetDatum(global_setting_oid));
     if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
-            errmsg("client master key with OID %u does not exist", global_setting_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_KEY),
+            errmsg("client master key with OID %u does not exist", global_setting_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
 
     ownerId = ((Form_gs_client_global_keys)GETSTRUCT(tuple))->key_owner;
@@ -5050,9 +5346,7 @@ AclMode gs_sec_cmk_aclmask(Oid global_setting_oid, Oid roleid, AclMode mask, Acl
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum)) {
-        pfree_ext(acl);
-    }
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5081,7 +5375,9 @@ AclMode pg_language_aclmask(Oid lang_oid, Oid roleid, AclMode mask, AclMaskHow h
      */
     tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(lang_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language with OID %u does not exist", lang_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("language with OID %u does not exist", lang_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_language)GETSTRUCT(tuple))->lanowner;
 
@@ -5098,8 +5394,7 @@ AclMode pg_language_aclmask(Oid lang_oid, Oid roleid, AclMode mask, AclMaskHow h
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5128,9 +5423,9 @@ AclMode gs_sec_cek_aclmask(Oid column_setting_oid, Oid roleid, AclMode mask, Acl
      */
     tuple = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(column_setting_oid));
     if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                 errmsg("function with OID %u does not exist", column_setting_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("function with OID %u does not exist", column_setting_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
 
     ownerId = ((Form_gs_column_keys) GETSTRUCT(tuple))->key_owner;
@@ -5198,7 +5493,9 @@ AclMode pg_largeobject_aclmask_snapshot(Oid lobj_oid, Oid roleid, AclMode mask, 
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobj_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("large object %u does not exist", lobj_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_largeobject_metadata)GETSTRUCT(tuple))->lomowner;
 
@@ -5225,6 +5522,21 @@ AclMode pg_largeobject_aclmask_snapshot(Oid lobj_oid, Oid roleid, AclMode mask, 
 
     return result;
 }
+
+/*
+ * Exported routine for examining a user's privileges for blockchain namespace
+ */
+
+static AclMode gs_blockchain_aclmask(Oid roleid, AclMode mask)
+{
+    /* Only super user or audit admin have access right to blockchain nsp */
+    if (superuser_arg(roleid) || isAuditadmin(roleid)) {
+        return REMOVE_DDL_FLAG(mask);
+    } else {
+        return ACL_NO_RIGHTS; /* not allowed to get access right by granting. */
+    }
+}
+
 /*
  * Exported routine for examining a user's privileges for a namespace
  */
@@ -5236,6 +5548,11 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
     bool isNull = false;
     Acl* acl = NULL;
     Oid ownerId;
+
+    /* Only super user or audit admin have access right to blockchain nsp */
+    if (nsp_oid == PG_BLOCKCHAIN_NAMESPACE) {
+        return gs_blockchain_aclmask(roleid, mask);
+    }
 
     /*
      * The initial user bypass all permission checking.
@@ -5284,7 +5601,9 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
      */
     tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nsp_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema with OID %u does not exist", nsp_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_SCHEMA),
+            errmsg("schema with OID %u does not exist", nsp_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_namespace)GETSTRUCT(tuple))->nspowner;
 
@@ -5309,8 +5628,7 @@ AclMode pg_namespace_aclmask(Oid nsp_oid, Oid roleid, AclMode mask, AclMaskHow h
     }
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5355,7 +5673,9 @@ AclMode pg_nodegroup_aclmask(Oid group_oid, Oid roleid, AclMode mask, AclMaskHow
      */
     tuple = SearchSysCache1(PGXCGROUPOID, ObjectIdGetDatum(group_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("node group with OID %u does not exist", group_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("node group with OID %u does not exist", group_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = BOOTSTRAP_SUPERUSERID;
 
@@ -5375,8 +5695,7 @@ AclMode pg_nodegroup_aclmask(Oid group_oid, Oid roleid, AclMode mask, AclMaskHow
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5409,7 +5728,9 @@ AclMode pg_tablespace_aclmask(Oid spc_oid, Oid roleid, AclMode mask, AclMaskHow 
      */
     tuple = SearchSysCache1(TABLESPACEOID, ObjectIdGetDatum(spc_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", spc_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("tablespace with OID %u does not exist", spc_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_tablespace)GETSTRUCT(tuple))->spcowner;
 
@@ -5427,8 +5748,7 @@ AclMode pg_tablespace_aclmask(Oid spc_oid, Oid roleid, AclMode mask, AclMaskHow 
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5460,8 +5780,9 @@ AclMode pg_foreign_data_wrapper_aclmask(Oid fdw_oid, Oid roleid, AclMode mask, A
      */
     tuple = SearchSysCache1(FOREIGNDATAWRAPPEROID, ObjectIdGetDatum(fdw_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign-data wrapper with OID %u does not exist", fdw_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("foreign-data wrapper with OID %u does not exist", fdw_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     fdwForm = (Form_pg_foreign_data_wrapper)GETSTRUCT(tuple);
 
     /*
@@ -5482,8 +5803,7 @@ AclMode pg_foreign_data_wrapper_aclmask(Oid fdw_oid, Oid roleid, AclMode mask, A
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5515,8 +5835,9 @@ AclMode pg_foreign_server_aclmask(Oid srv_oid, Oid roleid, AclMode mask, AclMask
      */
     tuple = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(srv_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign server with OID %u does not exist", srv_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("foreign server with OID %u does not exist", srv_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     srvForm = (Form_pg_foreign_server)GETSTRUCT(tuple);
 
     /*
@@ -5537,8 +5858,7 @@ AclMode pg_foreign_server_aclmask(Oid srv_oid, Oid roleid, AclMode mask, AclMask
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5574,7 +5894,9 @@ AclMode pg_extension_data_source_aclmask(Oid src_oid, Oid roleid, AclMode mask, 
     /* Get data source tuple */
     tuple = SearchSysCache1(DATASOURCEOID, ObjectIdGetDatum(src_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("data source with OID %u does not exist", src_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("data source with OID %u does not exist", src_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     srcForm = (Form_pg_extension_data_source)GETSTRUCT(tuple);
 
     /* Normal case: get the data source's ACL from pg_extension_data_source */
@@ -5592,8 +5914,7 @@ AclMode pg_extension_data_source_aclmask(Oid src_oid, Oid roleid, AclMode mask, 
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* If we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5624,7 +5945,9 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
      */
     tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type with OID %u does not exist", type_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("type with OID %u does not exist", type_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     typeForm = (Form_pg_type)GETSTRUCT(tuple);
 
     /*
@@ -5639,8 +5962,9 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
 
         /* this case is not a user-facing error, so elog not ereport */
         if (!HeapTupleIsValid(tuple))
-            ereport(
-                ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", elttype_oid)));
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for type %u", elttype_oid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
 
         typeForm = (Form_pg_type)GETSTRUCT(tuple);
     }
@@ -5662,8 +5986,7 @@ AclMode pg_type_aclmask(Oid type_oid, Oid roleid, AclMode mask, AclMaskHow how)
     result = aclmask(acl, roleid, ownerId, mask, how);
 
     /* if we have a detoasted copy, free it */
-    if (acl && (Pointer)acl != DatumGetPointer(aclDatum))
-        pfree_ext(acl);
+    FREE_DETOASTED_ACL(acl, aclDatum);
 
     ReleaseSysCache(tuple);
 
@@ -5977,7 +6300,9 @@ bool pg_class_ownercheck(Oid class_oid, Oid roleid)
 
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(class_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation with OID %u does not exist", class_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_TABLE),
+            errmsg("relation with OID %u does not exist", class_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_class)GETSTRUCT(tuple))->relowner;
 
@@ -6001,7 +6326,9 @@ bool pg_type_ownercheck(Oid type_oid, Oid roleid)
 
     tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(type_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("type with OID %u does not exist", type_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("type with OID %u does not exist", type_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_type)GETSTRUCT(tuple))->typowner;
 
@@ -6025,7 +6352,9 @@ bool pg_oper_ownercheck(Oid oper_oid, Oid roleid)
 
     tuple = SearchSysCache1(OPEROID, ObjectIdGetDatum(oper_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("operator with OID %u does not exist", oper_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("operator with OID %u does not exist", oper_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_operator)GETSTRUCT(tuple))->oprowner;
 
@@ -6049,9 +6378,37 @@ bool pg_proc_ownercheck(Oid proc_oid, Oid roleid)
 
     tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(proc_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function with OID %u does not exist", proc_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("function with OID %u does not exist", proc_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
+
+    ReleaseSysCache(tuple);
+
+    return has_privs_of_role(roleid, ownerId);
+}
+
+/*
+ * Ownership check for a package (specified by OID).
+ */
+bool pg_package_ownercheck(Oid package_oid, Oid roleid)
+{
+    HeapTuple tuple = NULL;
+    Oid ownerId;
+
+    /* Superusers bypass all permission checking. */
+    /* Database Security:  Support separation of privilege. */
+    if (superuser_arg(roleid) || systemDBA_arg(roleid))
+        return true;
+
+    tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(package_oid));
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_PACKAGE),
+            errmsg("package with OID %u does not exist", package_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Re-entering the session")));
+
+    ownerId = ((Form_gs_package)GETSTRUCT(tuple))->pkgowner;
 
     ReleaseSysCache(tuple);
 
@@ -6074,8 +6431,9 @@ bool gs_sec_cmk_ownercheck(Oid key_oid, Oid roleid)
     }
     tuple = SearchSysCache1(GLOBALSETTINGOID, ObjectIdGetDatum(key_oid));
     if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_KEY),
-            errmsg("client master key with OID %u does not exist", key_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_KEY), 
+            errmsg("client master key with OID %u does not exist", key_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
     ownerId = ((Form_gs_client_global_keys)GETSTRUCT(tuple))->key_owner;
     ReleaseSysCache(tuple);
@@ -6097,8 +6455,9 @@ bool gs_sec_cek_ownercheck(Oid key_oid, Oid roleid)
     }
     tuple = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(key_oid));
     if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_KEY), errmsg("column encryption key with OID %u does not exist", key_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_KEY),
+            errmsg("column encryption key with OID %u does not exist", key_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
     ownerId = ((Form_gs_column_keys)GETSTRUCT(tuple))->key_owner;
     ReleaseSysCache(tuple);
@@ -6120,7 +6479,9 @@ bool pg_language_ownercheck(Oid lan_oid, Oid roleid)
 
     tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(lan_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("language with OID %u does not exist", lan_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("language with OID %u does not exist", lan_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_language)GETSTRUCT(tuple))->lanowner;
 
@@ -6157,7 +6518,9 @@ bool pg_largeobject_ownercheck(Oid lobj_oid, Oid roleid)
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("large object %u does not exist", lobj_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("large object %u does not exist", lobj_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_largeobject_metadata)GETSTRUCT(tuple))->lomowner;
 
@@ -6181,7 +6544,9 @@ bool pg_namespace_ownercheck(Oid nsp_oid, Oid roleid)
 
     tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nsp_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema with OID %u does not exist", nsp_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_SCHEMA),
+            errmsg("schema with OID %u does not exist", nsp_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_namespace)GETSTRUCT(tuple))->nspowner;
 
@@ -6206,7 +6571,9 @@ bool pg_tablespace_ownercheck(Oid spc_oid, Oid roleid)
     /* Search syscache for pg_tablespace */
     spctuple = SearchSysCache1(TABLESPACEOID, ObjectIdGetDatum(spc_oid));
     if (!HeapTupleIsValid(spctuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("tablespace with OID %u does not exist", spc_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("tablespace with OID %u does not exist", spc_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     spcowner = ((Form_pg_tablespace)GETSTRUCT(spctuple))->spcowner;
 
@@ -6230,8 +6597,9 @@ bool pg_opclass_ownercheck(Oid opc_oid, Oid roleid)
 
     tuple = SearchSysCache1(CLAOID, ObjectIdGetDatum(opc_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("operator class with OID %u does not exist", opc_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("operator class with OID %u does not exist", opc_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_opclass)GETSTRUCT(tuple))->opcowner;
 
@@ -6255,8 +6623,9 @@ bool pg_opfamily_ownercheck(Oid opf_oid, Oid roleid)
 
     tuple = SearchSysCache1(OPFAMILYOID, ObjectIdGetDatum(opf_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("operator family with OID %u does not exist", opf_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("operator family with OID %u does not exist", opf_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_opfamily)GETSTRUCT(tuple))->opfowner;
 
@@ -6280,8 +6649,9 @@ bool pg_ts_dict_ownercheck(Oid dict_oid, Oid roleid)
 
     tuple = SearchSysCache1(TSDICTOID, ObjectIdGetDatum(dict_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("text search dictionary with OID %u does not exist", dict_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("text search dictionary with OID %u does not exist", dict_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_ts_dict)GETSTRUCT(tuple))->dictowner;
 
@@ -6305,9 +6675,9 @@ bool pg_ts_config_ownercheck(Oid cfg_oid, Oid roleid)
 
     tuple = SearchSysCache1(TSCONFIGOID, ObjectIdGetDatum(cfg_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("text search configuration with OID %u does not exist", cfg_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("text search configuration with OID %u does not exist", cfg_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_ts_config)GETSTRUCT(tuple))->cfgowner;
 
@@ -6331,8 +6701,9 @@ bool pg_foreign_data_wrapper_ownercheck(Oid srv_oid, Oid roleid)
 
     tuple = SearchSysCache1(FOREIGNDATAWRAPPEROID, ObjectIdGetDatum(srv_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign-data wrapper with OID %u does not exist", srv_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("foreign-data wrapper with OID %u does not exist", srv_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_foreign_data_wrapper)GETSTRUCT(tuple))->fdwowner;
 
@@ -6356,8 +6727,9 @@ bool pg_foreign_server_ownercheck(Oid srv_oid, Oid roleid)
 
     tuple = SearchSysCache1(FOREIGNSERVEROID, ObjectIdGetDatum(srv_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(
-            ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("foreign server with OID %u does not exist", srv_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("foreign server with OID %u does not exist", srv_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_foreign_server)GETSTRUCT(tuple))->srvowner;
 
@@ -6381,7 +6753,9 @@ bool pg_database_ownercheck(Oid db_oid, Oid roleid)
 
     tuple = SearchSysCache1(DATABASEOID, ObjectIdGetDatum(db_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database with OID %u does not exist", db_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_DATABASE),
+            errmsg("database with OID %u does not exist", db_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     dba = ((Form_pg_database)GETSTRUCT(tuple))->datdba;
 
@@ -6405,7 +6779,9 @@ bool pg_directory_ownercheck(Oid dir_oid, Oid roleid)
 
     tuple = SearchSysCache1(DIRECTORYOID, ObjectIdGetDatum(dir_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("directory with OID %u does not exist", dir_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("directory with OID %u does not exist", dir_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     dba = ((Form_pg_directory)GETSTRUCT(tuple))->owner;
 
@@ -6429,7 +6805,9 @@ bool pg_collation_ownercheck(Oid coll_oid, Oid roleid)
 
     tuple = SearchSysCache1(COLLOID, ObjectIdGetDatum(coll_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("collation with OID %u does not exist", coll_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("collation with OID %u does not exist", coll_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_collation)GETSTRUCT(tuple))->collowner;
 
@@ -6453,7 +6831,9 @@ bool pg_conversion_ownercheck(Oid conv_oid, Oid roleid)
 
     tuple = SearchSysCache1(CONVOID, ObjectIdGetDatum(conv_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("conversion with OID %u does not exist", conv_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("conversion with OID %u does not exist", conv_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_conversion)GETSTRUCT(tuple))->conowner;
 
@@ -6487,7 +6867,9 @@ bool pg_extension_ownercheck(Oid ext_oid, Oid roleid)
 
     tuple = systable_getnext(scan);
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("extension with OID %u does not exist", ext_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("extension with OID %u does not exist", ext_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_extension)GETSTRUCT(tuple))->extowner;
 
@@ -6516,10 +6898,9 @@ bool pg_extension_data_source_ownercheck(Oid src_oid, Oid roleid)
     /* Search the data source by oid */
     tuple = SearchSysCache1(DATASOURCEOID, ObjectIdGetDatum(src_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR,
-            (errmodule(MOD_EC),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("data source with OID %u does not exist", src_oid)));
+        ereport(ERROR, (errmodule(MOD_EC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("data source with OID %u does not exist", src_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_extension_data_source)GETSTRUCT(tuple))->srcowner;
 
@@ -6548,10 +6929,9 @@ bool pg_synonym_ownercheck(Oid synOid, Oid roleId)
     /* Search the data source by oid */
     tuple = SearchSysCache1(SYNOID, ObjectIdGetDatum(synOid));
     if (!HeapTupleIsValid(tuple)) {
-        ereport(ERROR,
-            (errmodule(MOD_EXECUTOR),
-                errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("synonym with OID %u does not exist", synOid)));
+        ereport(ERROR, (errmodule(MOD_EXECUTOR), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("synonym with OID %u does not exist", synOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
     }
 
     ownerId = ((Form_pg_synonym)GETSTRUCT(tuple))->synowner;
@@ -6682,6 +7062,10 @@ Acl* get_user_default_acl(GrantObjectType objtype, Oid ownerId, Oid nsp_oid)
             defaclobjtype = DEFACLOBJ_COLUMN_SETTING;
             break;
 
+        case ACL_OBJECT_PACKAGE:
+            defaclobjtype = DEFACLOBJ_PACKAGE;
+            break;
+
         default:
             return NULL;
     }
@@ -6766,7 +7150,9 @@ bool is_trust_language(Oid lang_oid)
     /* Get the language's lanpltrusted flag from pg_language. */
     tuple = SearchSysCache1(LANGOID, ObjectIdGetDatum(lang_oid));
     if (!HeapTupleIsValid(tuple))
-        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("language with OID %u does not exist", lang_oid)));
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_OBJECT),
+            errmsg("language with OID %u does not exist", lang_oid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
 
     is_trust_lang = ((Form_pg_language)GETSTRUCT(tuple))->lanpltrusted;
     ReleaseSysCache(tuple);

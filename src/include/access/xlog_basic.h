@@ -29,10 +29,11 @@
 
 #include "c.h"
 #include "access/xlogdefs.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "access/rmgr.h"
 #include "port/pg_crc32c.h"
 #include "utils/pg_crc.h"
+#include "tde_key_management/data_common.h"
 /*
  * These macros encapsulate knowledge about the exact layout of XLog file
  * names, timeline history file names, and archive-status file names.
@@ -127,6 +128,13 @@
 #define BKPBLOCK_WILL_INIT 0x40 /* redo will re-init the page */
 #define BKPBLOCK_SAME_REL 0x80  /* RelFileNode omitted, same as previous */
 
+/*
+ * The first bit in seg_fileno field denates whether the xlog record contains VM 
+ * physical block location
+ */
+#define BKPBLOCK_HAS_VM_LOC 0x80
+#define BKPBLOCK_GET_SEGFILENO(fileno) ((fileno) & 0x3F)
+
 typedef struct XLogReaderState XLogReaderState;
 
 /* Function type definition for the read_page callback */
@@ -141,6 +149,13 @@ typedef struct {
     RelFileNode rnode;
     ForkNumber forknum;
     BlockNumber blkno;
+
+    /* Segment block number */
+    uint8 seg_fileno;
+    BlockNumber seg_blockno;
+    bool has_vm_loc;
+    uint8 vm_seg_fileno;
+    BlockNumber vm_seg_blockno;
 
     /* copy of the fork_flags field from the XLogRecordBlockHeader */
     uint8 flags;
@@ -161,6 +176,7 @@ typedef struct {
 #ifdef USE_ASSERT_CHECKING
     uint8 replayed;
 #endif
+    TdeInfo* tdeinfo;
 } DecodedBkpBlock;
 
 /*
@@ -191,7 +207,7 @@ typedef struct XLogRecord {
     XLogRecPtr xl_prev;   /* ptr to previous record in log */
     uint8 xl_info;        /* flag bits, see below */
     RmgrId xl_rmid;       /* resource manager for this record */
-    int2  xl_bucket_id;
+    uint2  xl_bucket_id;    /* stores bucket id */
     pg_crc32c xl_crc; /* CRC for this record */
 
     /* XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding */
@@ -270,7 +286,9 @@ struct XLogReaderState {
     uint32 main_data_len;   /* main data portion's length */
     uint32 main_data_bufsz; /* allocated size of the buffer */
 
-    /* information about blocks referenced by the record. */
+    /* 
+     * Information about blocks referenced by the record.
+     */
     DecodedBkpBlock blocks[XLR_MAX_BLOCK_ID + 1];
 
     int max_block_id; /* highest block_id in use (-1 if none) */
@@ -318,7 +336,8 @@ struct XLogReaderState {
     // For parallel recovery
     bool isPRProcess;
     bool isDecode;
-    bool isFullSyncCheckpoint;
+    bool isFullSync;
+    bool isTde;
 };
 
 #define SizeOfXLogRecord (offsetof(XLogRecord, xl_crc) + sizeof(pg_crc32c))
@@ -391,7 +410,11 @@ typedef XLogLongPageHeaderData* XLogLongPageHeader;
 /* transform old version LSN into new version. */
 #define XLogRecPtrSwap(x) (((uint64)((x).xlogid)) << 32 | (x).xrecoff)
 
-
+typedef struct XLogPhyBlock {
+    Oid         relNode;
+    BlockNumber block;
+    XLogRecPtr  lsn;
+} XLogPhyBlock;
 
 #endif /* XLOG_BASIC_H */
 

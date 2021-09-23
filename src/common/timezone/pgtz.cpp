@@ -20,7 +20,7 @@
 
 #include "miscadmin.h"
 #include "pgtz.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/hsearch.h"
 
 /* Current session timezone (controlled by TimeZone GUC) */

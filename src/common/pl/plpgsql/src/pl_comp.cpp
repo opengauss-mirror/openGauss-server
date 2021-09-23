@@ -13,7 +13,8 @@
  * -------------------------------------------------------------------------
  */
 
-#include "plpgsql.h"
+#include "utils/pl_package.h"
+#include "utils/plpgsql.h"
 
 #include <ctype.h>
 
@@ -21,6 +22,8 @@
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/gs_package.h"
+#include "catalog/gs_package_fn.h"
 #include "catalog/pg_type.h"
 #include "executor/spi.h"
 #include "funcapi.h"
@@ -43,11 +46,12 @@
 #include "utils/syscache.h"
 #include "miscadmin.h"
 
+
 /* functions reference other modules */
 extern THR_LOCAL List* baseSearchPath;
 
 #define FUNCS_PER_USER 128 /* initial table size */
-
+#define PKGS_PER_USER 256  /* initial table size */
 /* ----------
  * Lookup table for EXCEPTION condition names
  * ----------
@@ -67,7 +71,7 @@ static const ExceptionLabelMap exception_label_map[] = {
  */
 static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup, PLpgSQL_function* func,
     PLpgSQL_func_hashkey* hashkey, bool for_validator);
-static void plpgsql_compile_error_callback(void* arg);
+extern void plpgsql_compile_error_callback(void* arg);
 static void add_parameter_name(int item_type, int item_no, const char* name);
 static void add_dummy_return(PLpgSQL_function* func);
 static Node* plpgsql_pre_column_ref(ParseState* pstate, ColumnRef* cref);
@@ -75,28 +79,22 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
 static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref);
 static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRef* cref, bool error_if_no_field);
 static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location);
-static PLpgSQL_row* build_row_from_class(Oid class_oid);
+extern PLpgSQL_row* build_row_from_class(Oid class_oid);
 static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars);
 static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation);
-static void compute_function_hashkey(
-    FunctionCallInfo fcinfo, Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator);
+static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
+    PLpgSQL_func_hashkey* hashkey, bool for_validator);
 static void plpgsql_resolve_polymorphic_argtypes(
     int numargs, Oid* argtypes, const char* argmodes, Node* call_expr, bool for_validator, const char* proname);
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key);
 static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key);
-static void delete_function(PLpgSQL_function* func);
 static void plpgsql_append_dlcell(plpgsql_HashEnt* entity);
 
-static int plpgsql_getCustomErrorCode(void);
+extern int plpgsql_getCustomErrorCode(void);
 extern bool is_func_need_cache(Oid funcid, const char* func_name);
 
-static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple procTup);
-static bool plpgsql_check_insert_colocate(
+extern bool plpgsql_check_insert_colocate(
     Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
-static bool plpgsql_check_updel_colocate(
-    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func);
-static bool plpgsql_check_opexpr_colocate(
-    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func, List* opexpr_list);
 
 typedef int (*plsql_parser)(void);
 static inline plsql_parser PlsqlParser(){
@@ -122,36 +120,46 @@ static inline plsql_parser PlsqlParser(){
  * has already been compiled.
  * ----------
  */
+
+/*
+ * Check whether function's search path is same as system search_path.
+ */
+static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup)
+{
+    /* If SUPPORT_BIND_SEARCHPATH is false, always return true. */
+    return check_search_path_interface(func->fn_searchpath->schemas, proc_tup);
+}
+
 PLpgSQL_function* plpgsql_compile(FunctionCallInfo fcinfo, bool for_validator)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
-    HeapTuple proc_tup = NULL;
-    Form_pg_proc proc_struct = NULL;
-    PLpgSQL_function* func = NULL;
     PLpgSQL_func_hashkey hashkey;
     bool function_valid = false;
     bool hashkey_valid = false;
-
+    bool isnull = false;
     /*
      * Lookup the pg_proc tuple by Oid; we'll need it in any case
      */
-    proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    HeapTuple proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
     if (!HeapTupleIsValid(proc_tup)) {
         ereport(ERROR,  (errmodule(MOD_PLSQL),  errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for function %u, while compile function", func_oid)));
     }
-    proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
+    Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
 
     /*
      * See if there's already a cache entry for the current FmgrInfo. If not,
      * try to find one in the hash table.
      */
-    func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
-
+    PLpgSQL_function* func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
+    Datum pkgoiddatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
+    Oid packageOid = DatumGetObjectId(pkgoiddatum);
+    Oid old_value = saveCallFromPkgOid(packageOid);
+    
 recheck:
     if (func == NULL) {
         /* Compute hashkey using function signature and actual arg types */
-        compute_function_hashkey(fcinfo, proc_struct, &hashkey, for_validator);
+        compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, for_validator);
         hashkey_valid = true;
 
         /* And do the lookup */
@@ -191,6 +199,24 @@ recheck:
                 }
             }
         }
+    } else {
+        if (OidIsValid(packageOid) && u_sess->plsql_cxt.plpgsql_curr_compile_package == NULL) {
+            PLpgSQL_package* pkg = PackageInstantiation(packageOid);
+            ListCell* l = NULL;
+            if (pkg == NULL) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
+                    errmsg("not found package %u", packageOid)));
+            }
+            foreach(l, pkg->proc_compiled_list) {
+                PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
+                if (func->fn_oid == fcinfo->flinfo->fn_oid) {
+                    ReleaseSysCache(proc_tup);
+                    return func;
+                }
+            }
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), 
+                errmsg("not found function %u in package", fcinfo->flinfo->fn_oid)));
+        }
     }
 
     /*
@@ -202,7 +228,7 @@ recheck:
          * completed function.
          */
         if (!hashkey_valid) {
-            compute_function_hashkey(fcinfo, proc_struct, &hashkey, for_validator);
+            compute_function_hashkey(proc_tup, fcinfo, proc_struct, &hashkey, for_validator);
         }
         /*
          * Do the hard part.
@@ -216,6 +242,7 @@ recheck:
      * Save pointer in FmgrInfo to avoid search on subsequent calls
      */
     fcinfo->flinfo->fn_extra = (void*)func;
+    restoreCallFromPkgOid(old_value);
 
     /*
      * Finally return the compiled function
@@ -232,22 +259,18 @@ recheck:
 PLpgSQL_function* plpgsql_compile_nohashkey(FunctionCallInfo fcinfo)
 {
     Oid func_oid = fcinfo->flinfo->fn_oid;
-    HeapTuple proc_tup = NULL;
-    Form_pg_proc proc_struct = NULL;
-    PLpgSQL_function* func = NULL;
 
     /* Lookup the pg_proc tuple by Oid, as we'll need it in any case */
-    proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
+    HeapTuple proc_tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(func_oid));
     if (!HeapTupleIsValid(proc_tup)) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("cache lookup failed for function %u", func_oid)));
     }
-    
-	proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
+
     /*
      * See if there's already a cache entry for the current FmgrInfo. If not,
      * try to find one in the hash table.
      */
-    func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
+    PLpgSQL_function* func = (PLpgSQL_function*)fcinfo->flinfo->fn_extra;
 
     /*
      * We should set for_validator of do_compile to false here which only need be
@@ -280,6 +303,22 @@ static bool whether_add_return(PLpgSQL_function* func, int num_out_args)
         return false;
     }
 }
+
+static bool IsNestAutonmous(List* stmts)
+{
+    for (int stmtid = 0; stmtid < list_length(stmts); stmtid++) {
+        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)list_nth(stmts, stmtid);
+        if ((enum PLpgSQL_stmt_types)stmt->cmd_type == PLPGSQL_STMT_BLOCK) {
+            PLpgSQL_stmt_block* block = (PLpgSQL_stmt_block*)stmt;
+            if (block->isAutonomous == true || IsNestAutonmous(block->body)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /*
  * This is the slow part of plpgsql_compile().
  *
@@ -307,9 +346,8 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
 {
     Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
     bool is_trigger = CALLED_AS_TRIGGER(fcinfo);
-    Datum prosrcdatum;
+    Datum proisprivatedatum;
     bool isnull = false;
-    char* proc_source = NULL;
     HeapTuple type_tup = NULL;
     Form_pg_type type_struct = NULL;
     PLpgSQL_variable* var = NULL;
@@ -326,6 +364,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     char* arg_modes = NULL;
     int* in_arg_varnos = NULL;
     PLpgSQL_variable** out_arg_variables;
+    Oid pkgoid = InvalidOid;
 
     Oid* saved_pseudo_current_userId = NULL;
     char* signature = NULL;
@@ -342,14 +381,23 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      * cannot be invoked recursively, so there's no need to save and restore
      * the static variables used here.
      */
-    prosrcdatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_prosrc, &isnull);
+    Datum prosrcdatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_prosrc, &isnull);
     if (isnull) {
         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("The definition of the function is null"),
                 errhint("Check whether the definition of the function is complete in the pg_proc system table.")));
     }
     
-    proc_source = TextDatumGetCString(prosrcdatum);
+    char* proc_source = TextDatumGetCString(prosrcdatum);
+    Datum pkgoiddatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
+    if (!isnull) {
+        pkgoid = ObjectIdGetDatum(pkgoiddatum);
+    }
+    if (OidIsValid(Anum_pg_proc_proisprivate)) {
+        proisprivatedatum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_proisprivate, &isnull);
+    } else {
+        proisprivatedatum = BoolGetDatum(false);
+    }
     plpgsql_scanner_init(proc_source);
 
     u_sess->plsql_cxt.plpgsql_error_funcname = pstrdup(NameStr(proc_struct->proname));
@@ -392,12 +440,18 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     rc = snprintf_s(
         context_name, NAMEDATALEN, NAMEDATALEN - 1, "%s_%lu", "PL/pgSQL function context", u_sess->debug_query_id);
     securec_check_ss(rc, "", "");
+    /*
+     * if the function belong to a package,then the function memorycontext will use the package memorycontext,
+     * because function may use package variable
+     */
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package == NULL) {
+        u_sess->plsql_cxt.plpgsql_cxt = AllocSetContextCreate(u_sess->top_mem_cxt,
+            context_name, ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    } else {
+        u_sess->plsql_cxt.plpgsql_cxt = u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_cxt;
+    }
+    
 
-    u_sess->plsql_cxt.plpgsql_func_cxt = AllocSetContextCreate(u_sess->top_mem_cxt,
-        context_name,
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
 
     /*
      * compile_tmp_cxt is a short temp context that will be detroyed after
@@ -407,22 +461,31 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      * signature is stored on a StringInfoData which is 1K byte at least, but
      * most signature will not be so long originally, so we should do a strdup.
      */
-    u_sess->plsql_cxt.compile_tmp_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_func_cxt);
+    u_sess->plsql_cxt.compile_tmp_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_cxt);
     func->fn_signature = pstrdup(signature);
-    func->fn_searchpath = (OverrideSearchPath*)palloc0(sizeof(OverrideSearchPath));
+    func->is_private = BoolGetDatum(proisprivatedatum);
+    /*
+     * if function belong to a package, it will use package search path.
+     */
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package == NULL) {
+        func->fn_searchpath = (OverrideSearchPath*)palloc0(sizeof(OverrideSearchPath));
+    } else {
+        func->fn_searchpath = u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_searchpath;
+    }
     func->fn_owner = proc_struct->proowner;
     func->fn_oid = fcinfo->flinfo->fn_oid;
     func->fn_xmin = HeapTupleGetRawXmin(proc_tup);
     func->fn_tid = proc_tup->t_self;
     func->fn_is_trigger = is_trigger;
     func->fn_input_collation = fcinfo->fncollation;
-    func->fn_cxt = u_sess->plsql_cxt.plpgsql_func_cxt;
+    func->fn_cxt = u_sess->plsql_cxt.plpgsql_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
     func->resolve_option = (PLpgSQL_resolve_option)u_sess->plsql_cxt.plpgsql_variable_conflict;
 
+    func->pkg_oid = pkgoid;
     func->fn_searchpath->addCatalog = true;
     func->fn_searchpath->addTemp = true;
-    if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE) {
+    if (proc_struct->pronamespace == PG_CATALOG_NAMESPACE || proc_struct->pronamespace == PG_DB4AI_NAMESPACE) {
         current_searchpath = fetch_search_path(false);
         if (current_searchpath == NIL) {
             ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_SCHEMA),
@@ -477,6 +540,12 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                  */
                 func->fn_searchpath->schemas = lappend_oid(func->fn_searchpath->schemas, namespaceId);
             }
+            if (module_logging_is_on(MOD_SCHEMA)) {
+                char* str = nodeToString(func->fn_searchpath->schemas);
+                ereport(DEBUG2, (errmodule(MOD_SCHEMA), errmsg("fn_searchpath:%s", str)));
+                pfree(str);
+            }
+
         }
     }
 
@@ -497,7 +566,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     u_sess->plsql_cxt.plpgsql_Datums = (PLpgSQL_datum**)MemoryContextAlloc(
         u_sess->plsql_cxt.compile_tmp_cxt, sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.datums_alloc);
     u_sess->plsql_cxt.datums_last = 0;
-
+    add_pkg_compile(); 
     switch ((int)is_trigger) {
         case false:
 
@@ -519,7 +588,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
             in_arg_varnos = (int*)palloc0(numargs * sizeof(int));
             out_arg_variables = (PLpgSQL_variable**)palloc0(numargs * sizeof(PLpgSQL_variable*));
 
-            MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_func_cxt);
+            MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_cxt);
 
             /*
              * Create the variables for the procedure's parameters.
@@ -529,7 +598,6 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 char buf[buf_size];
                 Oid arg_type_id = arg_types[i];
                 char arg_mode = arg_modes ? arg_modes[i] : PROARGMODE_IN;
-                PLpgSQL_type* argdtype = NULL;
                 PLpgSQL_variable* argvariable = NULL;
                 int arg_item_type;
                 errno_t err = EOK;
@@ -539,7 +607,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 securec_check_ss(err, "", "");
 
                 /* Create datatype info */
-                argdtype = plpgsql_build_datatype(arg_type_id, -1, func->fn_input_collation);
+                PLpgSQL_type* argdtype = plpgsql_build_datatype(arg_type_id, -1, func->fn_input_collation);
 
                 /* Disallow pseudotype argument */
                 /* (note we already replaced polymorphic types) */
@@ -550,7 +618,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 }
                 /* Build variable and add to datum list */
                 if (argnames != NULL) {
-                    argvariable = plpgsql_build_variable(buf, 0, argdtype, false, argnames[i]);
+                    argvariable = plpgsql_build_variable(buf, 0, argdtype, false, false, argnames[i]);
                 } else {
                     argvariable = plpgsql_build_variable(buf, 0, argdtype, false);
                 }
@@ -592,9 +660,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 func->out_param_varno = out_arg_variables[0]->dno;
             } else if (num_out_args > 1) {
                 PLpgSQL_row* row = build_row_from_vars(out_arg_variables, num_out_args);
+                row->isImplicit = true;
 
-                plpgsql_adddatum((PLpgSQL_datum*)row);
-                func->out_param_varno = row->dno;
+                int varno = 0;
+                varno = plpgsql_adddatum((PLpgSQL_datum*)row);
+                func->out_param_varno = varno;
             }
 
             /*
@@ -672,7 +742,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                  */
                 if (IsPolymorphicType(proc_struct->prorettype) && num_out_args == 0) {
                     (void)plpgsql_build_variable(
-                        "$0", 0, build_datatype(type_tup, -1, func->fn_input_collation), true);
+                        "$0", 0, build_datatype(type_tup, -1, func->fn_input_collation), true, true);
                 }
             }
             ReleaseSysCache(type_tup);
@@ -751,33 +821,32 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                     errhint("This node type is expected to be a function or trigger.")));
             break;
     }
-
     /* Remember if function is STABLE/IMMUTABLE */
     func->fn_readonly = (proc_struct->provolatile != PROVOLATILE_VOLATILE);
 
     /*
      * Create the magic FOUND variable.
      */
-    var = plpgsql_build_variable("found", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+    var = plpgsql_build_variable("found", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->found_varno = var->dno;
     /* Create the magic FOUND variable for implicit cursor attribute %found. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_found__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_found__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_cursor_found_varno = var->dno;
 
     /* Create the magic NOTFOUND variable for implicit cursor attribute %notfound. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_notfound__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_notfound__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_notfound_varno = var->dno;
 
     /* Create the magic ISOPEN variable for implicit cursor attribute %isopen. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_isopen__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_isopen__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_isopen_varno = var->dno;
 
     /* Create the magic ROWCOUNT variable for implicit cursor attribute %rowcount. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_rowcount__", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_rowcount__", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true, true);
     func->sql_rowcount_varno = var->dno;
 
     PushOverrideSearchPath(func->fn_searchpath);
@@ -786,7 +855,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     u_sess->misc_cxt.Pseudo_CurrentUserId = &func->fn_owner;
 
     // Create the magic sqlcode variable marco
-    var = plpgsql_build_variable("sqlcode", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true);
+    var = plpgsql_build_variable("sqlcode", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true, true);
     func->sqlcode_varno = var->dno;
 
     /*
@@ -800,6 +869,49 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
                 errmsg("Syntax parsing error, plpgsql parser returned %d", parse_rc)));
     }
     func->action = u_sess->plsql_cxt.plpgsql_parse_result;
+
+    if (is_trigger && func->action->isAutonomous) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Triggers do not support autonomous transactions"),
+                errdetail("N/A"),
+                errcause("PL/SQL uses unsupported feature."),
+                erraction("Modify SQL statement according to the manual.")));
+    }
+
+    if (func->fn_retset && func->action->isAutonomous) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Autonomous transactions do not support RETURN SETOF."),
+                errdetail("N/A"),
+                errcause("PL/SQL uses unsupported feature."),
+                erraction("Modify SQL statement according to the manual.")));
+    }
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (proc_struct->provolatile != PROVOLATILE_VOLATILE && func->action->isAutonomous) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Autonomous transactions do not support STABLE/IMMUTABLE."),
+                errdetail("Please remove stable/immutable."),
+                errcause("PL/SQL uses unsupported feature."),
+                erraction("Modify SQL statement according to the manual.")));
+    }
+#endif
+
+    if (IsNestAutonmous(func->action->body)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL),
+                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Autonomous transactions do not support nested anonymous blocks."),
+                errdetail("N/A"),
+                errcause("PL/SQL uses unsupported feature."),
+                erraction("You can delete AUTONOMOUS_TRANSACTION parameter.")));
+    }
+
     func->goto_labels = u_sess->plsql_cxt.goto_labels;
 
     plpgsql_scanner_finish();
@@ -832,6 +944,13 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->datums = (PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.plpgsql_nDatums);
     for (i = 0; i < u_sess->plsql_cxt.plpgsql_nDatums; i++) {
         func->datums[i] = u_sess->plsql_cxt.plpgsql_Datums[i];
+        if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+            func->datums[i]->ispkg = true;
+            if (func->datums[i]->dtype == PLPGSQL_DTYPE_VAR) {
+                PLpgSQL_var* var = reinterpret_cast<PLpgSQL_var*>(func->datums[i]);
+                var->pkg = u_sess->plsql_cxt.plpgsql_curr_compile_package;
+            }
+        }
     }
     /* Debug dump for completed functions */
     if (u_sess->plsql_cxt.plpgsql_DumpExecTree) {
@@ -851,11 +970,16 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
      */
     t_thrd.log_cxt.error_context_stack = pl_err_context.previous;
     u_sess->plsql_cxt.plpgsql_error_funcname = NULL;
-
+    u_sess->plsql_cxt.plpgsql_curr_compile = NULL;
     u_sess->plsql_cxt.plpgsql_check_syntax = false;
-
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+        List* proc_compiled_list = u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_compiled_list;
+        u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_compiled_list = lappend(proc_compiled_list, func);
+    }    
     MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
-    u_sess->plsql_cxt.compile_tmp_cxt = NULL;
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package == NULL)
+        u_sess->plsql_cxt.compile_tmp_cxt = NULL;
+
     return func;
 }
 
@@ -872,13 +996,11 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
 PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
 {
     const char* func_name = "inline_code_block";
-    PLpgSQL_function* func = NULL;
     ErrorContextCallback pl_err_context;
     Oid typinput;
     PLpgSQL_variable* var = NULL;
     int parse_rc;
     MemoryContext func_cxt;
-    int i;
     const int alloc_size = 128;
     /*
      * Setup the scanner input and error info.	We assume that this function
@@ -901,7 +1023,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     u_sess->plsql_cxt.plpgsql_check_syntax = u_sess->attr.attr_sql.check_function_bodies;
 
     /* Function struct does not live past current statement */
-    func = (PLpgSQL_function*)palloc0(sizeof(PLpgSQL_function));
+    PLpgSQL_function* func = (PLpgSQL_function*)palloc0(sizeof(PLpgSQL_function));
 
     u_sess->plsql_cxt.plpgsql_curr_compile = func;
 
@@ -909,17 +1031,22 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
      * All the rest of the compile-time storage (e.g. parse tree) is kept in
      * its own memory context, so it can be reclaimed easily.
      */
-    func_cxt = AllocSetContextCreate(CurrentMemoryContext,
-        "PL/pgSQL function context",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package == NULL) {
+        func_cxt = AllocSetContextCreate(CurrentMemoryContext,
+            "PL/pgSQL function context",
+            ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE,
+            ALLOCSET_DEFAULT_MAXSIZE);
+    } else {
+        func_cxt = u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_cxt;
+    }
     u_sess->plsql_cxt.compile_tmp_cxt = MemoryContextSwitchTo(func_cxt);
 
     func->fn_signature = pstrdup(func_name);
     func->fn_is_trigger = false;
     func->fn_input_collation = InvalidOid;
     func->fn_cxt = func_cxt;
+    u_sess->plsql_cxt.plpgsql_cxt = func_cxt;
     func->out_param_varno = -1; /* set up for no OUT param */
     func->resolve_option = (PLpgSQL_resolve_option)u_sess->plsql_cxt.plpgsql_variable_conflict;
 
@@ -947,31 +1074,31 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
      * set this TRUE inside a read-only transaction?  Not clear.
      */
     func->fn_readonly = false;
-
+    add_pkg_compile();
     /*
      * Create the magic FOUND variable.
      */
-    var = plpgsql_build_variable("found", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+    var = plpgsql_build_variable("found", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->found_varno = var->dno;
 
     /* Create the magic FOUND variable for implicit cursor attribute %found. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_found__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_found__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_cursor_found_varno = var->dno;
 
     /* Create the magic NOTFOUND variable for implicit cursor attribute %notfound. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_notfound__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_notfound__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_notfound_varno = var->dno;
 
     /* Create the magic ISOPEN variable for implicit cursor attribute %isopen. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_isopen__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_isopen__", 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true, true);
     func->sql_isopen_varno = var->dno;
 
     /* Create the magic ROWCOUNT variable for implicit cursor attribute %rowcount. */
     var = plpgsql_build_variable(
-        "__gsdb_sql_cursor_attri_rowcount__", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true);
+        "__gsdb_sql_cursor_attri_rowcount__", 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true, true);
     func->sql_rowcount_varno = var->dno;
 
     /*
@@ -1000,7 +1127,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     func->fn_nargs = 0;
     func->ndatums = u_sess->plsql_cxt.plpgsql_nDatums;
     func->datums = (PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.plpgsql_nDatums);
-    for (i = 0; i < u_sess->plsql_cxt.plpgsql_nDatums; i++) {
+    for (int i = 0; i < u_sess->plsql_cxt.plpgsql_nDatums; i++) {
         func->datums[i] = u_sess->plsql_cxt.plpgsql_Datums[i];
     }
     /*
@@ -1008,39 +1135,12 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
      */
     t_thrd.log_cxt.error_context_stack = pl_err_context.previous;
     u_sess->plsql_cxt.plpgsql_error_funcname = NULL;
-
+    u_sess->plsql_cxt.plpgsql_curr_compile = NULL; 
     u_sess->plsql_cxt.plpgsql_check_syntax = false;
 
     MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
     u_sess->plsql_cxt.compile_tmp_cxt = NULL;
     return func;
-}
-
-/*
- * error context callback to let us supply a call-stack traceback.
- * If we are validating or executing an anonymous code block, the function
- * source text is passed as an argument.
- */
-static void plpgsql_compile_error_callback(void* arg)
-{
-    if (arg != NULL) {
-        /*
-         * Try to convert syntax error position to reference text of original
-         * CREATE FUNCTION or DO command.
-         */
-        if (function_parse_error_transpose((const char*)arg)) {
-            return;
-        }
-        /*
-         * Done if a syntax error position was reported; otherwise we have to
-         * fall back to a "near line N" report.
-         */
-    }
-
-    if (u_sess->plsql_cxt.plpgsql_error_funcname) {
-        errcontext("compilation of PL/pgSQL function \"%s\" near line %d",
-            u_sess->plsql_cxt.plpgsql_error_funcname, plpgsql_latest_lineno());
-    }
 }
 
 /*
@@ -1055,14 +1155,16 @@ static void add_parameter_name(int item_type, int item_no, const char* name)
      * plpgsql, such names are in the same namespace, so there is no way to
      * disambiguate.
      */
-    if (plpgsql_ns_lookup(plpgsql_ns_top(), true, name, NULL, NULL, NULL) != NULL) {
-        ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
+    PLpgSQL_nsitem* item = plpgsql_ns_lookup(plpgsql_ns_top(), true, name, NULL, NULL, NULL);
+    if (item != NULL) {
+        if (item->pkgname == NULL) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("parameter name \"%s\" used more than once", name)));
+        }
     }
     /* OK, add the name */
     plpgsql_ns_additem(item_type, item_no, name);
 }
-
 /*
  * Add a dummy RETURN statement to the given function's body
  */
@@ -1079,6 +1181,7 @@ static void add_dummy_return(PLpgSQL_function* func)
         newm = (PLpgSQL_stmt_block*)palloc0(sizeof(PLpgSQL_stmt_block));
         newm->cmd_type = PLPGSQL_STMT_BLOCK;
         newm->body = list_make1(func->action);
+        newm->isAutonomous = func->action->isAutonomous;
 
         func->action = newm;
     }
@@ -1132,7 +1235,6 @@ static Node* plpgsql_pre_column_ref(ParseState* pstate, ColumnRef* cref)
 static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* var)
 {
     PLpgSQL_expr* expr = (PLpgSQL_expr*)pstate->p_ref_hook_state;
-    Node* myvar = NULL;
 
     if (expr->func->resolve_option == PLPGSQL_RESOLVE_VARIABLE) {
         return NULL; /* we already found there's no match */
@@ -1151,7 +1253,7 @@ static Node* plpgsql_post_column_ref(ParseState* pstate, ColumnRef* cref, Node* 
      * a conflict with a table name this could still be less than the most
      * helpful error message possible.)
      */
-    myvar = resolve_column_ref(pstate, expr, cref, (var == NULL));
+    Node* myvar = resolve_column_ref(pstate, expr, cref, (var == NULL));
 
     if (myvar != NULL && var != NULL) {
         /*
@@ -1175,13 +1277,12 @@ static Node* plpgsql_param_ref(ParseState* pstate, ParamRef* pref)
     PLpgSQL_expr* expr = (PLpgSQL_expr*)pstate->p_ref_hook_state;
     const int name_size = 32;
     char pname[name_size];
-    PLpgSQL_nsitem* nse = NULL;
     errno_t rc = EOK;
 
     rc = snprintf_s(pname, sizeof(pname), sizeof(pname) - 1, "$%d", pref->number);
     securec_check_ss(rc, "\0", "\0");
 
-    nse = plpgsql_ns_lookup(expr->ns, false, pname, NULL, NULL, NULL);
+    PLpgSQL_nsitem* nse = plpgsql_ns_lookup(expr->ns, false, pname, NULL, NULL, NULL);
 
     if (nse == NULL) {
         return NULL; /* name not known to plpgsql */
@@ -1297,6 +1398,28 @@ static Node* resolve_column_ref(ParseState* pstate, PLpgSQL_expr* expr, ColumnRe
 
     if (nse == NULL) {
         return NULL; /* name not known to plpgsql */
+    }
+    if (nse->itemtype == PLPGSQL_NSTYPE_UNKNOWN) {
+        if (nse->pkgname == NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_PACKAGE),
+                    (errmsg("not found package"))));
+        }
+        Oid pkgOid = PackageNameGetOid(nse->pkgname);
+        PLpgSQL_pkg_hashkey hashkey;
+        hashkey.pkgOid = pkgOid;
+        PLpgSQL_package* pkg = plpgsql_pkg_HashTableLookup(&hashkey);
+        if (pkg == NULL) {
+            pkg = PackageInstantiation(pkgOid);
+        }
+        if (pkg != NULL) {
+            PLpgSQL_nsitem* pkgPublicNs = plpgsql_ns_lookup(pkg->public_ns, false, nse->name, NULL, NULL, NULL);
+            nse->itemtype = pkgPublicNs->itemtype;
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_PACKAGE),
+                    (errmsg("not found package"))));
+        }
     }
     switch (nse->itemtype) {
         case PLPGSQL_NSTYPE_VAR:
@@ -1439,10 +1562,18 @@ static Node* make_datum_param(PLpgSQL_expr* expr, int dno, int location)
 /* param tok_flag is used to get self defined token flag */
 bool plpgsql_parse_word(char* word1, const char* yytxt, PLwdatum* wdatum, PLword* word, int* tok_flag)
 {
-    PLpgSQL_nsitem* ns = NULL;
     PLpgSQL_var* var = NULL;
 
-    ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, word1, NULL, NULL, NULL);
+    PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, word1, NULL, NULL, NULL);
+    if (ns == NULL) {
+        if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+            PLpgSQL_package* pkg = u_sess->plsql_cxt.plpgsql_curr_compile_package;
+            ns = plpgsql_ns_lookup(pkg->public_ns, false, word1, NULL, NULL, NULL);
+            if (ns == NULL) {
+                ns = plpgsql_ns_lookup(pkg->private_ns, false, word1, NULL, NULL, NULL);
+            }
+        }
+    }
     if (ns != NULL) {
         switch (ns->itemtype) {
             /* check cursor type variable, then get cursor type token */
@@ -1512,6 +1643,7 @@ bool plpgsql_parse_word(char* word1, const char* yytxt, PLwdatum* wdatum, PLword
                 case PLPGSQL_NSTYPE_ROW:
                 case PLPGSQL_NSTYPE_REC:
                 case PLPGSQL_NSTYPE_RECORD:
+                case PLPGSQL_NSTYPE_UNKNOWN:
                     wdatum->datum = u_sess->plsql_cxt.plpgsql_Datums[ns->itemno];
                     wdatum->ident = word1;
                     wdatum->quoted = (yytxt[0] == '"');
@@ -1578,10 +1710,17 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                 case PLPGSQL_NSTYPE_VAR:
                     /* Block-qualified reference to scalar variable. */
                     wdatum->datum = u_sess->plsql_cxt.plpgsql_Datums[ns->itemno];
-                    wdatum->ident = NULL;
+                    wdatum->ident = pstrdup(NameListToString(idents));
                     wdatum->quoted = false; /* not used */
                     wdatum->idents = idents;
                     return true;
+                case PLPGSQL_NSTYPE_UNKNOWN:
+                    /* it's a package variable. */
+                    wdatum->datum = u_sess->plsql_cxt.plpgsql_Datums[ns->itemno];
+                    wdatum->ident = pstrdup(NameListToString(idents));
+                    wdatum->quoted = false; /* not used */
+                    wdatum->idents = idents;
+                    return true; 
 
                 case PLPGSQL_NSTYPE_REC:
                 case PLPGSQL_NSTYPE_RECORD:
@@ -1595,14 +1734,14 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                         PLpgSQL_recfield* newm = NULL;
 
                         MemoryContext old_cxt = NULL;
-                        if (u_sess->plsql_cxt.plpgsql_func_cxt != NULL)
-                            old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_func_cxt);
+                        if (u_sess->plsql_cxt.plpgsql_cxt != NULL)
+                            old_cxt = MemoryContextSwitchTo(u_sess->plsql_cxt.plpgsql_cxt);
                         newm = (PLpgSQL_recfield*)palloc(sizeof(PLpgSQL_recfield));
                         newm->dtype = PLPGSQL_DTYPE_RECFIELD;
                         newm->fieldname = pstrdup(word2);
                         newm->recparentno = ns->itemno;
 
-                        plpgsql_adddatum((PLpgSQL_datum*)newm);
+                        (void)plpgsql_adddatum((PLpgSQL_datum*)newm);
 
                         if (old_cxt != NULL) {
                             MemoryContextSwitchTo(old_cxt);
@@ -1631,7 +1770,7 @@ bool plpgsql_parse_dblword(char* word1, char* word2, PLwdatum* wdatum, PLcword* 
                         for (i = 0; i < row->nfields; i++) {
                             if (row->fieldnames[i] && strcmp(row->fieldnames[i], word2) == 0) {
                                 wdatum->datum = u_sess->plsql_cxt.plpgsql_Datums[row->varnos[i]];
-                                wdatum->ident = NULL;
+                                wdatum->ident = pstrdup(NameListToString(idents));
                                 wdatum->quoted = false; /* not used */
                                 wdatum->idents = idents;
                                 return true;
@@ -1743,7 +1882,7 @@ bool plpgsql_parse_tripword(char* word1, char* word2, char* word3, PLwdatum* wda
                     newm->fieldname = pstrdup(word3);
                     newm->recparentno = ns->itemno;
 
-                    plpgsql_adddatum((PLpgSQL_datum*)newm);
+                    (void)plpgsql_adddatum((PLpgSQL_datum*)newm);
 
                     wdatum->datum = (PLpgSQL_datum*)newm;
                     wdatum->ident = NULL;
@@ -2022,7 +2161,8 @@ static void build_cursor_variable(int varno)
     appendStringInfo(&str, "__gsdb_cursor_attri_%d_isopen__", varno);
 
     /* Create the magic ISOPEN variable for explicit cursor attribute %isopen. */
-    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true,
+        true);
     tmpvar->isnull = false;
     tmpvar->is_cursor_open = true;
     tmpvar->is_cursor_var = true;
@@ -2030,20 +2170,24 @@ static void build_cursor_variable(int varno)
     appendStringInfo(&str, "__gsdb_cursor_attri_%d_found__", varno);
 
     /* Create the magic FOUND variable for explicit cursor attribute %isopen. */
-    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true,
+        true);
     tmpvar->is_cursor_var = true;
     resetStringInfo(&str);
     appendStringInfo(&str, "__gsdb_cursor_attri_%d_notfound__", varno);
     /* Create the magic NOTFOUND variable for explicit cursor attribute %isopen. */
-    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true);
+    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(BOOLOID, -1, InvalidOid), true,
+        true);
     tmpvar->is_cursor_var = true;
     resetStringInfo(&str);
     appendStringInfo(&str, "__gsdb_cursor_attri_%d_rowcount__", varno);
     /* Create the magic ROWCOUNT variable for explicit cursor attribute %isopen. */
-    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true);
+    tmpvar = (PLpgSQL_var*)plpgsql_build_variable(str.data, 0, plpgsql_build_datatype(INT4OID, -1, InvalidOid), true,
+        true);
     tmpvar->is_cursor_var = true;
     pfree_ext(str.data);
 }
+
 /*
  * plpgsql_build_variable - build a datum-array entry of a given
  * datatype
@@ -2053,11 +2197,16 @@ static void build_cursor_variable(int varno)
  * palloc.	The struct is automatically added to the current datum
  * array, and optionally to the current namespace.
  */
-PLpgSQL_variable* plpgsql_build_variable(
-    const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace, const char* varname)
+PLpgSQL_variable* plpgsql_build_variable(const char* refname, int lineno, PLpgSQL_type* dtype, bool add2namespace,
+    bool isImplicit, const char* varname, knl_pl_body_type plType)
 {
     PLpgSQL_variable* result = NULL;
-
+    int varno;
+    char* pkgname = NULL;
+    if (u_sess->plsql_cxt.plpgsql_curr_compile == NULL &&
+        u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+            pkgname = u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_signature;
+    }
     switch (dtype->ttype) {
         case PLPGSQL_TTYPE_SCALAR: {
             /* Ordinary scalar datatype */
@@ -2068,20 +2217,20 @@ PLpgSQL_variable* plpgsql_build_variable(
             var->refname = pstrdup(refname);
             var->lineno = lineno;
             var->datatype = dtype;
+            var->pkg = NULL;
             /* other fields might be filled by caller */
 
             /* preset to NULL */
             var->value = 0;
             var->isnull = true;
             var->freeval = false;
-
-            plpgsql_adddatum((PLpgSQL_datum*)var);
+            varno = plpgsql_adddatum((PLpgSQL_datum*)var);
             if (add2namespace) {
-                plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, var->dno, refname);
+                plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, refname, pkgname);
             }
 
             if (dtype->typoid == REFCURSOROID) {
-                build_cursor_variable(var->dno);
+                build_cursor_variable(varno);
             }
             result = (PLpgSQL_variable*)var;
             break;
@@ -2101,9 +2250,9 @@ PLpgSQL_variable* plpgsql_build_variable(
             row->refname = pstrdup(refname);
             row->lineno = lineno;
 
-            plpgsql_adddatum((PLpgSQL_datum*)row);
+            varno = plpgsql_adddatum((PLpgSQL_datum*)row);
             if (add2namespace) {
-                plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, row->dno, refname);
+                plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, refname, pkgname);
             }
             result = (PLpgSQL_variable*)row;
             break;
@@ -2131,9 +2280,9 @@ PLpgSQL_variable* plpgsql_build_variable(
 
             row = build_row_from_rec_type(refname, lineno, (PLpgSQL_rec_type*)dtype);
 
-            plpgsql_adddatum((PLpgSQL_datum*)row);
+            varno = plpgsql_adddatum((PLpgSQL_datum*)row);
             if (add2namespace) {
-                plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, row->dno, refname);
+                plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, refname, pkgname);
             }
             result = (PLpgSQL_variable*)row;
             break;
@@ -2145,7 +2294,7 @@ PLpgSQL_variable* plpgsql_build_variable(
             result = NULL; /* keep compiler quiet */
             break;
     }
-
+    result->isImplicit = isImplicit;
     return result;
 }
 
@@ -2156,6 +2305,7 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
 {
     /* Ordinary scalar datatype */
     PLpgSQL_var* var = NULL;
+    int varno;
     var = (PLpgSQL_var*)palloc0(sizeof(PLpgSQL_var));
     var->refname = pstrdup(refname);
     var->lineno = lineno;
@@ -2166,10 +2316,11 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
     var->value = 0;
     var->isnull = true;
     var->freeval = false;
+    var->isImplicit = true;
 
-    plpgsql_adddatum((PLpgSQL_datum*)var);
+    varno = plpgsql_adddatum((PLpgSQL_datum*)var);
     if (add2namespace) {
-        plpgsql_ns_additem(PLPGSQL_NSTYPE_VARRAY, var->dno, var->refname);
+        plpgsql_ns_additem(PLPGSQL_NSTYPE_VARRAY, varno, var->refname);
     }
     return (PLpgSQL_variable*)var;
 }
@@ -2180,6 +2331,7 @@ PLpgSQL_variable* plpgsql_build_varrayType(const char* refname, int lineno, PLpg
 PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2namespace)
 {
     PLpgSQL_rec* rec = NULL;
+    int varno;
 
     rec = (PLpgSQL_rec*)palloc0(sizeof(PLpgSQL_rec));
     rec->dtype = PLPGSQL_DTYPE_REC;
@@ -2188,9 +2340,9 @@ PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2name
     rec->tup = NULL;
     rec->tupdesc = NULL;
     rec->freetup = false;
-    plpgsql_adddatum((PLpgSQL_datum*)rec);
+    varno = plpgsql_adddatum((PLpgSQL_datum*)rec);
     if (add2namespace) {
-        plpgsql_ns_additem(PLPGSQL_NSTYPE_REC, rec->dno, rec->refname);
+        plpgsql_ns_additem(PLPGSQL_NSTYPE_REC, varno, rec->refname);
     }
     return rec;
 }
@@ -2209,6 +2361,7 @@ PLpgSQL_rec* plpgsql_build_record(const char* refname, int lineno, bool add2name
 PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* list, bool add2namespace)
 {
     int idx = 0;
+    int varno;
     ListCell* cell = NULL;
     PLpgSQL_rec_attr* attr = NULL;
     PLpgSQL_rec_type* result = NULL;
@@ -2236,10 +2389,10 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
         idx++;
     }
 
-    plpgsql_adddatum((PLpgSQL_datum*)result);
+    varno = plpgsql_adddatum((PLpgSQL_datum*)result);
 
     if (add2namespace) {
-        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, result->dno, typname);
+       plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, typname);
     }
     return result;
 }
@@ -2247,20 +2400,14 @@ PLpgSQL_rec_type* plpgsql_build_rec_type(const char* typname, int lineno, List* 
 /*
  * Build a row-variable data structure given the pg_class OID.
  */
-static PLpgSQL_row* build_row_from_class(Oid class_oid)
+PLpgSQL_row* build_row_from_class(Oid class_oid)
 {
-    PLpgSQL_row* row = NULL;
-    Relation rel;
-    Form_pg_class class_struct;
-    const char* relname = NULL;
-    int i;
-
     /*
      * Open the relation to get info.
      */
-    rel = relation_open(class_oid, AccessShareLock);
-    class_struct = RelationGetForm(rel);
-    relname = RelationGetRelationName(rel);
+    Relation rel = relation_open(class_oid, AccessShareLock);
+    Form_pg_class class_struct = RelationGetForm(rel);
+    const char* relname = RelationGetRelationName(rel);
 
     /* accept relation, sequence, view, composite type, materialized view, or foreign table */
     if (class_struct->relkind != RELKIND_RELATION && class_struct->relkind != RELKIND_SEQUENCE &&
@@ -2274,14 +2421,14 @@ static PLpgSQL_row* build_row_from_class(Oid class_oid)
      * Create a row datum entry and all the required variables that it will
      * point to.
      */
-    row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
+    PLpgSQL_row* row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
     row->dtype = PLPGSQL_DTYPE_ROW;
     row->rowtupdesc = CreateTupleDescCopy(RelationGetDescr(rel));
     row->nfields = class_struct->relnatts;
     row->fieldnames = (char**)palloc(sizeof(char*) * row->nfields);
     row->varnos = (int*)palloc(sizeof(int) * row->nfields);
 
-    for (i = 0; i < row->nfields; i++) {
+    for (int i = 0; i < row->nfields; i++) {
         Form_pg_attribute attr_struct;
 
         /*
@@ -2333,17 +2480,14 @@ static PLpgSQL_row* build_row_from_class(Oid class_oid)
  */
 static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars)
 {
-    PLpgSQL_row* row = NULL;
-    int i;
-
-    row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
+    PLpgSQL_row* row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
     row->dtype = PLPGSQL_DTYPE_ROW;
     row->rowtupdesc = CreateTemplateTupleDesc(numvars, false);
     row->nfields = numvars;
     row->fieldnames = (char**)palloc(numvars * sizeof(char*));
     row->varnos = (int*)palloc(numvars * sizeof(int));
 
-    for (i = 0; i < numvars; i++) {
+    for (int i = 0; i < numvars; i++) {
         PLpgSQL_variable* var = vars[i];
         Oid typoid = RECORDOID;
         int32 typmod = -1;
@@ -2399,12 +2543,10 @@ static PLpgSQL_row* build_row_from_vars(PLpgSQL_variable** vars, int numvars)
  */
 PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_rec_type* type)
 {
-    int i;
     const int buf_size = (NAMEDATALEN * 2) + 100;
     char buf[buf_size];
-    PLpgSQL_row* row = NULL;
 
-    row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
+    PLpgSQL_row* row = (PLpgSQL_row*)palloc0(sizeof(PLpgSQL_row));
 
     row->dtype = PLPGSQL_DTYPE_RECORD;
     row->refname = pstrdup(rowname);
@@ -2414,7 +2556,7 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
     row->fieldnames = (char**)palloc(row->nfields * sizeof(char*));
     row->varnos = (int*)palloc(row->nfields * sizeof(int));
 
-    for (i = 0; i < row->nfields; i++) {
+    for (int i = 0; i < row->nfields; i++) {
         PLpgSQL_variable* var = NULL;
         Oid typoid;
         int32 typmod;
@@ -2449,17 +2591,14 @@ PLpgSQL_row* build_row_from_rec_type(const char* rowname, int lineno, PLpgSQL_re
  */
 PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation)
 {
-    HeapTuple type_tup;
-    PLpgSQL_type* typ = NULL;
-
-    type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
+    HeapTuple type_tup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeOid));
     if (!HeapTupleIsValid(type_tup)) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmsg("cache lookup failed for type %u, type Oid is invalid", typeOid)));
     }
-    typ = build_datatype(type_tup, typmod, collation);
+    PLpgSQL_type* typ = build_datatype(type_tup, typmod, collation);
 
     ReleaseSysCache(type_tup);
 
@@ -2472,13 +2611,12 @@ PLpgSQL_type* plpgsql_build_datatype(Oid typeOid, int32 typmod, Oid collation)
 static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collation)
 {
     Form_pg_type type_struct = (Form_pg_type)GETSTRUCT(type_tup);
-    PLpgSQL_type* typ = NULL;
 
     if (!type_struct->typisdefined) {
         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("type \"%s\" is only a shell when build data type in PLSQL.", NameStr(type_struct->typname))));
     }
-    typ = (PLpgSQL_type*)palloc(sizeof(PLpgSQL_type));
+    PLpgSQL_type* typ = (PLpgSQL_type*)palloc(sizeof(PLpgSQL_type));
 
     typ->typname = pstrdup(NameStr(type_struct->typname));
     typ->typoid = HeapTupleGetOid(type_tup);
@@ -2520,6 +2658,95 @@ static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collat
     return typ;
 }
 
+
+/* ----------
+ * plpgsql_adddatum			Add a variable, record or row
+ *					to the compiler's datum list.
+ * ----------
+ */
+int plpgsql_adddatum(PLpgSQL_datum* newm)
+{
+    if (u_sess->plsql_cxt.plpgsql_curr_compile == NULL) {
+        if (u_sess->plsql_cxt.plpgsql_pkg_nDatums == u_sess->plsql_cxt.datums_pkg_alloc) {
+            u_sess->plsql_cxt.datums_pkg_alloc *= 2;
+            u_sess->plsql_cxt.plpgsql_Datums = (PLpgSQL_datum**)repalloc(
+                u_sess->plsql_cxt.plpgsql_Datums, sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.datums_pkg_alloc);
+        }
+        newm->dno = u_sess->plsql_cxt.plpgsql_pkg_nDatums;
+        u_sess->plsql_cxt.plpgsql_Datums[u_sess->plsql_cxt.plpgsql_pkg_nDatums++] = newm;
+        return u_sess->plsql_cxt.plpgsql_pkg_nDatums - 1;
+    } else {
+        if (u_sess->plsql_cxt.plpgsql_nDatums == u_sess->plsql_cxt.datums_alloc) {
+            u_sess->plsql_cxt.datums_alloc *= 2;
+            u_sess->plsql_cxt.plpgsql_Datums = (PLpgSQL_datum**)repalloc(
+                u_sess->plsql_cxt.plpgsql_Datums, sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.datums_alloc);
+        }
+        newm->dno = u_sess->plsql_cxt.plpgsql_nDatums;
+        u_sess->plsql_cxt.plpgsql_Datums[u_sess->plsql_cxt.plpgsql_nDatums++] = newm;
+        return u_sess->plsql_cxt.plpgsql_nDatums - 1;     
+    }
+}
+
+/* ----------
+ * plpgsql_add_initdatums		Make an array of the datum numbers of
+ *					all the simple VAR datums created since the last call
+ *					to this function.
+ *
+ * If varnos is NULL, we just forget any datum entries created since the
+ * last call.
+ *
+ * This is used around a DECLARE section to create a list of the VARs
+ * that have to be initialized at block entry.	Note that VARs can also
+ * be created elsewhere than DECLARE, eg by a FOR-loop, but it is then
+ * the responsibility of special-purpose code to initialize them.
+ * ----------
+ */
+int plpgsql_add_initdatums(int** varnos)
+{
+    int i;
+    int n = 0;
+    int plpgsql_nDatums;
+
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL && u_sess->plsql_cxt.plpgsql_curr_compile == NULL) {
+        plpgsql_nDatums = u_sess->plsql_cxt.plpgsql_pkg_nDatums;
+    } else {
+        plpgsql_nDatums = u_sess->plsql_cxt.plpgsql_nDatums;
+    }
+    for (i = u_sess->plsql_cxt.datums_last; i < plpgsql_nDatums; i++) {
+        switch (u_sess->plsql_cxt.plpgsql_Datums[i]->dtype) {
+            case PLPGSQL_DTYPE_VAR:
+                n++;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    if (varnos != NULL) {
+        if (n > 0) {
+            *varnos = (int*)palloc(sizeof(int) * n);
+
+            n = 0;
+            for (i = u_sess->plsql_cxt.datums_last; i < plpgsql_nDatums; i++) {
+                switch (u_sess->plsql_cxt.plpgsql_Datums[i]->dtype) {
+                    case PLPGSQL_DTYPE_VAR:
+                        (*varnos)[n++] = u_sess->plsql_cxt.plpgsql_Datums[i]->dno;
+                    /* fall through */
+                    
+                    default:
+                        break;
+                }
+            }
+        } else {
+            *varnos = NULL;
+        }
+    }
+
+    u_sess->plsql_cxt.datums_last = plpgsql_nDatums;
+    return n;
+}
+
 /*
  *	plpgsql_recognize_err_condition
  *		Check condition name and translate it to SQLSTATE.
@@ -2529,15 +2756,13 @@ static PLpgSQL_type* build_datatype(HeapTuple type_tup, int32 typmod, Oid collat
  */
 int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate)
 {
-    int i;
-
     if (allow_sqlstate) {
         if (strlen(condname) == 5 && strspn(condname, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") == 5) {
             return MAKE_SQLSTATE(condname[0], condname[1], condname[2], condname[3], condname[4]);
         }
     }
 
-    for (i = 0; exception_label_map[i].label != NULL; i++) {
+    for (int i = 0; exception_label_map[i].label != NULL; i++) {
         if (strcmp(condname, exception_label_map[i].label) == 0) {
             return exception_label_map[i].sqlerrstate;
         }
@@ -2552,14 +2777,13 @@ int plpgsql_recognize_err_condition(const char* condname, bool allow_sqlstate)
 
 /*
  * plpgsql_parse_err_condition
- *		Generate PLpgSQL_condition entry(s) for an exception condition name
+ *              Generate PLpgSQL_condition entry(s) for an exception condition name
  *
  * This has to be able to return a list because there are some duplicate
  * names in the table of error code names.
  */
 PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
 {
-    int i;
     PLpgSQL_condition* newm = NULL;
     PLpgSQL_condition* prev = NULL;
 
@@ -2581,7 +2805,7 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
     }
 
     prev = NULL;
-    for (i = 0; exception_label_map[i].label != NULL; i++) {
+    for (int i = 0; exception_label_map[i].label != NULL; i++) {
         if (strcmp(condname, exception_label_map[i].label) == 0) {
             newm = (PLpgSQL_condition*)palloc(sizeof(PLpgSQL_condition));
             newm->sqlerrstate = exception_label_map[i].sqlerrstate;
@@ -2600,84 +2824,14 @@ PLpgSQL_condition* plpgsql_parse_err_condition(char* condname)
     return prev;
 }
 
-/* ----------
- * plpgsql_adddatum			Add a variable, record or row
- *					to the compiler's datum list.
- * ----------
- */
-void plpgsql_adddatum(PLpgSQL_datum* newm)
-{
-    if (u_sess->plsql_cxt.plpgsql_nDatums == u_sess->plsql_cxt.datums_alloc) {
-        u_sess->plsql_cxt.datums_alloc *= 2;
-        u_sess->plsql_cxt.plpgsql_Datums = (PLpgSQL_datum**)repalloc(
-            u_sess->plsql_cxt.plpgsql_Datums, sizeof(PLpgSQL_datum*) * u_sess->plsql_cxt.datums_alloc);
-    }
-
-    newm->dno = u_sess->plsql_cxt.plpgsql_nDatums;
-    u_sess->plsql_cxt.plpgsql_Datums[u_sess->plsql_cxt.plpgsql_nDatums++] = newm;
-}
-
-/* ----------
- * plpgsql_add_initdatums		Make an array of the datum numbers of
- *					all the simple VAR datums created since the last call
- *					to this function.
- *
- * If varnos is NULL, we just forget any datum entries created since the
- * last call.
- *
- * This is used around a DECLARE section to create a list of the VARs
- * that have to be initialized at block entry.	Note that VARs can also
- * be created elsewhere than DECLARE, eg by a FOR-loop, but it is then
- * the responsibility of special-purpose code to initialize them.
- * ----------
- */
-int plpgsql_add_initdatums(int** varnos)
-{
-    int i;
-    int n = 0;
-
-    for (i = u_sess->plsql_cxt.datums_last; i < u_sess->plsql_cxt.plpgsql_nDatums; i++) {
-        switch (u_sess->plsql_cxt.plpgsql_Datums[i]->dtype) {
-            case PLPGSQL_DTYPE_VAR:
-                n++;
-                break;
-
-            default:
-                break;
-        }
-    }
-
-    if (varnos != NULL) {
-        if (n > 0) {
-            *varnos = (int*)palloc(sizeof(int) * n);
-
-            n = 0;
-            for (i = u_sess->plsql_cxt.datums_last; i < u_sess->plsql_cxt.plpgsql_nDatums; i++) {
-                switch (u_sess->plsql_cxt.plpgsql_Datums[i]->dtype) {
-                    case PLPGSQL_DTYPE_VAR:
-                        (*varnos)[n++] = u_sess->plsql_cxt.plpgsql_Datums[i]->dno;
-                    /* fall through */
-                    
-                    default:
-                        break;
-                }
-            }
-        } else {
-            *varnos = NULL;
-        }
-    }
-
-    u_sess->plsql_cxt.datums_last = u_sess->plsql_cxt.plpgsql_nDatums;
-    return n;
-}
 
 /*
  * Compute the hashkey for a given function invocation
  *
  * The hashkey is returned into the caller-provided storage at *hashkey.
  */
-static void compute_function_hashkey(
-    FunctionCallInfo fcinfo, Form_pg_proc proc_struct, PLpgSQL_func_hashkey* hashkey, bool for_validator)
+static void compute_function_hashkey(HeapTuple proc_tup, FunctionCallInfo fcinfo, Form_pg_proc proc_struct,
+    PLpgSQL_func_hashkey* hashkey, bool for_validator)
 {
     /* Make sure any unused bytes of the struct are zero */
     errno_t rc = memset_s(hashkey, sizeof(PLpgSQL_func_hashkey), 0, sizeof(PLpgSQL_func_hashkey));
@@ -2686,6 +2840,10 @@ static void compute_function_hashkey(
     /* get function OID */
     hashkey->funcOid = fcinfo->flinfo->fn_oid;
 
+    bool isnull = false;
+    Datum packageOid_datum = SysCacheGetAttr(PROCOID, proc_tup, Anum_pg_proc_packageid, &isnull);
+    Oid packageOid = DatumGetObjectId(packageOid_datum);
+    hashkey->packageOid = packageOid;
     /* get call context */
     hashkey->isTrigger = CALLED_AS_TRIGGER(fcinfo);
 
@@ -2704,11 +2862,12 @@ static void compute_function_hashkey(
     hashkey->inputCollation = fcinfo->fncollation;
 
     if (proc_struct->pronargs > 0) {
-        errno_t err = EOK;
+        oidvector* proargs = ProcedureGetArgTypes(proc_tup);
+
         /* get the argument types */
-        err = memcpy_s(hashkey->argtypes,
+        errno_t err = memcpy_s(hashkey->argtypes,
             sizeof(hashkey->argtypes),
-            proc_struct->proargtypes.values,
+            proargs->values,
             proc_struct->pronargs * sizeof(Oid));
         securec_check(err, "\0", "\0");
 
@@ -2716,9 +2875,7 @@ static void compute_function_hashkey(
         plpgsql_resolve_polymorphic_argtypes(proc_struct->pronargs,
             hashkey->argtypes,
             NULL,
-            fcinfo->flinfo->fn_expr,
-            for_validator,
-            NameStr(proc_struct->proname));
+            fcinfo->flinfo->fn_expr, for_validator, NameStr(proc_struct->proname));
     }
 }
 
@@ -2731,8 +2888,6 @@ static void compute_function_hashkey(
 static void plpgsql_resolve_polymorphic_argtypes(
     int numargs, Oid* arg_types, const char* arg_modes, Node* call_expr, bool for_validator, const char* pro_name)
 {
-    int i;
-
     if (!for_validator) {
         /* normal case, pass to standard routine */
         if (!resolve_polymorphic_argtypes(numargs, arg_types, arg_modes, call_expr))
@@ -2742,7 +2897,7 @@ static void plpgsql_resolve_polymorphic_argtypes(
                     errmsg("could not determine actual argument type for polymorphic function \"%s\"", pro_name)));
     } else {
         /* special validation case */
-        for (i = 0; i < numargs; i++) {
+        for (int i = 0; i < numargs; i++) {
             switch (arg_types[i]) {
                 case ANYELEMENTOID:
                 case ANYNONARRAYOID:
@@ -2776,7 +2931,7 @@ static void plpgsql_resolve_polymorphic_argtypes(
  * pointers to the same function cache.  Hence be careful not to do things
  * twice.
  */
-static void delete_function(PLpgSQL_function* func)
+void delete_function(PLpgSQL_function* func)
 {
     u_sess->plsql_cxt.is_delete_function = true;
 
@@ -2796,12 +2951,11 @@ static void delete_function(PLpgSQL_function* func)
 void plpgsql_HashTableInit(void)
 {
     HASHCTL ctl;
-    errno_t rc = EOK;
 
     /* don't allow double-initialization */
     AssertEreport(u_sess->plsql_cxt.plpgsql_HashTable == NULL, MOD_PLSQL, "don't allow double-initialization.");
 
-    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    errno_t rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
     securec_check(rc, "\0", "\0");
     ctl.keysize = sizeof(PLpgSQL_func_hashkey);
     ctl.entrysize = sizeof(plpgsql_HashEnt);
@@ -2809,6 +2963,15 @@ void plpgsql_HashTableInit(void)
     ctl.hcxt = u_sess->cache_mem_cxt;
     u_sess->plsql_cxt.plpgsql_HashTable =
         hash_create("PLpgSQL function cache", FUNCS_PER_USER, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+    /* init package hash table */
+    rc = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+    securec_check(rc, "\0", "\0");
+    ctl.keysize = sizeof(PLpgSQL_pkg_hashkey);
+    ctl.entrysize = sizeof(plpgsql_pkg_HashEnt);
+    ctl.hash = tag_hash;
+    ctl.hcxt = u_sess->cache_mem_cxt;
+    u_sess->plsql_cxt.plpgsql_pkg_HashTable =
+        hash_create("PLpgSQL package cache", PKGS_PER_USER, &ctl, HASH_ELEM | HASH_PACKAGE | HASH_CONTEXT);
 }
 
 static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
@@ -2819,12 +2982,13 @@ static PLpgSQL_function* plpgsql_HashTableLookup(PLpgSQL_func_hashkey* func_key)
 
     if (hentry != NULL) {
         /* add cell to the tail of the function list. */
-        dlist_add_tail_cell(u_sess->plsql_cxt.plpgsql_dlist_functions, hentry->cell);
+        dlist_add_tail_cell(u_sess->plsql_cxt.plpgsql_dlist_objects, hentry->cell);
         return hentry->function;
     } else {
         return NULL;
     }
 }
+
 
 static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey* func_key)
 {
@@ -2834,7 +2998,7 @@ static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey
     hentry = (plpgsql_HashEnt*)hash_search(u_sess->plsql_cxt.plpgsql_HashTable, (void*)func_key, HASH_ENTER, &found);
     if (found) {
         /* move cell to the tail of the function list. */
-        dlist_add_tail_cell(u_sess->plsql_cxt.plpgsql_dlist_functions, hentry->cell);
+        dlist_add_tail_cell(u_sess->plsql_cxt.plpgsql_dlist_objects, hentry->cell);
         elog(WARNING, "trying to insert a function that already exists");
     } else {
         /* append the current compiling entity to the end of the compile results list. */
@@ -2848,21 +3012,19 @@ static void plpgsql_HashTableInsert(PLpgSQL_function* func, PLpgSQL_func_hashkey
 
 void plpgsql_HashTableDelete(PLpgSQL_function* func)
 {
-    plpgsql_HashEnt* hentry = NULL;
-
     /* do nothing if not in table */
     if (func->fn_hashkey == NULL) {
         return;
     }
 
-    hentry = (plpgsql_HashEnt*)hash_search(
+    plpgsql_HashEnt* hentry = (plpgsql_HashEnt*)hash_search(
         u_sess->plsql_cxt.plpgsql_HashTable, (void*)func->fn_hashkey, HASH_REMOVE, NULL);
     if (hentry == NULL) {
         elog(WARNING, "trying to delete function that does not exist");
     } else {
         /* delete the cell from the list. */
-        u_sess->plsql_cxt.plpgsql_dlist_functions =
-            dlist_delete_cell(u_sess->plsql_cxt.plpgsql_dlist_functions, hentry->cell, false);
+        u_sess->plsql_cxt.plpgsql_dlist_objects =
+            dlist_delete_cell(u_sess->plsql_cxt.plpgsql_dlist_objects, hentry->cell, false);
     }
     /* remove back link, which no longer points to allocated storage */
     func->fn_hashkey = NULL;
@@ -2871,7 +3033,7 @@ void plpgsql_HashTableDelete(PLpgSQL_function* func)
 /*
  * get a custom error code for a new user defined exceprtion.
  */
-static int plpgsql_getCustomErrorCode(void)
+int plpgsql_getCustomErrorCode(void)
 {
     int curIndex = u_sess->plsql_cxt.plpgsql_IndexErrorVariable;
     int first = 0;
@@ -2894,6 +3056,7 @@ static int plpgsql_getCustomErrorCode(void)
     return MAKE_SQLSTATE('P', '1', '0' + first, '0' + second, '0' + third);
 }
 
+
 /*
  * append the current compiling entity to the end of the compiled
  * function results list. If the stored results exceed the limit,
@@ -2905,13 +3068,13 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
     MemoryContext oldctx;
     PLpgSQL_function* func = NULL;
     oldctx = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
-    u_sess->plsql_cxt.plpgsql_dlist_functions = dlappend(u_sess->plsql_cxt.plpgsql_dlist_functions, entity);
+    u_sess->plsql_cxt.plpgsql_dlist_objects = dlappend(u_sess->plsql_cxt.plpgsql_dlist_objects , entity);
     (void)MemoryContextSwitchTo(oldctx);
 
-    entity->cell = u_sess->plsql_cxt.plpgsql_dlist_functions->tail;
+    entity->cell = u_sess->plsql_cxt.plpgsql_dlist_objects->tail;
 
-    while (dlength(u_sess->plsql_cxt.plpgsql_dlist_functions) > g_instance.attr.attr_sql.max_compile_functions) {
-        DListCell* headcell = u_sess->plsql_cxt.plpgsql_dlist_functions->head;
+    while (dlength(u_sess->plsql_cxt.plpgsql_dlist_objects) > g_instance.attr.attr_sql.max_compile_functions) {
+        DListCell* headcell = u_sess->plsql_cxt.plpgsql_dlist_objects->head;
         plpgsql_HashEnt* head_entity = (plpgsql_HashEnt*)lfirst(headcell);
 
         func = head_entity->function;
@@ -2926,286 +3089,6 @@ static void plpgsql_append_dlcell(plpgsql_HashEnt* entity)
     }
 }
 
-/*
- * Check whether function's search path is same as system search_path.
- */
-static bool plpgsql_check_search_path(PLpgSQL_function* func, HeapTuple proc_tup)
-{
-    /* If SUPPORT_BIND_SEARCHPATH is false, always return true. */
-    if (!SUPPORT_BIND_SEARCHPATH) {
-        return true;
-    }
-    bool isOidListSame = true;
-    Form_pg_proc proc_struct = (Form_pg_proc)GETSTRUCT(proc_tup);
-
-    if (proc_struct->pronamespace != PG_CATALOG_NAMESPACE) {
-        /* Get lastest search_path if baseSearchPathValid is false */
-        recomputeNamespacePath();
-
-        int len1 = list_length(u_sess->catalog_cxt.baseSearchPath);
-        /*
-         * The first element of func->fn_searchpath->schemas is
-         * namespace the current function belongs to.
-         */
-        int len2 = list_length(func->fn_searchpath->schemas) - 1;
-        Assert(len2 >= 0);
-
-        if (len1 == len2) {
-            ListCell* lc1 = NULL;
-            ListCell* lc2 = NULL;
-
-            /* Check whether search_path has changed */
-            lc1 = list_head(u_sess->catalog_cxt.baseSearchPath);
-            lc2 = list_head(func->fn_searchpath->schemas);
-
-            /* Check function schema from list second position to list tail */
-            lc2 = lnext(lc2);
-            for (; lc1 && lc2; lc1 = lnext(lc1), lc2 = lnext(lc2)) {
-                if (lfirst_oid(lc1) != lfirst_oid(lc2)) {
-                    isOidListSame = false;
-                    break;
-                }
-            }
-        } else {
-            /* If length is different, two lists are different. */
-            isOidListSame = false;
-        }
-    }
-
-    return isOidListSame;
-}
-
-/*
- * @Description : Check co-location for INSERT/UPDATE/DELETE statement and the
- * the statment which it triggered.
- *
- * @in query : Query struct info about the IUD statement.
- * @in rte : range table entry for the insert/update/delete statement.
- * @in plpgsql_func : information for the insert/update/delete trigger function.
- * @return : true when statement and the triggered statement are co-location.
- */
-bool plpgsql_check_colocate(Query* query, RangeTblEntry* rte, void* plpgsql_func)
-{
-    List* query_partAttrNum = NIL;
-    List* trig_partAttrNum = NIL;
-    Relation qe_relation = NULL; /* triggering query's rel */
-    Relation tg_relation = NULL;
-    RelationLocInfo* qe_rel_loc_info = NULL; /* triggering query's rel loc info */
-    RelationLocInfo* tg_rel_loc_info = NULL; /* trigger body's rel loc info */
-    int qe_rel_nodelist_len = 0;
-    int tg_rel_nodelist_len = 0;
-
-    Assert(query->commandType == CMD_INSERT || query->commandType == CMD_DELETE || query->commandType == CMD_UPDATE);
-
-    PLpgSQL_function* func = (PLpgSQL_function*)plpgsql_func;
-
-    /* Get event query relation and trigger body's relation. */
-    qe_relation = func->tg_relation;
-    tg_relation = relation_open(rte->relid, AccessShareLock);
-
-    query_partAttrNum = qe_relation->rd_locator_info->partAttrNum;
-    trig_partAttrNum = rte->partAttrNum;
-
-    /* Check if trigger query table and trigger body table are on the same node list. */
-    qe_rel_loc_info = qe_relation->rd_locator_info;
-    tg_rel_loc_info = tg_relation->rd_locator_info;
-
-    qe_rel_nodelist_len = list_length(qe_rel_loc_info->nodeList);
-    tg_rel_nodelist_len = list_length(tg_rel_loc_info->nodeList);
-
-    /* Cannot ship whenever target table is not row type. */
-    if (!RelationIsRowFormat(tg_relation)) {
-        relation_close(tg_relation, AccessShareLock);
-        return false;
-    }
-
-    /* The query table and trigger table must in a same group. */
-    if (0 != strcmp(qe_rel_loc_info->gname.data, tg_rel_loc_info->gname.data)) {
-        relation_close(tg_relation, AccessShareLock);
-        return false;
-    }
-    relation_close(tg_relation, AccessShareLock);
-
-    /* If distribution key list lengths are different they both are not colocated. */
-    if (list_length(trig_partAttrNum) != list_length(query_partAttrNum)) {
-        return false;
-    }
-
-    /*
-     * Used difference check function between INSERT and UPDATE/DELETE here because we use
-     * targetlist to check INSERT and where clause to check UPDATE/DELETE.
-     */
-    if (query->commandType == CMD_UPDATE || query->commandType == CMD_DELETE) {
-        return plpgsql_check_updel_colocate(query, query_partAttrNum, trig_partAttrNum, func);
-    } else {
-        return plpgsql_check_insert_colocate(query, query_partAttrNum, trig_partAttrNum, func);
-    }
-}
-
-/*
- * @Description : Check co-location for update or delete command. To check co-location of the
- * update or delete query in trigger and the triggering query, we walk through the lists of
- * of attribute no of distribution keys of both queries. For each pair, we check
- * if the distribute key of trigger table exist in its where clause and its expression is
- * from new/old and is the distribute key of the table the triggering query work on.
- *
- * For example,
- * tables:
- * create table t1(a1 int, b1 int, c1 int,d1 varchar(100)) distribute by hash(a1,b1);
- * create table t2(a2 int, b2 int, c2 int,d2 varchar(100)) distribute by hash(a2,b2);
- * update in trigger body:
- * update t2 set d2=new.d1 where a2=old.a1 and b2=old.b1;
- * triggering event:
- * an insert or update on t1
- *
- * we walk through two pairs: (a1, a2) and (b1, b2), and check if a2 is in the
- * where clause "a2=old.a1 and b2=old.b1", and if its expression is from new/old
- * and is a1; if b2 is in the where clause too and its expression is from new/old
- * and is b1. If the above two checks are satified, co-location is true.
- *
- * @in query : Query struct of the query with trigger.
- * @in qry_part_attr_num : list of attr no of the dist keys of triggering query.
- * @in trig_part_attr_num : list of attr no of the dist keys of query in trigger.
- * @in func : trigger function body information.
- * @return : when co-location return true.
- */
-static bool plpgsql_check_updel_colocate(
-    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func)
-{
-    Node* whereClause = NULL;
-    List* opexpr_list = NIL;
-    bool is_colocate = true;
-
-    if (query->jointree == NULL || query->jointree->quals == NULL) {
-        return false;
-    }
-
-    /* Recursively get a list of opexpr from quals. */
-    opexpr_list = pull_opExpr((Node*)query->jointree->quals);
-    if (opexpr_list == NIL) {
-        return false;
-    }
-    /* Flatten AND/OR expression for checking or expr. */
-    whereClause = eval_const_expressions(NULL, (Node*)query->jointree->quals);
-
-    /* If it is or clause, we break the clause to check colocation of each expr */
-    if (or_clause(whereClause)) {
-        List* temp_list = NIL;
-        ListCell* opexpr_cell = NULL;
-
-        /* For or condtion, we can ship only when all opexpr are colocated. */
-        foreach (opexpr_cell, opexpr_list) {
-            temp_list = list_make1((Expr*)lfirst(opexpr_cell));
-            is_colocate = plpgsql_check_opexpr_colocate(query, qry_part_attr_num, trig_part_attr_num, func, temp_list);
-
-            if (temp_list != NIL) {
-                list_free_ext(temp_list);
-            }
-
-            if (!is_colocate) {
-                break;
-        	}
-		}
-		
-        if (opexpr_list != NIL) {
-            list_free_ext(opexpr_list);
-		}
-        return is_colocate;
-    } else {
-        /* For and with no or condition, we can ship when any opexpr is colocated. */
-        is_colocate = plpgsql_check_opexpr_colocate(query, qry_part_attr_num, trig_part_attr_num, func, opexpr_list);
-    }
-
-    if (opexpr_list != NIL) {
-        list_free_ext(opexpr_list);
-	}
-    return is_colocate;
-}
-
-/*
- * @Description : Check co-location for opexpr. we walk through the lists of opexpr
- * to check where they are from new/old with all the distributeion keys of both queries.
- *
- * @in query : Query struct of the query with trigger.
- * @in qry_part_attr_num : list of attr no of the dist keys of triggering query.
- * @in trig_part_attr_num : list of attr no of the dist keys of query in trigger.
- * @in func : trigger function body information.
- * @return : when co-location return true.
- */
-static bool plpgsql_check_opexpr_colocate(
-    Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func, List* opexpr_list)
-{
-    ListCell* lc1 = NULL;
-    ListCell* lc2 = NULL;
-    bool is_colocate = true;
-
-    forboth(lc1, qry_part_attr_num, lc2, trig_part_attr_num)
-    {
-        Expr* expr = NULL;
-        Param* param = NULL;
-        PLpgSQL_recfield* recfield = NULL;
-        PLpgSQL_rec* rec = NULL;
-        int fno;
-        AttrNumber attnum1 = lfirst_int(lc1);
-        AttrNumber attnum2 = lfirst_int(lc2);
-        ListCell* opexpr_cell = NULL;
-
-        /* Only all distribute column can colocate, we can ship. */
-        if (!is_colocate) {
-            return false;
-        }
-
-        foreach (opexpr_cell, opexpr_list) {
-            Expr* qual_expr = (Expr*)lfirst(opexpr_cell);
-
-            /* Check all opexpr with distribute column */
-            expr = pgxc_check_distcol_opexpr(query->resultRelation, attnum2, (OpExpr*)qual_expr);
-            if (expr == NULL) {
-                is_colocate = false;
-                continue;
-            }
-
-            /* NEW/OLD is replaced with param by parser */
-            if (!IsA(expr, Param)) {
-                is_colocate = false;
-                continue;
-            }
-            param = (Param*)expr;
-
-            /* This param should point to datum in func */
-            recfield = (PLpgSQL_recfield*)func->datums[param->paramid - 1];
-
-            /* From there we get the new or old rec */
-            rec = (PLpgSQL_rec*)func->datums[recfield->recparentno];
-            if (strcmp(rec->refname, "new") != 0 && strcmp(rec->refname, "old") != 0) {
-                is_colocate = false;
-                continue;
-            }
-
-            /* We should already set tupdesc at the very beginning */
-            if (rec->tupdesc == NULL) {
-                is_colocate = false;
-                continue;
-            }
-
-            /*
-             * Find field index of new.a1 and only if it matches to
-             * current distribution key of src table, we could call
-             * both tables are DML colocated
-             */
-            fno = SPI_fnumber(rec->tupdesc, recfield->fieldname);
-            if (fno != attnum1) {
-                is_colocate = false;
-                continue;
-            }
-
-            is_colocate = true;
-            break;
-        }
-    }
-
-    return is_colocate;
-}
 
 /*
  * @Description : check co-location for insert command. To check co-location of the
@@ -3232,7 +3115,7 @@ static bool plpgsql_check_opexpr_colocate(
  * @in qry_part_attr_num : list of attr no of the dist keys of triggering query
  * @in trig_part_attr_num : list of attr no of the dist keys of query in trigger
  */
-static bool plpgsql_check_insert_colocate(
+bool plpgsql_check_insert_colocate(
     Query* query, List* qry_part_attr_num, List* trig_part_attr_num, PLpgSQL_function* func)
 {
     ListCell* lc1 = NULL;

@@ -29,7 +29,7 @@
 #include <string>
 #include "orc_proto.pb.h"
 #include "storage/cache_mgr.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 #define MetaCache (MetaCacheMgr::GetInstance())
 

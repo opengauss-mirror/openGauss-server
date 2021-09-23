@@ -69,6 +69,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  autovacuum_vacuum_scale_factor    | real    |      | 0       | 100
  autovacuum_vacuum_threshold       | integer |      | 0       | 2147483647
  backend_flush_after               | integer | 8kB  | 0       | 256
+ backend_version                   | integer |      | 0       | 1073741823
  backslash_quote                   | enum    |      |         | 
  backtrace_min_messages            | enum    |      |         | 
  backwrite_quantity                | integer | 8kB  | 128     | 131072
@@ -246,7 +247,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  enable_wdr_snapshot               | bool    |      |         | 
  enable_xlog_prune                 | bool    |      |         | 
  enforce_a_behavior                | bool    |      |         | 
- enforce_two_phase_commit          | bool    |      |         | 
  escape_string_warning             | bool    |      |         | 
  event_source                      | string  |      |         | 
  exit_on_error                     | bool    |      |         | 
@@ -350,7 +350,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_compile_functions             | integer |      | 1       | 2147483647
  max_connections                   | integer |      | 10      | 262143
  max_files_per_process             | integer |      | 25      | 2147483647
- max_function_args                 | integer |      | 666     | 666
+ max_function_args                 | integer |      | 8192    | 8192
  max_identifier_length             | integer |      | 63      | 63
  max_index_keys                    | integer |      | 32      | 32
  max_loaded_cudesc                 | integer |      | 100     | 1073741823
@@ -369,6 +369,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_user_defined_exception        | integer |      | 1000    | 1000
  max_wal_senders                   | integer |      | 0       | 262143
  memory_detail_tracking            | string  |      |         | 
+ memory_fault_percent              | integer |      | 0       | 2147483647
  memorypool_enable                 | bool    |      |         | 
  memorypool_size                   | integer | kB   | 131072  | 1073741823
  memory_tracking_mode              | enum    |      |         | 
@@ -390,7 +391,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  partition_mem_batch               | integer |      | 1       | 65535
  password_effect_time              | real    |      | 0       | 999
  password_encryption_type          | integer |      | 0       | 2
- password_lock_time                | real    |      | 0       | 365
+ password_lock_time                | real    | d    | 0       | 365
  password_max_length               | integer |      | 6       | 999
  password_min_digital              | integer |      | 0       | 999
  password_min_length               | integer |      | 6       | 999
@@ -541,7 +542,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  wait_dummy_time                   | integer |      | 1       | 2147483647
  wal_block_size                    | integer |      | 8192    | 8192
  wal_buffers                       | integer | 8kB  | -1      | 262143
- wal_file_init_num                 | integer |      | 1       | 2147483647
  wal_keep_segments                 | integer |      | 2       | 2147483647
  wal_level                         | enum    |      |         | 
  wal_log_hints                     | bool    |      |         | 
@@ -554,14 +554,12 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  walsender_max_send_size           | integer | kB   | 8       | 2147483647
  wal_sender_timeout                | integer | ms   | 0       | 2147483647
  wal_sync_method                   | enum    |      |         | 
- wal_writer_cpu                    | integer |      | -1      | 1023
  wal_writer_delay                  | integer | ms   | 1       | 10000
  wdr_snapshot_interval             | integer | min  | 10      | 60
  wdr_snapshot_query_timeout        | integer | s    | 100     | 2147483647
  wdr_snapshot_retention_days       | integer |      | 1       | 8
  work_mem                          | integer | kB   | 64      | 2147483647
  xc_maintenance_mode               | bool    |      |         | 
- xlog_idle_flushes_before_sleep    | int64   |      | 0       | 576460752303423487
  xloginsert_locks                  | integer |      | 1       | 1000
  xmlbinary                         | enum    |      |         | 
  xmloption                         | enum    |      |         | 

@@ -22,6 +22,9 @@ static Value *makeNullValue();
 
 static Value *makeBoolValue(bool state);
 
+static void doNegateFloat(Value *v);
+static Value* integerToString(Value *v);
+
 #define YYMALLOC palloc
 #define YYFREE   pfree
 
@@ -47,14 +50,16 @@ static double convert_to_numeric(Node *value);
 
 
 
-%type <node> join_hint_item join_order_hint join_method_hint stream_hint row_hint scan_hint skew_hint expr_const pred_push_hint rewrite_hint
+%type <node> join_hint_item join_order_hint join_method_hint stream_hint row_hint scan_hint skew_hint expr_const
+	pred_push_hint rewrite_hint gather_hint set_hint plancache_hint guc_value no_expand_hint no_gpc_hint
 %type <list> relation_list join_hint_list relation_item relation_list_with_p ident_list skew_relist
              column_list_p column_list value_list_p value_list value_list_item value_type value_list_with_bracket
 %token <str>	IDENT FCONST SCONST BCONST XCONST
 %token <ival>	ICONST
 
-%token <keyword> NestLoop_P MergeJoin_P HashJoin_P No_P Leading_P Rows_P Broadcast_P
-				Redistribute_P BlockName_P TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P Rewrite_P
+%token <keyword> NestLoop_P MergeJoin_P HashJoin_P No_P Leading_P Rows_P Broadcast_P Redistribute_P BlockName_P
+	TableScan_P IndexScan_P IndexOnlyScan_P Skew_P HINT_MULTI_NODE_P NULL_P TRUE_P FALSE_P Predpush_P Rewrite_P
+	Gather_P Set_P USE_CPLAN_P USE_GPLAN_P ON_P OFF_P No_expand_P NO_GPC_P
 
 %nonassoc	IDENT NULL_P
 
@@ -132,6 +137,123 @@ join_hint_item:
 	| No_P rewrite_hint
 	{
 		$$ = $2;
+	}
+	| gather_hint
+	{
+		$$ = $1;
+	}
+	| set_hint
+	{
+		$$ = $1;
+	}
+	| plancache_hint
+	{
+		$$ = $1;
+	}
+	| no_expand_hint
+	{
+		$$ = $1;
+	}
+	| no_gpc_hint
+	{
+		$$ = $1;
+	}
+
+gather_hint:
+	Gather_P '(' IDENT ')'
+	{
+		GatherHint *gatherHint = makeNode(GatherHint);
+		gatherHint->base.hint_keyword = HINT_KEYWORD_GATHER;
+		gatherHint->base.state = HINT_STATE_NOTUSED;
+		if (pg_strcasecmp($3, "REL") == 0) {
+			gatherHint->source = HINT_GATHER_REL;
+		} else if (pg_strcasecmp($3, "JOIN") == 0) {
+			gatherHint->source = HINT_GATHER_JOIN;
+		} else if (pg_strcasecmp($3, "ALL") == 0) {
+			gatherHint->source = HINT_GATHER_ALL;
+		} else {
+			gatherHint->source = HINT_GATHER_UNKNOWN;
+		}
+		$$ = (Node *) gatherHint;
+	}
+
+no_gpc_hint:
+	NO_GPC_P
+	{
+		NoGPCHint *noGPCHint = makeNode(NoGPCHint);
+		noGPCHint->base.hint_keyword = HINT_KEYWORD_NO_GPC;
+		noGPCHint->base.state = HINT_STATE_NOTUSED;
+		$$ = (Node *) noGPCHint;
+	}
+
+no_expand_hint:
+	No_expand_P
+	{
+		NoExpandHint *noExpandHint = makeNode(NoExpandHint);
+		noExpandHint->base.hint_keyword = HINT_KEYWORD_NO_EXPAND;
+		noExpandHint->base.state = HINT_STATE_NOTUSED;
+		$$ = (Node *) noExpandHint;
+	}
+
+guc_value:
+	IDENT				{ $$ = (Node*)makeStringValue($1); }
+	| SCONST			{ $$ = (Node*)makeStringValue($1); }
+	| TRUE_P			{ $$ = (Node*)makeBoolValue(TRUE); }
+	| FALSE_P			{ $$ = (Node*)makeBoolValue(FALSE); }
+	| ON_P				{ $$ = (Node*)makeBoolValue(TRUE); }
+	| OFF_P				{ $$ = (Node*)makeBoolValue(FALSE); }
+	| ICONST			{ $$ = (Node*)makeInteger($1); }
+	| '+' ICONST		{ $$ = (Node*)makeInteger($2); }
+	| '-' ICONST		{ $$ = (Node*)makeInteger(-$2); }
+	| FCONST			{ $$ = (Node*)makeFloat($1); }
+	| '+' FCONST		{ $$ = (Node*)makeFloat($2); }
+	| '-' FCONST
+	{
+		Value *fvalue = makeFloat($2);
+		doNegateFloat(fvalue);
+		$$ = (Node*)fvalue;
+	}
+	;
+
+set_hint:
+	Set_P '(' IDENT guc_value ')'
+	{
+		char* name = $3;
+		if (!check_set_hint_in_white_list(name)) {
+			ereport(WARNING, (errmsg("SetHint is invalid. Parameter [%s] is not in whitelist.", name)));
+			$$ = NULL;
+		} else {
+			Value* guc_val = NULL;
+			if (IsA($4, Integer)) {
+				guc_val = integerToString((Value*)$4);
+			} else {
+				guc_val = (Value*)$4;
+			}
+			SetHint *setHint = makeNode(SetHint);
+			setHint->base.hint_keyword = HINT_KEYWORD_SET;
+			setHint->base.state = HINT_STATE_NOTUSED;
+			setHint->name = name;
+			setHint->value = strVal(guc_val);
+			$$ = (Node *) setHint;
+		}
+	}
+
+plancache_hint:
+	USE_CPLAN_P
+	{
+		PlanCacheHint *planCacheHint = makeNode(PlanCacheHint);
+		planCacheHint->base.hint_keyword = HINT_KEYWORD_CPLAN;
+		planCacheHint->base.state = HINT_STATE_NOTUSED;
+		planCacheHint->chooseCustomPlan = true;
+		$$ = (Node *) planCacheHint;
+	}
+	| USE_GPLAN_P
+	{
+		PlanCacheHint *planCacheHint = makeNode(PlanCacheHint);
+		planCacheHint->base.hint_keyword = HINT_KEYWORD_GPLAN;
+		planCacheHint->base.state = HINT_STATE_NOTUSED;
+		planCacheHint->chooseCustomPlan = false;
+		$$ = (Node *) planCacheHint;
 	}
 
 rewrite_hint:
@@ -520,6 +642,37 @@ makeBoolValue(bool state)
 	return val;
 }
 
+static void
+doNegateFloat(Value *v)
+{
+	char   *oldval = v->val.str;
+	Assert(IsA(v, Float));
+	if (*oldval == '+')
+		oldval++;
+	if (*oldval == '-')
+		v->val.str = oldval + 1;	/* just strip the '-' */
+	else
+	{
+		char   *newval = (char *) palloc(strlen(oldval) + 2);
+
+		*newval = '-';
+		strcpy(newval + 1, oldval);
+		v->val.str = newval;
+	}
+}
+
+static Value* integerToString(Value *v)
+{
+    Assert(IsA(v, Integer));
+    long num = intVal(v);
+    const int max_len_long_type = 11;
+    char* str = (char*)palloc0(sizeof(char) * (max_len_long_type + 1));
+    errno_t rc = sprintf_s(str, max_len_long_type + 1, "%ld", num);
+    securec_check_ss(rc, "\0", "\0");
+	Value* ret = makeString(str);
+    pfree(v);
+    return ret;
+}
 
 #include "hint_scan.inc"
 

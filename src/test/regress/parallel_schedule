@@ -5,6 +5,9 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
+
+test: memory_check
+
 test: directory_test
 
 # test sql by pass
@@ -807,3 +810,6 @@ test: gin_getbitmap
 
 # gs_basebackup
 test: gs_basebackup
+
+# gs_ledger
+test: ledger_table_case

@@ -8,7 +8,7 @@
 #ifndef FILEMAP_H
 #define FILEMAP_H
 
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "storage/buf/block.h"
 
 #include "datapagemap.h"
@@ -103,7 +103,7 @@ extern void process_waldata_change(
     ForkNumber forknum, RelFileNode rnode, StorageEngine store, off_t file_offset, size_t data_size);
 extern void filemap_finalize(void);
 extern int targetFilemapSearch(const char* path, file_entry_t* entry);
-extern bool isRelDataFile(const char* path, bool* match_hbucket_dir = NULL);
+extern bool isRelDataFile(const char* path);
 extern const char* action_to_str(file_action_t action);
 
 #endif /* FILEMAP_H */

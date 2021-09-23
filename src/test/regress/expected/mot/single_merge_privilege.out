@@ -68,6 +68,7 @@ ERROR:  Target relation type is not supported for MERGE INTO
 -- merge_privs has UPDATE permission for merge_privs_target2, but has no SELECT permission for merge_privs_target2
 GRANT UPDATE ON merge_privs_target2 TO merge_privs;
 ERROR:  permission denied for relation merge_privs_target2
+DETAIL:  N/A
 SET SESSION AUTHORIZATION merge_privs PASSWORD 'merge@123';
 MERGE INTO merge_privs_target2
 USING merge_privs_source

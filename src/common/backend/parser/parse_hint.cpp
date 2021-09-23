@@ -76,6 +76,7 @@ static void JoinMethodHintDelete(JoinMethodHint* hint);
 static void LeadingHintDelete(LeadingHint* hint);
 static void RowsHintDelete(RowsHint* hint);
 static void RewriteHintDelete(RewriteHint* hint);
+static void GatherHintDelete(GatherHint* hint);
 static void StreamHintDelete(StreamHint* hint);
 static void BlockNameHintDelete(BlockNameHint* hint);
 static void ScanMethodHintDelete(ScanMethodHint* hint);
@@ -87,6 +88,7 @@ static void drop_duplicate_join_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_stream_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_row_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_rewrite_hint(PlannerInfo* root, HintState* hstate);
+static void drop_duplicate_gather_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_scan_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_skew_hint(PlannerInfo* root, HintState* hstate);
 static void drop_duplicate_predpush_hint(PlannerInfo* root, HintState* hstate);
@@ -179,6 +181,38 @@ static void append_value(StringInfo buf, Value* value, Node* node)
         appendStringInfoCharMacro(buf, '\'');
     }
 }
+
+#define HINT_NUM 15
+#define HINT_KEYWORD_NUM 20
+
+typedef struct {
+    HintKeyword keyword;
+    char* keyStr;
+} KeywordPair;
+
+const char* G_HINT_KEYWORD[HINT_KEYWORD_NUM] = {
+    (char*) HINT_NESTLOOP,
+    (char*) HINT_MERGEJOIN,
+    (char*) HINT_HASHJOIN,
+    (char*) HINT_LEADING,
+    (char*) HINT_ROWS,
+    (char*) HINT_BROADCAST,
+    (char*) HINT_REDISTRIBUTE,
+    (char*) HINT_BLOCKNAME,
+    (char*) HINT_TABLESCAN,
+    (char*) HINT_INDEXSCAN,
+    (char*) HINT_INDEXONLYSCAN,
+    (char*) HINT_SKEW,
+    (char*) HINT_PRED_PUSH,
+    (char*) HINT_REWRITE,
+    (char*) HINT_GATHER,
+    (char*) HINT_NO_EXPAND,
+    (char*) HINT_SET,
+    (char*) HINT_CPLAN,
+    (char*) HINT_GPLAN,
+    (char*) HINT_NO_GPC,
+};
+
 /*
  * @Description: Describe hint keyword to string
  * @in keyword: hint keyword.
@@ -186,53 +220,12 @@ static void append_value(StringInfo buf, Value* value, Node* node)
 static const char* KeywordDesc(HintKeyword keyword)
 {
     const char* value = NULL;
-
-    switch (keyword) {
-        case HINT_KEYWORD_NESTLOOP:
-            value = HINT_NESTLOOP;
-            break;
-        case HINT_KEYWORD_MERGEJOIN:
-            value = HINT_MERGEJOIN;
-            break;
-        case HINT_KEYWORD_HASHJOIN:
-            value = HINT_HASHJOIN;
-            break;
-        case HINT_KEYWORD_LEADING:
-            value = HINT_LEADING;
-            break;
-        case HINT_KEYWORD_ROWS:
-            value = HINT_ROWS;
-            break;
-        case HINT_KEYWORD_BROADCAST:
-            value = HINT_BROADCAST;
-            break;
-        case HINT_KEYWORD_REDISTRIBUTE:
-            value = HINT_REDISTRIBUTE;
-            break;
-        case HINT_KEYWORD_BLOCKNAME:
-            value = HINT_BLOCKNAME;
-            break;
-        case HINT_KEYWORD_TABLESCAN:
-            value = HINT_TABLESCAN;
-            break;
-        case HINT_KEYWORD_INDEXSCAN:
-            value = HINT_INDEXSCAN;
-            break;
-        case HINT_KEYWORD_INDEXONLYSCAN:
-            value = HINT_INDEXONLYSCAN;
-            break;
-        case HINT_KEYWORD_SKEW:
-            value = HINT_SKEW;
-            break;
-        case HINT_KEYWORD_PREDPUSH:
-            value = HINT_PRED_PUSH;
-            break;
-        case HINT_KEYWORD_REWRITE:
-            value = HINT_REWRITE;
-            break;        
-        default:
-            elog(WARNING, "unrecognized keyword %d", (int)keyword);
-            break;
+    /* In case new tag is added within the old range. Keep the LFS as the newest keyword */
+    Assert(HINT_KEYWORD_NO_GPC == HINT_KEYWORD_NUM - 1);
+    if ((int)keyword >= HINT_KEYWORD_NUM || (int)keyword < 0) {
+        elog(WARNING, "unrecognized keyword %d", (int)keyword);
+    } else {
+        value = G_HINT_KEYWORD[(int)keyword];
     }
 
     return value;
@@ -304,6 +297,64 @@ Relids predpush_candidates_same_level(PlannerInfo *root)
 }
 
 /*
+ * @Description: get the prompts for no_gpc hint into subquery.
+ * @in hint: subquery no_gpc hint.
+ * @out buf: String buf.
+ */
+static void NoGPCHintDesc(NoGPCHint* hint, StringInfo buf)
+{
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s", KeywordDesc(hint->base.hint_keyword));
+}
+
+/*
+ * @Description: get the prompts for no_expand hint into subquery.
+ * @in hint: subquery no_expand hint.
+ * @out buf: String buf.
+ */
+static void NoExpandHintDesc(NoExpandHint* hint, StringInfo buf)
+{
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s", KeywordDesc(hint->base.hint_keyword));
+}
+
+/*
+ * @Description: get the prompts for plancache hint into subquery.
+ * @in hint: subquery plancache hint.
+ * @out buf: String buf.
+ */
+static void PlanCacheHintDesc(PlanCacheHint* hint, StringInfo buf)
+{
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s", KeywordDesc(hint->base.hint_keyword));
+}
+
+/*
+ * @Description: get the prompts for set-guc hint into subquery.
+ * @in hint: set-guc hint.
+ * @out buf: String buf.
+ */
+static void SetHintDesc(SetHint* hint, StringInfo buf)
+{
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s(", KeywordDesc(hint->base.hint_keyword));
+
+    if (hint->name != NULL) {
+        appendStringInfo(buf, "%s", hint->name);
+    }
+    
+    if (hint->value != NULL) {
+        appendStringInfo(buf, " %s", hint->value);
+    }
+
+    appendStringInfoString(buf, ")");
+}
+
+/*
  * @Description: get the prompts for redicate pushdown into subquery.
  * @in hint: predicate pushdown hint.
  * @out buf: String buf.
@@ -323,6 +374,48 @@ static void PredpushHintDesc(PredpushHint* hint, StringInfo buf)
 
     if (hint->candidates != NULL)
         appendStringInfo(buf, ")");
+
+    appendStringInfoString(buf, ")");
+}
+
+/*
+ * @Description: get the prompts for rewrite hint into subquery.
+ * @in hint: rewrite hint.
+ * @out buf: String buf.
+ */
+static void RewriteHintDesc(RewriteHint* hint, StringInfo buf)
+{
+    Hint base_hint = hint->base;
+
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s(", KeywordDesc(hint->base.hint_keyword));
+
+    relnamesToBuf(hint->param_names, buf);
+
+    appendStringInfoString(buf, ")");
+}
+
+/*
+ * @Description: get the prompts for redicate pushdown into subquery.
+ * @in hint: predicate pushdown hint.
+ * @out buf: String buf.
+ */
+static void GatherHintDesc(GatherHint* hint, StringInfo buf)
+{
+    Hint base_hint = hint->base;
+
+    Assert(buf != NULL);
+
+    appendStringInfo(buf, " %s(", KeywordDesc(hint->base.hint_keyword));
+
+    if (hint->source == HINT_GATHER_REL) {
+        appendStringInfo(buf, "REL");
+    } else if (hint->source == HINT_GATHER_JOIN) {
+        appendStringInfo(buf, "JOIN");
+    } else {
+        appendStringInfo(buf, "ALL");
+    }
 
     appendStringInfoString(buf, ")");
 }
@@ -617,6 +710,24 @@ char* descHint(Hint* hint)
         case T_PredpushHint:
             PredpushHintDesc((PredpushHint*)hint, &str);
             break;
+        case T_RewriteHint:
+            RewriteHintDesc((RewriteHint*)hint, &str);
+            break;
+        case T_GatherHint:
+            GatherHintDesc((GatherHint*)hint, &str);
+            break;
+        case T_SetHint:
+            SetHintDesc((SetHint*)hint, &str);
+            break;
+        case T_PlanCacheHint:
+            PlanCacheHintDesc((PlanCacheHint*)hint, &str);
+            break;
+        case T_NoExpandHint:
+            NoExpandHintDesc((NoExpandHint*)hint, &str);
+            break;
+        case T_NoGPCHint:
+            NoGPCHintDesc((NoGPCHint*)hint, &str);
+            break;
         default:
             break;
     }
@@ -656,9 +767,12 @@ void desc_hint_in_state(PlannerInfo* root, HintState* hstate)
     find_unused_hint_to_buf(hstate->join_hint, &str_buf);
     find_unused_hint_to_buf(hstate->row_hint, &str_buf);
     find_unused_hint_to_buf(hstate->rewrite_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->gather_hint, &str_buf);
     find_unused_hint_to_buf(hstate->stream_hint, &str_buf);
     find_unused_hint_to_buf(hstate->scan_hint, &str_buf);
     find_unused_hint_to_buf(hstate->block_name_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->set_hint, &str_buf);
+    find_unused_hint_to_buf(hstate->no_gpc_hint, &str_buf);
 
     /* for skew hint */
     ListCell* lc = NULL;
@@ -753,6 +867,17 @@ static void RewriteHintDelete(RewriteHint* hint)
 
     HINT_FREE_RELNAMES(hint);
 
+    pfree_ext(hint);
+}
+
+/*
+ * @Description: Delete rows hint.
+ * @in hint: Rows Hint.
+ */
+static void GatherHintDelete(GatherHint* hint)
+{
+    if (hint == NULL)
+        return;
     pfree_ext(hint);
 }
 
@@ -899,6 +1024,9 @@ void hintDelete(Hint* hint)
         case T_RewriteHint:
             RewriteHintDelete((RewriteHint*)hint);
             break;
+        case T_GatherHint:
+            GatherHintDelete((GatherHint*)hint);
+            break;
         default:
             elog(WARNING, "unrecognized hint method: %d", (int)nodeTag(hint));
             break;
@@ -934,6 +1062,11 @@ void HintStateDelete(HintState* hintState)
     foreach (lc, hintState->rewrite_hint) {
         RewriteHint* hint = (RewriteHint*)lfirst(lc);
         RewriteHintDelete(hint);
+    }
+
+    foreach (lc, hintState->gather_hint) {
+        GatherHint* hint = (GatherHint*)lfirst(lc);
+        GatherHintDelete(hint);
     }
 
     foreach (lc, hintState->stream_hint) {
@@ -983,6 +1116,10 @@ HintState* HintStateCreate()
     hstate->multi_node_hint = false;
     hstate->predpush_hint = NIL;
     hstate->rewrite_hint = NIL;
+    hstate->gather_hint = NIL;
+    hstate->set_hint = NIL;
+    hstate->cache_plan_hint = NIL;
+    hstate->no_expand_hint = NIL;
 
     return hstate;
 }
@@ -1062,6 +1199,117 @@ static void drop_duplicate_blockname_hint(HintState* hstate)
     hstate->block_name_hint = delete_invalid_hint(NULL, hstate, hstate->block_name_hint);
 }
 
+static List* keep_last_hint_cell(List* hintList)
+{
+    if(list_length(hintList) <= 1) {
+        return hintList;
+    }
+    Node* node = (Node*)copyObject(llast(hintList));
+    list_free_deep(hintList);
+    return lappend(NIL, node);
+}
+
+static void AddJoinHint(HintState* hstate, Hint* hint)
+{
+    hstate->join_hint = lappend(hstate->join_hint, hint);
+}
+
+static void AddLeadingHint(HintState* hstate, Hint* hint)
+{
+    hstate->leading_hint = lappend(hstate->leading_hint, hint);
+}
+
+static void AddRowsHint(HintState* hstate, Hint* hint)
+{
+    hstate->row_hint = lappend(hstate->row_hint, hint);
+}
+
+static void AddStreamHint(HintState* hstate, Hint* hint)
+{
+    hstate->stream_hint = lappend(hstate->stream_hint, hint);
+}
+
+static void AddBlockNameHint(HintState* hstate, Hint* hint)
+{
+    hstate->block_name_hint = lappend(hstate->block_name_hint, hint);
+}
+
+static void AddScanMethodHint(HintState* hstate, Hint* hint)
+{
+    hstate->scan_hint = lappend(hstate->scan_hint, hint);
+}
+
+static void AddSkewHint(HintState* hstate, Hint* hint)
+{
+    hstate->skew_hint = lappend(hstate->skew_hint, hint);
+}
+
+static void AddMultiNodeHint(HintState* hstate, Hint* hint)
+{
+    hstate->multi_node_hint = true;
+}
+
+static void AddPredpushHint(HintState* hstate, Hint* hint)
+{
+    hstate->predpush_hint = lappend(hstate->predpush_hint, hint);
+}
+
+static void AddRewriteHint(HintState* hstate, Hint* hint)
+{
+    hstate->rewrite_hint = lappend(hstate->rewrite_hint, hint);
+}
+
+static void AddGatherHint(HintState* hstate, Hint* hint)
+{
+    hstate->gather_hint = lappend(hstate->gather_hint, hint);
+}
+
+static void AddSetHint(HintState* hstate, Hint* hint)
+{
+    hstate->set_hint = lappend(hstate->set_hint, hint);
+}
+
+static void AddPlanCacheHint(HintState* hstate, Hint* hint)
+{
+    hstate->cache_plan_hint = lappend(hstate->cache_plan_hint, hint);
+}
+
+static void AddNoExpandHint(HintState* hstate, Hint* hint)
+{
+    /* only keep one no_expand hint for each subquery */
+    if (list_length(hstate->no_expand_hint) == 0) {
+        hstate->no_expand_hint = lappend(hstate->no_expand_hint, hint);
+    }
+}
+
+static void AddNoGPCHint(HintState* hstate, Hint* hint)
+{
+    /* only keep one no_gpc hint for each subquery */
+    if (list_length(hstate->no_gpc_hint) == 0) {
+        hstate->no_gpc_hint = lappend(hstate->no_gpc_hint, hint);
+    }
+}
+
+typedef void (*AddHintFunc)(HintState*, Hint*);
+
+const AddHintFunc G_HINT_CREATOR[HINT_NUM] = {
+    AddJoinHint,
+    AddLeadingHint,
+    AddRowsHint,
+    AddStreamHint,
+    AddBlockNameHint,
+    AddScanMethodHint,
+    AddMultiNodeHint,
+    AddPredpushHint,
+    AddSkewHint,
+    AddRewriteHint,
+    AddGatherHint,
+    AddSetHint,
+    AddPlanCacheHint,
+    AddNoExpandHint,
+    AddNoGPCHint,
+};
+
 /*
  * @Description: Generate hint struct according to hint str.
  * @in hints: Hint string.
@@ -1101,43 +1349,28 @@ HintState* create_hintstate(const char* hints)
 
     if (u_sess->parser_cxt.hint_list != NULL) {
         ListCell* lc = NULL;
+        int firstHintTag = T_JoinMethodHint; /* Do not add hint tag before JoinMethodHint. */
+        int lastHintTag = T_NoGPCHint; /* Keep this as the last hint tag in nodes.h. */
 
         foreach (lc, u_sess->parser_cxt.hint_list) {
             Hint* hint = (Hint*)lfirst(lc);
-            switch (nodeTag(hint)) {
-                case T_JoinMethodHint:
-                    hstate->join_hint = lappend(hstate->join_hint, hint);
-                    break;
-                case T_LeadingHint:
-                    hstate->leading_hint = lappend(hstate->leading_hint, hint);
-                    break;
-                case T_RowsHint:
-                    hstate->row_hint = lappend(hstate->row_hint, hint);
-                    break;
-                case T_StreamHint:
-                    hstate->stream_hint = lappend(hstate->stream_hint, hint);
-                    break;
-                case T_BlockNameHint:
-                    hstate->block_name_hint = lappend(hstate->block_name_hint, hint);
-                    break;
-                case T_ScanMethodHint:
-                    hstate->scan_hint = lappend(hstate->scan_hint, hint);
-                    break;
-                case T_SkewHint:
-                    hstate->skew_hint = lappend(hstate->skew_hint, hint);
-                    break;
-                case T_MultiNodeHint:
-                    hstate->multi_node_hint = true;
-                    break;
-                case T_PredpushHint:
-                    hstate->predpush_hint = lappend(hstate->predpush_hint, hint);
-                    break;
-                case T_RewriteHint:
-                    hstate->rewrite_hint = lappend(hstate->rewrite_hint, hint);
-                    break;
-                default:
-                    break;
+            if (hint == NULL) {
+                continue;
             }
+            /* In case new tag is added within the old range. Keep the LFS as the newest keyword */
+            Assert(lastHintTag == HINT_NUM - 1 + firstHintTag);
+            if (nodeTag(hint) < firstHintTag || nodeTag(hint) > lastHintTag) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg("[Internal Error]: Invalid hint type %d", (int)nodeTag(hint)),
+                         errhint("Do not add new hint tag between %d and %d.", firstHintTag, lastHintTag))));
+            }
+            if (G_HINT_CREATOR[nodeTag(hint) - firstHintTag] == NULL) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                        (errmsg("[Internal Error]: Hint add function not initialized %d", (int)nodeTag(hint)))));
+            }
+            G_HINT_CREATOR[nodeTag(hint) - firstHintTag](hstate, hint);
             hstate->nall_hints++;
         }
 
@@ -1156,6 +1389,8 @@ HintState* create_hintstate(const char* hints)
         if (list_length(hstate->block_name_hint) > 1) {
             drop_duplicate_blockname_hint(hstate);
         }
+        /* Only keep the last cplan/gplanhint */
+        hstate->cache_plan_hint = keep_last_hint_cell(hstate->cache_plan_hint);
     }
 
     pfree_ext(hint_str);
@@ -1769,6 +2004,32 @@ static void drop_duplicate_rewrite_hint(PlannerInfo* root, HintState* hstate)
     }
 }
 
+/*
+ * @Description: Delete duplicate gather hint.
+ * @in hstate: Hint state.
+ */
+static void drop_duplicate_gather_hint(PlannerInfo* root, HintState* hstate)
+{
+    bool hasError = false;
+    bool hfirst = true;
+    ListCell* lc = NULL;
+    if (list_length(hstate->gather_hint) > 1) {
+        foreach(lc, hstate->gather_hint) {
+            if (hfirst) {
+                hfirst = false;
+                continue;
+            }
+            GatherHint* gatherHint = (GatherHint*)lfirst(lc);
+            gatherHint->base.state = HINT_STATE_DUPLICATION;
+            hasError = true;
+        }
+        elog(WARNING, "Gather Hint: Multiple Gather Hint found. Execute with the first one instead.");
+    }
+
+    if (hasError) {
+        hstate->gather_hint = delete_invalid_hint(root, hstate, hstate->gather_hint);
+    }
+}
 
 /*
  * @Description: Delete duplicate scan hint.
@@ -2288,7 +2549,8 @@ static void set_colinfo_by_relation(Oid relid, int location, SkewColumnInfo* col
 {
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tmpOwner;
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint", MEMORY_CONTEXT_OPTIMIZER);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForSkewHint",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     Relation relation = NULL;
 
     relation = heap_open(relid, AccessShareLock);
@@ -3059,6 +3321,54 @@ bool permit_from_rewrite_hint(PlannerInfo *root, unsigned int params)
 }
 
 /*
+ * @Description: Check gather constraints hint:
+ * @in root: Planner Info
+ * @in src: Gather source
+ */
+bool permit_gather(PlannerInfo *root, GatherSource src)
+{
+    HintState *hstate = root->parse->hintState;
+
+    /* if null just return */
+    if (hstate == NULL || hstate->gather_hint == NULL) {
+        return false;
+    }
+
+    GatherHint* gather_hint = (GatherHint*)linitial(hstate->gather_hint);
+    gather_hint->base.state = HINT_STATE_USED;
+
+    /* if UNKNOWN just return */
+    if (src > HINT_GATHER_ALL) {
+        return false;
+    }
+
+    /*
+     * High-level gather hints also enables low-level gather hints
+     *      permit_gather(root, HINT_GATHER_REL) versus GATHER(JOIN) will permit
+     *      permit_gather(root, HINT_GATHER_JOIN) versus GATHER(JOIN) will permit
+     *      permit_gather(root, HINT_GATHER_JOIN) versus GATHER(REL) will abort
+     *      permit_gather(root) will used as guc control cn gather feature
+     */
+    return (src <= gather_hint->source);
+}
+
+/*
+ * @Description: Get gather hint source:
+ * @in root: Planner Info
+ */
+GatherSource get_gather_hint_source(PlannerInfo *root) {
+    HintState *hstate = root->parse->hintState;
+
+    if (hstate == NULL || hstate->gather_hint == NULL) {
+        return HINT_GATHER_UNKNOWN;   /* if null */
+    }
+
+    GatherHint* gather_hint = (GatherHint*)linitial(hstate->gather_hint);
+
+    return gather_hint->source;
+}
+
+/*
  * @Description: Transform hint into handy form.
  *  create bitmap of relids from alias names, to make it easier to check
  *  whether a join path matches a join method hint.
@@ -3096,6 +3406,7 @@ void transform_hints(PlannerInfo* root, Query* parse, HintState* hstate)
     drop_duplicate_skew_hint(root, hstate);
     drop_duplicate_predpush_hint(root, hstate);
     drop_duplicate_rewrite_hint(root, hstate);
+    drop_duplicate_gather_hint(root, hstate);
 
     /* Transform skew hint into handy form, SkewHint structure will be transform to SkewHintTransf. */
     transform_skew_hint(root, parse, hstate->skew_hint);
@@ -3267,4 +3578,86 @@ bool permit_predpush(PlannerInfo *root)
 
     PredpushHint *predpushHint = (PredpushHint*)linitial(hstate->predpush_hint);
     return !predpushHint->negative;
+}
+
+const unsigned int G_NUM_SET_HINT_WHITE_LIST = 32;
+const char* G_SET_HINT_WHITE_LIST[G_NUM_SET_HINT_WHITE_LIST] = {
+    /* keep in the ascending alphabetical order of frequency */
+    (char*)"best_agg_plan",
+    (char*)"cost_weight_index",
+    (char*)"cpu_index_tuple_cost",
+    (char*)"cpu_operator_cost",
+    (char*)"cpu_tuple_cost",
+    (char*)"default_limit_rows",
+    (char*)"effective_cache_size",
+    (char*)"enable_bitmapscan",
+    (char*)"enable_broadcast",
+    (char*)"enable_fast_query_shipping",
+    (char*)"enable_hashagg",
+    (char*)"enable_hashjoin",
+    (char*)"enable_index_nestloop",
+    (char*)"enable_indexonlyscan",
+    (char*)"enable_indexscan",
+    (char*)"enable_material",
+    (char*)"enable_mergejoin",
+    (char*)"enable_nestloop",
+    (char*)"enable_remotegroup",
+    (char*)"enable_remotejoin",
+    (char*)"enable_remotelimit",
+    (char*)"enable_remotesort",
+    (char*)"enable_seqscan",
+    (char*)"enable_sort",
+    (char*)"enable_stream_operator",
+    (char*)"enable_stream_recursive",
+    (char*)"enable_tidscan",
+    (char*)"enable_trigger_shipping",
+    (char*)"node_name",
+    (char*)"query_dop",
+    (char*)"random_page_cost",
+    (char*)"seq_page_cost"};
+
+static int param_str_cmp(const void *s1, const void *s2)
+{
+    const char *key = (const char *)s1;
+    const char * const *arg = (const char * const *)s2;
+    return pg_strcasecmp(key, *arg);
+}
+
+bool check_set_hint_in_white_list(const char* name)
+{
+    if (name == NULL) {
+        return false;
+    }
+    char* res = (char*)bsearch((void *) name,
+                               (void *) G_SET_HINT_WHITE_LIST,
+                               G_NUM_SET_HINT_WHITE_LIST,
+                               sizeof(char*),
+                               param_str_cmp);
+    return res != NULL;
+}
+
+bool has_no_expand_hint(Query* subquery)
+{
+    if (subquery->hintState == NULL) {
+        return false;
+    }
+    if (subquery->hintState->no_expand_hint != NIL) {
+        NoExpandHint* hint = (NoExpandHint*)linitial(subquery->hintState->no_expand_hint);
+        hint->base.state = HINT_STATE_USED;
+        return true;
+    }
+    return false;
+}
+
+bool has_no_gpc_hint(HintState* hintState)
+{
+    if (hintState == NULL) {
+        return false;
+    }
+    if (hintState->no_gpc_hint != NIL) {
+        NoGPCHint* hint = (NoGPCHint*)linitial(hintState->no_gpc_hint);
+        hint->base.state = HINT_STATE_USED;
+        return true;
+    }
+    return false;
 }

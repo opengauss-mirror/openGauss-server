@@ -6,7 +6,7 @@
  *
  *	 Portions Copyright (c) 1999-2012, PostgreSQL Global Development Group
  *
- *	 The PostgreSQL routines for a DateTime/int/float/numeric formatting,
+ *	 The openGauss routines for a DateTime/int/float/numeric formatting,
  *	 inspire with A db TO_CHAR() / TO_DATE() / TO_NUMBER() routines.
  *
  *	 Karel Zak

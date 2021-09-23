@@ -24,7 +24,8 @@
 #ifndef HAVE_AES256_CBC_ENCRYPTION_INCLUDE
 #define HAVE_AES256_CBC_ENCRYPTION_INCLUDE
 #include "client_logic/client_logic_enums.h"
-class AeadAesHamcEncKey;
+#include "aead_aes_hamc_enc_key.h"
+#include "cipher.h"
 
 /* 
  * returns the recommended size for allocation for encrypt_data's result buffer
@@ -45,18 +46,20 @@ int get_cipher_text_size(int plainTextSize);
  * returns the ciphertext length
  * return value == 0 on error
  */
-int encrypt_data(const unsigned char *plain_text, int plain_text_length, const AeadAesHamcEncKey &column_encryption_key,
+int encrypt_data(const unsigned char *plain_text, int plain_text_length, AeadAesHamcEncKey &column_encryption_key,
     EncryptionType encryption_type, unsigned char *result, ColumnEncryptionAlgorithm column_encryption_algorithm);
 
 /*
- * Decryption steps
+ * Decryption steps 
  *  1. Validate version byte
  *  2. Validate Authentication tag
  *  3. Decrypt the message
  */
-
 int decrypt_data(const unsigned char *cipher_text, int cipher_text_length,
-    const AeadAesHamcEncKey &column_encryptionKey, unsigned char *decryptedtext,
+    AeadAesHamcEncKey &column_encryptionKey, unsigned char *decryptedtext,
     ColumnEncryptionAlgorithm column_encryption_algorithm);
+
+bool cached_hmac(unsigned long algo_type, const unsigned char *key, int key_len, const unsigned char *data,
+    int data_len, unsigned char *result, unsigned int *result_len, HmacCtxGroup *cached_ctx_group);
 
 #endif /* HAVE_AES256_CBC_ENCRYPTION_INCLUDE */

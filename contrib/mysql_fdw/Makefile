@@ -26,35 +26,21 @@ install:install-data
 
 top_builddir ?= ../../
 include $(top_builddir)/src/Makefile.global
-MYSQL_FDW_DIR=output
-MYSQL_FDW_PACKAGE=mysql_fdw-REL-2_5_5
-MYSQL_FDW_PATCH=opengauss_mysql_fdw-2.5.5_patch
-MYSQL_FDW_MEGRED_SOURCES_DIR=$(MYSQL_FDW_DIR)/code
+CODE_DIR=mysql_fdw
 
 .PHONY: mysql_fdw_target
 mysql_fdw_target: prep_checked
-	@$(call create_mysql_fdw_sources)
-	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE)
+	@make -C $(MYFDW_HOME) TOP_DIR=$(abs_top_srcdir)
 
 prep_checked:
-	@test -f $(MYFDW_HOME)/$(MYSQL_FDW_PACKAGE).tar.gz || ( echo "ERROR: You need fetch and copy mysql_fdw from 'third_party' repo to 'third_party_binarylibs' repo and keep directory strucutre unchanged" && exit 1 )
-	@test -f $(MYFDW_HOME)/$(MYSQL_FDW_PACKAGE).tar.gz && date > prep_checked
-
+	@test -d $(MYFDW_HOME) || ( echo "ERROR: You need fetch and copy mysql_fdw from 'third_party' repo to 'third_party_binarylibs' repo and keep directory strucutre unchanged" && exit 1 )
+	@test -d $(MYFDW_HOME) && date > prep_checked
 .PHONY: install-data
 install-data: mysql_fdw_target
-	@make -C $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) install
-
+	@make -C $(MYFDW_HOME) TOP_DIR=$(abs_top_srcdir) install
 uninstall distclean clean:
-	@rm -rf $(MYSQL_FDW_DIR)
+	@rm -rf $(MYFDW_HOME)/*.o
+	@rm -rf $(MYFDW_HOME)/*.so
 	@rm -f prep_checked
 
 MYSQL_FDW_RELEVANT_SOURCES = connection.c deparse.c mysql_fdw.c mysql_query.c option.c
-
-define create_mysql_fdw_sources
-	rm -rf $(MYSQL_FDW_DIR);\
-	mkdir $(MYSQL_FDW_DIR);\
-	cp -r $(MYFDW_HOME)/. $(MYSQL_FDW_DIR);\
-	mkdir $(MYSQL_FDW_MEGRED_SOURCES_DIR); \
-	tar xfzv $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PACKAGE).tar.gz -C $(MYSQL_FDW_MEGRED_SOURCES_DIR) &> /dev/null; 
-	patch -p0 -d $(MYSQL_FDW_MEGRED_SOURCES_DIR)/$(MYSQL_FDW_PACKAGE) < $(MYSQL_FDW_DIR)/$(MYSQL_FDW_PATCH).patch &> /dev/null;
-endef

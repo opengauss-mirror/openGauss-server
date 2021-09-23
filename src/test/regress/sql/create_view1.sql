@@ -4,7 +4,6 @@
 --	(this also tests the query rewrite system)
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 CREATE VIEW street AS
    SELECT r.name, r.thepath, c.cname AS cname
@@ -66,6 +65,9 @@ CREATE OR REPLACE VIEW viewtest AS
 -- should work
 CREATE OR REPLACE VIEW viewtest AS
 	SELECT a, b, 0 AS c FROM viewtest_tbl;
+
+-- test error message
+DROP TABLE viewtest;
 
 DROP VIEW viewtest;
 DROP TABLE viewtest_tbl;

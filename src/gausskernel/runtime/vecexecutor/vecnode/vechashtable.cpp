@@ -26,7 +26,7 @@
 #include "vecexecutor/vecexecutor.h"
 #include "executor/executor.h"
 #include "nodes/memnodes.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "pgxc/pgxc.h"
 #include "storage/lz4_file.h"
 #include "utils/numeric.h"

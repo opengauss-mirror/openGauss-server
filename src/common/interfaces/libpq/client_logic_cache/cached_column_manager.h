@@ -27,7 +27,9 @@
 #include "nodes/parsenodes_common.h"
 #include "icached_column_manager.h"
 #include "icached_columns.h"
+#include "cached_proc.h"
 
+class CacheLoader;
 class CachedColumnSetting;
 class ExprPartsList;
 
@@ -36,7 +38,25 @@ class ExprPartsList;
  */
 class CachedColumnManager : public ICachedColumnManager {
 public:
+    CachedColumnManager();
+    ~CachedColumnManager();
+
     bool load_cache(PGconn *conn) override;
+    void clear() override;
+    const GlobalHookExecutor** get_global_hook_executors(size_t& global_hook_executors_size) const override;
+    const CachedGlobalSetting* get_global_setting_by_fqdn(const char* globalSettingFqdn) const override;
+    size_t get_object_fqdn(const char* object_name, bool is_global_setting, char* object_fqdn) const override;
+    const CachedColumnSetting** get_column_setting_by_global_setting_fqdn(const char* global_setting_fqdn,
+        size_t& column_settings_list_size) const override;
+    bool remove_schema(const char* schema_name) override;
+    void set_user_schema(const char* user_name) override;
+    void load_search_path(const char* search_path, const char* username) override;
+    ColumnHookExecutor* get_column_hook_executor(Oid columnSettingOid) const override;
+    const CachedGlobalSetting** get_global_settings_by_schema_name(const char* schema_name,
+        size_t& global_settings_list_size) const override;
+    const CachedColumnSetting** get_column_setting_by_schema_name(const char* schemaName,
+        size_t& column_settings_list_size) const override;
+    const CachedColumnSetting* get_column_setting_by_fqdn(const char* columnSettingFqdn) const override;
 
 	/**
 	 * @brief getting columns information from cache by querying using its full name params
@@ -104,6 +124,13 @@ public:
      */
     const ICachedColumn *get_cached_column(unsigned int tid, unsigned int cid) const override;
 
+    /**
+    * @brief getting column information from cache by querying cached column Oid
+    * @param oid   OID of the cached column
+    * @return shared pointer to column information
+    */
+    const ICachedColumn* get_cached_column(const Oid oid) const override;
+
 	/**
      * @brief getting column information from cache by querying using its full name params
      * @param db_name  catalog name where the table contains this column is located
@@ -121,6 +148,18 @@ public:
     const CachedColumnSetting *get_cached_column_setting_metadata(const Oid o) override;
     bool filter_cached_columns(const ICachedColumns *cached_columns, const ExprPartsList *where_exprs_list,
         bool &is_operator_Forbidden, ICachedColumns *new_cached_columns) const override;
+
+    /*
+     * @brief getting function information from cache by querying using its full name params
+     * @param dbName  catalog name where the table contains this column is located
+     * @param schemaName  schmea name where the table contains this column is located
+     * @param function name
+     * @return  pointer to column information
+     */
+    CachedProc* get_cached_proc(const char* db_name, const char* schema_name, const char* function_name) const override;
+    const CachedProc* get_cached_proc(Oid funcOid) const override;
+    const CachedType* get_cached_type(Oid typid) const override;
+
     /**
      * Constructor
      */
@@ -141,9 +180,11 @@ public:
     DatabaseType get_sql_compatibility() const override;
 
 private:
-    bool expand_op(const List *operators, const ICachedColumn *ce) const;
-    
+    bool expand_op(const List *operators, const ICachedColumn *ce) const;    
     const char *get_current_database() const;
+
+private:
+    CacheLoader* m_cache_loader;
 };
 
 #endif

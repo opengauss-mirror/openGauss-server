@@ -250,6 +250,26 @@ Datum int2vectorsend(PG_FUNCTION_ARGS)
     return array_send(fcinfo);
 }
 
+Datum int2vectorin_extend(PG_FUNCTION_ARGS)
+{
+    return int2vectorin(fcinfo);
+}
+
+Datum int2vectorout_extend(PG_FUNCTION_ARGS)
+{
+    return int2vectorout(fcinfo);
+}
+
+Datum int2vectorrecv_extend(PG_FUNCTION_ARGS)
+{
+    return int2vectorrecv(fcinfo);
+}
+
+Datum int2vectorsend_extend(PG_FUNCTION_ARGS)
+{
+    return int2vectorsend(fcinfo);
+}
+
 /*
  * We don't have a complete set of int2vector support routines,
  * but we need int2vectoreq for catcache indexing.

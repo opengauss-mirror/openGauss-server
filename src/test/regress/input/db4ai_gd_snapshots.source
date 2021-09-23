@@ -1,0 +1,84 @@
+
+CREATE TABLE abalone (
+    id INT,
+    sex_f SMALLINT,
+    sex_i SMALLINT,
+    sex_m SMALLINT,
+    length DOUBLE PRECISION,
+    diameter DOUBLE PRECISION,
+    height DOUBLE PRECISION,
+    whole DOUBLE PRECISION,
+    shucked DOUBLE PRECISION,
+    viscera DOUBLE PRECISION,
+    shell DOUBLE PRECISION,
+    rings INT
+);
+
+\copy abalone FROM '@abs_srcdir@/data/abalone.txt' DELIMITER ',';
+
+SELECT * FROM abalone ORDER BY id LIMIT 5;
+
+SELECT COUNT(*) FROM abalone;
+
+-- prepare snapshots
+SET db4ai_snapshot_mode = CSS;
+
+CREATE SNAPSHOT abalone AS
+    SELECT * FROM abalone;
+
+SELECT COUNT(*) FROM abalone@1.0.0;
+-- SELECT * FROM abalone@1.0.0 ORDER BY id LIMIT 10;
+
+SELECT setseed(0.28);
+CREATE SNAPSHOT abalone@train FROM @1.0.0 USING (
+    DELETE WHERE RANDOM() <= 0.2;
+    );
+
+SELECT COUNT(*),SUM(rings) FROM abalone@train;
+-- SELECT * FROM abalone@train ORDER BY id LIMIT 10;
+
+CREATE SNAPSHOT abalone@test FROM @1.0.0 USING (
+    DELETE WHERE id IN (SELECT id FROM abalone@train);
+    );
+
+SELECT COUNT(*),SUM(rings) FROM abalone@test;
+-- SELECT * FROM abalone@test ORDER BY id LIMIT 10;
+
+SELECT id, parent_id, matrix_id, root_id, schema, name, commands,
+       comment, published, archived, row_count
+  FROM db4ai.snapshot;
+
+-- linear regression
+CREATE MODEL abalone USING linear_regression
+       FEATURES sex_f, sex_i, sex_m, length, diameter, height,
+                whole, shucked, viscera, shell
+       TARGET rings
+       FROM abalone@train
+       WITH seed = 1;
+
+SELECT modelname, processedtuples, discardedtuples, iterations, outputtype, modeltype, query, modeldata, weight,
+       hyperparametersnames,  hyperparametersvalues, hyperparametersoids, coefnames, coefvalues, coefoids,
+       trainingscoresname, trainingscoresvalue, modeldescribe
+  FROM gs_model_warehouse;
+
+SELECT id, target, prediction, abs(prediction-target) as residual
+FROM (
+    SELECT id, rings AS target,
+           PREDICT BY abalone
+                (FEATURES sex_f, sex_i, sex_m, length, diameter, height,
+                          whole, shucked, viscera, shell)
+                AS prediction
+    FROM abalone@test
+)
+ORDER BY id;
+
+-- done
+DROP MODEL abalone;
+PURGE SNAPSHOT abalone@test;
+PURGE SNAPSHOT abalone@train;
+PURGE SNAPSHOT abalone@1.0.0;
+SELECT * FROM db4ai.snapshot;
+
+DROP TABLE abalone;
+
+SELECT 'DB4AI GD SNAPSHOTS TEST COMPLETED';

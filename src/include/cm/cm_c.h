@@ -2,7 +2,7 @@
  * 
  * cm_c.h
  *        Fundamental C definitions.  This is included by every .c file in
- *	      PostgreSQL (via either postgres.h or postgres_fe.h, as appropriate).
+ *	      openGauss (via either postgres.h or postgres_fe.h, as appropriate).
  *
  *	      Note that the definitions here are not intended to be exposed to clients
  *	      of the frontend interface libraries --- so we don't worry much about
@@ -35,9 +35,10 @@
 #include <errno.h>
 #include <pthread.h>
 #include "c.h"
-#include "cm/cm_misc.h"
 #include "securec.h"
 #include "securec_check.h"
+#include "utils/syscall_lock.h"
+#include "cm/etcdapi.h"
 
 #ifdef PC_LINT
 #ifndef Assert

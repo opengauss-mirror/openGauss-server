@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * rangetypes.h
- *	  Declarations for Postgres range types.
+ *	  Declarations for openGauss range types.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

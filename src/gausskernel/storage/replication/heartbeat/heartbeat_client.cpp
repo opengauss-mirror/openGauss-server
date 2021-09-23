@@ -48,7 +48,7 @@ struct replconninfo* GetHeartBeatServerConnInfo(void)
 {
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
-    if (walrcv->pid == 0) {
+    if (walrcv->pid <= 0) {
         return NULL;
     }
 
@@ -68,8 +68,7 @@ struct replconninfo* GetHeartBeatServerConnInfo(void)
 
         /* find target conninfo by conn_channel */
         if (strcmp(conninfo->remotehost, (char*)walrcv->conn_channel.remotehost) == 0 &&
-            conninfo->remoteport == walrcv->conn_channel.remoteport &&
-            conninfo->remoteservice == walrcv->conn_channel.remoteservice) {
+            conninfo->remoteport == walrcv->conn_channel.remoteport) {
             return conninfo;
         }
     }
@@ -94,7 +93,7 @@ bool HeartbeatClient::Connect()
     while (i < MAX_REPLNODE_NUM) {
         conninfo = GetHeartBeatServerConnInfo();
         if (conninfo == NULL) {
-            (void)sleep(SLEEP_TIME);
+            sleep(SLEEP_TIME);
             i++;
             continue;
         }

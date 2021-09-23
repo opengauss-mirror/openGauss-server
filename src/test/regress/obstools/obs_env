@@ -1,0 +1,1 @@
+export LD_LIBRARY_PATH=../../../../Platform/suse11_sp1_x86_64/libobs/comm/lib/:$LD_LIBRARY_PATH 

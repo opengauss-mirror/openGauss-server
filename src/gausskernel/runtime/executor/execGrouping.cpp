@@ -59,8 +59,6 @@ bool execTuplesMatch(TupleTableSlot* slot1, TupleTableSlot* slot2, int numCols, 
     MemoryContextReset(evalContext);
     oldContext = MemoryContextSwitchTo(evalContext);
 
-    Assert(slot1->tts_tupleDescriptor->tdTableAmType == slot2->tts_tupleDescriptor->tdTableAmType);
-
     /*
      * We cannot report a match without checking all the fields, but we can
      * report a non-match as soon as we find unequal fields.  So, start

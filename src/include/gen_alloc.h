@@ -15,7 +15,7 @@
 #define GEN_ALLOC_H
 
 /*
- * Common memory allocation binary interface both for Postgres and GTM processes.
+ * Common memory allocation binary interface both for openGauss and GTM processes.
  * Especially needed by gtm_serialize.c and gtm_serialize_debug.c
  */
 typedef struct Gen_Alloc {

@@ -25,7 +25,7 @@
 #define SRC_BACKEND_ACCESS_DFS_ORC_ORC_STREAM_ADAPTER_H
 #include <string>
 
-/* Becareful: liborc header file must before  postgres header file */
+/* Becareful: liborc header file must before  openGauss header file */
 #include "orc/Adaptor.hh"
 #include "orc/Exceptions.hh"
 #include "orc/OrcFile.hh"

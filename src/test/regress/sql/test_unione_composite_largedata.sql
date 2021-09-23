@@ -1,0 +1,146 @@
+set enable_default_ustore_table = on;
+
+create schema test_unione_composite_largedata;
+set current_schema='test_unione_composite_largedata';
+
+-- create type
+create type composite as (c1 int, c2 text, c3 boolean);
+create type nested_composite_type as (c1 int, c2 composite);
+create type composite_type_largedata as (c1 int, c2 text);
+create type composite_type_complex as (col_int integer, col_decimal decimal, col_bool boolean, col_money money, col_text text, col_date date, col_geo point, col_net cidr, col_circle circle);
+
+-- create table
+create table t1 (c1 composite_type_largedata) with (storage_type=USTORE);
+create table v_t1 (c1 composite_type_largedata) with (orientation=row);
+create table composite_complex (c1 composite_type_complex) with (storage_type=USTORE);
+create table v_composite_complex (c1 composite_type_complex) with (orientation=row);
+create table nested_composite (c1 nested_composite_type) with (storage_type=USTORE);
+create table v_nested_composite (c1 nested_composite_type) with (orientation=row);
+
+-- insert data
+insert into t1 values (row(1,repeat('hello',10000)));
+insert into t1 values (row(2,repeat('helloo',10000)));
+insert into v_t1 values (row(1,repeat('hello',10000)));
+insert into v_t1 values (row(2,repeat('helloo',10000)));
+
+create view view1 as (select * from t1 except select * from v_t1);
+
+select * from view1;
+
+-- update data
+update t1 set c1.c2=repeat('hi',10000);
+update v_t1 set c1.c2=repeat('hi',10000);
+
+create view view2 as (select * from t1 except select * from v_t1);
+
+select * from view2;
+
+-- delete
+delete from t1 where (t1.c1).c2=repeat('helloo',10000);
+delete from v_t1 where (v_t1.c1).c2=repeat('helloo',10000);
+
+create view view3 as (select * from t1 except select * from v_t1);
+
+select * from view3;
+
+-- insert select
+create table t2 (c1 composite_type_largedata) with (storage_type=USTORE);
+create table v_t2 (c1 composite_type_largedata) with (orientation=row);
+
+insert into t1 values (row(1,repeat('hello',10000)));
+insert into t1 values (row(2,repeat('helloo',10000)));
+insert into v_t1 values (row(1,repeat('hello',10000)));
+insert into v_t1 values (row(2,repeat('helloo',10000)));
+
+insert into t2 select * from t1;
+insert into v_t2 select * from v_t1;
+
+create view view4 as (select * from t1 except select * from v_t1);
+
+select * from view4;
+
+-- test composite complex type
+-- insert
+insert into composite_complex values (row(214748,12345.122,false,2000,repeat('hello',10000),'2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into composite_complex values (row(21478,135.2468,true,2000,repeat('helloo',10000),'2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+insert into v_composite_complex values (row(214748,12345.122,false,2000,repeat('hello',10000),'2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into v_composite_complex values (row(21478,135.2468,true,2000,repeat('helloo',10000),'2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+
+-- insert select
+create table i_composite_complex (c1 composite_type_complex) with (storage_type=USTORE);
+create table i_v_composite_complex (c1 composite_type_complex) with (orientation=row);
+
+insert into i_composite_complex select * from composite_complex;
+insert into i_v_composite_complex select * from v_composite_complex;
+
+-- update
+update composite_complex set c1.col_text=repeat('hi',10000) where (composite_complex.c1).col_bool=false;
+update v_composite_complex set c1.col_text=repeat('hi',10000) where (v_composite_complex.c1).col_bool=false;
+
+-- delete
+delete from composite_complex where (composite_complex.c1).col_text=repeat('hi',10000);
+delete from v_composite_complex where (v_composite_complex.c1).col_text=repeat('hi',10000);
+
+-- test nested composite type
+create table i_nested_composite (c1 nested_composite_type) with (storage_type=USTORE);
+create table i_v_nested_composite (c1 nested_composite_type) with (orientation=row);
+
+insert into nested_composite values (row(1,row(1,'hello',true)));
+insert into v_nested_composite values (row(1,row(1,'hello',true)));
+insert into nested_composite values (row(2,row(3,'helloo',false)));
+insert into v_nested_composite values (row(2,row(3,'helloo',false)));
+
+create view view5 as (select * from nested_composite except select * from v_nested_composite);
+
+select * from view5;
+
+insert into i_nested_composite select * from nested_composite;
+insert into i_v_nested_composite select * from v_nested_composite;
+
+create view view6 as (select * from nested_composite except select * from v_nested_composite);
+
+select * from view6;
+
+update nested_composite set c1.c2.c1=2;
+update v_nested_composite set c1.c2.c1=2;
+
+create view view7 as (select * from nested_composite except select * from v_nested_composite);
+
+select * from view7;
+
+delete from nested_composite where ((nested_composite.c1).c2).c3=false;
+delete from v_nested_composite where ((v_nested_composite.c1).c2).c3=false;
+
+create view view8 as (select * from nested_composite except select * from v_nested_composite);
+
+select * from view8;
+
+-- drop tables and views
+drop view view1;
+drop view view2;
+drop view view3;
+drop view view4;
+drop view view5;
+drop view view6;
+drop view view7;
+drop view view8;
+
+drop table t1;
+drop table t2;
+drop table composite_complex;
+drop table i_composite_complex;
+drop table nested_composite;
+drop table i_nested_composite;
+
+drop table v_t1;
+drop table v_t2;
+drop table v_composite_complex;
+drop table i_v_composite_complex;
+drop table v_nested_composite;
+drop table i_v_nested_composite;
+
+drop type composite_type_largedata;
+drop type composite_type_complex;
+drop type nested_composite_type;
+drop type composite;
+

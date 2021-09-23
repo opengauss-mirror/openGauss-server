@@ -1,0 +1,164 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6a
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6a';
+
+-- case 6a: concurrent fetch and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 6b: concurrent fetch and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6b
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6b';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|'; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 6c: concurrent fetch and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6c
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_fetch_6c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6c';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+update t1 set c2=3 where c1=3;
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 6d: concurrent fetch and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6d
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_fetch_6d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6d';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+update t1 set c2=3 where c1=3;
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+
+---- case 6e: concurrent fetch and lock; lock is delayed for 0.5 seconds
+--\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6e
+--\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6e
+--set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6e';
+--
+--drop table if exists t1;
+--CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+--insert into t1 values (15,10);
+--insert into t1 values (default);
+--select * from t1;
+--
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c2=1;" 2>&1 | append_timestamp "terminal 1" &
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+--\! sleep 15
+--select * from t1;
+
+-- case 6f: concurrent fetch and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6f
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6f';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 6g: concurrent fetch and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6g
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6g';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values (50, 'abc');
+insert into t1 values (60,'fbc');
+insert into t1 values (70,'gbc');
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select * from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c2 = 'abcabcabc' where c1 >= 60;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 6h: concurrent fetch and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6h
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6h';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+
+-- case 6i: concurrent fetch and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6i
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_fetch_6i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_fetch_6i';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (10,15,repeat('e',10000),repeat('d',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+
+-- drop all tables
+drop table t1;
+
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6a
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6b
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6c
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6d
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6e
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6f
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6g
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6h
+\! rm -f @abs_srcdir@/concurrent_uheap_fetch_6i

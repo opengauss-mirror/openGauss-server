@@ -332,7 +332,8 @@ void JobExecuteWorkerMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Worker", MEMORY_CONTEXT_EXECUTOR);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Worker",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     /* Get classified list of node Oids for syschronise th job info. */
     exec_init_poolhandles();

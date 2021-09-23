@@ -375,7 +375,8 @@ static bool gistUserPicksplit(Relation r, GistEntryVector *entryvec, int attno, 
     FunctionCall2Coll(&giststate->picksplitFn[attno], giststate->supportCollation[attno], PointerGetDatum(entryvec),
                       PointerGetDatum(sv));
 
-    if (sv->spl_nleft == 0 || sv->spl_nright == 0) {
+    bool isFailed = (sv->spl_nleft == 0 || sv->spl_nright == 0);
+    if (isFailed) {
         /*
          * User-defined picksplit failed to create an actual split, ie it put
          * everything on the same side.  Complain but cope.

@@ -1,0 +1,163 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4a
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4a';
+
+-- case 4a: concurrent update and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4b: concurrent update and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4b
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4b';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|'; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4c: concurrent update and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4c
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4c';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4d: concurrent update and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4d
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4d';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+
+-- case 4e: concurrent update and lock; lock is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4e
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4e';
+
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+insert into t1 values (15,10);
+insert into t1 values (default);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=15;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4f: concurrent update and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4f
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4f';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4g: concurrent update and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4g
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4g';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values (50, 'abc');
+insert into t1 values (60,'fbc');
+insert into t1 values (70,'gbc');
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=60 where c1=70;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c2 = 'abcabcabc' where c1 >= 60;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 4h: concurrent update and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4h
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4h';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000));
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+-- case 4i: concurrent update and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4i
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_update_4i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_update_4i';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000));
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=3 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (1,15,repeat('e',10000),repeat('d',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+
+-- drop all tables
+drop table t1;
+
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4a
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4b
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4c
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4d
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4e
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4f
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4g
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4h
+\! rm -f @abs_srcdir@/concurrent_uheap_update_4i

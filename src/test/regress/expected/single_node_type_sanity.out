@@ -67,15 +67,13 @@ WHERE p1.typtype not in ('c','d','p') AND p1.typname NOT LIKE E'\\_%'
     (SELECT 1 FROM pg_type as p2
      WHERE p2.typname = ('_' || p1.typname)::name AND
            p2.typelem = p1.oid and p1.typarray = p2.oid);
- oid  |            typname            
-------+-------------------------------
-   32 | oidvector_extend
-  210 | smgr
-  194 | pg_node_tree
- 4402 | byteawithoutorderwithequalcol
-  705 | unknown
- 4403 | byteawithoutordercol
-(6 rows)
+ oid |     typname      
+-----+------------------
+  32 | oidvector_extend
+ 210 | smgr
+ 194 | pg_node_tree
+ 705 | unknown
+(4 rows)
 
 -- Make sure typarray points to a varlena array type of our own base
 SELECT p1.oid, p1.typname as basetype, p2.typname as arraytype,
@@ -83,14 +81,10 @@ SELECT p1.oid, p1.typname as basetype, p2.typname as arraytype,
 FROM   pg_type p1 LEFT JOIN pg_type p2 ON (p1.typarray = p2.oid)
 WHERE  p1.typarray <> 0 AND
        (p2.oid IS NULL OR p2.typelem <> p1.oid OR p2.typlen <> -1);
- oid  |            basetype            | arraytype  | typelem | typlen 
-------+--------------------------------+------------+---------+--------
-   32 | oidvector_extend               | _oidvector |      30 |     -1
- 4402 | byteawithoutorderwithequalcol  | _bytea     |      17 |     -1
- 4403 | byteawithoutordercol           | _bytea     |      17 |     -1
- 4404 | _byteawithoutorderwithequalcol | _bytea     |      17 |     -1
- 4405 | _byteawithoutordercol          | _bytea     |      17 |     -1
-(5 rows)
+ oid |     basetype     | arraytype  | typelem | typlen 
+-----+------------------+------------+---------+--------
+  32 | oidvector_extend | _oidvector |      30 |     -1
+(1 row)
 
 -- Look for range types that do not have a pg_range entry
 SELECT p1.oid, p1.typname
@@ -142,15 +136,13 @@ WHERE p1.typinput = p2.oid AND p1.typtype in ('b', 'p') AND NOT
     (p1.typelem != 0 AND p1.typlen < 0) AND NOT
     (p2.prorettype = p1.oid AND NOT p2.proretset)
 ORDER BY 1;
- oid  |            typname             | oid  | proname  
-------+--------------------------------+------+----------
-   86 | raw                            | 4035 | rawin
-   88 | blob                           | 4035 | rawin
-   90 | clob                           |   46 | textin
- 1790 | refcursor                      |   46 | textin
- 4404 | _byteawithoutorderwithequalcol |  750 | array_in
- 4405 | _byteawithoutordercol          |  750 | array_in
-(6 rows)
+ oid  |  typname  | oid  | proname 
+------+-----------+------+---------
+   86 | raw       | 4035 | rawin
+   88 | blob      | 4035 | rawin
+   90 | clob      |   46 | textin
+ 1790 | refcursor |   46 | textin
+(4 rows)
 
 -- Varlena array types will point to array_in
 -- Exception as of 8.1: int2vector and oidvector have their own I/O routines
@@ -160,12 +152,13 @@ WHERE p1.typinput = p2.oid AND p1.typtype in ('b', 'p') AND
     (p1.typelem != 0 AND p1.typlen < 0) AND NOT
     (p2.oid = 'array_in'::regproc)
 ORDER BY 1;
- oid |     typname      | oid |      proname       
------+------------------+-----+--------------------
-  22 | int2vector       |  40 | int2vectorin
-  30 | oidvector        |  54 | oidvectorin
-  32 | oidvector_extend |  91 | oidvectorin_extend
-(3 rows)
+ oid |      typname      | oid  |       proname       
+-----+-------------------+------+---------------------
+  22 | int2vector        |   40 | int2vectorin
+  30 | oidvector         |   54 | oidvectorin
+  32 | oidvector_extend  |   91 | oidvectorin_extend
+  33 | int2vector_extend | 2600 | int2vectorin_extend
+(4 rows)
 
 -- Composites, domains, enums, ranges should all use the same input routines
 SELECT DISTINCT typtype, typinput
@@ -191,15 +184,13 @@ WHERE p1.typoutput = p2.oid AND p1.typtype in ('b', 'p') AND NOT
       (p2.oid = 'array_out'::regproc AND
        p1.typelem != 0 AND p1.typlen = -1)))
 ORDER BY 1;
- oid  |            typname             | oid  |  proname  
-------+--------------------------------+------+-----------
-   86 | raw                            | 4036 | rawout
-   88 | blob                           | 4036 | rawout
-   90 | clob                           |   47 | textout
- 1790 | refcursor                      |   47 | textout
- 4404 | _byteawithoutorderwithequalcol |  751 | array_out
- 4405 | _byteawithoutordercol          |  751 | array_out
-(6 rows)
+ oid  |  typname  | oid  | proname 
+------+-----------+------+---------
+   86 | raw       | 4036 | rawout
+   88 | blob      | 4036 | rawout
+   90 | clob      |   47 | textout
+ 1790 | refcursor |   47 | textout
+(4 rows)
 
 SELECT p1.oid, p1.typname, p2.oid, p2.proname
 FROM pg_type AS p1, pg_proc AS p2
@@ -249,16 +240,14 @@ WHERE p1.typreceive = p2.oid AND p1.typtype in ('b', 'p') AND NOT
     (p1.typelem != 0 AND p1.typlen < 0) AND NOT
     (p2.prorettype = p1.oid AND NOT p2.proretset)
 ORDER BY 1;
- oid  |            typname             | oid  |              proname              
-------+--------------------------------+------+-----------------------------------
-   88 | blob                           | 2412 | bytearecv
-   90 | clob                           | 2414 | textrecv
- 1790 | refcursor                      | 2414 | textrecv
- 4402 | byteawithoutorderwithequalcol  | 4444 | byteawithoutorderwithequalcolrecv
- 4403 | byteawithoutordercol           | 4424 | byteawithoutordercolrecv
- 4404 | _byteawithoutorderwithequalcol | 2400 | array_recv
- 4405 | _byteawithoutordercol          | 2400 | array_recv
-(7 rows)
+ oid  |            typname            | oid  |              proname              
+------+-------------------------------+------+-----------------------------------
+   88 | blob                          | 2412 | bytearecv
+   90 | clob                          | 2414 | textrecv
+ 1790 | refcursor                     | 2414 | textrecv
+ 4402 | byteawithoutorderwithequalcol | 4444 | byteawithoutorderwithequalcolrecv
+ 4403 | byteawithoutordercol          | 4424 | byteawithoutordercolrecv
+(5 rows)
 
 -- Varlena array types will point to array_recv
 -- Exception as of 8.1: int2vector and oidvector have their own I/O routines
@@ -268,12 +257,13 @@ WHERE p1.typreceive = p2.oid AND p1.typtype in ('b', 'p') AND
     (p1.typelem != 0 AND p1.typlen < 0) AND NOT
     (p2.oid = 'array_recv'::regproc)
 ORDER BY 1;
- oid |     typname      | oid  |       proname        
------+------------------+------+----------------------
-  22 | int2vector       | 2410 | int2vectorrecv
-  30 | oidvector        | 2420 | oidvectorrecv
-  32 | oidvector_extend | 3122 | oidvectorrecv_extend
-(3 rows)
+ oid |      typname      | oid  |        proname        
+-----+-------------------+------+-----------------------
+  22 | int2vector        | 2410 | int2vectorrecv
+  30 | oidvector         | 2420 | oidvectorrecv
+  32 | oidvector_extend  | 3122 | oidvectorrecv_extend
+  33 | int2vector_extend | 2602 | int2vectorrecv_extend
+(4 rows)
 
 -- Suspicious if typreceive doesn't take same number of args as typinput
 SELECT p1.oid, p1.typname, p2.oid, p2.proname, p3.oid, p3.proname
@@ -309,16 +299,14 @@ WHERE p1.typsend = p2.oid AND p1.typtype in ('b', 'p') AND NOT
       (p2.oid = 'array_send'::regproc AND
        p1.typelem != 0 AND p1.typlen = -1)))
 ORDER BY 1;
- oid  |            typname             | oid  |              proname              
-------+--------------------------------+------+-----------------------------------
-   88 | blob                           | 2413 | byteasend
-   90 | clob                           | 2415 | textsend
- 1790 | refcursor                      | 2415 | textsend
- 4402 | byteawithoutorderwithequalcol  | 4451 | byteawithoutorderwithequalcolsend
- 4403 | byteawithoutordercol           | 4425 | byteawithoutordercolsend
- 4404 | _byteawithoutorderwithequalcol | 2401 | array_send
- 4405 | _byteawithoutordercol          | 2401 | array_send
-(7 rows)
+ oid  |            typname            | oid  |              proname              
+------+-------------------------------+------+-----------------------------------
+   88 | blob                          | 2413 | byteasend
+   90 | clob                          | 2415 | textsend
+ 1790 | refcursor                     | 2415 | textsend
+ 4402 | byteawithoutorderwithequalcol | 4451 | byteawithoutorderwithequalcolsend
+ 4403 | byteawithoutordercol          | 4425 | byteawithoutordercolsend
+(5 rows)
 
 SELECT p1.oid, p1.typname, p2.oid, p2.proname
 FROM pg_type AS p1, pg_proc AS p2
@@ -435,14 +423,13 @@ WHERE t.typbasetype = 0 AND
     (t.typanalyze = 'array_typanalyze'::regproc) !=
     (typelem != 0 AND typlen < 0)
 ORDER BY 1;
- oid  |            typname             |    typanalyze    
-------+--------------------------------+------------------
-   22 | int2vector                     | -
-   30 | oidvector                      | -
-   32 | oidvector_extend               | -
- 4404 | _byteawithoutorderwithequalcol | array_typanalyze
- 4405 | _byteawithoutordercol          | array_typanalyze
-(5 rows)
+ oid |      typname      | typanalyze 
+-----+-------------------+------------
+  22 | int2vector        | -
+  30 | oidvector         | -
+  32 | oidvector_extend  | -
+  33 | int2vector_extend | -
+(4 rows)
 
 -- **************** pg_class ****************
 -- Look for illegal values in pg_class fields

@@ -1,0 +1,16 @@
+#multi_standby_single/inc_build_failover
+#multi_standby_single/inc_build_failover_twice
+#multi_standby_single/inc_build_primary_checkpoint_keep
+#multi_standby_single/inc_build_reconnect
+#multi_standby_single/inc_build_slave_checkpoint_keep
+#multi_standby_single/sync_commit
+#multi_standby_single/quorum
+paxos_single/changerole
+paxos_single/set_run_mode
+paxos_single/remove_add_node
+paxos_single/switchover
+paxos_single/kill
+#paxos_single/failover
+#multi_standby_single/params
+#multi_standby_single/most_available
+#multi_standby_single/failover_with_data

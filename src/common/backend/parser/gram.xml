@@ -767,7 +767,8 @@ COPY table_name [ ( column_name [, ...] ) ]
     [ WITHOUT ESCAPING ]
     [ [ WITH ] ( option [, ...] ) ]
     | copy_option
-    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ]
+    | [ TRANSFORM ( { column_name [ data_type ] [ AS transform_expr ] } [, ...] ) ];
 ]]></MainSentence>
     <MainSentence id="TO SYN"><![CDATA[
 COPY table_name [ ( column_name [, ...] ) ]

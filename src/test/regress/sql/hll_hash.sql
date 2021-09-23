@@ -17,10 +17,10 @@ SELECT hll_hash_boolean(FALSE);
 SELECT hll_hash_boolean(0);
 SELECT hll_hash_boolean('f');
 SELECT hll_hash_boolean(FALSE,123);
-
 SELECT hll_hash_boolean(TRUE);
 SELECT hll_hash_boolean('t');
 SELECT hll_hash_boolean(1);
+SELECT hll_hash_boolean(10);
 SELECT hll_hash_boolean(TRUE,123);
 
 ------------------------------------------
@@ -55,6 +55,13 @@ SELECT hll_hash_text('A');
 SELECT hll_hash_text('B');
 SELECT hll_hash_text('AB');
 SELECT hll_hash_text('AB',123);
+SELECT hll_hash_text(
+'过零丁洋 - 百度汉语
+作者：文天祥
+辛苦遭逢起一经，干戈寥落四周星。
+山河破碎风飘絮，身世浮沉雨打萍。
+惶恐滩头说惶恐，零丁洋里叹零丁。
+人生自古谁无死？留取丹心照汗青。');
 
 ------------------------------------------
 -- 4. hll_hash_any
@@ -62,6 +69,7 @@ SELECT hll_hash_text('AB',123);
 --- Check hash and hash_any function results match
 
 SELECT hll_hash_boolean(FALSE) = hll_hash_any(FALSE);
+SELECT hll_hash_boolean(FALSE) = hll_hash_any(FALSE,123);
 SELECT hll_hash_boolean(TRUE) = hll_hash_any(TRUE);
 SELECT hll_hash_boolean(TRUE) = hll_hash_any(TRUE,123);
 

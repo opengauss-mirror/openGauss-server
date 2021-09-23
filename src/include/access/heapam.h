@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * heapam.h
- *	  POSTGRES heap access method definitions.
+ *	  openGauss heap access method definitions.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -18,6 +18,7 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/xlogrecord.h"
+#include "executor/tuptable.h"
 #include "nodes/primnodes.h"
 #include "storage/lock/lock.h"
 #include "storage/pagecompress.h"
@@ -76,6 +77,10 @@ typedef struct TableScanDescData
     BufferAccessStrategy rs_strategy; /* access strategy for reads */
     bool rs_syncscan;                 /* report location to syncscan logic? */
 
+    /* fields used for ustore partial seq scan */
+    AttrNumber lastVar = -1; /* last variable (table column) needed for seq scan (non-inclusive), -1 = all */
+    bool* boolArr = NULL; /* false elements indicate columns that must be copied during seq scan */
+
     /* scan current state */
     bool rs_inited;        /* false = scan not init'd yet */
     BlockNumber rs_cblock; /* current block # in scan, if any */
@@ -89,6 +94,7 @@ typedef struct TableScanDescData
 
     /* state set up at initscan time */
     RangeScanInRedis  rs_rangeScanInRedis;       /* if it is a range scan in redistribution */
+    TupleTableSlot *slot; /* For begin scan of CopyTo */
 } TableScanDescData;
 
 /* struct definition appears in relscan.h */
@@ -120,7 +126,18 @@ struct ScanState;
 
 typedef struct BulkInsertStateData* BulkInsertState;
 
-typedef enum { LockTupleShared, LockTupleExclusive } LockTupleMode;
+typedef enum {
+    /* SELECT FOR KEY SHARE */
+    LockTupleKeyShare,
+    /* SELECT FOR SHARE */
+    LockTupleShared,
+    /* SELECT FOR NO KEY UPDATE, and UPDATEs that don't modify key columns */
+    LockTupleNoKeyExclusive,
+    /* SELECT FOR UPDATE, UPDATEs that modify key columns, and DELETE */
+    LockTupleExclusive 
+} LockTupleMode;
+
+#define MaxLockTupleMode        LockTupleExclusive
 
 /* the last arguments info for heap_multi_insert() */
 typedef struct {
@@ -157,6 +174,7 @@ typedef struct TM_FailureData
     TransactionId xmax;
     TransactionId xmin;
     CommandId cmax;
+    bool in_place_updated_or_locked;
 } TM_FailureData;
 
 #define enable_heap_bcm_data_replication() \
@@ -185,7 +203,7 @@ extern void relation_close(Relation relation, LOCKMODE lockmode);
 extern Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId);
 extern Relation heap_open(Oid relationId, LOCKMODE lockmode, int2 bucketid=-1);
 extern Relation heap_openrv(const RangeVar *relation, LOCKMODE lockmode);
-extern Relation heap_openrv_extended(const RangeVar* relation, LOCKMODE lockmode, bool missing_ok,
+extern Relation HeapOpenrvExtended(const RangeVar* relation, LOCKMODE lockmode, bool missing_ok,
     bool isSupportSynonym = false, StringInfo detailInfo = NULL);
 extern Partition bucketGetPartition(Partition part, int2 bucketid);
 extern void bucketClosePartition(Partition bucket);
@@ -194,6 +212,7 @@ extern void bucketClosePartition(Partition bucket);
 
 /* struct definition appears in relscan.h */
 typedef struct HeapScanDescData* HeapScanDesc;
+typedef struct ParallelHeapScanDescData *ParallelHeapScanDesc;
 
 /*
  * HeapScanIsValid
@@ -216,9 +235,13 @@ extern void heap_endscan(TableScanDesc scan);
 extern HeapTuple heap_getnext(TableScanDesc scan, ScanDirection direction);
 
 extern void heap_init_parallel_seqscan(TableScanDesc sscan, int32 dop, ScanDirection dir);
+extern void HeapParallelscanInitialize(ParallelHeapScanDesc target, Relation relation);
+extern HeapScanDesc HeapBeginscanParallel(Relation, ParallelHeapScanDesc);
 
 extern HeapTuple heapGetNextForVerify(TableScanDesc scan, ScanDirection direction, bool& isValidRelationPage);
-extern bool heap_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf, bool keep_buf, Relation stats_relation);
+extern bool heap_fetch(Relation relation, Snapshot snapshot, HeapTuple tuple, Buffer *userbuf, bool keepBuf, Relation statsRelation);
+extern bool TableIndexFetchTupleCheck(Relation rel, ItemPointer tid, Snapshot snapshot, bool *allDead);
+
 extern bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, Snapshot snapshot,
     HeapTuple heapTuple, HeapTupleHeaderData* uncompressTup, bool* all_dead, bool first_call);
 extern bool heap_hot_search(ItemPointer tid, Relation relation, Snapshot snapshot, bool* all_dead);
@@ -252,7 +275,7 @@ extern bool heap_freeze_tuple(HeapTuple tuple, TransactionId cutoff_xid);
 extern bool heap_tuple_needs_freeze(HeapTuple tuple, TransactionId cutoff_xid, Buffer buf);
 
 extern Oid simple_heap_insert(Relation relation, HeapTuple tup);
-extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0);
+extern void simple_heap_delete(Relation relation, ItemPointer tid, int options = 0, bool allow_update_self = false);
 extern void simple_heap_update(Relation relation, ItemPointer otid, HeapTuple tup);
 
 extern void heap_markpos(TableScanDesc scan);
@@ -283,12 +306,13 @@ extern XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer 
     TransactionId cutoff_xid, bool free_dict);
 extern XLogRecPtr log_cu_bcm(const RelFileNode* rnode, int col, uint64 block, int status, int count);
 extern XLogRecPtr log_heap_bcm(const RelFileNode* rnode, int col, uint64 block, int status);
-extern XLogRecPtr log_newpage(RelFileNode* rnode, ForkNumber forkNum, BlockNumber blk, Page page, bool page_std);
+extern XLogRecPtr log_newpage(RelFileNode* rnode, ForkNumber forkNum, BlockNumber blk, Page page, bool page_std, 
+    TdeInfo* tdeinfo = NULL);
 extern XLogRecPtr log_logical_newpage(
     RelFileNode* rnode, ForkNumber forkNum, BlockNumber blk, Page page, Buffer buffer);
 extern XLogRecPtr log_logical_newcu(
     RelFileNode* rnode, ForkNumber forkNum, int attid, Size offset, int size, char* cuData);
-extern XLogRecPtr log_newpage_buffer(Buffer buffer, bool page_std);
+extern XLogRecPtr log_newpage_buffer(Buffer buffer, bool page_std, TdeInfo* tde_info = NULL);
 /* in heap/pruneheap.c */
 extern void heap_page_prune_opt(Relation relation, Buffer buffer);
 extern int heap_page_prune(Relation relation, Buffer buffer, TransactionId OldestXmin, bool report_stats,
@@ -321,6 +345,7 @@ extern void PushHeapPageToDataQueue(Buffer buffer);
  *	if so, the indicated buffer is marked dirty.
  */
 extern bool HeapTupleSatisfiesVisibility(HeapTuple stup, Snapshot snapshot, Buffer buffer);
+extern void HeapTupleCheckVisible(Snapshot snapshot, HeapTuple tuple, Buffer buffer);
 
 /* Result codes for HeapTupleSatisfiesVacuum */
 typedef enum {

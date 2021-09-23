@@ -630,11 +630,11 @@ void TrimTrailingZeros(char* str)
  * style, str is where to write the output.
  *
  * Supported date styles:
- *	Postgres - day mon hh:mm:ss yyyy tz
+ *	openGauss - day mon hh:mm:ss yyyy tz
  *	SQL - mm/dd/yyyy hh:mm:ss.ss tz
  *	ISO - yyyy-mm-dd hh:mm:ss+/-tz
  *	German - dd.mm.yyyy hh:mm:ss tz
- * Variants (affects order of month and day for Postgres and SQL styles):
+ * Variants (affects order of month and day for openGauss and SQL styles):
  *	US - mm/dd/yyyy
  *	European - dd/mm/yyyy
  */
@@ -795,7 +795,7 @@ int EncodeDateTime(
 
         case USE_POSTGRES_DATES:
         default:
-            /* Backward-compatible with traditional Postgres abstime dates */
+            /* Backward-compatible with traditional openGauss abstime dates */
 
             day = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
             tm->tm_wday = (int)((day + date2j(2000, 1, 1) + 1) % 7);

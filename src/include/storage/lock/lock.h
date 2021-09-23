@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * lock.h
- *	  POSTGRES low-level lock mechanism
+ *	  openGauss low-level lock mechanism
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -18,6 +18,7 @@
 #include "storage/lock/lwlock.h"
 #include "storage/shmem.h"
 #include "gs_thread.h"
+#include "knl/knl_session.h"
 
 typedef struct PROC_QUEUE {
     SHM_QUEUE links; /* head of list of PGPROC objects */
@@ -174,10 +175,14 @@ typedef enum LockTagType {
      */
     LOCKTAG_USERLOCK, /* reserved for old contrib/userlock code */
     LOCKTAG_ADVISORY, /* advisory user locks */
+    /* same ID info as spcoid, dboid, reloid */
+    LOCKTAG_RELFILENODE, /* relfilenode */
+    LOCKTAG_SUBTRANSACTION, /* subtransaction (for waiting for subxact done) */
+    /* ID info for a transaction is its TransactionId + SubTransactionId */
     LOCK_EVENT_NUM
 } LockTagType;
 
-#define LOCKTAG_LAST_TYPE LOCKTAG_ADVISORY
+#define LOCKTAG_LAST_TYPE (LOCK_EVENT_NUM - 1)
 extern const char* const LockTagTypeNames[];
 
 /*
@@ -210,6 +215,15 @@ typedef struct LOCKTAG {
         (locktag).locktag_field4 = 0,                \
         (locktag).locktag_field5 = 0,                \
         (locktag).locktag_type = LOCKTAG_RELATION,   \
+        (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
+
+#define SET_LOCKTAG_RELFILENODE(locktag, spcoid, dboid, reloid) \
+    ((locktag).locktag_field1 = (spcoid),                       \
+        (locktag).locktag_field2 = (dboid),                     \
+        (locktag).locktag_field3 = (reloid),                    \
+        (locktag).locktag_field4 = 0,                           \
+        (locktag).locktag_field5 = 0,                           \
+        (locktag).locktag_type = LOCKTAG_RELFILENODE,           \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
 #define SET_LOCKTAG_RELATION_EXTEND(locktag, dboid, reloid, bucketid) \
@@ -257,6 +271,15 @@ typedef struct LOCKTAG {
         (locktag).locktag_type = LOCKTAG_VIRTUALTRANSACTION,                         \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
+#define SET_LOCKTAG_SUBTRANSACTION(locktag, xid, subxid) \
+            ((locktag).locktag_field1 = (uint32)((xid)&0xFFFFFFFF), \
+             (locktag).locktag_field2 = (uint32)((xid) >> 32), \
+             (locktag).locktag_field3 = subxid, \
+             (locktag).locktag_field4 = 0, \
+             (locktag).locktag_field5 = 0, \
+             (locktag).locktag_type = LOCKTAG_SUBTRANSACTION, \
+             (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
+
 #define SET_LOCKTAG_OBJECT(locktag, dboid, classoid, objoid, objsubid) \
     ((locktag).locktag_field1 = (dboid),                               \
         (locktag).locktag_field2 = (classoid),                         \
@@ -301,6 +324,12 @@ typedef struct LOCKTAG {
         (locktag).locktag_field5 = 0,                      \
         (locktag).locktag_type = LOCKTAG_CSTORE_FREESPACE, \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
+
+struct LockExtraInfo {
+    LOCKMODE        hwlock;
+    int                     lockstatus;
+    int                     updstatus;
+};
 
 /*
  * Per-locked-object lock information:
@@ -382,6 +411,7 @@ typedef struct PROCLOCK {
     PROCLOCKTAG tag; /* unique identifier of proclock object */
 
     /* data */
+    PGPROC  *groupLeader; /* group leader, or NULL if no lock group */	
     LOCKMASK holdMask;    /* bitmask for lock types currently held */
     LOCKMASK releaseMask; /* bitmask for lock types to be released */
     SHM_QUEUE lockLink;   /* list link in LOCK's list of proclocks */
@@ -459,6 +489,7 @@ typedef struct LockInstanceData {
     LocalTransactionId lxid; /* local transaction ID of this PGPROC */
     ThreadId pid;            /* pid of this PGPROC */
     uint64 sessionid;        /* session id of this PGPROC */
+    GlobalSessionId globalSessionId; /* global session id of this PGPROC */
     bool fastpath;           /* taken via fastpath? */
 } LockInstanceData;
 
@@ -486,6 +517,21 @@ typedef enum {
 } DeadLockState;
 
 /*
+ * This enum controls how to deal with rows being locked by FOR UPDATE/SHARE
+ * clauses (i.e., it represents the NOWAIT and SKIP LOCKED options).
+ * The ordering here is important, because the highest numerical value takes
+ * precedence when a RTE is specified multiple ways.  See applyLockingClause.
+ */
+typedef enum LockWaitPolicy {
+        /* Wait for the lock to become available (default behavior) */
+        LockWaitBlock,
+        /* Skip rows that can't be locked (SKIP LOCKED) */
+        LockWaitSkip,
+        /* Raise an error if a row cannot be locked (NOWAIT) */
+        LockWaitError
+} LockWaitPolicy;
+
+/*
  * The lockmgr's shared hash tables are partitioned to reduce contention.
  * To determine which partition a given locktag belongs to, compute the tag's
  * hash code with LockTagHashCode(), then apply one of these macros.
@@ -496,11 +542,24 @@ typedef enum {
 	(&t_thrd.shemem_ptr_cxt.mainLWLockArray[FirstLockMgrLock + LockHashPartition(hashcode)].lock)
 
 /*
+ * The deadlock detector needs to be able to access lockGroupLeader and
+ * related fields in the PGPROC, so we arrange for those fields to be protected
+ * by one of the lock hash partition locks.  Since the deadlock detector
+ * acquires all such locks anyway, this makes it safe for it to access these
+ * fields without doing anything extra.  To avoid contention as much as
+ * possible, we map different PGPROCs to different partition locks.  The lock
+ * used for a given lock group is determined by the group leader's pgprocno.
+ */
+#define LockHashPartitionLockByProc(leader_pgproc) \
+    LockHashPartitionLock((leader_pgproc)->pgprocno)
+
+/*
  * function prototypes
  */
 extern void InitLocks(void);
 extern LockMethod GetLocksMethodTable(const LOCK *lock);
 extern uint32 LockTagHashCode(const LOCKTAG *locktag);
+extern bool DoLockModesConflict(LOCKMODE mode1, LOCKMODE mode2);
 extern LockAcquireResult LockAcquire(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock, bool dontWait,
                                      bool allow_con_update = false);
 extern bool LockIncrementIfExists(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock);

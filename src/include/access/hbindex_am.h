@@ -45,10 +45,11 @@ static inline bool hbkt_idx_need_switch_bkt(IndexScanDesc scan, int targetSlot)
     }
 }
 
-extern bool hbkt_idx_bitmapscan_switch_bucket(IndexScanDesc scan, int target_slot);
-
 extern bool hbkt_idx_bitmapscan_switch_bucket(IndexScanDesc scan, int targetSlot);
-extern IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot, int nkeys, int norderbys, ScanState* scan_state);
+extern bool cbi_scan_need_fix_hbkt_rel(IndexScanDesc scan, int2 bucketid = InvalidBktId);
+extern bool cbi_scan_fix_hbkt_rel(HBktIdxScanDesc hpScan);
+extern IndexScanDesc scan_handler_idx_beginscan(Relation heap_relation, Relation index_relation, Snapshot snapshot, 
+    int nkeys, int norderbys, ScanState* scan_state = NULL);
 extern IndexScanDesc scan_handler_idx_beginscan_bitmap(Relation indexRelation, Snapshot snapshot, int nkeys, ScanState* scan_state);
 extern void scan_handler_idx_rescan(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys);
 extern void scan_handler_idx_rescan_local(IndexScanDesc scan, ScanKey key, int nkeys, ScanKey orderbys, int norderbys);
@@ -56,8 +57,9 @@ extern void scan_handler_idx_endscan(IndexScanDesc scan);
 extern void scan_handler_idx_markpos(IndexScanDesc scan);
 extern void scan_handler_idx_restrpos(IndexScanDesc scan);
 extern HeapTuple scan_handler_idx_fetch_heap(IndexScanDesc scan);
-extern HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction);
-extern ItemPointer scan_handler_idx_getnext_tid(IndexScanDesc scan, ScanDirection direction);
+extern HeapTuple scan_handler_idx_getnext(IndexScanDesc scan, ScanDirection direction, Oid expect_partoid = InvalidOid,
+    int2 expect_bktid = InvalidBktId);
+extern ItemPointer scan_handler_idx_getnext_tid(IndexScanDesc scan, ScanDirection direction, bool *bktchg = NULL);
 extern int64 scan_handler_idx_getbitmap(IndexScanDesc scan, TIDBitmap* bitmap);
 
 #endif /* HBINDEX_AM_H */

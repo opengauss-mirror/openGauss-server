@@ -18,6 +18,7 @@
 
 extern Oid ProcedureCreate(const char *procedureName,
                 Oid procNamespace,
+                Oid propackageid,
                 bool isOraStyle,
                 bool replace,
                 bool returnsSet,
@@ -45,9 +46,17 @@ extern Oid ProcedureCreate(const char *procedureName,
                 bool  fenced,
                 bool  shippable,
                 bool  package,
-                bool  proIsProcedure);
+                bool  proIsProcedure,
+                const char *proargsrc,
+                bool  isPrivate = false);
 
 extern bool function_parse_error_transpose(const char *prosrc);
 
+
+extern bool isSameArgList(List* argList1, List* argList2);
+
+extern char* getFuncName(List* funcNameList);
+
+extern oidvector* ProcedureGetArgTypes(HeapTuple tuple);
 #endif   /* PG_PROC_FN_H */
 

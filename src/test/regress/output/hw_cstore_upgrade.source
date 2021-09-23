@@ -10,7 +10,7 @@ successfully to align all files.
 successfully to align file(@abs_srcdir@/data/upgrade/test/dir/16386_C1.0), original size(38) padding size(8154).
 successfully to align all files.
 \! @abs_bindir@/pg_format_cu 
-pg_format_cu is an upgrade tool about align column store files for PostgreSQL.
+pg_format_cu is an upgrade tool about align column store files for openGauss.
 
 Usage:
   pg_format_cu [OPTION]...
@@ -21,7 +21,7 @@ Options:
   -a ALIGN_SIZE      size to align 
   -?, -h, --help     show this help, then exit
 \! @abs_bindir@/pg_format_cu --help
-pg_format_cu is an upgrade tool about align column store files for PostgreSQL.
+pg_format_cu is an upgrade tool about align column store files for openGauss.
 
 Usage:
   pg_format_cu [OPTION]...

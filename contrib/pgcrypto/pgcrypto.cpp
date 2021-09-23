@@ -1,6 +1,6 @@
 /*
  * pgcrypto.c
- *		Various cryptographic stuff for PostgreSQL.
+ *		Various cryptographic stuff for openGauss.
  *
  * Copyright (c) 2001 Marko Kreen
  * All rights reserved.

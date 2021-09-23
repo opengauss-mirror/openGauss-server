@@ -2,7 +2,6 @@ DROP SCHEMA test_insert_update_009 CASCADE;
 ERROR:  schema "test_insert_update_009" does not exist
 CREATE SCHEMA test_insert_update_009;
 SET CURRENT_SCHEMA TO test_insert_update_009;
-SET enable_light_proxy=off;
 -- test t1 with no index
 CREATE TABLE t1 (
     col1 INT,
@@ -538,7 +537,6 @@ SELECT * FROM t3 ORDER BY col5;
     2 |    2 |    2 |   20
 (7 rows)
 
-RESET enable_light_proxy;
 DROP SCHEMA test_insert_update_009 CASCADE;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table t1

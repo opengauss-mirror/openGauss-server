@@ -122,6 +122,7 @@ const struct AclObjType {
     {ACL_OBJECT_SEQUENCE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_SEQUENCE},
     {ACL_OBJECT_DATABASE, (ACL_CREATE_TEMP | ACL_CONNECT), ACL_ALL_RIGHTS_DATABASE},
     {ACL_OBJECT_FUNCTION, ACL_EXECUTE, ACL_ALL_RIGHTS_FUNCTION},
+    {ACL_OBJECT_PACKAGE, ACL_EXECUTE, ACL_ALL_RIGHTS_PACKAGE},
     {ACL_OBJECT_LARGEOBJECT, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_LARGEOBJECT},
     {ACL_OBJECT_NAMESPACE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NAMESPACE},
     {ACL_OBJECT_NODEGROUP, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NODEGROUP},
@@ -796,6 +797,9 @@ Datum acldefault_sql(PG_FUNCTION_ARGS)
             break;
         case 'f':
             objtype = ACL_OBJECT_FUNCTION;
+            break;
+        case 'p':
+            objtype = ACL_OBJECT_PACKAGE;
             break;
         case 'l':
             objtype = ACL_OBJECT_LANGUAGE;
@@ -5193,7 +5197,7 @@ static AclResult pg_role_aclcheck(Oid role_oid, Oid roleid, AclMode mode)
 }
 
 /*
- * initialization function (called by InitPostgres)
+ * initialization function (called by openGauss)
  */
 void initialize_acl(void)
 {
@@ -5529,7 +5533,7 @@ bool is_admin_of_role(Oid member, Oid role)
          * outside any security-restricted operation, SECURITY DEFINER or
          * similar context.  SQL-standard roles cannot self-admin.  However,
          * SQL-standard users are distinct from roles, and they are not
-         * grantable like roles: PostgreSQL's role-user duality extends the
+         * grantable like roles: openGauss's role-user duality extends the
          * standard.  Checking for a session user match has the effect of
          * letting a role self-admin only when it's conspicuously behaving
          * like a user.  Note that allowing self-admin under a mere SET ROLE

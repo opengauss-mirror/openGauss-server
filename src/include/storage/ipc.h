@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * ipc.h
- *	  POSTGRES inter-process communication definitions.
+ *	  openGauss inter-process communication definitions.
  *
  * This file is misnamed, as it no longer has much of anything directly
  * to do with IPC.	The functionality here is concerned with managing
@@ -75,6 +75,7 @@ extern void shmem_exit(int code);
 extern void on_proc_exit(pg_on_exit_callback function, Datum arg);
 extern void before_shmem_exit(pg_on_exit_callback function, Datum arg);
 extern void on_shmem_exit(pg_on_exit_callback function, Datum arg);
+extern void before_shmem_exit(pg_on_exit_callback function, Datum arg);
 extern void cancel_shmem_exit(pg_on_exit_callback function, Datum arg);
 extern void on_exit_reset(void);
 

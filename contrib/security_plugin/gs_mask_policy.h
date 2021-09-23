@@ -53,7 +53,8 @@ enum MaskBehaviour {
     M_FULLEMAIL,
     M_ALLDIGITS,
     M_SHUFFLE,
-    M_RANDOM
+    M_RANDOM,
+    M_REGEXP
 };
 
 struct GsMaskingAction {
@@ -70,6 +71,7 @@ struct GsMaskingAction {
     gs_stl::gs_vector<gs_stl::gs_string> m_params;
 };
 
+void parse_params(const gs_stl::gs_string& arg, gs_stl::gs_vector<gs_stl::gs_string> *params);
 struct PolicyAccessHash {
     size_t operator()(const GsMaskingAction& k) const;
 };
@@ -117,13 +119,14 @@ bool prepare_stmt_is_reload(const char* name);
 void unprepare_stmt(const char* name);
 void prepare_stmt(const char* name);
 
-bool validate_function_name(const char *func_name);
+bool validate_function_name(const char *func_name, const char* func_parameters,
+    bool* invalid_params, bool is_audit);
 
 bool is_masking_has_object(bool column_type_is_changed, const gs_stl::gs_string labelname);
 
 bool check_masking_policy_actions_for_label(const policy_labels_map *labels_to_drop);
 
-void validate_masking_function_name(List* full_funcname);
+void validate_masking_function_name(const List* full_funcname, bool is_audit = true);
 bool get_masking_policy_name_by_oid(Oid polid, gs_stl::gs_string *polname);
 void clear_thread_local_masking();
 #endif /* PGMASKING_POLICY_H_ */

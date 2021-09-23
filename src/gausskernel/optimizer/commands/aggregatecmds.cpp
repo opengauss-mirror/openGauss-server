@@ -40,6 +40,7 @@
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+#include "catalog/pg_proc_fn.h"
 
 /*
  *	DefineAggregate
@@ -255,6 +256,8 @@ void RenameAggregate(List* name, List* args, const char* newname)
 
     namespaceOid = procForm->pronamespace;
 
+    oidvector* proargs = ProcedureGetArgTypes(tup);
+
     /* make sure the new name doesn't exist */
     if (SearchSysCacheExists3(PROCNAMEARGSNSP,
             CStringGetDatum(newname),
@@ -263,7 +266,7 @@ void RenameAggregate(List* name, List* args, const char* newname)
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
                 errmsg("function %s already exists in schema \"%s\"",
-                    funcname_signature_string(newname, procForm->pronargs, NIL, procForm->proargtypes.values),
+                    funcname_signature_string(newname, procForm->pronargs, NIL, proargs->values),
                     get_namespace_name(namespaceOid))));
 
     /* must be owner */

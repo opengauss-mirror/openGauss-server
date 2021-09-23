@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_is_recycle_object(int4, int4, name);

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * tuptoaster.h
- *	  POSTGRES definitions for external and compressed storage
+ *	  openGauss definitions for external and compressed storage
  *	  of variable size attributes.
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
@@ -67,8 +67,10 @@
  * If an index value is larger than TOAST_INDEX_TARGET, we will try to
  * compress it (we can't move it out-of-line, however).  Note that this
  * number is per-datum, not per-tuple, for simplicity in index_form_tuple().
+ * Note that 16 is used as the divisor because it seems to work well in most cases.
  */
-#define TOAST_INDEX_TARGET (MaxHeapTupleSize / 16)
+#define TOAST_INDEX_TARGET (MaxHeapTupleSize / 16) // 509
+#define UTOAST_INDEX_TARGET (DefaultTdMaxUHeapTupleSize / 16)
 
 /*
  * When we store an oversize datum externally, we divide it into chunks
@@ -157,7 +159,11 @@ do { \
  * ----------
  */
 extern HeapTuple toast_insert_or_update(
-    Relation rel, HeapTuple newtup, HeapTuple oldtup, int options, Page pageForOldTup);
+    Relation rel, HeapTuple newtup, HeapTuple oldtup, int options, Page pageForOldTup, bool allow_update_self = false);
+
+extern Datum toast_save_datum(Relation rel, Datum value, struct varlena* oldexternal, int options);
+
+extern void toast_delete_datum(Relation rel, Datum value, int options, bool allow_update_self = false);
 
 /* ----------
  * toast_delete -

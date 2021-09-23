@@ -1,0 +1,627 @@
+\! rm -f @abs_srcdir@/extend_undo_file_1a
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1a
+\! echo "UNDO_EXTEND_FILE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1a
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_EXTEND_FILE" >> @abs_srcdir@/extend_undo_file_1a
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_EXTEND_FILE" >> @abs_srcdir@/extend_undo_file_1a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1a';
+-- case 1a: An error is reported if the undo file fails to be expanded.
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_EXTEND_FILE type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 4\] ERROR:  Hitting breakpoint UNDO_EXTEND_FILE
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_EXTEND_FILE
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\]
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\]
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_EXTEND_FILE type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 30000
+(1 row)
+
+--case 1b:
+\! rm -f @abs_srcdir@/extend_undo_file_1b
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1b
+\! echo "UNDO_GET_FILE_BLOCKS,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1b
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_GET_FILE_BLOCKS" >> @abs_srcdir@/extend_undo_file_1b
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_GET_FILE_BLOCKS" >> @abs_srcdir@/extend_undo_file_1b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1b';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_GET_FILE_BLOCKS type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_GET_FILE_BLOCKS
+--?.* \[terminal 4\] ERROR:  Hitting breakpoint UNDO_GET_FILE_BLOCKS
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_GET_FILE_BLOCKS type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 30000
+(1 row)
+
+--case 1c：
+\! rm -f @abs_srcdir@/extend_undo_file_1c
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1c
+\! echo "UNDO_OPEN_FILE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1c
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_OPEN_FILE" >> @abs_srcdir@/extend_undo_file_1c
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_OPEN_FILE" >> @abs_srcdir@/extend_undo_file_1c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1c';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_OPEN_FILE type=8
+--?.* \[terminal 4\] ERROR:  Hitting breakpoint UNDO_OPEN_FILE
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_OPEN_FILE
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_OPEN_FILE type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 30000
+(1 row)
+
+--case 1d
+\! rm -f @abs_srcdir@/extend_undo_file_1d
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1d
+\! echo "UNDO_READ_FILE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1d
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_READ_FILE" >> @abs_srcdir@/extend_undo_file_1d
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_READ_FILE" >> @abs_srcdir@/extend_undo_file_1d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1d';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_READ_FILE type=8
+--?.* \[terminal 4\] ERROR:  Hitting breakpoint UNDO_READ_FILE
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_READ_FILE
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_READ_FILE type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 30000
+(1 row)
+
+--case 1e
+\! rm -f @abs_srcdir@/extend_undo_file_1e
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1e
+\! echo "UNDO_WRITE_FILE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1e
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_WRITE_FILE" >> @abs_srcdir@/extend_undo_file_1e
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_WRITE_FILE" >> @abs_srcdir@/extend_undo_file_1e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1e';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (5,4);" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (7,6);" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_WRITE_FILE type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 4\] INSERT 0 1
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_WRITE_FILE type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     2
+(1 row)
+
+--case 1f
+\! rm -f @abs_srcdir@/extend_undo_file_1f
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1f
+\! echo "UNDO_EXTEND_LOG,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1f
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_EXTEND_LOG" >> @abs_srcdir@/extend_undo_file_1f
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_EXTEND_LOG" >> @abs_srcdir@/extend_undo_file_1f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1f';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_EXTEND_LOG type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_EXTEND_LOG
+--?.* \[terminal 4\] ERROR:  Hitting breakpoint UNDO_EXTEND_LOG
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_EXTEND_LOG type=8
+--?.* \[terminal 3\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 30000
+(1 row)
+
+--case 1h
+\! rm -f @abs_srcdir@/extend_undo_file_1h
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1h
+\! echo "UNDO_UNLINK_LOG,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1h
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_UNLINK_LOG" >> @abs_srcdir@/extend_undo_file_1h
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_UNLINK_LOG" >> @abs_srcdir@/extend_undo_file_1h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1h';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (generate_series(0, 30000));
+delete from t1 where c1=5;
+WARNING:  Disabling breakpoint UNDO_UNLINK_LOG type=8
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (generate_series(0, 30000));delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 3" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_UNLINK_LOG type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 3\] INSERT 0 30001
+--?.* \[terminal 2\] INSERT 0 30001
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_UNLINK_LOG type=8
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_UNLINK_LOG type=8
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_UNLINK_LOG type=8
+--?.* \[terminal 2\] WARNING:  UHeapDelete returned 5
+--?.* \[terminal 2\] WARNING:  UHeapDelete returned 4
+--?.* \[terminal 3\] DELETE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+ 90000
+(1 row)
+
+--case 1i
+\! rm -f @abs_srcdir@/extend_undo_file_1i
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1i
+\! echo "UNDO_CHECK_RECYCLE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1i
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_CHECK_RECYCLE" >> @abs_srcdir@/extend_undo_file_1i
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_CHECK_RECYCLE" >> @abs_srcdir@/extend_undo_file_1i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1i';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (3,2);" 2>&1 | append_timestamp "terminal 2" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 3" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "insert into t1 values (3,2);" 2>&1 | append_timestamp "terminal 4" &
+\! sleep 5
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_CHECK_RECYCLE type=8
+--?.* \[terminal 4\] INSERT 0 1
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 3\]  pg_sleep 
+--?.* \[terminal 3\] ----------
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] \(1 row\)
+--?.* \[terminal 3\] 
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_CHECK_RECYCLE type=8
+--?.* \[terminal 3\] WARNING:  Disabling breakpoint UNDO_CHECK_RECYCLE type=8
+--?.* \[terminal 3\] DELETE 2
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1n
+\! rm -f @abs_srcdir@/extend_undo_file_1n
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1n
+\! echo "UNDO_ALLOCATE_ZONE,ERROR,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1n
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_ZONE" >> @abs_srcdir@/extend_undo_file_1n
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_ZONE" >> @abs_srcdir@/extend_undo_file_1n
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1n';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (1,2);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_ALLOCATE_ZONE type=8
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] ERROR:  Hitting breakpoint UNDO_ALLOCATE_ZONE
+select count(*) from t1;
+ count 
+-------
+     2
+(1 row)
+
+--case 1q
+\! rm -f @abs_srcdir@/extend_undo_file_1q
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1q
+\! echo "UNDO_ALLOCATE_TRANS_SLOT,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1q
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_TRANS_SLOT" >> @abs_srcdir@/extend_undo_file_1q
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_TRANS_SLOT" >> @abs_srcdir@/extend_undo_file_1q
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1q';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_ALLOCATE_TRANS_SLOT type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_ALLOCATE_TRANS_SLOT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_ALLOCATE_TRANS_SLOT type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1r
+\! rm -f @abs_srcdir@/extend_undo_file_1r
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1r
+\! echo "UNDO_PREPAR_ZONE,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1r
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_PREPAR_ZONE" >> @abs_srcdir@/extend_undo_file_1r
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_PREPAR_ZONE" >> @abs_srcdir@/extend_undo_file_1r
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1r';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_PREPAR_ZONE type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_PREPAR_ZONE timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_PREPAR_ZONE type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1s
+\! rm -f @abs_srcdir@/extend_undo_file_1s
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1s
+\! echo "UNDO_UPDATE_TRANSACTION_SLOT,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1s
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_UPDATE_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1s
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_UPDATE_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1s
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1s';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_UPDATE_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_UPDATE_TRANSACTION_SLOT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_UPDATE_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1t
+\! rm -f @abs_srcdir@/extend_undo_file_1t
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1t
+\! echo "UNDO_UPDATE_SLOT,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1t
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_UPDATE_SLOT" >> @abs_srcdir@/extend_undo_file_1t
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_UPDATE_SLOT" >> @abs_srcdir@/extend_undo_file_1t
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1t';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_UPDATE_SLOT type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_UPDATE_SLOT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_UPDATE_SLOT type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1u
+\! rm -f @abs_srcdir@/extend_undo_file_1u
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1u
+\! echo "UNDO_CHECK_LAST_RECORD_SIZE,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1u
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_CHECK_LAST_RECORD_SIZE" >> @abs_srcdir@/extend_undo_file_1u
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_CHECK_LAST_RECORD_SIZE" >> @abs_srcdir@/extend_undo_file_1u
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1u';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_CHECK_LAST_RECORD_SIZE type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_CHECK_LAST_RECORD_SIZE timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_CHECK_LAST_RECORD_SIZE type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1v
+\! rm -f @abs_srcdir@/extend_undo_file_1v
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1v
+\! echo "UNDO_PREPARE_RECORD,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1v
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_PREPARE_RECORD" >> @abs_srcdir@/extend_undo_file_1v
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_PREPARE_RECORD" >> @abs_srcdir@/extend_undo_file_1v
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1v';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_PREPARE_RECORD type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_PREPARE_RECORD timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_PREPARE_RECORD type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1w
+\! rm -f @abs_srcdir@/extend_undo_file_1w
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1w
+\! echo "UNDO_INSERT_PREPARED,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1w
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_INSERT_PREPARED" >> @abs_srcdir@/extend_undo_file_1w
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_INSERT_PREPARED" >> @abs_srcdir@/extend_undo_file_1w
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1w';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_INSERT_PREPARED type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_INSERT_PREPARED timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_INSERT_PREPARED type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1x
+\! rm -f @abs_srcdir@/extend_undo_file_1x
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1x
+\! echo "UNDO_ALLOCATE_ZONE_BEFO_XID,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1x
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_ZONE_BEFO_XID" >> @abs_srcdir@/extend_undo_file_1x
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_ALLOCATE_ZONE_BEFO_XID" >> @abs_srcdir@/extend_undo_file_1x
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1x';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATEv
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_ALLOCATE_ZONE_BEFO_XID type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Suspending at breakpoint UNDO_ALLOCATE_ZONE_BEFO_XID timeout=10000000
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_ALLOCATE_ZONE_BEFO_XID type=2
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1y
+\! rm -f @abs_srcdir@/extend_undo_file_1y
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1y
+\! echo "UNDO_PREPARE_TRANSACTION_SLOT,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1y
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_PREPARE_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1y
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_PREPARE_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1y
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1y';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_PREPARE_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_PREPARE_TRANSACTION_SLOT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_PREPARE_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+--case 1z
+\! rm -f @abs_srcdir@/extend_undo_file_1z
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/extend_undo_file_1z
+\! echo "UNDO_FETCH_TRANSACTION_SLOT,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/extend_undo_file_1z
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UNDO_FETCH_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1z
+\! echo "UHEAP_DELETE,DISABLE,TARGET_TEST_STUB=UNDO_FETCH_TRANSACTION_SLOT" >> @abs_srcdir@/extend_undo_file_1z
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/extend_undo_file_1z';
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,4);
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from t1 where c1=5;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Hitting breakpoint UHEAP_UPDATE
+--?.* \[terminal 1\] WARNING:  Enabling breakpoint UNDO_FETCH_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UNDO_FETCH_TRANSACTION_SLOT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  Disabling breakpoint UNDO_FETCH_TRANSACTION_SLOT type=2
+--?.* \[terminal 1\] UPDATE 1
+--?.* \[terminal 2\] DELETE 1
+select count(*) from t1;
+ count 
+-------
+     1
+(1 row)
+
+-- drop all tables
+drop table t1;
+\! rm -f @abs_srcdir@/extend_undo_file_1a
+\! rm -f @abs_srcdir@/extend_undo_file_1b
+\! rm -f @abs_srcdir@/extend_undo_file_1c
+\! rm -f @abs_srcdir@/extend_undo_file_1d
+\! rm -f @abs_srcdir@/extend_undo_file_1e
+\! rm -f @abs_srcdir@/extend_undo_file_1f
+\! rm -f @abs_srcdir@/extend_undo_file_1h
+\! rm -f @abs_srcdir@/extend_undo_file_1i
+\! rm -f @abs_srcdir@/extend_undo_file_1n
+\! rm -f @abs_srcdir@/extend_undo_file_1q
+\! rm -f @abs_srcdir@/extend_undo_file_1r
+\! rm -f @abs_srcdir@/extend_undo_file_1s
+\! rm -f @abs_srcdir@/extend_undo_file_1t
+\! rm -f @abs_srcdir@/extend_undo_file_1u
+\! rm -f @abs_srcdir@/extend_undo_file_1v
+\! rm -f @abs_srcdir@/extend_undo_file_1w
+\! rm -f @abs_srcdir@/extend_undo_file_1x
+\! rm -f @abs_srcdir@/extend_undo_file_1y
+\! rm -f @abs_srcdir@/extend_undo_file_1z

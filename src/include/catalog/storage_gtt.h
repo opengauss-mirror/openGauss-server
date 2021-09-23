@@ -16,7 +16,7 @@
 
 #include "access/htup.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "nodes/execnodes.h"
 #include "utils/relcache.h"
 

@@ -29,11 +29,13 @@
 #include "access/visibilitymap.h"
 #include "access/tableam.h"
 #include "catalog/pg_partition_fn.h"
-#include "executor/execdebug.h"
-#include "executor/nodeIndexonlyscan.h"
-#include "executor/nodeIndexscan.h"
+#include "commands/cluster.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeIndexscan.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/predicate.h"
+#include "storage/tcap.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -50,9 +52,9 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
  *		Release VM buffer pin, if any.
  * ----------------------------------------------------------------
  */
-static void ReleaseNodeVMBuffer(IndexOnlyScanState* node)
+static inline void ReleaseNodeVMBuffer(IndexOnlyScanState* node)
 {
-    if (node->ioss_VMBuffer != InvalidBuffer) {
+    if (node != NULL && (node->ioss_VMBuffer != InvalidBuffer)) {
         ReleaseBuffer(node->ioss_VMBuffer);
         node->ioss_VMBuffer = InvalidBuffer;
     }
@@ -62,7 +64,7 @@ static void ReleaseNodeVMBuffer(IndexOnlyScanState* node)
  *		ExecGPIGetNextPartRelation
  * ----------------------------------------------------------------
  */
-static bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc indexScan)
+bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc indexScan)
 {
     if (IndexScanNeedSwitchPartRel(indexScan)) {
         /* Release VM buffer pin, if any. */
@@ -74,6 +76,29 @@ static bool ExecGPIGetNextPartRelation(IndexOnlyScanState* node, IndexScanDesc i
         indexScan->heapRelation = indexScan->xs_gpi_scan->fakePartRelation;
     }
 
+    return true;
+}
+
+bool ExecCBIFixHBktRel(IndexScanDesc indexScan, Buffer *vmbuffer)
+{
+    Assert(indexScan != NULL);
+    if (unlikely(RELATION_OWN_BUCKET(indexScan->indexRelation))) {
+        HBktIdxScanDesc hpScan = (HBktIdxScanDesc)indexScan;
+        if (cbi_scan_need_fix_hbkt_rel(hpScan->currBktIdxScan)) {
+            /* 
+             * Release VM buffer pin, if any. Ensure IndexOnlyScan to obtain
+             * the right visibility map after swapping the bucket relation.
+             */
+            if (vmbuffer != NULL && *vmbuffer != InvalidBuffer) {
+                ReleaseBuffer(*vmbuffer);
+                *vmbuffer = InvalidBuffer;
+            }
+
+            if (!cbi_scan_fix_hbkt_rel(hpScan)) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -91,6 +116,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     IndexScanDesc scandesc;
     TupleTableSlot* slot = NULL;
     ItemPointer tid;
+    bool isVersionScan = TvIsVersionScan(&node->ss);
+    bool isUHeap = false;
 
     /*
      * extract necessary information from index scan node
@@ -107,6 +134,8 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     scandesc = node->ioss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+
+    isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
 
     /*
      * OK, now that we have what we need, fetch the next tuple.
@@ -136,14 +165,49 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
         if (!ExecGPIGetNextPartRelation(node, indexScan)) {
             continue;
         }
-        if (!visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
+        if (!ExecCBIFixHBktRel(scandesc, &node->ioss_VMBuffer)) {
+            continue;
+        }
+
+        if (isUHeap) {
+            /* ustore with multi-version ubtree only recheck IndexTuple when xs_recheck_itup is set */
+            if (indexScan->xs_recheck_itup) {
+                node->ioss_HeapFetches++;
+                if (!IndexFetchUHeap(indexScan, slot)) {
+                    continue; /* this TID indicate no visible tuple */
+                }
+                if (!RecheckIndexTuple(indexScan, slot)) {
+                    continue; /* the visible version not match the IndexTuple */
+                }
+            }
+        } else if (isVersionScan ||
+            !visibilitymap_test(indexScan->heapRelation, ItemPointerGetBlockNumber(tid), &node->ioss_VMBuffer)) {
+            /* IMPORTANT: We ALWAYS visit the heap to check visibility in VERSION SCAN. */
+
             /*
              * Rats, we have to visit the heap to check visibility.
              */
             node->ioss_HeapFetches++;
-            tuple = scan_handler_idx_fetch_heap(scandesc);
-            if (tuple == NULL)
+            if (!IndexFetchSlot(indexScan, slot, isUHeap)) {
+#ifdef DEBUG_INPLACE
+                /* Now ustore does not support hash bucket table */
+                Assert(indexScan == scandesc);
+                /* Record whether the invisible heap tuple is all dead or not */
+                if (indexScan->kill_prior_tuple)
+                    INPLACEHEAPSTAT_COUNT_INDEX_FETCH_TUPLE(INPLACEHEAP_TUPLE_INVISIBLE_ALL_DEAD);
+                else
+                    INPLACEHEAPSTAT_COUNT_INDEX_FETCH_TUPLE(INPLACEHEAP_TUPLE_INVISIBLE_NOT_ALL_DEAD);
+#endif
                 continue; /* no visible tuple, try next index entry */
+            }
+
+#ifdef DEBUG_INPLACE
+            Assert(indexScan == scandesc);
+            Assert(!indexScan->kill_prior_tuple);
+            /* Record Heap Tuple is visible */
+            INPLACEHEAPSTAT_COUNT_INDEX_FETCH_TUPLE(INPLACEHEAP_TUPLE_VISIBLE);
+#endif
+
 
             /*
              * Only MVCC snapshots are supported here, so there should be no
@@ -461,6 +525,7 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
     Relation currentRelation;
     bool relistarget = false;
     TupleDesc tupDesc;
+    Snapshot scanSnap;
 
     /*
      * create state structure
@@ -606,6 +671,12 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
     }
 
     /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(indexstate->ioss_RelationDesc, &node->scan, &indexstate->ss);
+
+    /*
      * Initialize scan descriptor.
      * If the index is an non-partitioned index, initialize the table realtion that the index
      * is on. If the is an partitioned index, make the corresponding relation by the
@@ -635,9 +706,24 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
                 indexstate->ioss_CurrentIndexPartition =
                     partitionGetRelation(indexstate->ioss_RelationDesc, currentindex);
 
+                /*
+                 * Verify if a DDL operation that froze all tuples in the relation
+                 * occured after taking the snapshot.
+                 */
+                if (RelationIsUstoreFormat(indexstate->ss.ss_currentPartition)) {
+                    TransactionId relfrozenxid64 = getPartitionRelfrozenxid(indexstate->ss.ss_currentPartition);
+                    if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                        !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                        TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                        ereport(ERROR,
+                                (errcode(ERRCODE_SNAPSHOT_INVALID),
+                                 (errmsg("Snapshot too old."))));
+                    }
+                }
+
                 indexstate->ioss_ScanDesc = scan_handler_idx_beginscan(indexstate->ss.ss_currentPartition,
                     indexstate->ioss_CurrentIndexPartition,
-                    estate->es_snapshot,
+                    scanSnap,
                     indexstate->ioss_NumScanKeys,
                     indexstate->ioss_NumOrderByKeys,
                     (ScanState*)indexstate);
@@ -645,11 +731,26 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
         }
     } else {
         /*
+         * Verify if a DDL operation that froze all tuples in the relation
+         * occured after taking the snapshot.
+         */
+        if (RelationIsUstoreFormat(currentRelation)) {
+            TransactionId relfrozenxid64 = getRelationRelfrozenxid(currentRelation);
+            if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_SNAPSHOT_INVALID),
+                         (errmsg("Snapshot too old."))));
+            }
+        }
+
+        /*
          * Initialize scan descriptor.
          */
         indexstate->ioss_ScanDesc = scan_handler_idx_beginscan(currentRelation,
             indexstate->ioss_RelationDesc,
-            estate->es_snapshot,
+            scanSnap,
             indexstate->ioss_NumScanKeys,
             indexstate->ioss_NumOrderByKeys,
             (ScanState*)indexstate);
@@ -796,9 +897,9 @@ void ExecInitPartitionForIndexOnlyScan(IndexOnlyScanState* indexstate, EState* e
             resultPlan = plan->scan.pruningInfo;
         }
         if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-            indexstate->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            indexstate->ss.part_id = resultPlan->ls_rangeSelectedPartitions->length;
         } else {
-            indexstate->part_id = 0;
+            indexstate->ss.part_id = 0;
         }
         
         ListCell* cell = NULL;

@@ -136,15 +136,16 @@ NON_EXEC_STATIC void JobScheduleMain()
 
     SetProcessingMode(InitProcessing);
 
-    if (IS_PGXC_COORDINATOR && IsPostmasterEnvironment) {
+    bool isExit = IS_PGXC_COORDINATOR && IsPostmasterEnvironment;
+    if (isExit) {
         /*
          * If we exit, first try and clean connections and send to
          * pooler thread does NOT exist any more, PoolerLock of LWlock is used instead.
          *
          * PoolManagerDisconnect() which is called by PGXCNodeCleanAndRelease()
-         * is the last call to pooler in the postgres thread, and PoolerLock is
+         * is the last call to pooler in the openGauss thread, and PoolerLock is
          * used in PoolManagerDisconnect(), but it is called after ProcKill()
-         * when postgres thread exits.
+         * when openGauss thread exits.
          * ProcKill() releases any of its held LW locks. So Assert(!(proc == NULL ...))
          * will fail in LWLockAcquire() which is called by PoolManagerDisconnect().
          *
@@ -195,7 +196,7 @@ NON_EXEC_STATIC void JobScheduleMain()
     InitProcess();
 #endif
 
-    /* Initialize POSTGRES with DEFAULT_DATABASE, since it cannot be dropped */
+    /* Initialize openGauss with DEFAULT_DATABASE, since it cannot be dropped */
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitJobScheduler();
 
@@ -324,7 +325,8 @@ NON_EXEC_STATIC void JobScheduleMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Scheduler", MEMORY_CONTEXT_EXECUTOR);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Job Scheduler",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
 
     /* Get classified list of node Oids for syschronise th job status info. */
     exec_init_poolhandles();

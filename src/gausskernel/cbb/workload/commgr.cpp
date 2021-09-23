@@ -313,7 +313,6 @@ void WLMReplyCollectInfo(char* keystr, WLMCollectTag tag)
             int64 globalTotalSpace = 0;
             int64 globalTmpSpace = 0;
             int64 globalSpillSpace = 0;
-
             char* flag = strchr(keystr, '|');
             bool no_need_reply = false;
             if (keystr[0] == 'M') {
@@ -922,6 +921,11 @@ PGXCNodeAllHandles* WLMRemoteInfoCollectorStart(void)
     PG_TRY();
     {
         pgxc_handles = get_handles(dnlist, NULL, false);
+        for (int i = 0; i < pgxc_handles->dn_conn_count; i++) {
+            if (pgxc_handles->datanode_handles[i]->state == DN_CONNECTION_STATE_QUERY) {
+                BufferConnection(pgxc_handles->datanode_handles[i]);
+            }
+        }
     }
     PG_CATCH();
     {
@@ -1070,6 +1074,9 @@ int WLMRemoteInfoSender(PGXCNodeAllHandles* pgxc_handles, const char* keystr, WL
 
         if (dn_handle == NULL) {
             continue;
+        }
+        if (dn_handle->state == DN_CONNECTION_STATE_QUERY) {
+            BufferConnection(dn_handle);
         }
 
         dn_handle->state = DN_CONNECTION_STATE_IDLE;

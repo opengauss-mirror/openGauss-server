@@ -31,7 +31,7 @@
 #include "nodes/pg_list.h"
 #include "utils/atomic.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 #include "access/extreme_rto/posix_semaphore.h"
 #include "replication/replicainternal.h"
@@ -77,6 +77,7 @@ static const int32 ANY_BLOCK_ID = -1;
 static const uint32 ANY_WORKER = (uint32)-1;
 static const uint32 TRXN_WORKER = (uint32)-2;
 static const uint32 ALL_WORKER = (uint32)-3;
+static const uint32 USTORE_WORKER = (uint32)-4;
 
 static inline RedoItem *GetRedoItemPtr(XLogReaderState *record)
 {

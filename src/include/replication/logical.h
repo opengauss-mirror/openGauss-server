@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * logical.h
- *        PostgreSQL logical decoding coordination
+ *        openGauss logical decoding coordination
  *
  * Copyright (c) 2012-2014, PostgreSQL Global Development Group
  * 

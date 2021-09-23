@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * indexfsm.h
- *	  POSTGRES free space map for quickly finding an unused page in index
+ *	  openGauss free space map for quickly finding an unused page in index
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

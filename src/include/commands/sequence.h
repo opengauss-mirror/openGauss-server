@@ -17,7 +17,7 @@
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 #ifdef PGXC
 #include "utils/relcache.h"
@@ -160,7 +160,7 @@ extern int64 gen_uuid(List* uuids);
 extern char* gen_hybirdmsg_for_CreateSchemaStmt(CreateSchemaStmt* stmt, const char* queryString);
 extern void gen_uuid_for_CreateStmt(CreateStmt* stmt, List* uuids);
 extern void gen_uuid_for_CreateSchemaStmt(List* stmts, List* uuids);
-extern void  processUpdateSequenceMsg(const char* seqname, int64 lastvalue);
+extern void processUpdateSequenceMsg(List* nameList, int64 lastvalue);
 extern void checkAndDoUpdateSequence();
 
 #endif

@@ -92,6 +92,14 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
         scan->xs_gpi_scan = NULL;
     }
 
+    /* Initializes crossbucket index scan's information */
+    scan->xs_want_bucketid = RelationIsCrossBucketIndex(index_relation);
+    if (scan->xs_want_bucketid) {
+        cbi_scan_init(&scan->xs_cbi_scan);
+    } else {
+        scan->xs_cbi_scan = NULL;
+    }
+
     /*
      * We allocate key workspace here, but it won't get filled until amrescan.
      */
@@ -105,6 +113,8 @@ IndexScanDesc RelationGetIndexScan(Relation index_relation, int nkeys, int norde
         scan->orderByData = NULL;
 
     scan->xs_want_itup = false; /* may be set later */
+    scan->xs_want_xid = false; /* may be set later */
+    scan->xs_recheck_itup = false; /* may be set later */
 
     /*
      * During recovery we ignore killed tuples and don't bother to kill them
@@ -310,6 +320,8 @@ SysScanDesc systable_beginscan(Relation heap_relation, Oid index_id, bool index_
     SysScanDesc sysscan;
     Relation irel;
     int2 bucketid = InvalidBktId;
+
+
     if (index_ok && !u_sess->attr.attr_common.IgnoreSystemIndexes && !ReindexIsProcessingIndex(index_id)) {
         /*
          * we may use systable index scan to search chunk_id for a
@@ -381,7 +393,7 @@ HeapTuple systable_getnext(SysScanDesc sysscan)
     HeapTuple htup;
 
     if (sysscan->irel) {
-        htup = index_getnext(sysscan->iscan, ForwardScanDirection);
+        htup = (HeapTuple)index_getnext(sysscan->iscan, ForwardScanDirection);
         /*
          * We currently don't need to support lossy index operators for any
          * system catalog scan.  It could be done here, using the scan keys to
@@ -515,7 +527,7 @@ HeapTuple systable_getnext_ordered(SysScanDesc sysscan, ScanDirection direction)
     HeapTuple htup;
 
     Assert(sysscan->irel);
-    htup = index_getnext(sysscan->iscan, direction);
+    htup = (HeapTuple)index_getnext(sysscan->iscan, direction);
     /* See notes in systable_getnext */
     if (htup && sysscan->iscan->xs_recheck)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -544,24 +556,29 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan)
     HeapTuple htup;
 
     if (sysscan->irel)
-        htup = index_getnext(sysscan->iscan, BackwardScanDirection);
+        htup = (HeapTuple)index_getnext(sysscan->iscan, BackwardScanDirection);
     else
         htup = heap_getnext((TableScanDesc) (sysscan->scan), BackwardScanDirection);
 
     return htup;
 }
 
+#define InitFakeRelTableCommon(ctl, cxt)                                    \
+    do {                                                                    \
+        errno_t errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));      \
+        securec_check_c(errorno, "\0", "\0");                               \
+        ctl.keysize = sizeof(PartRelIdCacheKey);                            \
+        ctl.entrysize = sizeof(PartRelIdCacheEnt);                          \
+        ctl.hash = tag_hash;                                                \
+        ctl.hcxt = cxt;                                                     \
+    } while (0)
+
 /* Use global-partition-index-scan access to partition tables */
 /* Create hash table for global partition index scan */
 static void GPIInitFakeRelTable(GPIScanDesc gpiScan, MemoryContext cxt)
 {
     HASHCTL ctl;
-    errno_t errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
-    securec_check_c(errorno, "\0", "\0");
-    ctl.keysize = sizeof(PartRelIdCacheKey);
-    ctl.entrysize = sizeof(PartRelIdCacheEnt);
-    ctl.hash = tag_hash;
-    ctl.hcxt = cxt;
+    InitFakeRelTableCommon(ctl, cxt);
     gpiScan->fakeRelationTable = hash_create(
         "GPI fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 }
@@ -584,6 +601,9 @@ static void GPIInsertFakeRelCache(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMO
     /* Save search fake relation in gpiScan->fakeRelation */
     searchFakeReationForPartitionOid(
         fakeRels, cxt, parentRel, currPartOid, gpiScan->fakePartRelation, partition, lmode);
+
+    /* save partition */
+    gpiScan->partition = partition;
 }
 
 /* destroy partition information from hash table */
@@ -695,4 +715,82 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
     return result;
 }
 
+/* Create and fill an CBIScanDesc */
+void cbi_scan_init(CBIScanDesc* cbiScan)
+{
+    CBIScanDesc cbiInfo = (CBIScanDesc)palloc(sizeof(CBIScanDescData));
+    cbiInfo->bucketid = InvalidBktId;
+    cbiInfo->fakeBucketRelation = NULL;
+    cbiInfo->parentRelation = NULL;
+    cbiInfo->fakeRelationTable = NULL;
+    cbiInfo->partition = NULL;
+    cbiInfo->mergingBktId = InvalidBktId;
+    *cbiScan = cbiInfo;
+}
 
+/* Release fake-relation's hash table and GPIScanDesc */
+void cbi_scan_end(CBIScanDesc cbiScan)
+{
+    if (cbiScan == NULL) {
+        return;
+    }
+    if (cbiScan->fakeRelationTable != NULL) {
+        FakeRelationCacheDestroy(cbiScan->fakeRelationTable);
+        cbiScan->fakeRelationTable = NULL;
+    }
+
+    pfree_ext(cbiScan);
+}
+
+/* Use global-partition-index-scan access to partition tables */
+/* Create hash table for global partition index scan */
+static inline void cbi_init_fake_reltable(CBIScanDesc cbiScan, MemoryContext cxt)
+{
+    HASHCTL ctl;
+    InitFakeRelTableCommon(ctl, cxt);
+    cbiScan->fakeRelationTable = hash_create(
+        "CBI fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl, HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+}
+
+/* Lookup partition information from hash table use key for global partition index scan */
+static inline void cbi_lookup_fake_relcache(CBIScanDesc cbiScan, PartRelIdCacheKey fakeRelKey)
+{
+    HTAB* fakeRels = cbiScan->fakeRelationTable;
+    FakeRelationIdCacheLookup(fakeRels, fakeRelKey, cbiScan->fakeBucketRelation, cbiScan->partition);
+}
+
+/* Set global bucket index bucket id. */
+void cbi_set_bucketid(CBIScanDesc cbiScan, int2 butcketid)
+{
+    if (cbiScan == NULL) {
+        ereport(ERROR, (errmsg("cbiScan is null, when set bucket id")));
+    }
+    cbiScan->bucketid = butcketid;
+}
+
+/* Get cross-bucket index working bucketid */
+int2 cbi_get_current_bucketid(const CBIScanDesc cbiScan)
+{
+    if (cbiScan == NULL) {
+        ereport(ERROR, (errmsg("cbiScan is null, when get bucketid")));
+    }
+    return cbiScan->bucketid;
+}
+
+bool cbi_get_bucket_relation(CBIScanDesc cbiScan, MemoryContext cxt)
+{
+    PartRelIdCacheKey fakeRelKey = {cbiScan->parentRelation->rd_id, cbiScan->bucketid};
+    Assert(cbiScan->bucketid != InvalidBktId);
+    if (!PointerIsValid(cbiScan->fakeRelationTable)) {
+        cbi_init_fake_reltable(cbiScan, cxt);
+    }
+
+    /* Obtains information about the current partition from the hash table */
+    cbi_lookup_fake_relcache(cbiScan, fakeRelKey);
+    if (!RelationIsValid(cbiScan->fakeBucketRelation)) {
+        searchHBucketFakeRelation(cbiScan->fakeRelationTable, cxt, cbiScan->parentRelation, cbiScan->bucketid,
+            cbiScan->fakeBucketRelation);
+    }
+
+    return RelationIsValid(cbiScan->fakeBucketRelation);
+}

@@ -17,9 +17,9 @@
  * Functions called from postmaster
  * ----------
  */
-extern ThreadId pgarch_start(void);
+extern ThreadId pgarch_start();
 #ifdef EXEC_BACKEND
-extern void PgArchiverMain();
+extern void PgArchiverMain(knl_thread_arg* arg);
 #endif
 
 #endif /* _PGARCH_H */

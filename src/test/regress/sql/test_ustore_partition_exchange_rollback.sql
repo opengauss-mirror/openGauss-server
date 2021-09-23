@@ -1,0 +1,89 @@
+-- Test PARTITION EXCHANGE with ROLLBACK
+
+CREATE TABLESPACE example4 relative location 'tablespace4';
+CREATE TABLESPACE example5 relative location 'tablespace5';
+
+-- Test 1. Transaction does an insert in standalone table, EXCHANGE then insert into partition.
+-- Both inserts are done in the same relfilenode but the undorecords point to different relid.
+-- ROLLBACK should be able to detect that both inserts happen on the same relfilenode and
+-- open the correct one.
+CREATE TABLE t1 (ppid int, c2 int) WITH (storage_type = ustore) tablespace example4;
+CREATE TABLE p1 (ppid int, c2 int)
+WITH (storage_type = ustore) tablespace example5
+partition by range (c2)
+(
+    partition p1_0 values less than (1000),
+    partition p2_0 values less than (3000)
+);
+
+BEGIN;
+-- insert into relfilenode r1
+INSERT INTO t1 values (1, 10);
+
+ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+
+-- insert into relfilnode r1 since p1 now uses r1.
+INSERT INTO p1 values (2, 20);
+ROLLBACK;
+
+-- ROLLBACK should be successful and t1 and p1 are empty
+SELECT * FROM t1;
+SELECT * FROM p1;
+DROP TABLE t1;
+DROP TABLE p1;
+
+-- Test 2. Same as Test1 but do the INSERTs in different order. This time during rollback,
+-- the reloid of t1 points to the old relfilenode (not r1) but the undorecord is pointing
+-- to the correct relfilenode (r1). ROLLBACK should be able to open r1 correctly.
+CREATE TABLE t1 (ppid int, c2 int) WITH (storage_type = ustore) tablespace example4;
+CREATE TABLE p1 (ppid int, c2 int)
+WITH (storage_type = ustore) tablespace example5
+partition by range (c2)
+(
+    partition p1_0 values less than (1000),
+    partition p2_0 values less than (3000)
+);
+
+BEGIN;
+-- insert into relfilenode r1
+INSERT INTO p1 values (1, 10);
+
+ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+
+-- insert into relfilnode r1 since t1 now uses r1.
+INSERT INTO t1 values (2, 20);
+ROLLBACK;
+
+-- ROLLBACK should be successful and t1 and p1 are empty
+SELECT * FROM t1;
+SELECT * FROM p1;
+DROP TABLE t1;
+DROP TABLE p1;
+
+-- Test 3. Transaction does a single UPDATE after the EXCHANGE. During rollback, the relid
+-- in undorecord points to the correct relfilenode but pg_class points to the wrong one.
+-- Rollback should be able to do the rollback on the correct relfilenode.
+CREATE TABLE t1 (ppid int, c2 int) WITH (storage_type = ustore) tablespace example4;
+INSERT INTO t1 VALUES(1,10);
+
+CREATE TABLE p1 (ppid int, c2 int)
+WITH (storage_type = ustore) tablespace example5
+partition by range (c2)
+(
+    partition p1_0 values less than (1000),
+    partition p2_0 values less than (3000)
+);
+
+BEGIN;
+-- swap t1 and p1_0.
+ALTER TABLE p1 EXCHANGE PARTITION ("p1_0") WITH TABLE t1;
+-- insert into relfilnode r1 since p1 now uses r1.
+UPDATE p1 SET ppid = 2, c2 = 20 WHERE ppid = 1;
+ROLLBACK;
+
+-- ROLLBACK should be successful and t1 shows the old value, p1 is empty.
+SELECT * FROM t1;
+SELECT * FROM p1;
+DROP TABLE t1;
+DROP TABLE p1;
+

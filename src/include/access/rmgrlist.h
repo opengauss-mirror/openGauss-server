@@ -32,31 +32,47 @@
  * Changes to this list possibly need an XLOG_PAGE_MAGIC bump.
  */
 
-/* symbol name, textual name, redo, desc, identify, startup, cleanup */
-PG_RMGR(RM_XLOG_ID, "XLOG", xlog_redo, xlog_desc, NULL, NULL, NULL)
-PG_RMGR(RM_XACT_ID, "Transaction", xact_redo, xact_desc, NULL, NULL, NULL)
-PG_RMGR(RM_SMGR_ID, "Storage", smgr_redo, smgr_desc, NULL, NULL, NULL)
-PG_RMGR(RM_CLOG_ID, "CLOG", clog_redo, clog_desc, NULL, NULL, NULL)
-PG_RMGR(RM_DBASE_ID, "Database", dbase_redo, dbase_desc, NULL, NULL, NULL)
-PG_RMGR(RM_TBLSPC_ID, "Tablespace", tblspc_redo, tblspc_desc, NULL, NULL, NULL)
-PG_RMGR(RM_MULTIXACT_ID, "MultiXact", multixact_redo, multixact_desc, NULL, NULL, NULL)
-PG_RMGR(RM_RELMAP_ID, "RelMap", relmap_redo, relmap_desc, NULL, NULL, NULL)
+/* symbol name, textual name, redo, desc, identify, startup, cleanup, undo, undo_desc */
+PG_RMGR(RM_XLOG_ID, "XLOG", xlog_redo, xlog_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_XACT_ID, "Transaction", xact_redo, xact_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_SMGR_ID, "Storage", smgr_redo, smgr_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_CLOG_ID, "CLOG", clog_redo, clog_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_DBASE_ID, "Database", dbase_redo, dbase_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_TBLSPC_ID, "Tablespace", tblspc_redo, tblspc_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_MULTIXACT_ID, "MultiXact", multixact_redo, multixact_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_RELMAP_ID, "RelMap", relmap_redo, relmap_desc, NULL, NULL, NULL, NULL, NULL)
+
 #ifndef ENABLE_MULTIPLE_NODES
-PG_RMGR(RM_STANDBY_ID, "Standby", standby_redo, standby_desc, StandbyXlogStartup, StandbyXlogCleanup, StandbySafeRestartpoint)
+PG_RMGR(RM_STANDBY_ID, "Standby", standby_redo, standby_desc, StandbyXlogStartup, StandbyXlogCleanup, StandbySafeRestartpoint, NULL, NULL)
 #else
-PG_RMGR(RM_STANDBY_ID, "Standby", standby_redo, standby_desc, NULL, NULL, NULL)
+PG_RMGR(RM_STANDBY_ID, "Standby", standby_redo, standby_desc, NULL, NULL, NULL, NULL, NULL)
 #endif
-PG_RMGR(RM_HEAP2_ID, "Heap2", heap2_redo, heap2_desc, NULL, NULL, NULL)
-PG_RMGR(RM_HEAP_ID, "Heap", heap_redo, heap_desc, NULL, NULL, NULL)
-PG_RMGR(RM_BTREE_ID, "Btree", btree_redo, btree_desc, btree_xlog_startup, btree_xlog_cleanup, btree_safe_restartpoint)
-PG_RMGR(RM_HASH_ID, "Hash", hash_redo, hash_desc, NULL, NULL, NULL)
-PG_RMGR(RM_GIN_ID, "Gin", gin_redo, gin_desc, gin_xlog_startup, gin_xlog_cleanup, NULL)
-PG_RMGR(RM_GIST_ID, "Gist", gist_redo, gist_desc, gist_xlog_startup, gist_xlog_cleanup, NULL)
-PG_RMGR(RM_SEQ_ID, "Sequence", seq_redo, seq_desc, NULL, NULL, NULL)
-PG_RMGR(RM_SPGIST_ID, "SPGist", spg_redo, spg_desc, spg_xlog_startup, spg_xlog_cleanup, NULL)
-PG_RMGR(RM_SLOT_ID, "Slot", slot_redo, slot_desc, NULL, NULL, NULL)
-PG_RMGR(RM_HEAP3_ID, "Heap3", heap3_redo, heap3_desc, NULL, NULL, NULL)
-PG_RMGR(RM_BARRIER_ID, "Barrier", barrier_redo, barrier_desc, NULL, NULL, NULL)
+
+PG_RMGR(RM_HEAP2_ID, "Heap2", heap2_redo, heap2_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_HEAP_ID, "Heap", heap_redo, heap_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_BTREE_ID, "Btree", btree_redo, btree_desc, btree_xlog_startup, btree_xlog_cleanup, btree_safe_restartpoint,
+    NULL, NULL)
+PG_RMGR(RM_HASH_ID, "Hash", hash_redo, hash_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_GIN_ID, "Gin", gin_redo, gin_desc, gin_xlog_startup, gin_xlog_cleanup, NULL, NULL, NULL)
+PG_RMGR(RM_GIST_ID, "Gist", gist_redo, gist_desc, gist_xlog_startup, gist_xlog_cleanup, NULL, NULL, NULL)
+PG_RMGR(RM_SEQ_ID, "Sequence", seq_redo, seq_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_SPGIST_ID, "SPGist", spg_redo, spg_desc, spg_xlog_startup, spg_xlog_cleanup, NULL, NULL, NULL)
+PG_RMGR(RM_SLOT_ID, "Slot", slot_redo, slot_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_HEAP3_ID, "Heap3", heap3_redo, heap3_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_BARRIER_ID, "Barrier", barrier_redo, barrier_desc, NULL, NULL, NULL, NULL, NULL)
+
 #ifdef ENABLE_MOT
-PG_RMGR(RM_MOT_ID, "MOT", MOTRedo, MOTDesc, NULL, NULL, NULL)
+PG_RMGR(RM_MOT_ID, "MOT", MOTRedo, MOTDesc, NULL, NULL, NULL, NULL, NULL)
 #endif
+
+PG_RMGR(RM_UHEAP_ID, "UHeap", UHeapRedo, UHeapDesc, NULL, NULL, NULL, UHeapUndoActions, NULL)
+PG_RMGR(RM_UHEAP2_ID, "UHeap2", UHeap2Redo, UHeap2Desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_UNDOLOG_ID, "UndoLog", undo::UndoXlogRedo, undo::UndoXlogDesc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_UHEAPUNDO_ID, "UHeapUndo", UHeapUndoRedo, UHeapUndoDesc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_UNDOACTION_ID, "UndoAction", undo::UndoXlogRollbackFinishRedo, undo::UndoXlogRollbackFinishDesc, NULL, NULL,
+    NULL, NULL, NULL)
+PG_RMGR(RM_UBTREE_ID, "UBtree", UBTreeRedo, UBTreeDesc, UBTreeXlogStartup, UBTreeXlogCleanup, UBTreeSafeRestartPoint,
+NULL, NULL)
+PG_RMGR(RM_UBTREE2_ID, "UBtree2", UBTree2Redo, UBTree2Desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_SEGPAGE_ID, "SegpageStorage", segpage_smgr_redo, segpage_smgr_desc, NULL, NULL, NULL, NULL, NULL)
+

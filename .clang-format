@@ -4,7 +4,7 @@ Language: Cpp
 SortIncludes: false
 AccessModifierOffset: -4
 DerivePointerAlignment: false
-PointerAlignment: Left
+PointerAlignment: Right
 ConstructorInitializerIndentWidth: 4
 AlignEscapedNewlinesLeft: true
 AlignTrailingComments: true
@@ -14,7 +14,7 @@ AllowShortIfStatementsOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 AlwaysBreakTemplateDeclarations: true
-BinPackArguments: false
+BinPackArguments: true
 AlwaysBreakBeforeMultilineStrings: false
 BreakBeforeBinaryOperators: None
 BreakBeforeTernaryOperators: true
@@ -79,7 +79,8 @@ MacroBlockEnd: "</span>
 ^ *END_PROG *$|</span>
 
 END_CATCH_ERROR$"
-AlignAfterOpenBracket: DontAlign
+AlignAfterOpenBracket: Align
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 ...
+

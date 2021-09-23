@@ -1,9 +1,9 @@
-i-- predictability
+-- predictability
 SET synchronous_commit = on;
 set enable_data_replicate = false;
 DROP TABLE IF EXISTS xpto;
 
-execute direct on (datanode1)'SELECT ''init'' FROM pg_create_logical_replication_slot(''regression_slot'', ''test_decoding'');';
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'test_decoding');
 
 CREATE SEQUENCE xpto_rand_seq START 79 INCREMENT 1499; -- portable "random"
 CREATE TABLE xpto (
@@ -260,7 +260,7 @@ ALTER TABLE toasted_copy ALTER COLUMN data SET STORAGE EXTERNAL;
 203	untoasted200
 \.
 
-execute direct on (datanode1)'SELECT substr(data, 1, 200) FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'');';
+SELECT substr(data, 1, 200) FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- test we can decode "old" tuples bigger than the max heap tuple size correctly
 DROP TABLE IF EXISTS toasted_several;
@@ -277,13 +277,13 @@ ALTER TABLE toasted_several ALTER COLUMN toasted_col2 SET STORAGE EXTERNAL;
 
 INSERT INTO toasted_several(toasted_key) VALUES(repeat('9876543210', 2000));
 
-execute direct on (datanode1)'SELECT regexp_replace(data, ''^(.{100}).*(.{100})$'', ''\1..\2'') FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'');';
+SELECT regexp_replace(data, '^(.{100}).*(.{100})$', '\1..\2') FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 -- test update of a toasted key without changing it
 UPDATE toasted_several SET toasted_col1 = toasted_key;
 UPDATE toasted_several SET toasted_col2 = toasted_col1;
 
-execute direct on (datanode1)'SELECT regexp_replace(data, ''^(.{100}).*(.{100})$'', ''\1..\2'') FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'');';
+SELECT regexp_replace(data, '^(.{100}).*(.{100})$', '\1..\2') FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1');
 
 /*
  * update with large tuplebuf, in a transaction large enough to force to spool to disk
@@ -295,10 +295,14 @@ DELETE FROM toasted_several WHERE id = 1;
 COMMIT;
 
 
-execute direct on (datanode1)'SELECT regexp_replace(data, ''^(.{100}).*(.{100})$'', ''\1..\2'') FROM pg_logical_slot_get_changes(''regression_slot'', NULL, NULL, ''include-xids'', ''0'', ''skip-empty-xacts'', ''1'')
-WHERE data NOT LIKE ''%INSERT: %'';';
+SELECT regexp_replace(data, '^(.{100}).*(.{100})$', '\1..\2') FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'include-xids', '0', 'skip-empty-xacts', '1')
+WHERE data NOT LIKE '%INSERT: %';
 
 
-execute direct on (datanode1)'SELECT pg_drop_replication_slot(''regression_slot'');';
+SELECT pg_drop_replication_slot('regression_slot');
 
 DROP TABLE toasted_several;
+DROP TABLE xpto;
+DROP TABLE toasted_key;
+DROP TABLE toasted_copy;
+DROP SEQUENCE xpto_rand_seq;

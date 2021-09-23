@@ -43,7 +43,7 @@ extern Node* ParseFuncOrColumn(
 
 extern FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int nargs, Oid* argtypes,
     bool expand_variadic, bool expand_defaults, Oid* funcid, Oid* rettype, bool* retset, int* nvargs, Oid* vatype,
-    Oid** true_typeids, List** argdefaults, bool call_func = false, Oid* refSynOid = NULL);
+    Oid** true_typeids, List** argdefaults, bool call_func = false, Oid* refSynOid = NULL, int* rettype_orig = NULL);
 
 extern int func_match_argtypes(
     int nargs, Oid* input_typeids, FuncCandidateList raw_candidates, FuncCandidateList* candidates);
@@ -58,6 +58,7 @@ extern const char* func_signature_string(List* funcname, int nargs, List* argnam
 extern Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError);
 extern Oid LookupFuncNameTypeNames(List* funcname, List* argtypes, bool noError);
 extern Oid LookupFuncNameOptTypeNames(List* funcname, List* argtypes, bool noError);
+extern Oid LookupPackageNames(List* pkgname);
 extern Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError);
 
 extern void check_pg_get_expr_args(ParseState* pstate, Oid fnoid, List* args);

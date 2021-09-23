@@ -38,7 +38,7 @@
 #include "parser/parser.h"
 #include "utils/int8.h"
 #include "utils/sortsupport.h"
-#include "executor/nodeSort.h"
+#include "executor/node/nodeSort.h"
 #include "pgxc/groupmgr.h"
 
 #define JUDGE_INPUT_VALID(X, Y) ((NULL == (X)) || (NULL == (Y)))
@@ -767,18 +767,28 @@ Datum textcat(PG_FUNCTION_ARGS)
     text* t1 = NULL;
     text* t2 = NULL;
 
-    if (PG_ARGISNULL(0) && PG_ARGISNULL(1))
-        PG_RETURN_NULL();
-    else if (PG_ARGISNULL(0)) {
-        t2 = PG_GETARG_TEXT_PP(1);
-        PG_RETURN_TEXT_P(t2);
-    } else if (PG_ARGISNULL(1)) {
-        t1 = PG_GETARG_TEXT_PP(0);
-        PG_RETURN_TEXT_P(t1);
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        if (PG_ARGISNULL(0) && PG_ARGISNULL(1))
+            PG_RETURN_NULL();
+        else if (PG_ARGISNULL(0)) {
+            t2 = PG_GETARG_TEXT_PP(1);
+            PG_RETURN_TEXT_P(t2);
+        } else if (PG_ARGISNULL(1)) {
+            t1 = PG_GETARG_TEXT_PP(0);
+            PG_RETURN_TEXT_P(t1);
+        } else {
+            t1 = PG_GETARG_TEXT_PP(0);
+            t2 = PG_GETARG_TEXT_PP(1);
+            PG_RETURN_TEXT_P(text_catenate(t1, t2));
+        }
     } else {
-        t1 = PG_GETARG_TEXT_PP(0);
-        t2 = PG_GETARG_TEXT_PP(1);
-        PG_RETURN_TEXT_P(text_catenate(t1, t2));
+        if (!PG_ARGISNULL(0) && !PG_ARGISNULL(1)) {
+            t1 = PG_GETARG_TEXT_PP(0);
+            t2 = PG_GETARG_TEXT_PP(1);
+            PG_RETURN_TEXT_P(text_catenate(t1, t2));
+        } else {
+            PG_RETURN_NULL();
+        }
     }
 }
 
@@ -823,7 +833,7 @@ static text* text_catenate(text* t1, text* t2)
 
     return result;
 }
-void text_to_bktmap(text* gbucket, uint2* bktmap, int len)
+void text_to_bktmap(text* gbucket, uint2* bktmap, int *bktlen)
 {
     int s_idx = 0;
     int dest_idx = 0;
@@ -832,16 +842,16 @@ void text_to_bktmap(text* gbucket, uint2* bktmap, int len)
     char dest_str[MAX_NODE_DIG + 1] = {0};
     char* s = text_to_cstring(gbucket);
     int len_text = text_length((Datum)gbucket);
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
     while (s_idx < len_text && s[s_idx] != '\0' && res_idx < BUCKETDATALEN) {
         if (s[s_idx] == ',') {
             dest_str[dest_idx] = '\0';
             bucket_nid = atoi(dest_str);
             if (bucket_nid > MAX_DATANODE_NUM || bucket_nid < 0)
                 ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Node id out of range")));
-            bktmap[res_idx++] = bucket_nid;
+            if (bktmap) {
+                bktmap[res_idx] = bucket_nid;
+            }
+            res_idx++;
             dest_idx = 0;
         } else {
             if (dest_idx >= MAX_NODE_DIG)
@@ -852,9 +862,14 @@ void text_to_bktmap(text* gbucket, uint2* bktmap, int len)
     }
     if (dest_idx > 0 && res_idx < BUCKETDATALEN) {
         dest_str[dest_idx] = '\0';
-        bktmap[res_idx++] = atoi(dest_str);
-        dest_idx = 0;
+        if (bktmap) {
+            bktmap[res_idx] = atoi(dest_str);
+        }
+        *bktlen = ++res_idx;
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("bucket map string is invalid")));
     }
+    
     pfree_ext(s);
 }
 /*

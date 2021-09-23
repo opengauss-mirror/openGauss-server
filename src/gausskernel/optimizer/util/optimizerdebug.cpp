@@ -340,6 +340,13 @@ void debug1_print_rel(PlannerInfo* root, RelOptInfo* rel)
         }
     }
 
+    if (rel->cheapest_gather_path) {
+        appendStringInfoString(&buf, "\n\tcheapest gather path:\n");
+        tmpBufPtr = debug1_print_path(root, rel->cheapest_gather_path, 1);
+        appendStringInfoString(&buf, tmpBufPtr);
+        pfree_ext(tmpBufPtr);
+    }
+
     appendStringInfoChar(&buf, '\n');
     appendStringInfoChar(&buf, '}');
     appendStringInfoChar(&buf, '\n');

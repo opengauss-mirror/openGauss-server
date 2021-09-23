@@ -16,12 +16,14 @@
 #include "knl/knl_variable.h"
 
 #include "access/skey.h"
+#include "catalog/pg_opfamily.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/plannodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
+#include "optimizer/planner.h"
 #include "optimizer/streamplan.h"
 #include "optimizer/tlist.h"
 #include "parser/parse_hint.h"
@@ -81,7 +83,8 @@ static PathKey* make_canonical_pathkey(
         /* Here need ensure ec_group_set be also equal. */
         pk = (PathKey*)lfirst(lc);
         if (eclass == pk->pk_eclass && eclass->ec_group_set == pk->pk_eclass->ec_group_set &&
-            opfamily == pk->pk_opfamily && strategy == pk->pk_strategy && nulls_first == pk->pk_nulls_first)
+            OpFamilyEquals(opfamily, pk->pk_opfamily) && strategy == pk->pk_strategy &&
+            nulls_first == pk->pk_nulls_first)
             return pk;
     }
 
@@ -216,6 +219,38 @@ List* canonicalize_pathkeys(PlannerInfo* root, List* pathkeys)
         /* Add to list unless redundant */
         if (!pathkey_is_redundant(cpathkey, new_pathkeys))
             new_pathkeys = lappend(new_pathkeys, cpathkey);
+    }
+    return new_pathkeys;
+}
+
+/*
+ * There maybe some CONST/PARAM EC in the pathkeys, it should be removed.
+ */
+List* remove_param_pathkeys(PlannerInfo* root, List* pathkeys)
+{
+    List* new_pathkeys = NIL;
+    ListCell* l = NULL;
+
+    if (pathkeys == NULL)
+        return NULL;
+
+    foreach (l, pathkeys) {
+        PathKey* pathkey = (PathKey*)lfirst(l);
+        EquivalenceClass* eclass = NULL;
+
+        /* Find the canonical (merged) EquivalenceClass */
+        eclass = pathkey->pk_eclass;
+        Assert(eclass->ec_merged == NULL);
+
+        /*
+         * If we can tell it's redundant just from the EC, skip.
+         * pathkey_is_redundant would notice that, but we needn't even bother
+         * constructing the node...
+         */
+        if (EC_MUST_BE_REDUNDANT(eclass) && !eclass->ec_group_set)
+            continue;
+
+        new_pathkeys = lappend(new_pathkeys, pathkey);
     }
     return new_pathkeys;
 }
@@ -361,9 +396,20 @@ PathKeysComparison compare_pathkeys(List* keys1, List* keys2)
 
         AssertEreport(list_member_ptr(root->canon_pathkeys, pathkey2), MOD_OPT, "pathky2 is not a member in pathkeys");
 #endif
-
-        if (pathkey1 != pathkey2)
+        if (pathkey1 == pathkey2) {
+            continue;
+        }
+        if (pathkey1 == NULL && pathkey2 != NULL) {
             return PATHKEYS_DIFFERENT; /* no need to keep looking */
+        }
+        if (pathkey1 != NULL && pathkey2 == NULL) {
+            return PATHKEYS_DIFFERENT; /* no need to keep looking */
+        }
+        if (pathkey1->type != pathkey2->type || !OpFamilyEquals(pathkey1->pk_opfamily, pathkey2->pk_opfamily) ||
+            pathkey1->pk_eclass != pathkey2->pk_eclass || pathkey1->pk_strategy != pathkey2->pk_strategy ||
+            pathkey1->pk_nulls_first != pathkey2->pk_nulls_first) {
+            return PATHKEYS_DIFFERENT; /* no need to keep looking */
+        }
     }
 
     /*
@@ -1447,7 +1493,8 @@ static bool right_merge_direction(PlannerInfo* root, PathKey* pathkey)
     foreach (l, root->query_pathkeys) {
         PathKey* query_pathkey = (PathKey*)lfirst(l);
 
-        if (pathkey->pk_eclass == query_pathkey->pk_eclass && pathkey->pk_opfamily == query_pathkey->pk_opfamily) {
+        if (pathkey->pk_eclass == query_pathkey->pk_eclass &&
+            OpFamilyEquals(pathkey->pk_opfamily, query_pathkey->pk_opfamily)) {
             /*
              * Found a matching query sort column.	Prefer this pathkey's
              * direction iff it matches.  Note that we ignore pk_nulls_first,
@@ -1539,3 +1586,129 @@ bool has_useful_pathkeys(PlannerInfo* root, RelOptInfo* rel)
     return false;    /* definitely useless */
 }
 
+/*
+ * Compute query_pathkeys and other pathkeys during plan generation
+ */
+void
+construct_pathkeys(PlannerInfo *root, List *tlist, List *activeWindows,
+                   List *groupClause, bool canonical)
+{
+    Query      *parse = root->parse;
+
+    /*
+     * Calculate pathkeys that represent grouping/ordering requirements.
+     * Stash them in PlannerInfo so that query_planner can canonicalize
+     * them after EquivalenceClasses have been formed.	The sortClause is
+     * certainly sort-able, but GROUP BY and DISTINCT might not be, in
+     * which case we just leave their pathkeys empty.
+     */
+
+    /* To groupingSet, we need build it's groupPathKey according to it's lower levels sort clause.*/
+    if (groupClause && grouping_is_sortable(groupClause)) {
+        root->group_pathkeys = make_pathkeys_for_sortclauses(root, groupClause, tlist, canonical);
+    } else {
+        root->group_pathkeys = NIL;
+    }
+
+    /* We consider only the first (bottom) window in pathkeys logic */
+    if (activeWindows != NIL) {
+        WindowClause* wc = NULL;
+
+        wc = (WindowClause*)linitial(activeWindows);
+
+        root->window_pathkeys = make_pathkeys_for_window(root, wc, tlist, canonical);
+    } else {
+        root->window_pathkeys = NIL;
+    }
+
+    if (parse->distinctClause && grouping_is_sortable(parse->distinctClause)) {
+
+        root->distinct_pathkeys = make_pathkeys_for_sortclauses(root,
+                                    parse->distinctClause, tlist, canonical);
+    } else {
+        root->distinct_pathkeys = NIL;
+    }
+
+    root->sort_pathkeys = make_pathkeys_for_sortclauses(root, parse->sortClause, tlist, canonical);
+
+    /* Remove the PARAM EC */
+    if (canonical) {
+        root->group_pathkeys = remove_param_pathkeys(root, root->group_pathkeys);
+        root->window_pathkeys = remove_param_pathkeys(root, root->window_pathkeys);
+        root->distinct_pathkeys = remove_param_pathkeys(root, root->distinct_pathkeys);
+        root->sort_pathkeys = remove_param_pathkeys(root, root->sort_pathkeys);
+    }
+
+    /*
+     * Figure out whether we want a sorted result from query_planner.
+     *
+     * If we have a sortable GROUP BY clause, then we want a result sorted
+     * properly for grouping.  Otherwise, if we have window functions to
+     * evaluate, we try to sort for the first window.  Otherwise, if
+     * there's a sortable DISTINCT clause that's more rigorous than the
+     * ORDER BY clause, we try to produce output that's sufficiently well
+     * sorted for the DISTINCT.  Otherwise, if there is an ORDER BY
+     * clause, we want to sort by the ORDER BY clause.
+     *
+     * Note: if we have both ORDER BY and GROUP BY, and ORDER BY is a
+     * superset of GROUP BY, it would be tempting to request sort by ORDER
+     * BY --- but that might just leave us failing to exploit an available
+     * sort order at all.  Needs more thought.	The choice for DISTINCT
+     * versus ORDER BY is much easier, since we know that the parser
+     * ensured that one is a superset of the other.
+     */
+    if (root->group_pathkeys)
+      root->query_pathkeys = root->group_pathkeys;
+    else if (root->window_pathkeys)
+      root->query_pathkeys = root->window_pathkeys;
+    else if (list_length(root->distinct_pathkeys) > list_length(root->sort_pathkeys))
+      root->query_pathkeys = root->distinct_pathkeys;
+    else if (root->sort_pathkeys)
+      root->query_pathkeys = root->sort_pathkeys;
+    else
+      root->query_pathkeys = NIL;
+
+    return;
+}
+
+/*
+ * Init the standard_qp_extra
+ */
+void
+standard_qp_init(PlannerInfo *root, void *extra, List *tlist,
+                 List *activeWindows, List *groupClause)
+{
+    if (ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
+        Assert (extra != NULL);
+        standard_qp_extra *qp_extra = (standard_qp_extra *)extra;
+        qp_extra->tlist = tlist;
+        qp_extra->activeWindows = activeWindows;
+        qp_extra->groupClause = groupClause;
+    } else {
+        construct_pathkeys(root, tlist, activeWindows, groupClause, false);
+    }
+
+    return;
+}
+
+/*
+ * Compute query_pathkeys and other pathkeys during plan generation
+ */
+void
+standard_qp_callback(PlannerInfo *root, void *extra)
+{
+    if (ENABLE_SQL_BETA_FEATURE(CANONICAL_PATHKEY)) {
+        Assert (extra != NULL);
+        standard_qp_extra *qp_extra = (standard_qp_extra *)extra;
+        construct_pathkeys(root, qp_extra->tlist, qp_extra->activeWindows,
+                    qp_extra->groupClause, true);
+    } else {
+        root->group_pathkeys = canonicalize_pathkeys(root, root->group_pathkeys);
+        root->window_pathkeys = canonicalize_pathkeys(root, root->window_pathkeys);
+        root->distinct_pathkeys = canonicalize_pathkeys(root, root->distinct_pathkeys);
+        root->sort_pathkeys = canonicalize_pathkeys(root, root->sort_pathkeys);
+        root->query_pathkeys = canonicalize_pathkeys(root, root->query_pathkeys);
+    }
+
+    return;
+}

@@ -24,7 +24,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeForeignscan.h"
+#include "executor/node/nodeForeignscan.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "utils/rel.h"

@@ -32,5 +32,6 @@
 extern uint32 generate_unique_queryid(Query* query, const char* query_string);
 extern bool normalized_unique_querystring(Query* query, const char* query_string, char* unique_string, int len,
     uint32 multi_sql_offset);
+extern void init_builtin_unique_sql();
 
 #endif

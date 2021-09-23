@@ -1,0 +1,628 @@
+DROP SCHEMA test_insert_update_002 CASCADE;
+ERROR:  schema "test_insert_update_002" does not exist
+CREATE SCHEMA test_insert_update_002;
+SET CURRENT_SCHEMA TO test_insert_update_002;
+-- test t1 with no index
+CREATE TABLE t1 (
+    col1 INT,
+    col2 INT,
+    col3 INT DEFAULT 1,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+) with(storage_type=ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "t1_col5_seq" for serial column "t1.col5"
+--- distribute key are not allowed to update
+INSERT INTO t1 VALUES (1, 2) ON DUPLICATE KEY UPDATE col1 = 3;
+--- should always insert
+INSERT INTO t1 VALUES (1, 2) ON DUPLICATE KEY UPDATE col2 = 3;
+INSERT INTO t1 VALUES (1, 2) ON DUPLICATE KEY UPDATE t1.col2 = 4;
+--- appoint column list in insert clause, should always insert
+INSERT INTO t1(col1, col3) VALUES (1, 3) ON DUPLICATE KEY UPDATE col2 = 5;
+INSERT INTO t1(col1, col3) VALUES (1, 3) ON DUPLICATE KEY UPDATE t1.col2 = 6;
+--- multiple rows, should always insert
+INSERT INTO t1 VALUES (2, 1), (2, 1) ON DUPLICATE KEY UPDATE col2 = 7, col3 = 7;
+SELECT * FROM t1 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    2 |    1 |    1
+    1 |    2 |    1 |    2
+    1 |    2 |    1 |    3
+    1 |      |    3 |    4
+    1 |      |    3 |    5
+    2 |    1 |    1 |    6
+    2 |    1 |    1 |    7
+(7 rows)
+
+--- test union, should insert
+INSERT INTO t1 (col1, col2)
+    SELECT * FROM
+        (SELECT col1, col2 FROM t1
+        UNION
+        SELECT col1, col3 FROM t1) AS union_table
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 10;
+SELECT col1, col2, col3 FROM t1 WHERE col5 > 6 ORDER BY col1, col2;
+ col1 | col2 | col3 
+------+------+------
+    1 |    1 |    1
+    1 |    2 |    1
+    1 |    3 |    1
+    1 |      |    1
+    2 |    1 |    1
+    2 |    1 |    1
+(6 rows)
+
+--- test subquery, should insert
+INSERT INTO t1
+    (SELECT col1 || col2 || '00' FROM t1 ORDER BY col5)
+    ON DUPLICATE KEY UPDATE col3 = col1 * 100;
+SELECT col1, col2, col3 FROM t1 WHERE col1 >= 100 ORDER BY col1;
+ col1 | col2 | col3 
+------+------+------
+  100 |      |    1
+  100 |      |    1
+  100 |      |    1
+ 1100 |      |    1
+ 1200 |      |    1
+ 1200 |      |    1
+ 1200 |      |    1
+ 1200 |      |    1
+ 1300 |      |    1
+ 2100 |      |    1
+ 2100 |      |    1
+ 2100 |      |    1
+(12 rows)
+
+-- test t2 with one primary key
+CREATE TABLE t2 (
+    col1 INT,
+    col2 INT PRIMARY KEY,
+    col3 INT DEFAULT 1,
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+)  with(storage_type=ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "t2_col5_seq" for serial column "t2.col5"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t2_pkey" for table "t2"
+--- distribute key are not allowed to update
+INSERT INTO t2 VALUES (1, 1) ON DUPLICATE KEY UPDATE col2 = 3;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+INSERT INTO t2 VALUES (1, 1) ON DUPLICATE KEY UPDATE t2.col2 = 3;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+INSERT INTO t2 (col2, col3, col4, col5)
+    VALUES  (10, 10, CURRENT_TIMESTAMP(0), 10),
+            (20, 20, CURRENT_TIMESTAMP(1), 20),
+            (30, 30, CURRENT_TIMESTAMP(2), 30)
+    ON DUPLICATE KEY UPDATE
+        col1 = 100,
+        col2 = 100,
+        col3 = 100,
+        col4 = '2019-08-09'::TIMESTAMP,
+        col5 = 100;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+--- should insert
+INSERT INTO t2 VALUES (1, 1) ON DUPLICATE KEY UPDATE col1 = 30;
+INSERT INTO t2 VALUES (2, 2) ON DUPLICATE KEY UPDATE t2.col1 = 40;
+INSERT INTO t2 VALUES (3, 3) ON DUPLICATE KEY UPDATE col1 = col1 * 2;
+INSERT INTO t2 VALUES (4, 4) ON DUPLICATE KEY UPDATE t2.col1 = t2.col1 * 2 ;
+INSERT INTO t2 VALUES (5, 5) ON DUPLICATE KEY UPDATE col1 = col2 + 1;
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = t2.col2 + 1;
+INSERT INTO t2 VALUES (7, 7) ON DUPLICATE KEY UPDATE col1 = extract(dow from col4) + 10;
+INSERT INTO t2 VALUES (8, 8) ON DUPLICATE KEY UPDATE t2.col1 = extract(century from col4) * 100 + extract(isodow from col4);
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    1 |    1 |    1
+    2 |    2 |    1 |    2
+    3 |    3 |    1 |    3
+    4 |    4 |    1 |    4
+    5 |    5 |    1 |    5
+    6 |    6 |    1 |    6
+    7 |    7 |    1 |    7
+    8 |    8 |    1 |    8
+(8 rows)
+
+--- should update
+INSERT INTO t2 VALUES (3, 1) ON DUPLICATE KEY UPDATE col1 = 30, col3 = col5 + 1;
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 VALUES (4, 2) ON DUPLICATE KEY UPDATE t2.col1 = 40, t2.col3 = t2.col5;
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 VALUES (3, 3), (4, 4) ON DUPLICATE KEY UPDATE col3 = t2.col5 + 1;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 VALUES (5, 5) ON DUPLICATE KEY UPDATE col1 = extract(dow from col4) + 10;
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 VALUES (6, 6) ON DUPLICATE KEY UPDATE t2.col1 = extract(century from col4) * 100 + extract(isodow from col4);
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+   30 |    1 |    2 |    1
+   40 |    2 |    2 |    2
+    3 |    3 |    4 |    3
+    4 |    4 |    5 |    4
+--?.* |    5 |    1 |    5
+--?.* |    6 |    1 |    6
+    7 |    7 |    1 |    7
+    8 |    8 |    1 |    8
+(8 rows)
+
+-- primary key are not allowed to be null
+INSERT INTO t2 (col1) VALUES (10) ON DUPLICATE KEY UPDATE col1 = 10;
+ERROR:  null value in column "col2" violates not-null constraint
+--?.*
+--- appoint column list in insert clause
+---- should insert
+INSERT INTO t2 (col2, col3) VALUES (9, 9) ON DUPLICATE KEY UPDATE col1 = 90;
+INSERT INTO t2 (col2, col3, col4, col5)
+    VALUES  (10, 10, CURRENT_TIMESTAMP(0), 10),
+            (20, 20, CURRENT_TIMESTAMP(1), 20),
+            (30, 30, CURRENT_TIMESTAMP(2), 30)
+    ON DUPLICATE KEY UPDATE
+        col1 = 100,
+        col3 = 100,
+        col4 = '2019-08-20'::TIMESTAMP,
+        col5 = 100;
+SELECT * FROM t2 ORDER BY col5;
+ col1 | col2 | col3 |              col4               | col5 
+------+------+------+---------------------------------+------
+--?   30 |    1 |    2 | .*                              |    1
+--?   40 |    2 |    2 | .*                              |    2
+--?    3 |    3 |    4 | .*                              |    3
+--?    4 |    4 |    5 | .*                              |    4
+--? .* |    5 |    1 | .*                              |    5
+--? .* |    6 |    1 | .*                              |    6
+--?    7 |    7 |    1 | .*                              |    7
+--?    8 |    8 |    1 | .*                              |    8
+--?      |   10 |   10 | .*                              |   10
+--?      |    9 |    9 | .*                              |   16
+--?      |   20 |   20 | .*                              |   20
+--?      |   30 |   30 | .*                              |   30
+(12 rows)
+
+---- should update
+INSERT INTO t2 (col2, col3) VALUES (9, 9) ON DUPLICATE KEY UPDATE col1 = 90;
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 (col2, col3, col4, col5)
+    VALUES  (10, 10, CURRENT_TIMESTAMP(0), 10),
+            (20, 20, CURRENT_TIMESTAMP(1), 20),
+            (30, 30, CURRENT_TIMESTAMP(2), 30)
+    ON DUPLICATE KEY UPDATE
+        col1 = 100,
+        col3 = 100,
+        col4 = '2019-08-20'::TIMESTAMP,
+        col5 = 100;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+SELECT * FROM t2 ORDER BY col5, col2;
+ col1 | col2 | col3 |              col4               | col5 
+------+------+------+---------------------------------+------
+--?   30 |    1 |    2 | .* |    1
+--?   40 |    2 |    2 | .* |    2
+--?    3 |    3 |    4 | .* |    3
+--?    4 |    4 |    5 | .* |    4
+--? .* |    5 |    1 | .* |    5
+--? .* |    6 |    1 | .* |    6
+--?    7 |    7 |    1 | .* |    7
+--?    8 |    8 |    1 | .* |    8
+--?   90 |    9 |    9 | .* |   16
+  100 |   10 |  100 | Tue Aug 20 00:00:00 2019        |  100
+  100 |   20 |  100 | Tue Aug 20 00:00:00 2019        |  100
+  100 |   30 |  100 | Tue Aug 20 00:00:00 2019        |  100
+(12 rows)
+
+--- test subquery
+---- should insert
+INSERT INTO t2
+    (SELECT col1 * 1000, col2 * 1000 + 1 FROM t2 ORDER BY col5 LIMIT 2)
+    ON DUPLICATE KEY UPDATE col3 = col2 + 1;
+INSERT INTO t2 (col2, col3)
+    (SELECT col1 * 1000 + 2, col2 * 1000 FROM t2 ORDER BY col5 LIMIT 2 OFFSET 1)
+    ON DUPLICATE KEY UPDATE col3 = col2 + 1;
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
+ col1  | col2  | col3 | col5 
+-------+-------+------+------
+    30 |     1 |    2 |    1
+    40 |     2 |    2 |    2
+     3 |     3 |    4 |    3
+     4 |     4 |    5 |    4
+--? .* |     5 |    1 |    5
+--? .* |     6 |    1 |    6
+     7 |     7 |    1 |    7
+     8 |     8 |    1 |    8
+    90 |     9 |    9 |   16
+--? 30000 |  1001 |    1 |   18
+--? 40000 |  2001 |    1 |   19
+--?       | 40002 | 2000 |   20
+--?       |  3002 | 3000 |   21
+   100 |    10 |  100 |  100
+   100 |    20 |  100 |  100
+   100 |    30 |  100 |  100
+(16 rows)
+
+---- should update
+INSERT INTO t2
+    (SELECT col1 * 1000, col2 * 1000 + 1 FROM t2 ORDER BY col5 LIMIT 2)
+    ON DUPLICATE KEY UPDATE col3 = col2 + 1;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t2 (col2, col3)
+    (SELECT col1 * 1000 + 2, col2 * 1000 FROM t2 ORDER BY col5 LIMIT 2 OFFSET 1)
+    ON DUPLICATE KEY UPDATE col3 = col2 + 1;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
+ col1  | col2  | col3  | col5 
+-------+-------+-------+------
+    30 |     1 |     2 |    1
+    40 |     2 |     2 |    2
+     3 |     3 |     4 |    3
+     4 |     4 |     5 |    4
+--? .* |     5 |     1 |    5
+--? .* |     6 |     1 |    6
+     7 |     7 |     1 |    7
+     8 |     8 |     1 |    8
+    90 |     9 |     9 |   16
+--? 30000 |  1001 |  1002 |   18
+--? 40000 |  2001 |  2002 |   19
+--?       | 40002 | 40003 |   20
+--?      |  3002 |  3003 |   21
+   100 |    10 |   100 |  100
+   100 |    20 |   100 |  100
+   100 |    30 |   100 |  100
+(16 rows)
+
+--- test union, some insert some update
+SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    UNION
+    SELECT col1, col3 FROM t1 ORDER BY 1, 2;
+ col1 | col2 
+------+------
+    1 |    1
+    1 |    2
+    1 |    3
+    2 |    1
+  100 |    1
+ 1100 |    1
+ 1200 |    1
+ 1300 |    1
+ 2100 |    1
+(9 rows)
+
+INSERT INTO t2 (col1, col2)
+    SELECT * FROM
+        (SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+        UNION
+        SELECT col1, col3 FROM t1) AS union_table
+    ON DUPLICATE KEY UPDATE col3 = 1110;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+set behavior_compat_options='merge_update_multi';
+INSERT INTO t2 (col1, col2)
+    SELECT * FROM
+        (SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+        UNION
+        SELECT col1, col3 FROM t1) AS union_table
+    ON DUPLICATE KEY UPDATE col3 = 2220;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
+ col1  | col2  | col3  | col5 
+-------+-------+-------+------
+    30 |     1 |  2220 |    1
+    40 |     2 |  2220 |    2
+     3 |     3 |  2220 |    3
+     4 |     4 |     5 |    4
+--? .*     |     5 |     1 |    5
+--? .*    |     6 |     1 |    6
+     7 |     7 |     1 |    7
+     8 |     8 |     1 |    8
+    90 |     9 |     9 |   16
+--? 30000 |  1001 |  1002 |   18
+--? 40000 |  2001 |  2002 |   19
+--?       | 40002 | 40003 |   20
+--?       |  3002 |  3003 |   21
+   100 |    10 |   100 |  100
+   100 |    20 |   100 |  100
+   100 |    30 |   100 |  100
+(16 rows)
+
+INSERT INTO t2 (col1, col2)
+    SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    UNION
+    SELECT col1, col3 FROM t1
+    ON DUPLICATE KEY UPDATE col3 = 3330;
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+WARNING:  UHeapLockTuple returned 7
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 ORDER BY col5, col2;
+ col1  | col2  | col3  | col5 
+-------+-------+-------+------
+    30 |     1 |  3330 |    1
+    40 |     2 |  3330 |    2
+     3 |     3 |  3330 |    3
+     4 |     4 |     5 |    4
+--?    16 |     5 |     1 |    5
+--?  2106 |     6 |     1 |    6
+     7 |     7 |     1 |    7
+     8 |     8 |     1 |    8
+    90 |     9 |     9 |   16
+--? 30000 |  1001 |  1002 |   18
+--? 40000 |  2001 |  2002 |   19
+--?       | 40002 | 40003 |   20
+--?       |  3002 |  3003 |   21
+   100 |    10 |   100 |  100
+   100 |    20 |   100 |  100
+   100 |    30 |   100 |  100
+(16 rows)
+
+reset behavior_compat_options;
+-- test INTERSECT, should update
+(SELECT col1, col1 + col2 FROM t1 WHERE col2 IS NOT NULL
+    UNION
+    SELECT 1, 2)
+    INTERSECT
+    SELECT col1, col3 FROM t1;
+ col1 | ?column? 
+------+----------
+    1 |        3
+(1 row)
+
+INSERT INTO t2 (col1, col2)
+    (SELECT col1, col1 + col2 FROM t1 WHERE col2 IS NOT NULL
+        UNION
+        SELECT 1, 2)
+    INTERSECT
+    SELECT col1, col3 FROM t1
+    ON DUPLICATE KEY UPDATE col3 = 4440;
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 3 ORDER BY col5, col2;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    3 |    3 | 4440 |    3
+(1 row)
+
+-- test EXCEPT, should update
+SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    EXCEPT
+    (SELECT col1, col3 FROM t1
+        UNION
+        SELECT NULL, NULL);
+ col1 | col2 
+------+------
+    1 |    2
+(1 row)
+
+INSERT INTO t2 (col1, col2)
+    SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    EXCEPT
+    (SELECT col1, col3 FROM t1
+        UNION
+        SELECT NULL, NULL)
+    ON DUPLICATE KEY UPDATE col3 = 5550;
+WARNING:  UHeapUpdate returned 5
+SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 2 ORDER BY col5, col2;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+   40 |    2 | 5550 |    2
+(1 row)
+
+-- test unique index with not default value
+drop table t2;
+CREATE TABLE t2 (
+    col1 INT,
+    col2 INT NOT NULL,
+    col3 INT DEFAULT 1,
+    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+)  with(storage_type=ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "t2_col5_seq" for serial column "t2.col5"
+CREATE UNIQUE INDEX t2_u_index ON t2(col2, col5);
+SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    EXCEPT
+    (SELECT col1, col3 FROM t1
+        UNION
+        SELECT NULL, NULL);
+ col1 | col2 
+------+------
+    1 |    2
+(1 row)
+
+INSERT INTO t2
+    SELECT col1, col2 FROM t1 WHERE col2 IS NOT NULL
+    EXCEPT
+    (SELECT col1, col3 FROM t1
+        UNION
+        SELECT NULL, NULL)
+    ON DUPLICATE KEY UPDATE col3 = (col1 + col2 + col3) * 100;
+SELECT col1, col2, col3, col5 FROM t2 WHERE col2 = 2 ORDER BY col5, col2;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    2 |    1 |    1
+(1 row)
+
+-- test t3 with one primary index with two columns
+CREATE TABLE t3 (
+    col1 INT,
+    col2 INT,
+    col3 INT DEFAULT 1,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL,
+    PRIMARY KEY (col2, col3)
+)  with(storage_type=ustore);
+NOTICE:  CREATE TABLE will create implicit sequence "t3_col5_seq" for serial column "t3.col5"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t3_pkey" for table "t3"
+--- column referenced by primary key are not allowed to update
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE col3 = 3;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+--- should insert when not contains primary key and not all primary key referred columns have default value.
+--- but will fail cause primary key should not be null
+INSERT INTO t3 (col1) VALUES (1) ON DUPLICATE KEY UPDATE col1 = 2;
+ERROR:  null value in column "col2" violates not-null constraint
+DETAIL:  Failing row contains (1, null, 1, 1).
+--- should insert
+--- (SEQUENCE BUG: the serial column will starts from 2 since the above statement has applied for a sequence)
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE col1 = 10;
+INSERT INTO t3 VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col5 = 20;
+SELECT * FROM t3 order by col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |    1 |    1 |    2
+    2 |    2 |    2 |    3
+(2 rows)
+
+--- should update
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE col1 = 10;
+WARNING:  UHeapUpdate returned 5
+INSERT INTO t3 VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col5 = 20;
+WARNING:  UHeapUpdate returned 5
+SELECT * FROM t3 order by col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+   10 |    1 |    1 |    2
+    2 |    2 |    2 |   20
+(2 rows)
+
+--- test subquery
+---- should insert
+INSERT INTO t3 (col2, col3) (SELECT max(col2) + 1, max(col3) + 1 FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+SELECT * FROM t3 order by col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+   10 |    1 |    1 |    2
+      |    3 |    3 |    6
+    2 |    2 |    2 |   20
+(3 rows)
+
+---- should update
+INSERT INTO t3 (col2, col3) (SELECT max(col2), max(col3) FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+WARNING:  UHeapUpdate returned 5
+SELECT * FROM t3 order by col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+   10 |    1 |    1 |    2
+    6 |    3 |    3 |    6
+    2 |    2 |    2 |   20
+(3 rows)
+
+-- test t3 with one unique index with two columns
+drop table t3;
+CREATE TABLE t3 (
+    col1 INT,
+    col2 INT,
+    col3 INT DEFAULT 1 NOT NULL,
+--    col4 TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    col5 BIGSERIAL
+);
+NOTICE:  CREATE TABLE will create implicit sequence "t3_col5_seq" for serial column "t3.col5"
+CREATE UNIQUE INDEX t3_ukey ON t3 (col2, col3);
+--- column referenced by unique key are not allowed to update
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE col3 = 3;
+ERROR:  INSERT ON DUPLICATE KEY UPDATE don't allow update on primary key or unique key.
+--- should insert cause not contains unique key and not all unique key referred columns have default value.
+INSERT INTO t3 (col1) VALUES (1) ON DUPLICATE KEY UPDATE col1 = 2;
+INSERT INTO t3 (col1) VALUES (1) ON DUPLICATE KEY UPDATE col1 = 2;
+SELECT * FROM t3 order by col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |      |    1 |    1
+    1 |      |    1 |    2
+(2 rows)
+
+--- should insert
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE col1 = 10;
+INSERT INTO t3 VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE t3.col5 = 20;
+SELECT * FROM t3 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |      |    1 |    1
+    1 |      |    1 |    2
+    1 |    1 |    1 |    3
+    2 |    2 |    2 |    4
+(4 rows)
+
+--- should update
+INSERT INTO t3 VALUES (1, 1) ON DUPLICATE KEY UPDATE t3.col1 = 10;
+INSERT INTO t3 VALUES (2, 2, 2) ON DUPLICATE KEY UPDATE col5 = 20;
+SELECT * FROM t3 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |      |    1 |    1
+    1 |      |    1 |    2
+   10 |    1 |    1 |    3
+    2 |    2 |    2 |   20
+(4 rows)
+
+--- test subquery
+---- should insert
+INSERT INTO t3 (SELECT 100, NULL, max(col3) FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+INSERT INTO t3 (SELECT 100, NULL, max(col3) FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+INSERT INTO t3 (col2, col3) (SELECT max(col2) + 1, max(col3) + 1 FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+SELECT * FROM t3 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |      |    1 |    1
+    1 |      |    1 |    2
+   10 |    1 |    1 |    3
+  100 |      |    2 |    7
+  100 |      |    2 |    8
+      |    3 |    3 |    9
+    2 |    2 |    2 |   20
+(7 rows)
+
+---- should update
+INSERT INTO t3 (col2, col3) (SELECT max(col2), max(col3) FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
+SELECT * FROM t3 ORDER BY col5;
+ col1 | col2 | col3 | col5 
+------+------+------+------
+    1 |      |    1 |    1
+    1 |      |    1 |    2
+   10 |    1 |    1 |    3
+  100 |      |    2 |    7
+  100 |      |    2 |    8
+    6 |    3 |    3 |    9
+    2 |    2 |    2 |   20
+(7 rows)
+
+DROP SCHEMA test_insert_update_002 CASCADE;
+NOTICE:  drop cascades to 3 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t2
+drop cascades to table t3

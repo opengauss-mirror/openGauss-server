@@ -35,9 +35,9 @@
 #include "commands/trigger.h"
 #include "distributelayer/streamProducer.h"
 #include "distributelayer/streamTransportComm.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "executor/executor.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "executor/tuptable.h"
 #include "gssignal/gs_signal.h"
 #include "libcomm/libcomm.h"
@@ -142,9 +142,9 @@ StreamProducer::StreamProducer(
 
     /* use the origianl exec_nodes to setup bucketmap for redistribution case */
     if (EXEC_IN_RECURSIVE_MODE(snode) && snode->origin_consumer_nodes != NULL) {
-        m_bucketMap = get_bucketmap_by_execnode(snode->origin_consumer_nodes, pstmt);
+        m_bucketMap = get_bucketmap_by_execnode(snode->origin_consumer_nodes, pstmt, &m_bucketCnt);
     } else {
-        m_bucketMap = get_bucketmap_by_execnode(snode->consumer_nodes, pstmt);
+        m_bucketMap = get_bucketmap_by_execnode(snode->consumer_nodes, pstmt, &m_bucketCnt);
     }
 
     rc = memset_s(m_skewMatch, sizeof(int) * BatchMaxSize, 0, sizeof(int) * BatchMaxSize);
@@ -1051,10 +1051,6 @@ void StreamProducer::redistributeBatchChannel(VectorBatch* batch)
     bool isNull[BatchMaxSize] = {true};
     Datum data;
 
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     Assert((BUCKETDATALEN & (BUCKETDATALEN - 1)) == 0);
     Assert(m_disQuickLocator != NULL);
 
@@ -1624,10 +1620,7 @@ void StreamProducer::waitThreadIdReady()
  */
 inline uint2 StreamProducer::NodeLocalizer(ScalarValue hashValue)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-    return m_bucketMap[(uint32)abs((int)hashValue) & (uint32)(BUCKETDATALEN - 1)];
+    return m_bucketMap[(uint32)abs((int)hashValue) & (uint32)(m_bucketCnt - 1)];
 }
 
 /*
@@ -1651,9 +1644,6 @@ inline uint2 StreamProducer::NodeLocalizerForSlice(Const** distValues)
  */
 inline int StreamProducer::ThreadLocalizer(ScalarValue hashValue, int dop)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
     return (hashValue / BUCKETDATALEN) % dop;
 }
 

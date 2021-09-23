@@ -19,7 +19,7 @@
  *    with ngram parser) or indirectly(such as to_tsvector with text seach configuration
  *    defined with N-gram parser).
  *
- *    As a parser we have got to abide by PostgreSQL full-text search rules, and define 4
+ *    As a parser we have got to abide by openGauss full-text search rules, and define 4
  *    functions ngram_start as start_function, ngram_nexttoken as gettoken_function,
  *    ngram_end as end_function, ngram_start as start_function, and use prsd_headline
  *    defined for default parser as N-gram's headline_function

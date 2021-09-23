@@ -324,7 +324,6 @@ NATURAL FULL JOIN
 
 -- Test for propagation of nullability constraints into sub-joins
 
-SET enforce_two_phase_commit TO off;
 
 create temp table x (x1 int, x2 int);
 insert into x values (1,11);

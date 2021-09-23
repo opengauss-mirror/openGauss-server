@@ -35,7 +35,33 @@
 #include "cl_state.h"
 #include "zlib.h"
 #include "libpq-int.h"
+#include "pqexpbuffer.h"
 #include "catalog/pg_type.h"
+#include "cmk_entity_manager_hooks/reg_cmkem_manager_main.h"
+#include "cmk_entity_manager_hooks/reg_hook_frame.h"
+
+bool is_cmk_algo_sm(CmkAlgorithm cmk_algo)
+{
+    if (cmk_algo == CmkAlgorithm::SM2 || cmk_algo == CmkAlgorithm::SM4) {
+        return true;
+    }
+
+    return false;
+}
+
+bool is_cek_algo_sm(ColumnEncryptionAlgorithm cek_algo)
+{
+    if (cek_algo == ColumnEncryptionAlgorithm::SM4_SM3) {
+        return true;
+    }
+
+    return false;
+}
+
+bool is_sm_algo_used_together(CmkAlgorithm cmk_algo, ColumnEncryptionAlgorithm cek_algo)
+{
+    return (is_cmk_algo_sm(cmk_algo) == is_cek_algo_sm(cek_algo));
+}
 
 int EncryptionColumnHookExecutor::get_estimated_processed_data_size_impl(int data_size) const
 {
@@ -50,22 +76,18 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
     if (!encryption_global_hook_executor) {
         return -1;
     }
-
+    PGClientLogic &PgClientLogic = encryption_global_hook_executor->get_client_logic();
+    PGconn* conn = PgClientLogic.m_conn;
+    
     size_t encrypted_key_value_size = 0;
     const char *encrypted_key_value = NULL;
-
     /* get effective encrypted_key */
     get_argument("encrypted_value", &encrypted_key_value, encrypted_key_value_size);
     if (encrypted_key_value == NULL) {
-        printf("ERROR(CLIENT): failed to get key_value.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to get key_value.\n"));
         return -1;
     }
-    AeadAesHamcEncKey aesCbcEncryptionKey;
-    unsigned char decrypted_key[MAX_CEK_LENGTH];
-    errno_t rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
-    securec_check_c(rc, "\0", "\0");
     size_t decrypted_key_size = 0;
-    errno_t securec_rc = EOK;
     unsigned char *cek_keys = NULL;
     cek_keys = get_cek_keys();
     decrypted_key_size = get_cek_size();
@@ -74,41 +96,37 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
         size_t algorithm_str_size(0);
         const char *algorithm_str = NULL;
+
         get_argument("algorithm", &algorithm_str, algorithm_str_size);
         if (algorithm_str == NULL) {
-            printf("ERROR(CLIENT): failed to get column encryption algorithm.\n");
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): failed to get column encryption algorithm.\n"));
             return -1;
-        } else if (strcasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256") == 0) {
-            column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
-        } else if (strcasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
-            column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_128_CBC_HMAC_SHA256;
-        } else {
-            printf("ERROR(CLIENT): un-support invalid encryption algorithm.\n");
+        } 
+        
+        column_encryption_algorithm = get_cek_algorithm_from_string(algorithm_str);
+        if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): un-support invalid encryption algorithm.\n"));
             return -1;
         }
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
-    if (cek_keys != NULL && decrypted_key_size != 0) {
-        securec_rc = memcpy_s(decrypted_key, MAX_CEK_LENGTH, cek_keys, decrypted_key_size);
-        securec_check_c(securec_rc, "", "");
-    } else {
-        if (!deprocess_column_encryption_key(encryption_global_hook_executor, decrypted_key,
+    if (cek_keys == NULL || decrypted_key_size == 0) {
+        unsigned char encrypted_key[MAX_CEK_LENGTH];
+        errno_t rc = memset_s(encrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+        securec_check_c(rc, "\0", "\0");
+        if (!deprocess_column_encryption_key(encryption_global_hook_executor, encrypted_key,
             &decrypted_key_size, encrypted_key_value, &encrypted_key_value_size)) {
-            return -1;
+            return DECRYPT_CEK_ERR;
         }
-        set_cek_keys((unsigned char *)decrypted_key, decrypted_key_size);
-        set_cek_size(decrypted_key_size);
-    }
-
-    /* encryption key */
-    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decrypted_key, decrypted_key_size)) {
-        errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+        if (!set_cek_keys((unsigned char *)encrypted_key, decrypted_key_size)) {
+            return DECRYPT_CEK_ERR;
+        }
+        errno_t res = memset_s(encrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");
-        return -1;
     }
-    errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
-    securec_check_c(res, "\0", "\0");
     Oid data_type = cached_column->get_data_type();
     EncryptionType encryption_type = EncryptionType::INVALID_TYPE;
     if (data_type == BYTEAWITHOUTORDERWITHEQUALCOLOID) {
@@ -129,21 +147,17 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
     if (!encryption_global_hook_executor) {
         return CLIENT_HEAP_ERR;
     }
-
+    PGClientLogic &PgClientLogic = encryption_global_hook_executor->get_client_logic();
+    PGconn* conn = PgClientLogic.m_conn;
     /* get effective encrypted_key */
     size_t encrypted_key_value_size = 0;
     const char *encrypted_key_value = NULL;
     get_argument("encrypted_value", &encrypted_key_value, encrypted_key_value_size);
     if (encrypted_key_value == NULL) {
-        printf("ERROR(CLIENT): failed to get key_value.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to get key_value.\n"));
         return DECRYPT_CEK_ERR;
     }
-
-    AeadAesHamcEncKey aesCbcEncryptionKey;
-    unsigned char decrypted_key[MAX_CEK_LENGTH];
-    errno_t securec_rc = EOK;
-    securec_rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
-    securec_check_c(securec_rc, "\0", "\0");
+    errno_t res;
     size_t decrypted_key_size = 0;
     unsigned char *cek_keys = NULL;
     cek_keys = get_cek_keys();
@@ -154,53 +168,51 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
         const char *algorithm_str = NULL;
         get_argument("algorithm", &algorithm_str, algorithm_str_size);
         if (algorithm_str == NULL) {
-            printf("ERROR(CLIENT): failed to get column encryption algorithm.\n");
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): failed to get column encryption algorithm.\n"));
             return DECRYPT_CEK_ERR;
-        } else if (strcasecmp(algorithm_str, "AEAD_AES_256_CBC_HMAC_SHA256") == 0) {
-            column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
-        } else if (strcasecmp(algorithm_str, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
-            column_encryption_algorithm = ColumnEncryptionAlgorithm::AEAD_AES_128_CBC_HMAC_SHA256;
         }
+
+        column_encryption_algorithm = get_cek_algorithm_from_string(algorithm_str);
+        if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
+            printfPQExpBuffer(&conn->errorMessage,
+                libpq_gettext("ERROR(CLIENT): un-support invalid encryption algorithm.\n"));
+            return DECRYPT_CEK_ERR;
+        }
+        
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
-    if (cek_keys != NULL && decrypted_key_size != 0) {
-        securec_rc = memcpy_s(decrypted_key, MAX_CEK_LENGTH, cek_keys, decrypted_key_size);
-        securec_check_c(securec_rc, "\0", "\0");
-    } else {
-        if (!deprocess_column_encryption_key(encryption_global_hook_executor, decrypted_key, &decrypted_key_size,
-            encrypted_key_value, &encrypted_key_value_size)) {
+    if (cek_keys == NULL || decrypted_key_size == 0) {
+        unsigned char decrypted_key[MAX_CEK_LENGTH];
+        errno_t rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+        securec_check_c(rc, "\0", "\0");
+        if (!deprocess_column_encryption_key(encryption_global_hook_executor, decrypted_key,
+            &decrypted_key_size, encrypted_key_value, &encrypted_key_value_size)) {
             return DECRYPT_CEK_ERR;
         }
-
-        set_cek_keys((unsigned char *)decrypted_key, decrypted_key_size);
-        set_cek_size(decrypted_key_size);
-    }
-
-    /* encryption key */
-    if (!aesCbcEncryptionKey.generate_keys((unsigned char *)decrypted_key, decrypted_key_size)) {
-        errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
+        if (!set_cek_keys((unsigned char *)decrypted_key, decrypted_key_size)) {
+            return DECRYPT_CEK_ERR;
+        }
+        res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(res, "\0", "\0");
-        return DERIVE_CEK_ERR;
     }
 
-    errno_t res = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
-    securec_check_c(res, "\0", "\0");
     if (data_proceeed_size <= 0) {
-        printf("ERROR(CLIENT): data processed size(%d) is invalid.\n", data_proceeed_size);
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): data processed size is invalid.\n"));
         return INVALID_DATA_LEN;
     }
     *data = (unsigned char *)malloc(data_proceeed_size);
     if (!(*data)) {
-        printf("ERROR(CLIENT): allocation failure.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): allocation failure.\n"));
         return CLIENT_HEAP_ERR;
     }
     res = memset_s(*data, data_proceeed_size, 0, data_proceeed_size);
     securec_check_c(res, "\0", "\0");
-    int plainTextSize =
-        decrypt_data(data_processed, data_proceeed_size, aesCbcEncryptionKey, *data, column_encryption_algorithm);
+    int plainTextSize = decrypt_data(data_processed, data_proceeed_size, aesCbcEncryptionKey, *data,
+        column_encryption_algorithm);
     if (plainTextSize <= 0) {
-        printf("ERROR(CLIENT): failed to decrypt data.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to decrypt data.\n"));
         free(*data);
         *data = NULL;
         return DEC_DATA_ERR;
@@ -218,67 +230,43 @@ bool EncryptionColumnHookExecutor::deprocess_column_encryption_key(
     EncryptionGlobalHookExecutor *encryption_global_hook_executor, unsigned char *decrypted_key,
     size_t *decrypted_key_size, const char *encrypted_key_value, const size_t *encrypted_key_value_size) const
 {
-    size_t key_path_size(0);
-    const char *key_path_str = NULL;
-    encryption_global_hook_executor->get_argument("key_path", &key_path_str, key_path_size);
-    if (key_path_str == NULL || strlen(key_path_str) == 0) {
-        printf("ERROR(CLIENT): failed to get key path!\n");
-        return false;
-    }
-
-    size_t key_store_size(0);
+    PGClientLogic &PgClientLogic = encryption_global_hook_executor->get_client_logic();
+    PGconn* conn = PgClientLogic.m_conn;
+    size_t unused = 0;
     const char *key_store_str = NULL;
-    encryption_global_hook_executor->get_argument("key_store", &key_store_str, key_store_size);
-    if (!key_store_str || strlen(key_store_str) == 0) {
-        printf("ERROR(CLIENT): failed to get key store!\n");
+    const char *key_path_str = NULL;
+    const char *key_algo_str = NULL;
+    CmkemErrCode ret = CMKEM_SUCCEED;
+    CmkemUStr cek_cipher = {(unsigned char *)encrypted_key_value, *encrypted_key_value_size};
+    CmkemUStr *cek_plain = NULL;
+
+    encryption_global_hook_executor->get_argument("key_store", &key_store_str, unused);
+    encryption_global_hook_executor->get_argument("key_path", &key_path_str, unused);
+    encryption_global_hook_executor->get_argument("algorithm", &key_algo_str, unused);
+
+    CmkIdentity cmk_identify = {key_store_str, key_path_str, key_algo_str, 0, PgClientLogic.client_cache_id};
+
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
         return false;
     }
 
-    CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    /* read cmk plain from gs_ktool */
-    unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
-    unsigned int cmk_id = 0;
-
-    if (keyStore == CmkKeyStore::GS_KTOOL) {
-        if (!kt_atoi(key_path_str, &cmk_id)) {
-            return false;
-        }
-
-        /* read cmk plain from gs_ktool */
-        if (!read_cmk_plain(cmk_id, cmk_plain)) {
-            return false;
-        }
-
-        if (!decrypt_cek_use_aes256((const unsigned char *)encrypted_key_value, *encrypted_key_value_size, cmk_plain,
-            decrypted_key, decrypted_key_size)) {
-            return false;
-        }
-    } else {
-        printf("ERROR(CLIENT): Invalid key store type, only support gs_ktool now.\n");
+    ret = decrypt_cek_cipher(&cek_cipher, &cmk_identify, &cek_plain);
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        conn->client_logic->is_external_err = true;
         return false;
     }
-#else
-    RealCmkPath real_cmk_path = {0};
-    KmsErrType err_type = SUCCEED;
 
-    if (keyStore == CmkKeyStore::LOCALKMS) {
-        err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, READ_KEY_FILE);
-        if (err_type != SUCCEED) {
-            handle_kms_err(err_type);
-            return false;
-        }
-
-        if (decrypt_cek_use_rsa2048((const unsigned char *)encrypted_key_value, *encrypted_key_value_size,
-            real_cmk_path.real_priv_cmk_path, sizeof(real_cmk_path.real_priv_cmk_path),
-            decrypted_key, decrypted_key_size) != SUCCEED) {
-            return false;
-        }
-    } else {
-        printf("ERROR(CLIENT): Invalid key store type, only support localkms now.\n");
-        return false;
+    size_t i = 0;
+    for (; i < cek_plain->ustr_len && i < MAX_CEK_LENGTH - 1; i++) {
+        decrypted_key[i] = cek_plain->ustr_val[i];
     }
-#endif
+    decrypted_key[i] = '\0';
+    *decrypted_key_size = i;
+    free_cmkem_ustr_with_erase(cek_plain);
+
     return true;
 }
 
@@ -305,59 +293,13 @@ bool EncryptionColumnHookExecutor::is_operator_allowed(const ICachedColumn *ce, 
     return false;
 }
 
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain, size_t cek_plain_size,
-    unsigned char *cek_ciph, size_t &cek_ciph_len)
-{
-    /* read cmk plain from gs_ktool */
-    unsigned char cmk_plain[DEFAULT_CMK_LEN + 1] = {0};
-    unsigned int cmk_id = 0;
-
-    if (!kt_atoi(key_path_str, &cmk_id)) {
-        return false;
-    }
-
-    if (!read_cmk_plain(cmk_id, cmk_plain)) {
-        return false;
-    }
-
-    if (!encrypt_cek_use_aes256(cek_plain, cek_plain_size, cmk_plain, cek_ciph, cek_ciph_len)) {
-        return false;
-    }
-
-    return true;
-}
-#else
-static bool encrypt_cek(const char *key_path_str, const unsigned char *cek_plain, const size_t plain_len,
-    unsigned char *cek_cipher, size_t &cipher_len)
-{
-    /* read cmk plain from localkms */
-    RealCmkPath real_cmk_path = {0};
-    KmsErrType err_type = SUCCEED;
-
-    err_type = get_and_check_real_key_path(key_path_str, &real_cmk_path, READ_KEY_FILE);
-    if (err_type != SUCCEED) {
-        handle_kms_err(err_type);
-        return false;
-    }
-
-    if (encrypt_cek_use_ras2048(cek_plain, plain_len, real_cmk_path.real_pub_cmk_path,
-        sizeof(real_cmk_path.real_pub_cmk_path), cek_cipher, cipher_len) != SUCCEED) {
-        handle_kms_err(err_type);
-        return false;
-    }
-
-    return true;
-}
-#endif
-
-static unsigned char *create_or_check_cek(unsigned char *cek_plain, size_t &cek_plain_len)
+static unsigned char *create_or_check_cek(PGconn* conn, unsigned char *cek_plain, size_t &cek_plain_len)
 {    
     /* if user has not set cek plain by use "ENCRYPTED_VALUE=" while CREATE CEK, we will create new */
     if (cek_plain == NULL) {
         cek_plain = (unsigned char *)malloc(MAX_CEK_LENGTH * sizeof(char));
         if (cek_plain == NULL) {
-            printf("ERROR(CLIENT): failed to .\n");
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to malloc memory.\n"));
             return NULL;
         }
 
@@ -365,10 +307,10 @@ static unsigned char *create_or_check_cek(unsigned char *cek_plain, size_t &cek_
         return cek_plain;
     } else { /* else, we only need to check it */
         if (cek_plain_len < (112 / 8 * 2)) {
-            printf("ERROR(CLIENT): encryption key too short\n");
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): encryption key too short\n"));
             return NULL;
         } else if (cek_plain_len > MAX_CEK_LENGTH) {
-            printf("ERROR(CLIENT): encryption key too long\n");
+            printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): encryption key too long\n"));
             return NULL;
         } else {
             return cek_plain;
@@ -394,25 +336,19 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     if (!encryption_global_hook_executor) {
         return false;
     }
+    PGconn *conn = column_encryption.m_conn;
 
-    size_t key_path_size(0);
-    const char *key_path_str = NULL;
-    encryption_global_hook_executor->get_argument("key_path", &key_path_str, key_path_size);
-    if (key_path_str == NULL || strlen(key_path_str) == 0) {
-        printf("ERROR(CLIENT): failed to get key path!\n");
-        return false;
-    }
+    size_t unused = 0;
+    const char *cmk_store_str = NULL;
+    const char *cmk_path_str = NULL;
+    const char *cmk_algo_str = NULL;
+    CmkemErrCode ret = CMKEM_SUCCEED;
 
-    size_t key_store_size(0);
-    const char *key_store_str = NULL;
-    encryption_global_hook_executor->get_argument("key_store", &key_store_str, key_store_size);
+    encryption_global_hook_executor->get_argument("key_store", &cmk_store_str, unused);
+    encryption_global_hook_executor->get_argument("key_path", &cmk_path_str, unused);
+    encryption_global_hook_executor->get_argument("algorithm", &cmk_algo_str, unused);
 
-    if (key_store_str == NULL || strlen(key_store_str) == 0) {
-        printf("ERROR(CLIENT): failed to get key store!\n");
-        return false;
-    }
-
-    CmkKeyStore keyStore = get_key_store_from_string(key_store_str);
+    CmkIdentity cmk_identify = {cmk_store_str, cmk_path_str, cmk_algo_str, 0, column_encryption.client_cache_id};
 
     ColumnEncryptionAlgorithm column_encryption_algorithm(ColumnEncryptionAlgorithm::INVALID_ALGORITHM);
     const char *expected_value = NULL;
@@ -429,57 +365,58 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
         expected_value_size = strlen(expected_value);
     }
 
-    PGconn *conn = column_encryption.m_conn;
-
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
-        printf("ERROR(CLIENT): invalid algorithm.\n");
+        printfPQExpBuffer(&conn->errorMessage,
+            libpq_gettext("ERROR(CLIENT): invalid column encryption key algorithm.\n"));
         /* by returning false -  make sure the parser is not run again in search of DDL's */
         return false;
     }
 
+    CmkAlgorithm cmk_algo = get_algorithm_from_string(cmk_algo_str);
+    if (!is_sm_algo_used_together(cmk_algo, column_encryption_algorithm)) {
+        printfPQExpBuffer(&conn->errorMessage,
+            libpq_gettext("ERROR(CLIENT): National secret algorithm must be used together.\n"));
+        return false;
+    }
+
     /* genereate CEK if not provided (common case) */
-    expected_value = (const char *)create_or_check_cek((unsigned char *)expected_value, expected_value_size);
+    expected_value = (const char *)create_or_check_cek(conn, (unsigned char *)expected_value, expected_value_size);
     if (expected_value == NULL) {
         return false;
     }
 
-    set_cek_keys((unsigned char *)expected_value, expected_value_size);
-    set_cek_size(expected_value_size);
     set_column_encryption_algorithm(column_encryption_algorithm);
+    if (!set_cek_keys((unsigned char *)expected_value, expected_value_size)) {
+        free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+        return false;
+    }
     /* encrypt CEK */
-    unsigned char encrypted_value[MAX_CEK_LENGTH * 2];
-    size_t encrypted_value_size(0);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-    if (keyStore == CmkKeyStore::GS_KTOOL) {
-        if (!encrypt_cek(key_path_str, (unsigned char *)expected_value, expected_value_size,
-            encrypted_value, encrypted_value_size)) {
-            free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
-            return false;
-        }
-    } else {
-        printf("ERROR(CLIENT): Invalid key store type, only support gs_ktool now.\n");
+
+    CmkemUStr cek_plain = {(unsigned char *)expected_value, expected_value_size};
+    CmkemUStr *cek_cipher = NULL;
+
+    ret = reg_all_cmk_entity_manager();
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
         return false;
     }
-#else
-    if (keyStore == CmkKeyStore::LOCALKMS) {
-        if (!encrypt_cek(key_path_str, (unsigned char *)expected_value, expected_value_size, encrypted_value,
-            encrypted_value_size) != SUCCEED) {
-            free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
-            return false;
-        }
-    } else {
-        printf("ERROR(CLIENT): Invalid key store type, only support localkms now.\n");
-        return false;
-    }
-#endif
+    
+    ret = encrypt_cek_plain(&cek_plain, &cmk_identify, &cek_cipher);
     free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+    if (ret != CMKEM_SUCCEED) {
+        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
+        conn->client_logic->is_external_err = true;
+        return false;
+    }
 
     /* escape encrypted CEK for BYTEA insertion */
     size_t encoded_encrypted_value_size;
-    char *encoded_encrypted_value = (char *)PQescapeByteaConn(conn, (const unsigned char *)encrypted_value,
-        encrypted_value_size, &encoded_encrypted_value_size);
+    char *encoded_encrypted_value = (char *)PQescapeByteaConn(conn, cek_cipher->ustr_val,
+        cek_cipher->ustr_len, &encoded_encrypted_value_size);
+    free_cmkem_ustr(cek_cipher);
     if (encoded_encrypted_value == NULL) {
-        printf("ERROR(CLIENT): failed to encode encrypted values.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to encode encrypted values.\n"));
         return false;
     } else {
         new_args.set("encrypted_value", encoded_encrypted_value, encoded_encrypted_value_size - 1);
@@ -491,10 +428,17 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
 
 const char *EncryptionColumnHookExecutor::get_data_type(const ColumnDef * const column)
 {
+    EncryptionGlobalHookExecutor *encryption_global_hook_executor =
+        dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
+    if (!encryption_global_hook_executor) {
+        return NULL;
+    }
+    PGClientLogic &PgClientLogic = encryption_global_hook_executor->get_client_logic();
+    PGconn* conn = PgClientLogic.m_conn;
     char *data_type = NULL;
     data_type = (char *)malloc(MAX_DATATYPE_LEN);
     if (data_type == NULL) {
-        printf("ERROR(CLIENT): out of memory.\n");
+        printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): out of memory.\n"));
         return data_type;
     }
     errno_t rc = EOK;

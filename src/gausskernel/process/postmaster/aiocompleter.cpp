@@ -45,7 +45,7 @@
 #include "libpq/pqsignal.h"
 #include "postmaster/aiocompleter.h"
 #include "postmaster/postmaster.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "utils/guc.h"

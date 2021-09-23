@@ -75,6 +75,7 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
 static void validate_restore_options(char** argv, RestoreOptions* opts);
 static void free_restoreopts(RestoreOptions* opts);
 static void free_SimpleStringList(SimpleStringList* list);
+static void get_password_pipeline(RestoreOptions* opts);
 
 static int disable_triggers = 0;
 static int no_data_for_failed_tables = 0;
@@ -84,6 +85,7 @@ static int no_security_labels = 0;
 static char* passwd = NULL;
 static char* decrypt_key = NULL;
 static bool is_encrypt = false;
+static bool is_pipeline = false;
 
 typedef struct option optType;
 #ifdef GSDUMP_LLT
@@ -148,6 +150,7 @@ int main(int argc, char** argv)
         {"no-security-labels", no_argument, &no_security_labels, 1},
         {"rolepassword", required_argument, NULL, 5},
         {"with-key", required_argument, NULL, 6},
+        {"pipeline", no_argument, NULL, 7},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -183,6 +186,10 @@ int main(int argc, char** argv)
 
     /* parse the restore options for gs_restore*/
     restore_getopts(argc, argv, cmdopts, opts, &inputFileSpec);
+
+    if (is_pipeline) {
+        get_password_pipeline(opts);
+    }
 
     if (NULL == inputFileSpec) {
         write_stderr(_("Mandatory to specify dump filename/path for gs_restore\n"));
@@ -371,6 +378,38 @@ int main(int argc, char** argv)
     return exit_code;
 }
 
+static void get_password_pipeline(RestoreOptions* opts)
+{
+    int pass_max_len = 1024;
+    char* pass_buf = NULL;
+    errno_t rc = EOK;
+
+    if (isatty(fileno(stdin))) {
+        exit_horribly(NULL, "Terminal is not allowed to use --pipeline\n");
+    }
+
+    pass_buf = (char*)pg_malloc(pass_max_len);
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+
+    if (passwd != NULL) {
+        rc = memset_s(passwd, strlen(passwd), 0, strlen(passwd));
+        securec_check_c(rc, "\0", "\0");
+        GS_FREE(passwd);
+    }
+
+    if (NULL != fgets(pass_buf, pass_max_len, stdin)) {
+        opts->promptPassword = TRI_YES;
+        pass_buf[strlen(pass_buf) - 1] = '\0';
+        passwd = gs_strdup(pass_buf);
+    }
+
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+    free(pass_buf);
+    pass_buf = NULL;
+}
+
 static void free_restoreopts(RestoreOptions* opts)
 {
     if (opts != NULL) {
@@ -456,12 +495,6 @@ static void validate_restore_options(char** argv, RestoreOptions* opts)
     if (opts->single_txn && opts->number_of_jobs > 1) {
         write_stderr(_("%s: cannot specify both --single-transaction and multiple jobs\n"), progname);
         exit_nicely(1);
-    }
-
-    if (((opts->use_role != NULL) && (opts->rolepassword == NULL)) ||
-        ((opts->use_role == NULL) && (opts->rolepassword != NULL))) {
-        write_msg(NULL, "options --role --rolepassword need use together\n");
-        exit_nicely(0);
     }
 
     opts->disable_triggers = disable_triggers;
@@ -665,6 +698,10 @@ static void restore_getopts(int argc, char** argv, struct option* options, Resto
                 is_encrypt = true;
                 break;
 
+            case 7:
+                is_pipeline = true;
+                break;
+
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -726,6 +763,8 @@ void usage(const char* pchProgname)
     printf(_("  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"));
     printf(_("  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"
              "                                        ALTER OWNER commands to set ownership\n"));
+    printf(_("  --pipeline                            use pipeline to pass the password,\n"
+             "                                        forbidden to use in terminal\n"));
 
     printf(_("\nConnection options:\n"));
     printf(_("  -h, --host=HOSTNAME                   database server host or socket directory\n"));

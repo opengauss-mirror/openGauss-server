@@ -26,7 +26,8 @@ typedef struct TupleConversionMap {
     bool* outisnull;
 } TupleConversionMap;
 
-extern TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char* msg);
+extern TupleConversionMap* convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char* msg,
+    const Oid func_id = InvalidOid);
 
 extern TupleConversionMap* convert_tuples_by_name(TupleDesc indesc, TupleDesc outdesc, const char* msg);
 

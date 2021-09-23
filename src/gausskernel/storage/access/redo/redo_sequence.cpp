@@ -43,7 +43,7 @@
 #include "nodes/makefuncs.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -141,5 +141,5 @@ void seq_redo_data_block(XLogBlockHead *blockhead, XLogBlockDataParse *blockdata
     Size itemsz = mainDataLen - sizeof(xl_seq_rec);
 
     seqRedoOperatorPage(bufferinfo, item, itemsz);
-    MarkBufferDirty(bufferinfo->buf);
+    MakeRedoBufferDirty(bufferinfo);
 }

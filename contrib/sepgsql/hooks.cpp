@@ -2,7 +2,7 @@
  *
  * contrib/sepgsql/hooks.c
  *
- * Entrypoints of the hooks in PostgreSQL, and dispatches the callbacks.
+ * Entrypoints of the hooks in openGauss, and dispatches the callbacks.
  *
  * Copyright (c) 2010-2012, PostgreSQL Global Development Group
  *

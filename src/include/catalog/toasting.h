@@ -17,14 +17,14 @@
 /*
  * toasting.c prototypes
  */
-extern void AlterTableCreateToastTable(Oid relOid, Datum reloptions, List *filenodelist = NIL);
+extern void AlterTableCreateToastTable(Oid relOid, Datum reloptions, LOCKMODE partLockMode = AccessExclusiveLock);
 extern void BootstrapToastTable(char *relName,
                                 Oid toastOid,
                                 Oid toastIndexOid);
 extern bool createToastTableForPartition(Oid relOid, 
                                          Oid partOid,
                                          Datum reloptions,
-                                         List *relfilenode);
+                                         LOCKMODE partLockMode);
 
 /*
  * This macro is just to keep the C compiler from spitting up on the
@@ -55,7 +55,9 @@ DECLARE_TOAST(pg_statistic_ext, 3439, 3440);
 DECLARE_TOAST(pg_trigger, 2336, 2337);
 DECLARE_TOAST(pg_partition, 5502, 5503);
 DECLARE_TOAST(pgxc_class, 5506, 5507);
-DECLARE_TOAST(pg_hashbucket, 4390, 4391);
+DECLARE_TOAST(pg_hashbucket, 4392, 4393);
+DECLARE_TOAST(gs_package, 8002, 8003);
+DECLARE_TOAST(gs_global_chain, 5816, 5817);
 DECLARE_TOAST(gs_model_warehouse, 3995, 3996);
 
 /* shared catalogs */

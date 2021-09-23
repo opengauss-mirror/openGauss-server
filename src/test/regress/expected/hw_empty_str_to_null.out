@@ -712,6 +712,201 @@ select split_part('abc~@~~@~ghi', '#', 2) is null; -- expect t;
  12
 (1 row)
 
+-- textanycat check
+create database mydb;
+\c mydb
+select 'aa'||cast(null as CLOB);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as BLOB);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as money);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as boolean);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as int);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as inet);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as cidr);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as circle);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as box);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as path);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as lseg);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as point);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as macaddr);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as uuid);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as tsvector);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as oid);
+ ?column? 
+----------
+ aa
+(1 row)
+
+select 'aa'||cast(null as CLOB)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as BLOB)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as money)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as boolean)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as int)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as inet)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as cidr)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as circle)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as box)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as path)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as lseg)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as point)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as macaddr)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as uuid)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
+select 'aa'||cast(null as tsvector)||'bb';
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as oid)||'bb';
+ ?column? 
+----------
+ aabb
+(1 row)
+
  create database music DBCOMPATIBILITY 'A' ENCODING 'SQL_ASCII' TEMPLATE template0 lc_collate = 'C' lc_ctype = 'C';
  \c music
  select substring('123', 5, 2) is null;
@@ -724,5 +919,104 @@ select split_part('abc~@~~@~ghi', '#', 2) is null; -- expect t;
  substring 
 -----------
  12
+(1 row)
+
+create database music_pg DBCOMPATIBILITY 'PG' ENCODING 'SQL_ASCII' TEMPLATE template0 lc_collate = 'C' lc_ctype = 'C';
+\c music_pg
+---textanycat check whith sql_compatibility = PG
+select 'aa'||cast(null as CLOB);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as BLOB);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as money);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as boolean);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as int);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as inet);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as cidr);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as circle);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as box);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as path);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as lseg);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as point);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as macaddr);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as uuid);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as tsvector);
+ ?column? 
+----------
+ 
+(1 row)
+
+select 'aa'||cast(null as oid);
+ ?column? 
+----------
+ 
 (1 row)
 

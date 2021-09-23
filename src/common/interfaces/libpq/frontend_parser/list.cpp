@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * list.c
- * 	  implementation for PostgreSQL generic linked list package
+ * 	  implementation for openGauss generic linked list package
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

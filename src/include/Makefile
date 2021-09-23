@@ -17,19 +17,19 @@ all: pg_config.h pg_config_os.h
 
 
 # Subdirectories containing headers for server-side dev
-SUBDIRS = bootstrap catalog commands client_logic datatype executor foreign gs_policy iprange lib libpq mb \
+SUBDIRS = bootstrap catalog commands client_logic datatype executor foreign gs_policy gs_ledger iprange lib libpq mb \
 	nodes optimizer parser pgxc postmaster regex replication rewrite  \
 	tcop snowball snowball/libstemmer tsearch tsearch/dicts utils\
 	port port/win32 port/win32_msvc port/win32_msvc/sys \
 	port/win32/arpa port/win32/netinet port/win32/sys \
 	portability \
-	gtm \
+	gtm tde_key_management \
 	storage vecexecutor access streaming access/obs \
 	hotpatch \
 	gstrace \
 	knl knl/knl_guc threadpool workload
 ifneq ($(enable_multiple_nodes), yes)
-    SUBDIRS += storage/lock storage/buf storage/item storage/cstore storage/mot fmgr
+    SUBDIRS += storage/smgr storage/lock storage/buf storage/item storage/cstore storage/mot fmgr
 endif
 
 # Install all headers
@@ -71,6 +71,12 @@ install: all installdirs
 	$(INSTALL_DATA) ssl/gs_openssl_client.h '$(DESTDIR)$(includedir_server)/ssl/gs_openssl_client.h'
 	$(INSTALL_DATA) instruments/list.h '$(DESTDIR)$(includedir_server)/instruments/list.h'
 	$(INSTALL_DATA) instruments/instr_event.h '$(DESTDIR)$(includedir_server)/instruments/instr_event.h'
+	$(INSTALL_DATA) storage/smgr/fd.h '$(DESTDIR)$(includedir_server)/storage/smgr/fd.h'
+	$(INSTALL_DATA) storage/smgr/knl_usync.h '$(DESTDIR)$(includedir_server)/storage/smgr/knl_usync.h'
+	$(INSTALL_DATA) storage/smgr/relfilenode.h '$(DESTDIR)$(includedir_server)/storage/smgr/relfilenode.h'
+	$(INSTALL_DATA) storage/smgr/segment_internal.h '$(DESTDIR)$(includedir_server)/storage/smgr/segment_internal.h'
+	$(INSTALL_DATA) storage/smgr/segment.h '$(DESTDIR)$(includedir_server)/storage/smgr/segment.h'
+	$(INSTALL_DATA) storage/smgr/smgr.h '$(DESTDIR)$(includedir_server)/storage/smgr/smgr.h'
 	$(INSTALL_DATA) storage/dfs/dfs_connector.h '$(DESTDIR)$(includedir_server)/storage/dfs/dfs_connector.h' 
 	$(INSTALL_DATA) storage/buf/block.h '$(DESTDIR)$(includedir_server)/storage/buf/block.h'
 	$(INSTALL_DATA) storage/buf/buf.h '$(DESTDIR)$(includedir_server)/storage/buf/buf.h'

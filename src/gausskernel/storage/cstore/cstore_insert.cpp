@@ -73,8 +73,6 @@ int64 adio_write_cache_size = 0;
 
 extern void CUListWriteAbort(int code, Datum arg);
 
-extern void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool* isnull);
-
 static inline void cu_append_null_value(int which, void* cuPtr)
 {
     ((CU*)cuPtr)->AppendNullValue(which);
@@ -684,11 +682,13 @@ void CStoreInsert::InitIndexInfo(void)
                     idxOid = partIndex->pd_part->relcudescrelid;
                 else {
                     m_idxRelation[which_index] = partitionGetRelation(rawIndexRel, partIndex);
+#ifndef ENABLE_MULTI_NODES
                     if (m_idxRelation[which_index]->rd_index != NULL &&
                         m_idxRelation[which_index]->rd_index->indisunique) {
                         Oid deltaIdxOid = GetDeltaIdxFromCUIdx(RelationGetRelid(m_idxRelation[which_index]), true);
                         m_deltaIdxRelation[which_index] = relation_open(deltaIdxOid, RowExclusiveLock);
                     }
+#endif
                     idxOid = InvalidOid;
                 }
                 partitionClose(rawIndexRel, partIndex, NoLock);
@@ -702,12 +702,14 @@ void CStoreInsert::InitIndexInfo(void)
             /* open this index relation */
             if (idxOid != InvalidOid) {
                 m_idxRelation[which_index] = relation_open(idxOid, RowExclusiveLock);
+#ifndef ENABLE_MULTI_NODES
                 Form_pg_index indexInfo = m_idxRelation[which_index]->rd_index;
                 if (indexInfo != NULL && indexInfo->indisunique) {
                     Oid deltaIdxOid = GetDeltaIdxFromCUIdx(RelationGetRelid(m_idxRelation[which_index]), false);
                     m_deltaIdxRelation[which_index] = relation_open(deltaIdxOid, RowExclusiveLock);
                 }
             }
+#endif
             CStoreInsert::InitIndexColId(which_index);
 
             if (rawIndexRel->rd_rel->relam == PSORT_AM_OID) {
@@ -847,8 +849,9 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
     bool idxIsNull[INDEX_MAX_KEYS];
     List* idxNums = NIL;
     List* allIndexInfos = NIL;
+    int i = 0;
     if (relation_has_indexes(m_resultRelInfo)) {
-        for (int i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
+        for (i = 0; i < m_resultRelInfo->ri_NumIndices; ++i) {
             if (m_deltaIdxRelation[i] != NULL) {
                 IndexInfo* indexInfo = BuildIndexInfo(m_deltaIdxRelation[i]);
                 idxNums = lappend_int(idxNums, i);
@@ -867,7 +870,7 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
     iter.begin(batchRowPtr);
     while (iter.not_end()) {
         iter.next(values, nulls);
-        tuple = heap_form_tuple(m_delta_desc, values, nulls);
+        tuple = (HeapTuple)tableam_tops_form_tuple(m_delta_desc, values, nulls, HEAP_TUPLE);
 
         /* We always generate xlog for delta tuple */
         uint32 tmpVal = (uint32)options;
@@ -878,7 +881,7 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
         if (needInsertIdx) {
             (void)ExecStoreTuple(tuple, slot, InvalidBuffer, false);
 
-            for (int i = 0; i < list_length(allIndexInfos); i++) {
+            for (i = 0; i < list_length(allIndexInfos); i++) {
                 int idxNum = list_nth_int(idxNums, i);
                 IndexInfo* indexInfo = (IndexInfo*)list_nth(allIndexInfos, i);
                 FormIndexDatum(indexInfo, slot, NULL, idxValues, idxIsNull);
@@ -958,7 +961,7 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
             }
 
             MemoryContext oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(m_estate));
-            HeapTuple fakeTuple = heap_form_tuple(tupDesc, m_fake_values, m_fake_isnull);
+            HeapTuple fakeTuple = (HeapTuple)tableam_tops_form_tuple(tupDesc, m_fake_values, m_fake_isnull, HEAP_TUPLE);
             TupleTableSlot* fakeSlot = MakeSingleTupleTableSlot(tupDesc);
 
             (void)ExecStoreTuple(fakeTuple, fakeSlot, InvalidBuffer, false);

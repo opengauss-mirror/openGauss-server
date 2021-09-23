@@ -47,18 +47,16 @@ typedef struct {
 #endif
     Node* node; /* @hdfs record a CreateStmt or AlterTableStmt object. */
     char* internalData;
-
     List* uuids;     /* used for create sequence */
     bool isResizing; /* true if the table is resizing */
-    Oid  bucketOid;     /* bucket oid of the resizing table */
-    List *relnodelist;  /* filenode of the resizing table */
-    List *toastnodelist; /* toast node of the resizing table */
     bool ofType;         /* true if statement contains OF typename */
 } CreateStmtContext;
 
+typedef enum TransformTableType { TRANSFORM_INVALID = 0, TRANSFORM_TO_HASHBUCKET, TRANSFORM_TO_NONHASHBUCKET} TransformTableType;
+
 extern void checkPartitionSynax(CreateStmt *stmt);
 extern List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids,
-    bool preCheck, bool isFirstNode = true);
+    bool preCheck, Oid *namespaceid, bool isFirstNode = true);
 extern List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* queryString);
 extern IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryString);
 extern void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, Node** whereClause);
@@ -87,6 +85,7 @@ extern bool is_multi_nodegroup_createtbllike(PGXCSubCluster* subcluster, Oid oid
 extern char* getTmptableIndexName(const char* srcSchema, const char* srcIndex);
 
 extern IndexStmt* generateClonedIndexStmt(
-    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel);
+    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel,
+    TransformTableType transformType);
 
 #endif /* PARSE_UTILCMD_H */

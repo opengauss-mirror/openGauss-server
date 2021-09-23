@@ -76,11 +76,13 @@ extern void delete_matdep_table(Oid mlogid);
 extern Datum get_matview_refreshtime(Oid matviewOid, bool *isNUll);
 extern Datum get_matview_mapid(Oid matviewOid);
 extern bool is_incremental_matview(Oid oid);
+
 extern bool IsMatviewRelationbyOid(Oid relOid, MvRelationType *matviewRelationType);
 extern Oid MatviewRelationGetBaseid(Oid relOid, MvRelationType matviewRelationType);
 extern Query *get_matview_query(Relation matviewRel);
 extern bool CheckPermissionForBasetable(const RangeTblEntry *rte);
 extern void CheckRefreshMatview(Relation matviewRel, bool isIncremental);
 extern void acquire_mativew_tables_lock(Query *query, bool incremental);
+extern bool CheckMatviewQuals(Query *query);
 
 #endif   /* GS_MATVIEW_H */

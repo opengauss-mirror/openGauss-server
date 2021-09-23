@@ -52,6 +52,7 @@ bool ColumnsList::add(CachedColumn *cached_column)
     if (m_columns_list == NULL) {
         return false;
     }
+    cached_column->set_flag_columnslist();
     m_columns_list[m_columns_list_size] = cached_column;
     ++m_columns_list_size;
     return true;
@@ -61,6 +62,16 @@ const CachedColumn *ColumnsList::get_by_oid(Oid table_oid, unsigned int column_p
 {
     for (size_t i = 0; i < m_columns_list_size; ++i) {
         if (m_columns_list[i]->get_table_oid() == table_oid && m_columns_list[i]->get_col_idx() == column_position) {
+            return m_columns_list[i];
+        }
+    }
+    return NULL;
+}
+
+const CachedColumn* ColumnsList::get_by_oid(Oid oid) const
+{
+    for (size_t i = 0; i < m_columns_list_size; ++i) {
+        if (m_columns_list[i]->get_oid() == oid) {
             return m_columns_list[i];
         }
     }

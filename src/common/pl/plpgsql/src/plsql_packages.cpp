@@ -23,7 +23,7 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "plpgsql.h"
+#include "utils/plpgsql.h"
 #include "access/hash.h"
 #include "utils/numeric.h"
 

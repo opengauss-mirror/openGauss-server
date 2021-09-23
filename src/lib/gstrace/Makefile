@@ -16,7 +16,7 @@
 # Makefile
 #        Makefile for gstrace
 # 
-# Postgres-XC GTM makefile
+# openGauss GTM makefile
 # Copyright(c) 2010-2012 Postgres-XC Development Group
 #
 # IDENTIFICATION

@@ -7,6 +7,7 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
+set sql_beta_feature = 'index_cost_with_leaf_pages_only';
 -- create table
 drop table if exists test_bypass_sq1;
 NOTICE:  table "test_bypass_sq1" does not exist, skipping
@@ -1567,9 +1568,11 @@ select * from test_bypass_sq5 where col2>2 for update;
 
 insert into test_bypass_sq5 values (2,3,4); --fail
 ERROR:  permission denied for relation test_bypass_sq5
+DETAIL:  N/A
 update test_bypass_sq5 set col3 = col3+1 where col2 > 0;
 delete from test_bypass_sq5; --fail
 ERROR:  permission denied for relation test_bypass_sq5
+DETAIL:  N/A
 RESET SESSION AUTHORIZATION;
 revoke update on test_bypass_sq5 from bypassuser;
 revoke select on test_bypass_sq5 from bypassuser;
@@ -1804,7 +1807,7 @@ SET SESSION SESSION AUTHORIZATION qps PASSWORD 'TTEST@123';
 SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_count, dml_count FROM gs_sql_count where user_name='qps';
  node_name | select_count | update_count | insert_count | delete_count | ddl_count | dml_count 
 -----------+--------------+--------------+--------------+--------------+-----------+-----------
- datanode1 |            0 |            0 |            0 |            0 |         0 |         0
+ datanode1 |            6 |            0 |            0 |            0 |         0 |         6
 (1 row)
 
 SELECT * from test_bypass_sq7 where col1 >10 and col2 >10 order by col1,col2;
@@ -1821,7 +1824,7 @@ delete test_bypass_sq7 where col1 =1;
 SELECT node_name,select_count, update_count, insert_count, delete_count,  ddl_count, dml_count FROM gs_sql_count where user_name='qps';
  node_name | select_count | update_count | insert_count | delete_count | ddl_count | dml_count 
 -----------+--------------+--------------+--------------+--------------+-----------+-----------
- datanode1 |            2 |            1 |            1 |            1 |         0 |         5
+ datanode1 |            8 |            1 |            1 |            1 |         0 |        11
 (1 row)
 
 CREATE OR REPLACE FUNCTION tri_bypass() RETURNS trigger AS $$

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * lmgr.cpp
- *	  POSTGRES lock manager code
+ *	  openGauss lock manager code
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -36,7 +36,6 @@ void RelationInitLockInfo(Relation relation)
 {
     Assert(RelationIsValid(relation));
     Assert(OidIsValid(RelationGetRelid(relation)));
-
     relation->rd_lockInfo.lockRelId.relId = RelationGetRelid(relation);
 
     if (relation->rd_rel->relisshared)
@@ -220,7 +219,7 @@ void LockRelFileNode(const RelFileNode &rnode, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION(tag, rnode.dbNode, rnode.relNode);
+    SET_LOCKTAG_RELFILENODE(tag, rnode.spcNode, rnode.dbNode, rnode.relNode);
 
     (void)LockAcquire(&tag, lockmode, false, false);
 }
@@ -229,7 +228,7 @@ void UnlockRelFileNode(const RelFileNode &rnode, LOCKMODE lockmode)
 {
     LOCKTAG tag;
 
-    SET_LOCKTAG_RELATION(tag, rnode.dbNode, rnode.relNode);
+    SET_LOCKTAG_RELFILENODE(tag, rnode.spcNode, rnode.dbNode, rnode.relNode);
 
     (void)LockRelease(&tag, lockmode, false);
 }
@@ -635,6 +634,117 @@ bool ConditionalXactLockTableWait(TransactionId xid, bool waitparent, bool bcare
 }
 
 /*
+ *              SubXactLockTableInsert
+ *
+ * Insert a lock showing that the current subtransaction is running ---
+ * this is done when a subtransaction performs the operation.  The lock can
+ * then be used to wait for the subtransaction to finish.
+ */
+void
+SubXactLockTableInsert(SubTransactionId subxid)
+{
+        LOCKTAG         tag;
+        TransactionId xid;
+        ResourceOwner currentOwner;
+
+        /* Acquire lock only if we doesn't already hold that lock. */
+        if (HasCurrentSubTransactionLock())
+                return;
+
+        xid = GetTopTransactionId();
+
+        /*
+         * Acquire lock on the transaction XID.  (We assume this cannot block.) We
+         * have to ensure that the lock is assigned to the transaction's own
+         * ResourceOwner.
+         */
+        currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+        t_thrd.utils_cxt.CurrentResourceOwner = GetCurrentTransactionResOwner();
+
+        SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
+        (void) LockAcquire(&tag, ExclusiveLock, false, false);
+
+        t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+
+        SetCurrentSubTransactionLocked();
+}
+
+/*
+ *  SubXactLockTableDelete
+ *
+ * Delete the lock showing that the given subtransaction is running.
+ * (This is never used for main transaction IDs; those locks are only
+ * released implicitly at transaction end.  But we do use it for
+ * subtransactions in UStore.)
+ */
+void
+SubXactLockTableDelete(SubTransactionId subxid)
+{
+    LOCKTAG         tag;
+    TransactionId xid = GetTopTransactionId();
+
+    SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
+
+    LockRelease(&tag, ExclusiveLock, false);
+}
+
+/*
+ *              SubXactLockTableWait
+ *
+ * Wait for the specified subtransaction to commit or abort.  Here, instead of
+ * waiting on xid, we wait on xid + subTransactionId.  Whenever any concurrent
+ * transaction finds conflict then it will create a lock tag by (slot xid +
+ * subtransaction id from the undo) and wait on that.
+ *
+ * Unlike XactLockTableWait, we don't need to wait for topmost transaction to
+ * finish as we release the lock only when the transaction (committed/aborted)
+ * is recorded in clog.  This has some overhead in terms of maintianing unique
+ * xid locks for subtransactions during commit, but that shouldn't be much as
+ * we release the locks immediately after transaction is recorded in clog.
+ * This function is designed for Ustore where we don't have xids assigned for
+ * subtransaction, so we can't really figure out if the subtransaction is
+ * still in progress.
+ */
+void
+SubXactLockTableWait(TransactionId xid, SubTransactionId subxid)
+{
+    LOCKTAG         tag;
+    Assert(TransactionIdIsValid(xid));
+    Assert(!TransactionIdEquals(xid, GetTopTransactionIdIfAny()));
+    Assert(subxid != InvalidSubTransactionId);
+
+    SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
+
+    (void) LockAcquire(&tag, ShareLock, false, false);
+
+    LockRelease(&tag, ShareLock, false);
+}
+
+/*
+ *              ConditionalSubXactLockTableWait
+ *
+ * As above, but only lock if we can get the lock without blocking.
+ * Returns true if the lock was acquired.
+ */
+bool
+ConditionalSubXactLockTableWait(TransactionId xid, SubTransactionId subxid)
+{
+    LOCKTAG         tag;
+
+    Assert(TransactionIdIsValid(xid));
+    Assert(!TransactionIdEquals(xid, GetTopTransactionIdIfAny()));
+
+    SET_LOCKTAG_SUBTRANSACTION(tag, xid, subxid);
+
+    if (LockAcquire(&tag, ShareLock, false, true) == LOCKACQUIRE_NOT_AVAIL)
+            return false;
+
+    LockRelease(&tag, ShareLock, false);
+
+    return true;
+}
+
+/*
  *		LockDatabaseObject
  *
  * Obtain a lock on a general object of the current database.  Don't use
@@ -652,6 +762,23 @@ void LockDatabaseObject(Oid classid, Oid objid, uint16 objsubid, LOCKMODE lockmo
 
     /* Make sure syscaches are up-to-date with any changes we waited for */
     AcceptInvalidationMessages();
+}
+
+bool ConditionalLockDatabaseObject(Oid classid, Oid objid, uint16 objsubid, LOCKMODE lockmode)
+{
+    LOCKTAG tag;
+    LockAcquireResult res;
+
+    SET_LOCKTAG_OBJECT(tag, u_sess->proc_cxt.MyDatabaseId, classid, objid, objsubid);
+
+    res = LockAcquire(&tag, lockmode, false, true);
+    if (res == LOCKACQUIRE_NOT_AVAIL)
+        return false;
+
+    /* Make sure syscaches are up-to-date with any changes we waited for */
+    AcceptInvalidationMessages();
+
+    return true;
 }
 
 /*
@@ -739,6 +866,10 @@ void DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
             appendStringInfo(buf, _("extension of relation %u of database %u"), tag->locktag_field2,
                              tag->locktag_field1);
             break;
+        case LOCKTAG_RELFILENODE:
+            appendStringInfo(buf, _("relation %u of database %u of tablespace %u"), tag->locktag_field3,
+                tag->locktag_field2, tag->locktag_field1);
+            break;
         case LOCKTAG_CSTORE_FREESPACE:
             appendStringInfo(buf, _("freespace of cstore relation %u of database %u"), tag->locktag_field2,
                              tag->locktag_field1);
@@ -764,6 +895,9 @@ void DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
             break;
         case LOCKTAG_VIRTUALTRANSACTION:
             appendStringInfo(buf, _("virtual transaction %u/%u"), tag->locktag_field1, tag->locktag_field2);
+            break;
+        case LOCKTAG_SUBTRANSACTION:
+            appendStringInfo(buf, _("transaction %u, Sub-transaction %u"), tag->locktag_field1, tag->locktag_field3);
             break;
         case LOCKTAG_OBJECT:
             appendStringInfo(buf,
