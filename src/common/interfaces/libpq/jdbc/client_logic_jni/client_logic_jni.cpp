@@ -75,7 +75,9 @@ void clean_empty_conn_4cl(PGconn *conn)
     }
     libpq_free(conn->dbName);
     if (conn->client_logic != NULL) {
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
         free_kms_cache(conn->client_logic->client_cache_id);
+#endif
         delete conn->client_logic;
         conn->client_logic = NULL;
     }
@@ -142,16 +144,18 @@ bool ClientLogicJNI::link_client_logic(JNIEnv *env, jobject jdbc_cl_impl, const 
 
 bool ClientLogicJNI::set_kms_info(const char *key, const char *value)
 {
-    CmkemErrCode ret = CMKEM_SUCCEED;
     if (m_stub_conn == NULL) {
         return false; /* should never happen */
     }
 
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    CmkemErrCode ret = CMKEM_SUCCEED;
     ret = set_kms_cache_auth_info(m_stub_conn->client_logic->client_cache_id, key, value);
     if (ret != CMKEM_SUCCEED) {
         JNI_LOG_ERROR(get_cmkem_errmsg(ret));
         return false;
     }
+#endif
     
     return true;
 }

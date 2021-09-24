@@ -473,25 +473,15 @@ INSERT INTO gtest23q VALUES (2, 5);  -- error
 ERROR:  insert or update on table "gtest23q" violates foreign key constraint "gtest23q_b_fkey"
 DETAIL:  Key (b)=(5) is not present in table "gtest23p".
 DROP TABLE gtest23q;
--- domains (domain is not yet supported.)
+-- domains
 CREATE DOMAIN gtestdomain1 AS int CHECK (VALUE < 10);
-ERROR:  domain is not yet supported.
 CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED);
-ERROR:  type "gtestdomain1" does not exist
-LINE 1: CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENE...
-                                                   ^
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "gtest24_pkey" for table "gtest24"
 INSERT INTO gtest24 (a) VALUES (4);  -- ok
-ERROR:  relation "gtest24" does not exist on datanode1
-LINE 1: INSERT INTO gtest24 (a) VALUES (4);
-                    ^
 INSERT INTO gtest24 (a) VALUES (6);  -- error
-ERROR:  relation "gtest24" does not exist on datanode1
-LINE 1: INSERT INTO gtest24 (a) VALUES (6);
-                    ^
+ERROR:  value for domain gtestdomain1 violates check constraint "gtestdomain1_check"
 DROP TABLE gtest24;
-ERROR:  table "gtest24" does not exist
 DROP DOMAIN gtestdomain1;
-ERROR:  type "gtestdomain1" does not exist
 -- typed tables (currently not supported)
 CREATE TYPE gtest_type AS (f1 integer, f2 text, f3 bigint);
 CREATE TABLE gtest28 OF gtest_type (f1 WITH OPTIONS GENERATED ALWAYS AS (f2 *2) STORED);

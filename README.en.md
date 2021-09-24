@@ -64,7 +64,7 @@ When the Xlog is transferred to the standby node, the standby node flushs the Xl
 
 **MOT Engine (beta release)**
 
-The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See [MOT Engine documentation](https://opengauss.org/en/docs/2.0.0/docs/Developerguide/mot.html).
+The Memory-Optimized Tables (MOT) storage engine is a transactional rowstore optimized for many-core and large memory and delivering extreme OLTP performance and high resources utilization. With data and indexes stored totally in-memory, a NUMA-aware design, algorithms that eliminate lock and latch contention and query native compilation (JIT), MOT provides low latency data access and more efficient transaction execution. See [MOT Engine documentation](https://opengauss.org/en/docs/2.1.0/docs/Developerguide/mot.html).
 
 **Security**
 
@@ -383,7 +383,7 @@ https://opengauss.org/zh/
 
 From the following website, you can obtain the binarylibs we have compiled. Please unzip it and rename to **binarylibs** after you download.
 
-https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.0.0/openGauss-third_party_binarylibs.tar.gz
+https://opengauss.obs.cn-south-1.myhuaweicloud.com/2.1.0/openGauss-third_party_binarylibs.tar.gz
 
 
 Now we have completed openGauss code, for example, we store it in following directories.
@@ -544,7 +544,7 @@ Installation package packaging log: **./package/make_package.log**
 
 ## Quick Start
 
-See the [Quick Start](https://opengauss.org/zh/docs/2.0.0/docs/Quickstart/Quickstart.html) to implement the image classification.
+See the [Quick Start](https://opengauss.org/zh/docs/2.1.0/docs/Quickstart/Quickstart.html) to implement the image classification.
 
 ## Docs
 
@@ -568,7 +568,7 @@ Welcome contributions. See our [Contributor](https://opengauss.org/zh/contributi
 
 ## Release Notes
 
-For the release notes, see our [RELEASE](https://opengauss.org/zh/docs/2.0.0/docs/Releasenotes/Releasenotes.html).
+For the release notes, see our [RELEASE](https://opengauss.org/zh/docs/2.1.0/docs/Releasenotes/Releasenotes.html).
 
 ## License
 

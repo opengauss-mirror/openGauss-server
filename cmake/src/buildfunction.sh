@@ -118,7 +118,7 @@ function get_gs_version()
         default_gs_version="(openGauss 2.0.0 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
     else
         date_time=$(date -d today +"%Y-%m-%d %H:%M:%S")
-        default_gs_version="(openGauss 2.0.0 build $csv_version) compiled at $date_time commit $commits last mr $mrid $debug_str"
+        default_gs_version="(openGauss 2.1.0 build $csv_version) compiled at $date_time commit $commits last mr $mrid $debug_str"
     fi
     printf "${default_gs_version}"
 }
@@ -130,12 +130,14 @@ function get_kernel_version()
     commits=$(git log | grep "See merge request" | wc -l)
     mrid=$(git log | grep "See merge request" | head -1 | awk -F! '{print $2}' | grep -o '[0-9]\+')
     debug_str="$DEBUG_TYPE"
+    product=$(cat build/script/gauss.spec | grep 'PRODUCT' | awk -F "=" '{print $2}')
+    version=$(cat build/script/gauss.spec | grep 'VERSION' | awk -F "=" '{print $2}')
 
     if test "$enable_ccache" = yes; then
         default_kernel_version="(GaussDB Kernel V500R002C00 build 1f1f1f1f1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
     else
         date_time=$(date -d today +"%Y-%m-%d %H:%M:%S")
-        default_kernel_version="(GaussDB Kernel V500R002C00 build $csv_version) compiled at $date_time commit $commits last mr $mrid $debug_str"
+        default_kernel_version="($product $version build $csv_version) compiled at $date_time commit $commits last mr $mrid $debug_str"
     fi
     printf "${default_kernel_version}"
 }

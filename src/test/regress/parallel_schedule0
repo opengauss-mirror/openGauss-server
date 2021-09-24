@@ -329,7 +329,7 @@ test: upsert_001 upsert_002 upsert_003 upsert_008 upsert_009 upsert_010
 test: upsert_grammer_test_01 upsert_unlog_test upsert_tmp_test
 test: upsert_grammer_test_02 upsert_restriction upsert_composite
 test: upsert_trigger_test upsert_explain
-test: upsert_subquery
+#test: upsert_subquery
 test: upsert_clean
 
 # all pass
@@ -768,7 +768,7 @@ test: autonomous_test
 #test jdbc pbe for bypass
 test: bypass_pbe
 #test: partition for hash list
-test: pbe_hash_list_partition 
+test: pbe_hash_list_partition
 test: hw_partition_list_insert
 test: hw_partition_list_ddl
 test: hw_partition_hash_insert
@@ -798,7 +798,7 @@ test: rule_test
 #delete limit
 test: delete_limit
 
-test: hotpatch
+#test: hotpatch
 
 # --------------------------
 # DB4AI
@@ -831,8 +831,7 @@ test: comment_proc
 test: hw_package
 test: procedure_privilege_test
 test: cast_privileges_test
-test: hw_package hw_dbms_sql1
+#test: hw_dbms_sql1
 test: hw_cipher_sm4
 test: hw_cipher_aes128
-test: hw_pwd_encryption_sm3
 test: sequence_cache_test

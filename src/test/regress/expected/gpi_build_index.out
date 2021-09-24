@@ -228,11 +228,11 @@ Number of partition: 5 (View pg_partition to check each partition range.)
 
 insert into test_gpi_create_like values(generate_series(0,9999), 1);
 explain (costs off) select * from test_gpi_create_like where c1 = 0;
-                           QUERY PLAN                            
------------------------------------------------------------------
+                             QUERY PLAN                             
+--------------------------------------------------------------------
  Bitmap Heap Scan on test_gpi_create_like
    Recheck Cond: (c1 = 0)
-   ->  Bitmap Index Scan on test_gpi_create_like_c1_tableoid_idx
+   ->  Bitmap Index Scan on test_gpi_create_like_c1_c2_tableoid_idx
          Index Cond: (c1 = 0)
 (4 rows)
 

@@ -492,6 +492,7 @@ end cnt;
 create user user1 password 'huawei@123';
 set session AUTHORIZATION user1 PASSWORD 'huawei@123';
 reset session AUTHORIZATION;
+DROP USER user1;
 
 
 create or replace package commit_rollback_test as

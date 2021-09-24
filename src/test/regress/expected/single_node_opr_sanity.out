@@ -2895,6 +2895,16 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6321 | pg_stat_file_recursive
  6322 | gs_decrypt
  6323 | gs_encrypt
+ 6555 | array_remove
+ 6556 | array_replace
+ 6558 | first_transition
+ 6559 | last_transition
+ 6560 | first
+ 6561 | last
+ 6666 | network_larger
+ 6667 | network_smaller
+ 6668 | max
+ 6669 | min
  7000 | pg_stat_segment_space_info
  7001 | pg_stat_segment_extent_usage
  7002 | gs_space_shrink
@@ -2904,10 +2914,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7006 | local_space_shrink
  7007 | remote_segment_space_info
  7008 | global_space_shrink
- 6666 | network_larger
- 6667 | network_smaller
- 6668 | max
- 6669 | min
  7101 | db4ai_predict_by_bool
  7102 | db4ai_predict_by_int32
  7103 | db4ai_predict_by_int64
@@ -2915,12 +2921,6 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7106 | db4ai_predict_by_float8
  7107 | db4ai_predict_by_numeric
  7108 | db4ai_predict_by_text
- 6555 | array_remove
- 6556 | array_replace
- 6558 | first_transition
- 6559 | last_transition
- 6560 | first
- 6561 | last
  7777 | sysdate
  7800 | init
  7801 | analyze_query

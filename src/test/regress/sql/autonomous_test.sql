@@ -11,7 +11,7 @@ DECLARE
 	res int;
 	res2 text;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 := 'aa55';
 	res := 55;
 END;
@@ -22,7 +22,7 @@ create table t1(a int ,b text);
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	insert into t1 values(1,'you are so cute!');
 END;
 /
@@ -39,7 +39,7 @@ START TRANSACTION;
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	insert into t1 values(1,'you are so cute,will commit!');
 END;
 /
@@ -61,7 +61,7 @@ BEGIN
 	DECLARE 
 		PRAGMA AUTONOMOUS_TRANSACTION;
 	BEGIN
-		dbe_output.print_line('just use call.');
+		raise notice 'just use call.';
 		insert into t1 values(1,'can you rollback!');
 	END;
 	insert into t1 values(2,'I will rollback!');
@@ -81,7 +81,7 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 = res2/res;
 END;
 /
@@ -94,11 +94,11 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 = res2/res;
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+	    raise notice 'autonomous throw exception.';
 END;
 /
 
@@ -152,13 +152,13 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_5(a int, b int)  AS 
 DECLARE 
 BEGIN
-	dbe_output.print_line('just no use call.');
+	raise notice 'just no use call.';
 	insert into t2 values(666, 666);
 	autonomous_4(a,b);
 	rollback;
@@ -181,14 +181,14 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	rollback;
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_7(a int, b int)  AS 
 DECLARE 
 BEGIN
-	dbe_output.print_line('just no use call.');
+	raise notice 'just no use call.';
 	insert into t2 values(666, 666);
 	autonomous_6(a,b);
 END;
@@ -221,7 +221,7 @@ BEGIN
 	autonomous_8();
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+		raise notice 'autonomous throw exception.';
 END;
 /
 
@@ -242,7 +242,7 @@ BEGIN
 	b := b/a;
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('inner autonomous exception.');
+		raise notice 'inner autonomous exception.';
 END;
 /
 select autonomous_10();
@@ -253,7 +253,7 @@ BEGIN
 	autonomous_10();
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+	    raise notice 'autonomous throw exception.';
 END;
 /
 
@@ -322,7 +322,7 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t3 values(a, b, c);
-	dbe_output.print_line('inner autonomous exception.');
+	raise notice 'inner autonomous exception.';
 	autonomous_15(a, b, c);
 END;
 /
@@ -490,7 +490,7 @@ SET SESSION AUTHORIZATION jim PASSWORD 'gauss_123';
 DECLARE
 PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-dbe_output.print_line('just use call.');
+raise notice 'just use call.';
 insert into t5 values(1,'aaa');
 END;
 /

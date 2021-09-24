@@ -22672,8 +22672,8 @@ static char* GenTemporaryPartitionName(Relation partTableRel, int sequence)
     return pstrdup(tmpName);
 }
 
-static Oid GetNewPartitionOid(
-    Relation pgPartRel, Relation partTableRel, Node *partDef, Oid bucketOid, bool *isTimestamptz, StorageType stype)
+static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *partDef, Oid bucketOid,
+    bool *isTimestamptz, StorageType stype, Datum new_reloptions)
 {
     Oid newPartOid = InvalidOid;
     switch (nodeTag(partDef)) {
@@ -22684,7 +22684,7 @@ static Oid GetNewPartitionOid(
                 bucketOid,
                 (RangePartitionDefState *)partDef,
                 partTableRel->rd_rel->relowner,
-                (Datum)0,
+                new_reloptions,
                 isTimestamptz,
                 stype,
                 AccessExclusiveLock);
@@ -22760,8 +22760,8 @@ static Oid AddTemporaryPartition(Relation partTableRel, Node* partDef)
     }
 
     /* Temporary tables do not use segment-page */
-    newPartOid = GetNewPartitionOid(
-        pgPartRel, partTableRel, partDef, bucketOid, isTimestamptz, RelationGetStorageType(partTableRel));
+    newPartOid = GetNewPartitionOid(pgPartRel, partTableRel, partDef, bucketOid,
+        isTimestamptz, RelationGetStorageType(partTableRel), new_reloptions);
 
     // We must bump the command counter to make the newly-created
     // partition tuple visible for opening.

@@ -10,22 +10,22 @@ DECLARE
 	res int;
 	res2 text;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 := 'aa55';
 	res := 55;
 END;
 /
-just use call.
+NOTICE:  just use call.
 
 create table t1(a int ,b text);
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	insert into t1 values(1,'you are so cute!');
 END;
 /
-just use call.
+NOTICE:  just use call.
 
 select * from t1;
  a |        b         
@@ -42,11 +42,11 @@ START TRANSACTION;
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	insert into t1 values(1,'you are so cute,will commit!');
 END;
 /
-just use call.
+NOTICE:  just use call.
 
 insert into t1 values(1,'you will rollback!');
 rollback;
@@ -68,14 +68,14 @@ BEGIN
 	DECLARE 
 		PRAGMA AUTONOMOUS_TRANSACTION;
 	BEGIN
-		dbe_output.print_line('just use call.');
+		raise notice 'just use call.';
 		insert into t1 values(1,'can you rollback!');
 	END;
 	insert into t1 values(2,'I will rollback!');
 	rollback;
 END;
 /
-just use call.
+NOTICE:  just use call.
 select * from t1;
  a | b 
 ---+---
@@ -90,11 +90,11 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 = res2/res;
 END;
 /
-just use call.
+NOTICE:  just use call.
 
 ERROR:  ERROR:  division by zero
 CONTEXT:  PL/pgSQL function inline_code_block line 6 at assignment
@@ -107,16 +107,16 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	res2 = res2/res;
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+	    raise notice 'autonomous throw exception.';
 END;
 /
-just use call.
+NOTICE:  just use call.
 
-autonomous throw exception.
+NOTICE:  autonomous throw exception.
 
 /************************************************************************/
 /*                              PROCEDURE                               */
@@ -184,21 +184,23 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_5(a int, b int)  AS 
 DECLARE 
 BEGIN
-	dbe_output.print_line('just no use call.');
+	raise notice 'just no use call.';
 	insert into t2 values(666, 666);
 	autonomous_4(a,b);
 	rollback;
 END;
 /
 select autonomous_5(11,22);
-just no use call.
-just use call.
+NOTICE:  just no use call.
+CONTEXT:  referenced column: autonomous_5
+NOTICE:  just use call.
+CONTEXT:  referenced column: autonomous_4
 
  autonomous_5 
 --------------
@@ -229,21 +231,23 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	dbe_output.print_line('just use call.');
+	raise notice 'just use call.';
 	rollback;
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_7(a int, b int)  AS 
 DECLARE 
 BEGIN
-	dbe_output.print_line('just no use call.');
+	raise notice 'just no use call.';
 	insert into t2 values(666, 666);
 	autonomous_6(a,b);
 END;
 /
 select autonomous_7(11,22);
-just no use call.
-just use call.
+NOTICE:  just no use call.
+CONTEXT:  referenced column: autonomous_7
+NOTICE:  just use call.
+CONTEXT:  referenced column: autonomous_6
 
  autonomous_7 
 --------------
@@ -283,11 +287,12 @@ BEGIN
 	autonomous_8();
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+		raise notice 'autonomous throw exception.';
 END;
 /
 select autonomous_9();
-autonomous throw exception.
+NOTICE:  autonomous throw exception.
+CONTEXT:  referenced column: autonomous_9
 
  autonomous_9 
 --------------
@@ -307,11 +312,12 @@ BEGIN
 	b := b/a;
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('inner autonomous exception.');
+		raise notice 'inner autonomous exception.';
 END;
 /
 select autonomous_10();
-inner autonomous exception.
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_10
 
  autonomous_10 
 ---------------
@@ -324,11 +330,12 @@ BEGIN
 	autonomous_10();
 EXCEPTION
 	WHEN division_by_zero THEN
-		dbe_output.print_line('autonomous throw exception.');
+	    raise notice 'autonomous throw exception.';
 END;
 /
 select autonomous_11();
-inner autonomous exception.
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_10
 
  autonomous_11 
 ---------------
@@ -415,48 +422,46 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t3 values(a, b, c);
-	dbe_output.print_line('inner autonomous exception.');
+	raise notice 'inner autonomous exception.';
 	autonomous_15(a, b, c);
 END;
 /
 select autonomous_15(1,2,'1111');
-inner autonomous exception.
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
-inner autonomous exception.
-
-
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
 
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
@@ -464,8 +469,8 @@ inner autonomous exception.
 
 
 
-inner autonomous exception.
-
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
@@ -474,7 +479,19 @@ inner autonomous exception.
 
 
 
-inner autonomous exception.
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
+
+
+
+
+
+
+
+
+
+NOTICE:  inner autonomous exception.
+CONTEXT:  referenced column: autonomous_15
 
 
 
@@ -729,11 +746,11 @@ SET SESSION AUTHORIZATION jim PASSWORD 'gauss_123';
 DECLARE
 PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-dbe_output.print_line('just use call.');
+raise notice 'just use call.';
 insert into t5 values(1,'aaa');
 END;
 /
-just use call.
+NOTICE:  just use call.
 
 ERROR:  ERROR:  permission denied for relation t5
 DETAIL:  N/A

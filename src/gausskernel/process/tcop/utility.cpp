@@ -5623,8 +5623,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
              * ******************************** DOMAIN statements ****
              */
         case T_CreateDomainStmt:
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
+#endif
             DefineDomain((CreateDomainStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)

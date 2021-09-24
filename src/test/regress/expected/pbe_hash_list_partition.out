@@ -21,18 +21,18 @@ prepare p1(int,int) as SELECT * FROM r INNER JOIN h ON r.a=$1 and h.a=$2;
 explain  execute p1(10,10);
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
- Nested Loop  (cost=0.00..66.27 rows=121 width=16)
-   ->  Partition Iterator  (cost=0.00..27.86 rows=11 width=8)
-         Iterations: PART
-         ->  Partitioned Seq Scan on r  (cost=0.00..27.86 rows=11 width=8)
+ Nested Loop  (cost=0.00..75.27 rows=121 width=16)
+   ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
+         Iterations: 4
+         ->  Partitioned Seq Scan on r  (cost=0.00..36.86 rows=11 width=8)
                Filter: (a = $1)
-               Selected Partitions:  PART
+               Selected Partitions:  1..4
    ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
          ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-               Iterations: PART
+               Iterations: 2
                ->  Partitioned Seq Scan on h  (cost=0.00..36.86 rows=11 width=8)
                      Filter: (a = $2)
-                     Selected Partitions:  PART
+                     Selected Partitions:  1..2
 (12 rows)
 
 execute p1(10,10);
@@ -45,27 +45,27 @@ prepare p2(int,int,int,int) as select * from r inner join h on r.a=$1 and h.a=$2
 explain  execute p2(1,1,1,1);
                                          QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
- Result  (cost=0.00..119.80 rows=1331 width=24)
+ Result  (cost=0.00..128.79 rows=1331 width=24)
    One-Time Filter: ($1 = $3)
-   ->  Nested Loop  (cost=0.00..119.80 rows=1331 width=24)
-         ->  Nested Loop  (cost=0.00..66.27 rows=121 width=16)
-               ->  Partition Iterator  (cost=0.00..27.86 rows=11 width=8)
-                     Iterations: PART
-                     ->  Partitioned Seq Scan on r  (cost=0.00..27.86 rows=11 width=8)
+   ->  Nested Loop  (cost=0.00..128.79 rows=1331 width=24)
+         ->  Nested Loop  (cost=0.00..75.27 rows=121 width=16)
+               ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
+                     Iterations: 4
+                     ->  Partitioned Seq Scan on r  (cost=0.00..36.86 rows=11 width=8)
                            Filter: (a = $3)
-                           Selected Partitions:  PART
+                           Selected Partitions:  1..4
                ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
                      ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-                           Iterations: PART
+                           Iterations: 2
                            ->  Partitioned Seq Scan on h  (cost=0.00..36.86 rows=11 width=8)
                                  Filter: (a = $2)
-                                 Selected Partitions:  PART
+                                 Selected Partitions:  1..2
          ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
                ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-                     Iterations: PART
+                     Iterations: 2
                      ->  Partitioned Seq Scan on l  (cost=0.00..36.86 rows=11 width=8)
                            Filter: (a = $4)
-                           Selected Partitions:  PART
+                           Selected Partitions:  1..2
 (21 rows)
 
 execute p2(1,1,1,1);
@@ -78,18 +78,18 @@ prepare p3(int,int) as SELECT * FROM r right JOIN h ON r.a=$1 and h.a=$2;
 explain  execute p3(10,10);
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------
- Nested Loop Left Join  (cost=0.00..413.97 rows=2149 width=16)
+ Nested Loop Left Join  (cost=0.00..422.97 rows=2149 width=16)
    Join Filter: (h.a = $2)
    ->  Partition Iterator  (cost=0.00..31.49 rows=2149 width=8)
          Iterations: 2
          ->  Partitioned Seq Scan on h  (cost=0.00..31.49 rows=2149 width=8)
                Selected Partitions:  1..2
-   ->  Materialize  (cost=0.00..27.92 rows=11 width=8)
-         ->  Partition Iterator  (cost=0.00..27.86 rows=11 width=8)
-               Iterations: PART
-               ->  Partitioned Seq Scan on r  (cost=0.00..27.86 rows=11 width=8)
+   ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
+         ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
+               Iterations: 4
+               ->  Partitioned Seq Scan on r  (cost=0.00..36.86 rows=11 width=8)
                      Filter: (a = $1)
-                     Selected Partitions:  PART
+                     Selected Partitions:  1..4
 (12 rows)
 
 prepare p4(int,int) as SELECT * FROM r left JOIN h ON r.a=$1 and h.a=$2;
@@ -104,10 +104,10 @@ explain  execute p4(10,10);
                Selected Partitions:  1..4
    ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
          ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-               Iterations: PART
+               Iterations: 2
                ->  Partitioned Seq Scan on h  (cost=0.00..36.86 rows=11 width=8)
                      Filter: (a = $2)
-                     Selected Partitions:  PART
+                     Selected Partitions:  1..2
 (12 rows)
 
 prepare p5(int,int) as SELECT * FROM h right JOIN l ON h.a=$1 and l.a=$2;
@@ -122,10 +122,10 @@ explain  execute p5(10,10);
                Selected Partitions:  1..2
    ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
          ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-               Iterations: PART
+               Iterations: 2
                ->  Partitioned Seq Scan on h  (cost=0.00..36.86 rows=11 width=8)
                      Filter: (a = $1)
-                     Selected Partitions:  PART
+                     Selected Partitions:  1..2
 (12 rows)
 
 prepare p6(int,int) as SELECT * FROM h left JOIN l ON h.a=$1 and l.a=$2;
@@ -140,10 +140,10 @@ explain  execute p6(10,10);
                Selected Partitions:  1..2
    ->  Materialize  (cost=0.00..36.92 rows=11 width=8)
          ->  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-               Iterations: PART
+               Iterations: 2
                ->  Partitioned Seq Scan on l  (cost=0.00..36.86 rows=11 width=8)
                      Filter: (a = $2)
-                     Selected Partitions:  PART
+                     Selected Partitions:  1..2
 (12 rows)
 
 prepare p7(int) as SELECT * FROM h where h.a=$1;
@@ -151,10 +151,10 @@ explain  execute p7(10);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-   Iterations: PART
+   Iterations: 2
    ->  Partitioned Seq Scan on h  (cost=0.00..36.86 rows=11 width=8)
          Filter: (a = $1)
-         Selected Partitions:  PART
+         Selected Partitions:  1..2
 (5 rows)
 
 execute p7(10);
@@ -170,10 +170,10 @@ explain  execute p8(18);
  Sort  (cost=76.19..77.98 rows=716 width=8)
    Sort Key: a
    ->  Partition Iterator  (cost=0.00..42.23 rows=716 width=8)
-         Iterations: PART
+         Iterations: 2
          ->  Partitioned Seq Scan on h  (cost=0.00..42.23 rows=716 width=8)
                Filter: (a <= ($1 + 10))
-               Selected Partitions:  PART
+               Selected Partitions:  1..2
 (7 rows)
 
 execute p8(18);
@@ -214,10 +214,10 @@ explain  execute p9(1);
                              QUERY PLAN                              
 ---------------------------------------------------------------------
  Partition Iterator  (cost=0.00..36.86 rows=11 width=8)
-   Iterations: PART
+   Iterations: 2
    ->  Partitioned Seq Scan on l  (cost=0.00..36.86 rows=11 width=8)
          Filter: (a = $1)
-         Selected Partitions:  PART
+         Selected Partitions:  1..2
 (5 rows)
 
 execute p9(1);

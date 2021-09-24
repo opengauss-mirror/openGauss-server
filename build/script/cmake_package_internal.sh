@@ -388,7 +388,11 @@ export CC="$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/gcc"
 export CXX="$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin/g++"
 export LD_LIBRARY_PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/lib64:$BUILD_TOOLS_PATH/gcc$gcc_version/isl/lib:$BUILD_TOOLS_PATH/gcc$gcc_version/mpc/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/mpfr/lib/:$BUILD_TOOLS_PATH/gcc$gcc_version/gmp/lib/:$LD_LIBRARY_PATH
 export PATH=$BUILD_TOOLS_PATH/gcc$gcc_version/gcc/bin:$PATH
-export JAVA_HOME=${binarylib_dir}/platform/huaweijdk8/${PLATFORM_ARCH}/jdk
+jdkpath=${binarylib_dir}/platform/huaweijdk8/${PLATFORM_ARCH}/jdk
+if [ ! -d ${jdkpath} ]; then
+    jdkpath=${binarylib_dir}/platform/openjdk8/${PLATFORM_ARCH}/jdk
+fi
+export JAVA_HOME=${jdkpath}
 
 declare p7zpath="${BUILD_TOOLS_PATH}/p7z/bin"
 ###################################

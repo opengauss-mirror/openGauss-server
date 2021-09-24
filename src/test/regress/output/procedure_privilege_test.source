@@ -26,6 +26,7 @@ GRANT INSERT ON TABLE test_sch.test_table TO test_acl;
 REVOKE ALL PRIVILEGES ON PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) FROM test_acl;
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_acl -W 'openGauss@123' -c 'ALTER PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) RENAME TO new_test_pro;'
 ERROR:  permission denied for function test_sch.test_pro
+DETAIL:  N/A
 ALTER PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) OWNER TO test_owner;
 GRANT ALL PRIVILEGES ON PROCEDURE test_sch.test_pro(num1 integer, num2 varchar(20)) TO test_acl;
 SELECT p.proname, r.rolname FROM PG_PROC AS p, pg_roles AS r WHERE p.proowner=r.oid AND proname='test_pro';

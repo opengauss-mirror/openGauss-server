@@ -2184,7 +2184,7 @@ PACKAGE_VERSION='9.2.4'
 # Postgres-XC 1.1devel is based on PostgreSQL 9.2.4
 PACKAGE_XC_VERSION='1.1'
 # openGauss is based on PostgreSQL 9.2.4 and it will be the Kernel of GaussDB database
-OPENGAUSS_VERSION='2.0.0'
+OPENGAUSS_VERSION='2.1.0'
 
 cat >>confdefs.h <<_ACEOF
 #define PG_VERSION "$PACKAGE_VERSION"
@@ -2666,7 +2666,7 @@ else
   fi
 
   if test "$enable_ccache" = yes; then
-      default_gs_version="(openGauss 2.0.0 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
+      default_gs_version="(openGauss 2.1.0 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
       default_kernel_version="(GaussDB Kernel V500R002C00 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
   else
       default_gs_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"

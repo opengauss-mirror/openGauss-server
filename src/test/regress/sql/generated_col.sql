@@ -266,7 +266,7 @@ INSERT INTO gtest23q VALUES (2, 5);  -- error
 
 DROP TABLE gtest23q;
 
--- domains (domain is not yet supported.)
+-- domains
 CREATE DOMAIN gtestdomain1 AS int CHECK (VALUE < 10);
 CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED);
 INSERT INTO gtest24 (a) VALUES (4);  -- ok
