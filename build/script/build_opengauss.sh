@@ -12,7 +12,7 @@
 # Example: ./build_opengauss.sh -3rd /path/to/your/third_party_binarylibs/
 
 # change it to "N", if you want to build with original build system based on solely Makefiles
-CMAKE_PKG="Y"
+CMAKE_PKG="N"
 
 #(0) pre-check 
 if [ ! -f opengauss.spec ] || [ ! -f package_internal.sh ]; then
