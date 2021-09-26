@@ -625,7 +625,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
             while ((fileBytes = read(fdSrc, pbuff, sizeof(pbuff))) > 0) {
                 if (write(fdDest, pbuff, fileBytes) != fileBytes) {
                     close(fdSrc);
-                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", srcPath)));
+                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", destPath)));
                 }
                 (void)memset_s(pbuff, sizeof(pbuff), 0, sizeof(pbuff));
             }
